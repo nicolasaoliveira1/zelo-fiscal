@@ -11,10 +11,12 @@ from app.services import batch_engine
 FGTS_BATCH_LOCK = Lock()
 RS_BATCH_LOCK = Lock()
 MUNICIPAL_BATCH_LOCK = Lock()
+TRABALHISTA_BATCH_LOCK = Lock()
 
 FGTS_BATCH_STATE = batch_engine.batch_state_defaults()
 RS_BATCH_STATE = batch_engine.batch_state_defaults()
 MUNICIPAL_BATCH_STATE = batch_engine.batch_state_defaults()
+TRABALHISTA_BATCH_STATE = batch_engine.batch_state_defaults()
 
 EMISSAO_INDIVIDUAL_LOCK = Lock()
 _EMISSAO_INDIVIDUAL_STATE = {'ativa': False}
@@ -40,3 +42,7 @@ def rs_batch_stop_requested():
 
 def municipal_batch_stop_requested():
     return MUNICIPAL_BATCH_STATE.get('stop_requested')
+
+
+def trabalhista_batch_stop_requested():
+    return TRABALHISTA_BATCH_STATE.get('stop_requested')

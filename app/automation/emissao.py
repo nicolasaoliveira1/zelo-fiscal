@@ -27,7 +27,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from app import db, file_manager
-from app.automation import capture, captcha_img, pdf, steps
+from app.automation import capture, captcha_img, pdf, steps, trabalhista
 from app.automation.sites import SITES_CERTIDOES, VALIDADES_CERTIDOES
 from app.automation.driver import (
     _configurar_download_automatico_chrome,
@@ -40,9 +40,12 @@ from app.automation.batch_state import (
     MUNICIPAL_BATCH_STATE,
     RS_BATCH_LOCK,
     RS_BATCH_STATE,
+    TRABALHISTA_BATCH_LOCK,
+    TRABALHISTA_BATCH_STATE,
     fgts_stop_requested as _fgts_stop_requested,
     municipal_batch_stop_requested as _municipal_batch_stop_requested,
     rs_batch_stop_requested as _rs_batch_stop_requested,
+    trabalhista_batch_stop_requested as _trabalhista_batch_stop_requested,
 )
 from app.errors import map_exception_to_error_type, mensagem_usuario
 from app.models import (
@@ -1266,6 +1269,140 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
                 local_driver.quit()
             except Exception:
                 pass
+
+
+def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
+    """Emite a certidão Trabalhista (CNDT) para o lote/agendador.
+
+    Contrato do run_batch_loop: retorna (sucesso, grave, mensagem). Reusa o fluxo
+    de captcha de imagem (`trabalhista.resolver_captcha_e_submeter` -> `captcha_img`)
+    e a classificação positiva/negativa (`pdf.classificar_e_tratar_positivo`)."""
+    if execution_id:
+        CorrelationContext.set_execution_id(execution_id)
+    if _trabalhista_batch_stop_requested():
+        return False, False, 'Lote interrompido.'
+
+    certidao = db.session.get(Certidao, certidao_id)
+    if not certidao:
+        return False, False, 'Certidão não encontrada.'
+    if certidao.tipo != TipoCertidao.TRABALHISTA:
+        return False, False, 'Certidão não pertence ao fluxo Trabalhista.'
+
+    info_site = SITES_CERTIDOES.get('TRABALHISTA', {})
+    if not info_site.get('url'):
+        return False, True, 'Configuração Trabalhista ausente.'
+
+    cnpj_limpo = _normalizar_cnpj(certidao.empresa.cnpj)
+    local_driver = driver
+    criado_localmente = False
+    try:
+        if local_driver is None:
+            local_driver = _criar_driver_chrome()
+            criado_localmente = True
+
+        TRABALHISTA_BATCH_STATE['driver'] = local_driver
+        wait = WebDriverWait(local_driver, 20)
+        local_driver.get(info_site.get('url'))
+        try:
+            _configurar_download_automatico_chrome(local_driver)
+        except Exception as exc:
+            log_event('trabalhista_batch_download_config_failed', level='WARNING',
+                      certidao_id=certidao_id, error=str(exc))
+
+        # abre o formulário de emissão (pre-fill "Emitir Certidão")
+        pre_by = steps.BY_MAP.get(info_site.get('pre_fill_click_by') or 'css_selector')
+        if info_site.get('pre_fill_click_id') and pre_by:
+            try:
+                botao = wait.until(EC.element_to_be_clickable(
+                    (pre_by, info_site['pre_fill_click_id'])))
+                botao.click()
+            except Exception:
+                pass
+
+        # preenche o CNPJ
+        cnpj_by = steps.BY_MAP.get(info_site.get('by') or 'id')
+        if info_site.get('cnpj_field_id') and cnpj_by:
+            try:
+                campo = wait.until(EC.element_to_be_clickable(
+                    (cnpj_by, info_site['cnpj_field_id'])))
+                campo.click()
+                campo.send_keys(cnpj_limpo)
+                campo.send_keys(Keys.TAB)
+            except Exception:
+                pass
+
+        snapshot_before = _snapshot_downloads_pdf()
+
+        def _houve_sucesso():
+            return _pick_changed_download_pdf(snapshot_before) is not None
+
+        ok, msg = trabalhista.resolver_captcha_e_submeter(
+            local_driver, current_app.config, _houve_sucesso, execution_id=execution_id)
+        if not ok:
+            return False, False, msg
+
+        novo_arquivo = _pick_changed_download_pdf(snapshot_before)
+        if not novo_arquivo:
+            return False, False, 'Trabalhista: submetido mas sem PDF detectado.'
+        if not _wait_file_stable(novo_arquivo, checks=4, interval=0.6):
+            time.sleep(0.8)
+
+        sucesso_mv, caminho_final = file_manager.mover_e_renomear(
+            novo_arquivo, certidao.empresa.nome, certidao.tipo.value)
+        if not sucesso_mv:
+            return False, True, f'Falha ao mover arquivo Trabalhista: {caminho_final}'
+
+        certidao.caminho_arquivo = caminho_final
+        classificacao, msg_pos = pdf.classificar_e_tratar_positivo(
+            certidao, caminho_final, origem_log='TRABALHISTA', tipo_label='Trabalhista')
+
+        if classificacao == 'erro':
+            return False, True, msg_pos
+
+        if classificacao == 'positiva':
+            # classificar_e_tratar_positivo já removeu o arquivo e marcou PENDENTE.
+            with TRABALHISTA_BATCH_LOCK:
+                TRABALHISTA_BATCH_STATE['pendentes_resultado'] = (
+                    TRABALHISTA_BATCH_STATE.get('pendentes_resultado', 0) + 1)
+                TRABALHISTA_BATCH_STATE['last_completed'] = {
+                    'certidao_id': certidao.id, 'data_formatada': 'PENDENTE',
+                    'nova_classe': 'status-vermelho'}
+                batch_engine.append_batch_message(
+                    TRABALHISTA_BATCH_STATE,
+                    f"Trabalhista ID={certidao.id} positiva: marcada como pendente.",
+                    level='warning', certidao_id=certidao.id)
+            return True, False, msg_pos
+
+        nova_data = calcular_validade_padrao(certidao, None)
+        certidao.data_validade = nova_data
+        certidao.status_especial = None
+        db.session.commit()
+
+        with TRABALHISTA_BATCH_LOCK:
+            TRABALHISTA_BATCH_STATE['last_completed'] = {
+                'certidao_id': certidao.id,
+                'data_formatada': nova_data.strftime('%d/%m/%Y') if nova_data else None,
+                'nova_classe': _fgts_status_por_data(nova_data)}
+            batch_engine.append_batch_message(
+                TRABALHISTA_BATCH_STATE, f"Trabalhista ID={certidao.id} emitida com sucesso.",
+                level='info', certidao_id=certidao.id)
+        return True, False, None
+    except Exception as exc:
+        db.session.rollback()
+        log_event('trabalhista_batch_error', level='ERROR', certidao_id=certidao_id,
+                  empresa_id=certidao.empresa_id if certidao else None,
+                  error_type=map_exception_to_error_type(exc).value, error=str(exc))
+        capture.capturar_contexto_falha(local_driver, 'trabalhista_lote',
+                                        certidao_id=certidao_id, execution_id=execution_id)
+        return False, _classificar_grave(exc), mensagem_usuario(exc, contexto='lote Trabalhista')
+    finally:
+        if criado_localmente:
+            TRABALHISTA_BATCH_STATE['driver'] = None
+            if local_driver:
+                try:
+                    local_driver.quit()
+                except Exception:
+                    pass
 
 
 def calcular_validade_padrao(certidao, data_encontrada=None):

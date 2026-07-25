@@ -210,3 +210,19 @@ def test_imbe_encontrar_captcha_uma_unica_espera(monkeypatch):
     _by, xpath = loc['locator']
     assert xpath.count(' | ') == 3  # uniao dos 4 seletores num so XPath
     assert 'palavra' in xpath and 'captcha' in xpath and 'verificacao' in xpath
+
+
+def test_emitir_trabalhista_inexistente(app):
+    # Guarda do lote: id sem certidao -> falha soft, sem abrir driver.
+    with app.app_context():
+        ok, grave, msg = emissao._emitir_trabalhista_certidao(999999)
+    assert (ok, grave) == (False, False)
+    assert msg == 'Certidão não encontrada.'
+
+
+def test_emitir_trabalhista_tipo_errado(app, ids):
+    # Guarda de tipo (TRAB-08/09): uma certidao FGTS nao passa pelo fluxo Trabalhista.
+    with app.app_context():
+        ok, grave, msg = emissao._emitir_trabalhista_certidao(ids['fgts'])
+    assert (ok, grave) == (False, False)
+    assert msg == 'Certidão não pertence ao fluxo Trabalhista.'
