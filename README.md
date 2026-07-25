@@ -100,6 +100,10 @@ O sistema combina:
   - Tramandaí: fluxo condicional com detecção de link NEGATIVA na página final; suporte a lote.
   - Gravataí: classificação de status via conteúdo do PDF (positiva/negativa), com tratamento automático de pendência quando positiva.
   - Imbé: resolução automática de captcha de imagem via 2captcha; emissão de geral e mobiliário separadamente; suporte a lote por subtipo.
+- Trabalhista (CNDT/TST):
+  - Unitário mantido assistido/manual para evitar consumo indevido de solver (o operador resolve o captcha).
+  - Lote com captcha de imagem resolvido automaticamente via 2captcha; disponível também na emissão proativa do agendador.
+  - Classificação do PDF: positiva vira PENDENTE (arquivo removido); negativa/positiva-com-efeitos-de-negativa grava validade de 180 dias.
   - Portais IPM Atende.Net (Gravataí, Osório, Novo Hamburgo): a emissão individual usa **undetected-chromedriver** com um perfil persistente dedicado para não ser bloqueada pelo score anti-bot do portal (tela "validação automática de segurança / baixa pontuação"). A detecção é automática pela URL (`*.atende.net`) — qualquer novo município com esse domínio entra no fluxo sem mudança de código. O captcha em si continua resolvido manualmente pelo operador. Falhas de pré-condição (driver indisponível ou perfil em uso) retornam mensagem acionável (HTTP 409) sem cair para o navegador comum.
 
 ### Gestão de arquivos
@@ -280,6 +284,7 @@ docker compose --env-file .env.docker up
    - FGTS: fluxo de lote quando houver mais de 1 item elegível.
    - Estadual RS: lote com controles de pausar, retomar e parar.
    - Municipal (Imbé e Tramandaí): lote com as mesmas ações; resolve captcha de imagem via 2captcha no Imbé.
+   - Trabalhista: lote quando houver mais de 1 item elegível; resolve captcha de imagem via 2captcha.
 
 ## Configurações importantes
 
