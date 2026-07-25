@@ -8,9 +8,10 @@ from unittest.mock import MagicMock, patch
 from app.automation import captcha_img
 
 
-def _img(bytes_png=b'PNGDATA'):
+def _img(bytes_png=b'PNGDATA', natural_width='120'):
     el = MagicMock()
     el.screenshot_as_png = bytes_png
+    el.get_attribute.return_value = natural_width  # naturalWidth > 0 => já carregou
     return el
 
 
@@ -62,3 +63,22 @@ def test_solver_levanta_retorna_erro_sem_propagar():
     assert ok is False
     assert msg.startswith('Falha ao resolver captcha:')
     assert 'boom' in msg
+
+
+def test_imagem_carregada_true_quando_naturalwidth_positivo():
+    el = MagicMock()
+    el.get_attribute.return_value = '300'
+    assert captcha_img._imagem_carregada(el) is True
+
+
+def test_imagem_carregada_false_quando_nao_carregou():
+    el = MagicMock()
+    el.get_attribute.return_value = '0'
+    assert captcha_img._imagem_carregada(el) is False
+
+
+def test_imagem_carregada_false_para_none_ou_erro():
+    assert captcha_img._imagem_carregada(None) is False
+    el = MagicMock()
+    el.get_attribute.side_effect = RuntimeError('stale')
+    assert captcha_img._imagem_carregada(el) is False
