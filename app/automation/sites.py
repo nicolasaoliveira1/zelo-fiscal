@@ -71,9 +71,7 @@ SITES_CERTIDOES = {
         # captcha de imagem (base64) + submit — spec 07 COV-01a (CNDT full-auto)
         'captcha_img_id': 'idImgBase64',
         'captcha_input_id': 'idCampoResposta',
-        'captcha_input_by': 'id',
-        'submit_id': 'gerarCertidaoForm:btnEmitirCertidao',
-        'submit_by': 'id'
+        'submit_id': 'gerarCertidaoForm:btnEmitirCertidao'
     }
 }
 

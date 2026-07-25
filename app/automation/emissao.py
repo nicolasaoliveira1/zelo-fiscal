@@ -1292,10 +1292,11 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
     if not info_site.get('url'):
         return False, True, 'Configuração Trabalhista ausente.'
 
-    cnpj_limpo = _normalizar_cnpj(certidao.empresa.cnpj)
     local_driver = driver
     criado_localmente = False
     try:
+        # Dentro do try: empresa órfã (FK quebrada) vira falha por-item, não crash do lote.
+        cnpj_limpo = _normalizar_cnpj(certidao.empresa.cnpj)
         if local_driver is None:
             local_driver = _criar_driver_chrome()
             criado_localmente = True
@@ -1332,18 +1333,24 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
                 pass
 
         snapshot_before = _snapshot_downloads_pdf()
+        achado_pdf = {'path': None}
 
         def _houve_sucesso():
-            return _pick_changed_download_pdf(snapshot_before) is not None
+            caminho = _pick_changed_download_pdf(snapshot_before)
+            if caminho:
+                achado_pdf['path'] = caminho
+                return True
+            return False
 
         ok, msg = trabalhista.resolver_captcha_e_submeter(
             local_driver, current_app.config, _houve_sucesso, execution_id=execution_id)
-        if not ok:
-            return False, False, msg
 
-        novo_arquivo = _pick_changed_download_pdf(snapshot_before)
+        # O PDF baixado é a fonte de verdade: se chegou (mesmo que o helper tenha
+        # esgotado a espera do submit), seguimos e reusamos o caminho já encontrado
+        # no polling; só falha quando não há PDF nenhum.
+        novo_arquivo = achado_pdf['path'] or _pick_changed_download_pdf(snapshot_before)
         if not novo_arquivo:
-            return False, False, 'Trabalhista: submetido mas sem PDF detectado.'
+            return False, False, msg or 'Trabalhista: submetido mas sem PDF detectado.'
         if not _wait_file_stable(novo_arquivo, checks=4, interval=0.6):
             time.sleep(0.8)
 
