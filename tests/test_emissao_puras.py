@@ -212,8 +212,9 @@ def test_imbe_encontrar_captcha_uma_unica_espera(monkeypatch):
     assert 'palavra' in xpath and 'captcha' in xpath and 'verificacao' in xpath
 
 
-def test_emitir_trabalhista_inexistente(app):
+def test_emitir_trabalhista_inexistente(app, ids):
     # Guarda do lote: id sem certidao -> falha soft, sem abrir driver.
+    # (ids cria/semeia as tabelas; 999999 nao existe entre as semeadas.)
     with app.app_context():
         ok, grave, msg = emissao._emitir_trabalhista_certidao(999999)
     assert (ok, grave) == (False, False)

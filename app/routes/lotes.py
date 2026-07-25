@@ -20,6 +20,8 @@ from app.automation.batch_state import (
     MUNICIPAL_BATCH_STATE,
     RS_BATCH_LOCK,
     RS_BATCH_STATE,
+    TRABALHISTA_BATCH_LOCK,
+    TRABALHISTA_BATCH_STATE,
     emissao_individual_ativa,
 )
 from app.automation.driver import (
@@ -31,6 +33,7 @@ from app.automation.emissao import (
     _emitir_estadual_rs_certidao,
     _emitir_fgts_certidao,
     _emitir_municipal_certidao_lote,
+    _emitir_trabalhista_certidao,
     _fgts_quit_driver_async,
     _fgts_status_por_data,
     _municipal_batch_suportado,
@@ -67,6 +70,15 @@ def _calc_fgts_targets_by_scope(start_certidao_id, scope='default'):
         extra_filter=lambda query: query.filter(Certidao.tipo == TipoCertidao.FGTS),
         scope=scope,
         tipo=TipoCertidao.FGTS,
+    )
+
+
+def _calc_trabalhista_targets_by_scope(start_certidao_id, scope='default'):
+    return batch_engine.calc_targets(
+        start_certidao_id,
+        extra_filter=lambda query: query.filter(Certidao.tipo == TipoCertidao.TRABALHISTA),
+        scope=scope,
+        tipo=TipoCertidao.TRABALHISTA,
     )
 
 
@@ -201,6 +213,23 @@ def _municipal_batch_worker(app):
         curto='Municipal',
         tag='MUNICIPAL-LOTE',
         event_prefix='municipal_batch_worker',
+        create_driver=_criar_driver_chrome,
+        on_finish=_registrar_desfecho_lote,
+    )
+
+
+def _trabalhista_batch_worker(app):
+    batch_engine.run_batch_loop(
+        app,
+        lock=TRABALHISTA_BATCH_LOCK,
+        state=TRABALHISTA_BATCH_STATE,
+        emit_fn=lambda cid, drv, eid: _emitir_trabalhista_certidao(
+            cid, driver=drv, execution_id=eid
+        ),
+        nome_lote='Trabalhista',
+        curto='Trabalhista',
+        tag='TRABALHISTA-LOTE',
+        event_prefix='trabalhista_batch_worker',
         create_driver=_criar_driver_chrome,
         on_finish=_registrar_desfecho_lote,
     )
@@ -424,6 +453,19 @@ _register_batch_routes('/estadual-rs', 'estadual_rs_lote', {
     'msg_pausado': 'Lote Estadual RS pausado.',
     'msg_interrompido': 'Lote Estadual RS interrompido.',
     'msg_nao_pausado': 'Lote Estadual RS não está pausado.',
+})
+
+_register_batch_routes('/trabalhista', 'trabalhista_lote', {
+    'lock': TRABALHISTA_BATCH_LOCK, 'state': TRABALHISTA_BATCH_STATE,
+    'worker': _trabalhista_batch_worker, 'calc_targets': _calc_trabalhista_targets_by_scope,
+    'started_event': 'trabalhista_batch_started', 'tag': 'TRABALHISTA-LOTE', 'nome_lote': 'Trabalhista',
+    'precondicao': _preflight_precondicao(precisa_solver=True),
+    'msg_em_andamento': 'Já existe um lote Trabalhista em andamento.',
+    'msg_vazio_pendentes': 'Nenhuma certidão Trabalhista pendente para emissão.',
+    'msg_vazio_default': 'Nenhuma certidão Trabalhista vencida ou a vencer.',
+    'msg_pausado': 'Lote Trabalhista pausado.',
+    'msg_interrompido': 'Lote Trabalhista interrompido.',
+    'msg_nao_pausado': 'Lote Trabalhista não está pausado.',
 })
 
 _register_batch_routes('/municipal', 'municipal_lote', {

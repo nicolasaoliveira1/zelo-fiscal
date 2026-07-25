@@ -4,7 +4,12 @@ Trava o contrato HTTP (paths, status code, campo `status` e tokens das
 mensagens). Exercita apenas caminhos seguros: status, info e erros 400 de
 `iniciar` — nunca dispara um worker/Selenium. Usa as fixtures de conftest.py.
 """
-PREFIXOS = {'fgts': '/fgts', 'rs': '/estadual-rs', 'municipal': '/municipal'}
+PREFIXOS = {
+    'fgts': '/fgts',
+    'rs': '/estadual-rs',
+    'municipal': '/municipal',
+    'trabalhista': '/trabalhista',
+}
 
 
 def test_status_idle(client):
