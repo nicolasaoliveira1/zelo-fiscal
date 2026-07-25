@@ -9,7 +9,6 @@ import os
 import random
 import re
 import string
-import tempfile
 import time
 from datetime import date, datetime, timedelta
 from threading import Thread
@@ -28,7 +27,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from app import db, file_manager
-from app.automation import capture, pdf, steps
+from app.automation import capture, captcha_img, pdf, steps
 from app.automation.sites import SITES_CERTIDOES, VALIDADES_CERTIDOES
 from app.automation.driver import (
     _configurar_download_automatico_chrome,
@@ -45,7 +44,6 @@ from app.automation.batch_state import (
     municipal_batch_stop_requested as _municipal_batch_stop_requested,
     rs_batch_stop_requested as _rs_batch_stop_requested,
 )
-from app.captcha_solver import solve_normal_captcha
 from app.errors import map_exception_to_error_type, mensagem_usuario
 from app.models import (
     Certidao,
@@ -762,37 +760,10 @@ def _imbe_resolver_captcha_2captcha(driver, execution_id=None):
     if not campo:
         return False, 'Campo do captcha não encontrado.'
 
-    arquivo_tmp = None
-    try:
-        captcha_bytes = imagem.screenshot_as_png
-        if not captcha_bytes:
-            return False, 'Captcha sem imagem capturada.'
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
-            tmp.write(captcha_bytes)
-            arquivo_tmp = tmp.name
-
-        resultado = solve_normal_captcha(
-            current_app.config,
-            image_path=arquivo_tmp,
-            execution_id=execution_id,
-        )
-        codigo = (resultado.get('code') or '').strip()
-        if not codigo:
-            return False, 'Resposta do 2captcha vazia.'
-
-        campo.clear()
-        campo.click()
-        campo.send_keys(codigo)
-        return True, None
-    except Exception as exc:
-        return False, f'Falha ao resolver captcha: {exc}'
-    finally:
-        if arquivo_tmp and os.path.exists(arquivo_tmp):
-            try:
-                os.remove(arquivo_tmp)
-            except Exception:
-                pass
+    # Reusa o nucleo compartilhado (extraido deste fluxo, AD-021). Preserva o
+    # contrato historico do IMBE: (True, None) em sucesso | (False, mensagem).
+    ok, info = captcha_img.resolver_captcha_imagem(imagem, campo, execution_id=execution_id)
+    return (True, None) if ok else (False, info)
 
 
 def _emitir_municipal_certidao_lote(certidao_id, driver=None, execution_id=None):

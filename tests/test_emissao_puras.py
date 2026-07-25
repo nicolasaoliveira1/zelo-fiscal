@@ -5,7 +5,7 @@ impedimento FGTS (driver falso) e o diff de downloads (snapshot/pick).
 """
 import os
 from datetime import date, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from app.automation import emissao
 
@@ -138,3 +138,46 @@ def test_classificar_grave_comum_e_true():
     # sendo True — no lote automatico vira falha por-item e o loop segue.
     exc = ValueError('timeout aguardando download')
     assert emissao._classificar_grave(exc) is True
+
+
+def test_imbe_captcha_delega_ao_nucleo_sucesso(monkeypatch):
+    # T2/AD-021: o IMBE delega ao nucleo compartilhado (captcha_img) e mapeia o
+    # sucesso para o contrato historico (True, None), passando os elementos ja
+    # localizados pelas heuristicas do IMBE.
+    imagem, campo = MagicMock(), MagicMock()
+    monkeypatch.setattr(emissao, '_imbe_encontrar_captcha_imagem', lambda drv: imagem)
+    monkeypatch.setattr(emissao, '_imbe_encontrar_campo_captcha', lambda drv: campo)
+    with patch.object(emissao.captcha_img, 'resolver_captcha_imagem', return_value=(True, 'XYZ9')) as core:
+        resultado = emissao._imbe_resolver_captcha_2captcha(MagicMock(), execution_id='e1')
+    assert resultado == (True, None)
+    core.assert_called_once_with(imagem, campo, execution_id='e1')
+
+
+def test_imbe_captcha_delega_ao_nucleo_falha(monkeypatch):
+    # Falha do nucleo propaga a mensagem no contrato (False, mensagem).
+    monkeypatch.setattr(emissao, '_imbe_encontrar_captcha_imagem', lambda drv: MagicMock())
+    monkeypatch.setattr(emissao, '_imbe_encontrar_campo_captcha', lambda drv: MagicMock())
+    with patch.object(
+        emissao.captcha_img, 'resolver_captcha_imagem',
+        return_value=(False, 'Resposta do 2captcha vazia.'),
+    ):
+        resultado = emissao._imbe_resolver_captcha_2captcha(MagicMock())
+    assert resultado == (False, 'Resposta do 2captcha vazia.')
+
+
+def test_imbe_captcha_sem_imagem_nao_chama_nucleo(monkeypatch):
+    # Fast-fail preservado: sem imagem, retorna a mensagem historica e NAO chama o nucleo.
+    monkeypatch.setattr(emissao, '_imbe_encontrar_captcha_imagem', lambda drv: None)
+    with patch.object(emissao.captcha_img, 'resolver_captcha_imagem') as core:
+        resultado = emissao._imbe_resolver_captcha_2captcha(MagicMock())
+    assert resultado == (False, 'Imagem do captcha não encontrada.')
+    core.assert_not_called()
+
+
+def test_imbe_captcha_sem_campo_nao_chama_nucleo(monkeypatch):
+    monkeypatch.setattr(emissao, '_imbe_encontrar_captcha_imagem', lambda drv: MagicMock())
+    monkeypatch.setattr(emissao, '_imbe_encontrar_campo_captcha', lambda drv: None)
+    with patch.object(emissao.captcha_img, 'resolver_captcha_imagem') as core:
+        resultado = emissao._imbe_resolver_captcha_2captcha(MagicMock())
+    assert resultado == (False, 'Campo do captcha não encontrado.')
+    core.assert_not_called()
