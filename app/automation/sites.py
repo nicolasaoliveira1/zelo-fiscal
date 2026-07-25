@@ -77,9 +77,9 @@ SITES_CERTIDOES = {
 
 
 VALIDADES_CERTIDOES = {
-    # federal nao tem automatizacao - deixar aqui para futuro
+    # assistido melhorado (COV-01b): fallback de validade quando o PDF nao traz "Valida ate"
     'FEDERAL': {
-        'validade_dias_padrao': None
+        'validade_dias_padrao': 180
     },
     'FGTS': {
         # atualmente sistema usa scraping para pegar validade
