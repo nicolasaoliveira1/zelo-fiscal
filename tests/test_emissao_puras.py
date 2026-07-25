@@ -227,3 +227,83 @@ def test_emitir_trabalhista_tipo_errado(app, ids):
         ok, grave, msg = emissao._emitir_trabalhista_certidao(ids['fgts'])
     assert (ok, grave) == (False, False)
     assert msg == 'Certidão não pertence ao fluxo Trabalhista.'
+
+
+class _FakeWait:
+    """WebDriverWait falso: resolve instantaneamente sem polling real de Selenium."""
+    def __init__(self, driver, timeout):
+        pass
+
+    def until(self, cond):
+        return MagicMock()
+
+
+def _run_emit_trabalhista(app, cert_id, *, resolver_ret=(True, None),
+                          resolver_side=None, pick_ret='/tmp/cndt.pdf',
+                          classificacao=('negativa', None), capture_mock=None):
+    """Executa `_emitir_trabalhista_certidao` com um driver falso e a I/O de rede
+    mockada (captcha/submit, diff de downloads, move e classificacao). Deixa
+    `calcular_validade_padrao` rodar de verdade para asserir a validade real."""
+    resolver = patch.object(
+        emissao.trabalhista, 'resolver_captcha_e_submeter',
+        side_effect=resolver_side) if resolver_side else patch.object(
+        emissao.trabalhista, 'resolver_captcha_e_submeter', return_value=resolver_ret)
+    capture = capture_mock or MagicMock()
+    with app.app_context(), \
+            patch.object(emissao, 'WebDriverWait', _FakeWait), \
+            patch.object(emissao, '_configurar_download_automatico_chrome'), \
+            patch.object(emissao, '_snapshot_downloads_pdf', return_value=set()), \
+            patch.object(emissao, '_pick_changed_download_pdf', return_value=pick_ret), \
+            patch.object(emissao, '_wait_file_stable', return_value=True), \
+            patch.object(emissao.file_manager, 'mover_e_renomear',
+                         return_value=(True, '/rede/cndt_final.pdf')), \
+            patch.object(emissao.pdf, 'classificar_e_tratar_positivo',
+                         return_value=classificacao), \
+            patch.object(emissao.capture, 'capturar_contexto_falha', capture), \
+            resolver:
+        resultado = emissao._emitir_trabalhista_certidao(cert_id, driver=MagicMock())
+        certidao = emissao.db.session.get(emissao.Certidao, cert_id)
+        estado = (certidao.data_validade, certidao.status_especial, certidao.caminho_arquivo)
+    return resultado, estado
+
+
+def test_emitir_trabalhista_negativa_salva_validade_180d(app, ids):
+    # TRAB-02: negativa -> move PDF, grava validade hoje+180 e limpa status_especial.
+    # Mata o mutante `data_validade = None` no branch de sucesso.
+    (ok, grave, msg), (validade, status, caminho) = _run_emit_trabalhista(
+        app, ids['trabalhista'], classificacao=('negativa', None))
+    assert (ok, grave, msg) == (True, False, None)
+    assert validade == date.today() + timedelta(days=180)
+    assert status is None
+    assert caminho == '/rede/cndt_final.pdf'
+
+
+def test_emitir_trabalhista_positiva_pendente_sem_validade(app, ids):
+    # TRAB-03: positiva -> retorna sucesso-com-pendencia e NAO grava validade.
+    (ok, grave, msg), (validade, _status, _caminho) = _run_emit_trabalhista(
+        app, ids['trabalhista'],
+        classificacao=('positiva', 'Trabalhista positiva: marcada como pendente.'))
+    assert ok is True and grave is False
+    assert msg == 'Trabalhista positiva: marcada como pendente.'
+    assert validade is None  # nao caiu no branch que grava 180d
+
+
+def test_emitir_trabalhista_sem_pdf_erro_sem_validade(app, ids):
+    # TRAB-06: submetido mas sem PDF detectado -> erro acionavel, sem gravar validade.
+    (ok, grave, msg), (validade, _status, _caminho) = _run_emit_trabalhista(
+        app, ids['trabalhista'], resolver_ret=(False, 'CNDT: timeout no download.'),
+        pick_ret=None)
+    assert ok is False and grave is False
+    assert msg == 'CNDT: timeout no download.'
+    assert validade is None
+
+
+def test_emitir_trabalhista_excecao_rollback_e_captura(app, ids):
+    # TRAB-07: excecao no fluxo -> rollback, captura de contexto e sem validade gravada.
+    cap = MagicMock()
+    (ok, grave, msg), (validade, _status, _caminho) = _run_emit_trabalhista(
+        app, ids['trabalhista'], resolver_side=RuntimeError('boom'), capture_mock=cap)
+    assert ok is False
+    assert msg  # mensagem acionavel ao usuario
+    assert validade is None
+    cap.assert_called_once()
