@@ -5,7 +5,16 @@ Sem Selenium/rede: `_localizar`, `_clicar_submit`, `_aguardar_sucesso` e o núcl
 """
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.automation import trabalhista
+
+
+@pytest.fixture(autouse=True)
+def _stub_espera_imagem(monkeypatch):
+    # A espera real usa WebDriverWait (bloquearia 8s com mocks). Stub p/ os testes
+    # do resolver; o predicado _imagem_carregada e testado direto abaixo.
+    monkeypatch.setattr(trabalhista, '_esperar_imagem_carregada', lambda *a, **k: True)
 
 
 def _patches(resolver_ret, submit_ret=True, aguardar_side=None, aguardar_ret=True):
@@ -86,3 +95,22 @@ def test_aguardar_sucesso_trata_excecao_do_callback_como_nao():
     def boom():
         raise RuntimeError('x')
     assert trabalhista._aguardar_sucesso(boom, 0) is False
+
+
+def test_imagem_carregada_true_quando_naturalwidth_positivo():
+    el = MagicMock()
+    el.get_attribute.return_value = '300'
+    assert trabalhista._imagem_carregada(el) is True
+
+
+def test_imagem_carregada_false_quando_nao_carregou():
+    el = MagicMock()
+    el.get_attribute.return_value = '0'
+    assert trabalhista._imagem_carregada(el) is False
+
+
+def test_imagem_carregada_false_para_none_ou_erro():
+    assert trabalhista._imagem_carregada(None) is False
+    el = MagicMock()
+    el.get_attribute.side_effect = RuntimeError('stale')
+    assert trabalhista._imagem_carregada(el) is False

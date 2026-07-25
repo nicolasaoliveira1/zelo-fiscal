@@ -33,6 +33,33 @@ def _localizar(driver, locator, timeout=10):
         return None
 
 
+def _imagem_carregada(imagem_el):
+    """True se a <img> do captcha já carregou de fato (naturalWidth > 0).
+
+    O elemento <img> pode existir no DOM antes do base64 chegar; tirar o
+    screenshot antes disso manda uma imagem em branco/incompleta ao 2captcha."""
+    if imagem_el is None:
+        return False
+    try:
+        largura = imagem_el.get_attribute('naturalWidth')
+        return bool(largura) and int(largura) > 0
+    except Exception:
+        return False
+
+
+def _esperar_imagem_carregada(driver, imagem_el, timeout=8):
+    """Aguarda a imagem do captcha carregar antes do screenshot. Best-effort:
+    retorna False no timeout/erro (o screenshot ainda ocorre e, se sair em branco,
+    o retry re-tenta com a imagem já carregada)."""
+    if imagem_el is None:
+        return False
+    try:
+        return bool(WebDriverWait(driver, timeout).until(
+            lambda d: _imagem_carregada(imagem_el)))
+    except Exception:
+        return False
+
+
 def _clicar_submit(driver, submit_id):
     try:
         botao = WebDriverWait(driver, 10).until(
@@ -94,6 +121,9 @@ def resolver_captcha_e_submeter(driver, config, houve_sucesso, execution_id=None
     for tentativa in range(1, max(1, tentativas) + 1):
         imagem = _localizar(driver, img_id)
         campo = _localizar(driver, input_id)
+        # Espera a imagem carregar de fato (naturalWidth > 0) antes do screenshot —
+        # o <img> aparece no DOM antes do base64 chegar.
+        _esperar_imagem_carregada(driver, imagem)
         ok, info = captcha_img.resolver_captcha_imagem(
             imagem, campo, config=config, execution_id=execution_id)
         if not ok:
