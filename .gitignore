@@ -25,6 +25,9 @@ instance/
 chrome-profile/
 # Perfil dedicado do Chrome para fluxos municipais IPM (undetected-chromedriver)
 chrome-profile-municipal/
+# Perfil do spike de recon Federal (spec 07, undetected-chromedriver)
+chrome-profile-federal-recon/
+chrome-profile-federal-real/
 
 # Configurações do editor de código
 .vscode/
