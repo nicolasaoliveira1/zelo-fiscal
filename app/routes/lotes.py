@@ -592,6 +592,21 @@ def _fluxo_municipal_rodar(app, ids, *, wrap_emit, execution_id):
         on_finish=_registrar_desfecho_lote)
 
 
+def _fluxo_trabalhista_calc_ids(app):
+    return _calc_trabalhista_targets_by_scope(None, scope='default')['ids']
+
+
+def _fluxo_trabalhista_rodar(app, ids, *, wrap_emit, execution_id):
+    _rodar_lote_agendado(
+        app, ids, wrap_emit=wrap_emit, execution_id=execution_id,
+        lock=TRABALHISTA_BATCH_LOCK, state=TRABALHISTA_BATCH_STATE,
+        real_emit=lambda cid, drv, eid: _emitir_trabalhista_certidao(
+            cid, driver=drv, execution_id=eid),
+        nome_lote='Trabalhista', curto='Trabalhista', tag='TRABALHISTA-LOTE',
+        event_prefix='trabalhista_batch_worker', create_driver=_criar_driver_chrome,
+        on_finish=_registrar_desfecho_lote)
+
+
 def _registrar_fluxos_agendador():
     """Registra os fluxos automatizáveis no agendador (idempotente). Chamado no
     import de routes; exposto para os testes re-registrarem se necessário."""
@@ -604,6 +619,9 @@ def _registrar_fluxos_agendador():
     agendador.registrar_fluxo(TipoCertidao.MUNICIPAL, {
         'tipo': TipoCertidao.MUNICIPAL,
         'calc_ids': _fluxo_municipal_calc_ids, 'rodar_lote': _fluxo_municipal_rodar})
+    agendador.registrar_fluxo(TipoCertidao.TRABALHISTA, {
+        'tipo': TipoCertidao.TRABALHISTA,
+        'calc_ids': _fluxo_trabalhista_calc_ids, 'rodar_lote': _fluxo_trabalhista_rodar})
 
 
 _registrar_fluxos_agendador()

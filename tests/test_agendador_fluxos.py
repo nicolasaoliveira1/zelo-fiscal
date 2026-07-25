@@ -19,8 +19,8 @@ def fluxos_registrados():
     agendador._fluxos.clear()
 
 
-def test_registra_os_tres_fluxos(fluxos_registrados):
-    assert set(fluxos_registrados) == {'FGTS', 'Estadual', 'Municipal'}
+def test_registra_os_fluxos_automatizaveis(fluxos_registrados):
+    assert set(fluxos_registrados) == {'FGTS', 'Estadual', 'Municipal', 'Trabalhista'}
     for cfg in fluxos_registrados.values():
         assert callable(cfg['calc_ids'])
         assert callable(cfg['rodar_lote'])
@@ -97,6 +97,16 @@ def test_fgts_calc_ids_traz_a_vencer(app, ids, fluxos_registrados):
         db.session.commit()
         alvos = fluxos_registrados['FGTS']['calc_ids'](app)
         assert ids['fgts'] in alvos
+
+
+def test_trabalhista_calc_ids_traz_a_vencer(app, ids, fluxos_registrados):
+    # TRAB-13: a Trabalhista entra na emissao proativa diaria (enfileira alvos).
+    with app.app_context():
+        tb = db.session.get(Certidao, ids['trabalhista'])
+        tb.data_validade = date.today() + timedelta(days=1)  # dentro da janela
+        db.session.commit()
+        alvos = fluxos_registrados['Trabalhista']['calc_ids'](app)
+        assert ids['trabalhista'] in alvos
 
 
 def test_rs_calc_ids_vazio_sem_solver(app, ids, fluxos_registrados):
