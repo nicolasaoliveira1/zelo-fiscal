@@ -203,17 +203,17 @@ def test_resposta_rs_positiva(app, ids):
         assert j['message'] == 'POSITIVA detectada'
 
 
-def test_resposta_erro_acionavel_trabalhista(app, ids):
-    # TRAB-04/05/06: falha do fluxo Trabalhista (ex.: captcha recusado, 2captcha
-    # indisponivel, timeout) vira erro acionavel com a mensagem e o codigo do helper.
+def test_resposta_erro_acionavel(app, ids):
+    # Contrato do erro acionavel (ex.: preflight fail-fast): vira _json_error com a
+    # mensagem e o codigo informados no resultado.
     with app.test_request_context('/'):
         cert = Certidao.query.get(ids['fgts'])
         resultado = emissao_service._resultado_baixar_vazio()
         resultado['erro_acionavel'] = {
-            'message': 'Captcha do CNDT recusado (tentativa 2).', 'code': 409,
+            'message': 'Preflight: dependencia ausente.', 'code': 409,
         }
         resp = emissao_service._montar_resposta_baixar(cert, _cfg_simples(cert), resultado)
         _body, code = resp
         assert code == 409
-        assert _body.get_json()['message'] == 'Captcha do CNDT recusado (tentativa 2).'
+        assert _body.get_json()['message'] == 'Preflight: dependencia ausente.'
         assert _body.get_json()['status'] == 'error'
