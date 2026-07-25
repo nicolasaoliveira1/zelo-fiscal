@@ -145,6 +145,44 @@ window.showToast = showToast;
             const btnFgtsBatchResume = document.getElementById('btnFgtsBatchResume');
             const btnFgtsBatchStop = document.getElementById('btnFgtsBatchStop');
 
+            const trabalhistaBatchModalElement = document.getElementById('trabalhistaBatchModal');
+            let trabalhistaBatchModal = trabalhistaBatchModalElement ? new bootstrap.Modal(trabalhistaBatchModalElement) : null;
+            const trabalhistaBatchSummaryModalElement = document.getElementById('trabalhistaBatchSummaryModal');
+            let trabalhistaBatchSummaryModal = trabalhistaBatchSummaryModalElement
+                ? new bootstrap.Modal(trabalhistaBatchSummaryModalElement, { backdrop: 'static', keyboard: false })
+                : null;
+            const trabalhistaBatchVencidas = document.getElementById('trabalhistaBatchVencidas');
+            const trabalhistaBatchAVencer = document.getElementById('trabalhistaBatchAVencer');
+            const trabalhistaBatchTotal = document.getElementById('trabalhistaBatchTotal');
+            const trabalhistaBatchLabelVencidas = document.getElementById('trabalhistaBatchLabelVencidas');
+            const trabalhistaBatchLabelAVencer = document.getElementById('trabalhistaBatchLabelAVencer');
+            const trabalhistaBatchLabelTotal = document.getElementById('trabalhistaBatchLabelTotal');
+            const trabalhistaBatchScopeHint = document.getElementById('trabalhistaBatchScopeHint');
+            const trabalhistaBatchEmpresaDisplay = document.getElementById('trabalhistaBatchEmpresaDisplay');
+            const btnTrabalhistaBatchStart = document.getElementById('btnTrabalhistaBatchStart');
+            const btnTrabalhistaSingleEmit = document.getElementById('btnTrabalhistaSingleEmit');
+
+            const trabalhistaBatchSummaryEmitidas = document.getElementById('trabalhistaBatchSummaryEmitidas');
+            const trabalhistaBatchSummaryOutcomeCard = document.getElementById('trabalhistaBatchSummaryOutcomeCard');
+            const trabalhistaBatchSummaryOutcomeLabel = document.getElementById('trabalhistaBatchSummaryOutcomeLabel');
+            const trabalhistaBatchSummaryFalhas = document.getElementById('trabalhistaBatchSummaryFalhas');
+            const trabalhistaBatchSummaryPendentes = document.getElementById('trabalhistaBatchSummaryPendentes');
+            const trabalhistaBatchSummaryTotal = document.getElementById('trabalhistaBatchSummaryTotal');
+            const trabalhistaBatchSummaryTempo = document.getElementById('trabalhistaBatchSummaryTempo');
+            const trabalhistaBatchSummaryTaxa = document.getElementById('trabalhistaBatchSummaryTaxa');
+            const trabalhistaBatchSummaryNotice = document.getElementById('trabalhistaBatchSummaryNotice');
+
+            const trabalhistaBatchOverlay = document.getElementById('trabalhista-batch-overlay');
+            const trabalhistaBatchProgress = document.getElementById('trabalhistaBatchProgress');
+            const trabalhistaBatchFalhas = document.getElementById('trabalhistaBatchFalhas');
+            const trabalhistaBatchPendentes = document.getElementById('trabalhistaBatchPendentes');
+            const trabalhistaBatchSuccess = document.getElementById('trabalhistaBatchSuccess');
+            const trabalhistaBatchRemaining = document.getElementById('trabalhistaBatchRemaining');
+            const trabalhistaBatchLastMessage = document.getElementById('trabalhistaBatchLastMessage');
+            const btnTrabalhistaBatchPause = document.getElementById('btnTrabalhistaBatchPause');
+            const btnTrabalhistaBatchResume = document.getElementById('btnTrabalhistaBatchResume');
+            const btnTrabalhistaBatchStop = document.getElementById('btnTrabalhistaBatchStop');
+
             const rsBatchModalElement = document.getElementById('rsBatchModal');
             let rsBatchModal = rsBatchModalElement ? new bootstrap.Modal(rsBatchModalElement) : null;
             const rsBatchSummaryModalElement = document.getElementById('rsBatchSummaryModal');
@@ -260,6 +298,13 @@ window.showToast = showToast;
             let fgtsBatchEmpresaNome = null;
             let fgtsBatchTipoCert = null;
             let fgtsBatchScope = 'default';
+            let trabalhistaBatchCertidaoId = null;
+            let trabalhistaBatchPoller = null;
+            let trabalhistaBatchLastCompletedId = null;
+            let trabalhistaBatchSingleUrl = null;
+            let trabalhistaBatchEmpresaNome = null;
+            let trabalhistaBatchTipoCert = null;
+            let trabalhistaBatchScope = 'default';
             let rsBatchCertidaoId = null;
             let rsBatchPoller = null;
             let rsBatchLastCompletedId = null;
@@ -308,6 +353,7 @@ window.showToast = showToast;
             }
 
             bindStaticModalShake(fgtsBatchSummaryModalElement);
+            bindStaticModalShake(trabalhistaBatchSummaryModalElement);
             bindStaticModalShake(rsBatchSummaryModalElement);
             bindStaticModalShake(municipalBatchSummaryModalElement);
 
@@ -979,6 +1025,77 @@ window.showToast = showToast;
                         return;
                     }
 
+                    if (btn.dataset.tipo === 'TRABALHISTA') {
+                        trabalhistaBatchCertidaoId = btn.dataset.id || btn.dataset.certidaoId || btn.getAttribute('data-certidao-id');
+                        trabalhistaBatchSingleUrl = btn.dataset.href || null;
+                        const cardDaLinhaTb = btn.closest('.company-card');
+                        trabalhistaBatchEmpresaNome = cardDaLinhaTb && cardDaLinhaTb.dataset.nomeEmpresa ? cardDaLinhaTb.dataset.nomeEmpresa : '';
+                        trabalhistaBatchTipoCert = btn.dataset.tipo || '';
+                        const certidaoIdTb = btn.dataset.id || btn.dataset.certidaoId || btn.getAttribute('data-certidao-id');
+                        if (!certidaoIdTb) {
+                            showToast('Certidão Trabalhista inválida.', 'error');
+                            resetDownloadButton(btn, originalHTML);
+                            return;
+                        }
+
+                        trabalhistaBatchScope = isPendenteStatus(clickedStatusEspecial) ? 'pendentes' : 'default';
+
+                        fetch(`/trabalhista/lote/info/${certidaoIdTb}?scope=${encodeURIComponent(trabalhistaBatchScope)}`)
+                            .then(response => response.json())
+                            .then(data => {
+                                resetDownloadButton(btn, originalHTML);
+                                if (!data) {
+                                    showToast('Erro ao obter informações Trabalhista.', 'error');
+                                    return;
+                                }
+
+                                const totalLote = Number(data.total || 0);
+                                const scopeAtual = normalizeBatchScope(data.scope || trabalhistaBatchScope);
+                                trabalhistaBatchScope = scopeAtual;
+
+                                applyBatchModalData({
+                                    scopeHintEl: trabalhistaBatchScopeHint,
+                                    labelVencidasEl: trabalhistaBatchLabelVencidas,
+                                    labelAVencerEl: trabalhistaBatchLabelAVencer,
+                                    labelTotalEl: trabalhistaBatchLabelTotal,
+                                    valueVencidasEl: trabalhistaBatchVencidas,
+                                    valueAVencerEl: trabalhistaBatchAVencer,
+                                    valueTotalEl: trabalhistaBatchTotal
+                                }, data, scopeAtual);
+
+                                // Certidao fora do escopo do lote nunca abre modal: emite so a clicada.
+                                const foraDoLote = data.start_incluida === false;
+                                if (foraDoLote || (totalLote <= 1 && scopeAtual !== 'pendentes')) {
+                                    if (!trabalhistaBatchSingleUrl) {
+                                        showToast('URL de emissão indisponível.', 'error');
+                                        return;
+                                    }
+
+                                    showLoading(trabalhistaBatchEmpresaNome || '', trabalhistaBatchTipoCert || '');
+                                    fetch(trabalhistaBatchSingleUrl)
+                                        .then(response => response.json())
+                                        .then(dataSingle => {
+                                            handleDownloadResponse(dataSingle);
+                                        })
+                                        .catch(() => {
+                                            showToast('Erro ao emitir Trabalhista.', 'error');
+                                        })
+                                        .finally(() => {
+                                            hideLoading();
+                                        });
+                                    return;
+                                }
+                                if (trabalhistaBatchEmpresaDisplay) trabalhistaBatchEmpresaDisplay.textContent = trabalhistaBatchEmpresaNome || 'esta empresa';
+                                if (trabalhistaBatchModal) trabalhistaBatchModal.show();
+                            })
+                            .catch(() => {
+                                resetDownloadButton(btn, originalHTML);
+                                showToast('Erro ao obter informações Trabalhista.', 'error');
+                            });
+
+                        return;
+                    }
+
                     const cardDaLinha = btn.closest('.company-card');
                     const estadoEmpresa = ((cardDaLinha && cardDaLinha.dataset.estadoEmpresa) ? cardDaLinha.dataset.estadoEmpresa : '').toUpperCase();
                     const isEstadualRs = btn.dataset.tipo === 'ESTADUAL' && estadoEmpresa === 'RS';
@@ -1506,6 +1623,60 @@ window.showToast = showToast;
                 summaryTempoEl: fgtsBatchSummaryTempo,
                 summaryTaxaEl: fgtsBatchSummaryTaxa,
                 summaryNoticeEl: fgtsBatchSummaryNotice
+            });
+
+            bindBatchControls({
+                endpoints: {
+                    status: '/trabalhista/lote/status',
+                    start: '/trabalhista/lote/iniciar',
+                    pause: '/trabalhista/lote/pausar',
+                    resume: '/trabalhista/lote/retomar',
+                    stop: '/trabalhista/lote/parar'
+                },
+                messages: {
+                    invalidCertidao: 'Certidão Trabalhista inválida.',
+                    startError: 'Erro ao iniciar lote Trabalhista.',
+                    startCatchError: 'Erro ao iniciar lote Trabalhista.',
+                    singleError: 'Erro ao emitir Trabalhista.',
+                    paused: 'Lote Trabalhista pausado.',
+                    resumeError: 'Erro ao retomar lote Trabalhista.',
+                    resumed: 'Lote Trabalhista retomado.',
+                    stopped: 'Lote Trabalhista interrompido.',
+                    completed: 'Lote Trabalhista concluído.',
+                    error: 'Erro grave no lote Trabalhista.'
+                },
+                getPoller: () => trabalhistaBatchPoller,
+                setPoller: (value) => { trabalhistaBatchPoller = value; },
+                getLastCompletedId: () => trabalhistaBatchLastCompletedId,
+                setLastCompletedId: (value) => { trabalhistaBatchLastCompletedId = value; },
+                getCertidaoId: () => trabalhistaBatchCertidaoId,
+                getBatchScope: () => trabalhistaBatchScope,
+                getSingleUrl: () => trabalhistaBatchSingleUrl,
+                getEmpresaNome: () => trabalhistaBatchEmpresaNome,
+                getTipoCert: () => trabalhistaBatchTipoCert,
+                progressEl: trabalhistaBatchProgress,
+                falhasEl: trabalhistaBatchFalhas,
+                pendentesEl: trabalhistaBatchPendentes,
+                successEl: trabalhistaBatchSuccess,
+                remainingEl: trabalhistaBatchRemaining,
+                lastMessageEl: trabalhistaBatchLastMessage,
+                overlayEl: trabalhistaBatchOverlay,
+                resumeBtn: btnTrabalhistaBatchResume,
+                pauseBtn: btnTrabalhistaBatchPause,
+                stopBtn: btnTrabalhistaBatchStop,
+                startBtn: btnTrabalhistaBatchStart,
+                singleBtn: btnTrabalhistaSingleEmit,
+                batchModal: trabalhistaBatchModal,
+                summaryModal: trabalhistaBatchSummaryModal,
+                summaryEmitidasEl: trabalhistaBatchSummaryEmitidas,
+                summaryOutcomeCardEl: trabalhistaBatchSummaryOutcomeCard,
+                summaryOutcomeLabelEl: trabalhistaBatchSummaryOutcomeLabel,
+                summaryFalhasEl: trabalhistaBatchSummaryFalhas,
+                summaryPendentesEl: trabalhistaBatchSummaryPendentes,
+                summaryTotalEl: trabalhistaBatchSummaryTotal,
+                summaryTempoEl: trabalhistaBatchSummaryTempo,
+                summaryTaxaEl: trabalhistaBatchSummaryTaxa,
+                summaryNoticeEl: trabalhistaBatchSummaryNotice
             });
 
             bindBatchControls({
