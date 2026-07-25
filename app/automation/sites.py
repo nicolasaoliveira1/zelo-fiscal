@@ -67,7 +67,13 @@ SITES_CERTIDOES = {
         'pre_fill_click_id': "input[value='Emitir Certidão']",
         'pre_fill_click_by': 'css_selector',                  
         'cnpj_field_id': 'gerarCertidaoForm:cpfCnpj',
-        'by': 'id'
+        'by': 'id',
+        # captcha de imagem (base64) + submit — spec 07 COV-01a (CNDT full-auto)
+        'captcha_img_id': 'idImgBase64',
+        'captcha_input_id': 'idCampoResposta',
+        'captcha_input_by': 'id',
+        'submit_id': 'gerarCertidaoForm:btnEmitirCertidao',
+        'submit_by': 'id'
     }
 }
 
