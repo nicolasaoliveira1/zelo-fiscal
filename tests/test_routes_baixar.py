@@ -201,3 +201,19 @@ def test_resposta_rs_positiva(app, ids):
         j = resp.get_json()
         assert j['status'] == 'estadual_rs_positiva'
         assert j['message'] == 'POSITIVA detectada'
+
+
+def test_resposta_erro_acionavel_trabalhista(app, ids):
+    # TRAB-04/05/06: falha do fluxo Trabalhista (ex.: captcha recusado, 2captcha
+    # indisponivel, timeout) vira erro acionavel com a mensagem e o codigo do helper.
+    with app.test_request_context('/'):
+        cert = Certidao.query.get(ids['fgts'])
+        resultado = emissao_service._resultado_baixar_vazio()
+        resultado['erro_acionavel'] = {
+            'message': 'Captcha do CNDT recusado (tentativa 2).', 'code': 409,
+        }
+        resp = emissao_service._montar_resposta_baixar(cert, _cfg_simples(cert), resultado)
+        _body, code = resp
+        assert code == 409
+        assert _body.get_json()['message'] == 'Captcha do CNDT recusado (tentativa 2).'
+        assert _body.get_json()['status'] == 'error'

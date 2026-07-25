@@ -14,7 +14,7 @@ tokens de visualizacao (app.services.visualizar_token).
 import time
 from datetime import date, timedelta
 
-from flask import jsonify, redirect, request
+from flask import current_app, jsonify, redirect, request
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
@@ -22,7 +22,7 @@ from selenium.webdriver.support.ui import Select, WebDriverWait
 
 from app import db, file_manager
 from app.errors import ErrorType
-from app.automation import SITES_CERTIDOES, capture, pdf, steps
+from app.automation import SITES_CERTIDOES, capture, pdf, steps, trabalhista
 from app.automation.batch_state import (
     FGTS_BATCH_LOCK,
     FGTS_BATCH_STATE,
@@ -620,6 +620,24 @@ def _executar_automacao_baixar(certidao, cfg):
                         campo1.send_keys(Keys.TAB)
                 except Exception:
                     pass
+
+        if tipo_certidao_chave == 'TRABALHISTA':
+            # Resolve o captcha de imagem do CNDT e submete (spec 07 COV-01a).
+            # Sucesso = novo PDF nos Downloads (mesma deteccao do monitor abaixo);
+            # em captcha recusado, o helper repete. Falha -> erro acionavel.
+            def _trabalhista_houve_sucesso():
+                return bool(file_manager.verificar_novo_arquivo(tempo_inicio))
+
+            ok_tb, msg_tb = trabalhista.resolver_captcha_e_submeter(
+                driver, current_app.config, _trabalhista_houve_sucesso,
+            )
+            if not ok_tb:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+                resultado['erro_acionavel'] = {'message': msg_tb, 'code': 409}
+                return resultado
 
         if tipo_certidao_chave == 'ESTADUAL' and estado_emp == 'RS':
             log_event(
