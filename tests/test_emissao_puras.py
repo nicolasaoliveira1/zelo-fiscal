@@ -181,3 +181,32 @@ def test_imbe_captcha_sem_campo_nao_chama_nucleo(monkeypatch):
         resultado = emissao._imbe_resolver_captcha_2captcha(MagicMock())
     assert resultado == (False, 'Campo do captcha não encontrado.')
     core.assert_not_called()
+
+
+def test_imbe_encontrar_captcha_uma_unica_espera(monkeypatch):
+    # Correcao de latencia: a imagem do captcha do IMBE e localizada numa UNICA
+    # espera com uniao de seletores, em vez de 4 esperas seriais que gastavam ate
+    # `timeout` cada uma antes de casar. Sem serie -> extracao rapida como no CNDT.
+    esperas = {'n': 0}
+    loc = {}
+
+    class _FakeWait:
+        def __init__(self, driver, timeout):
+            esperas['n'] += 1
+
+        def until(self, cond):
+            return 'ELEMENTO'
+
+    monkeypatch.setattr(emissao, 'WebDriverWait', _FakeWait)
+    monkeypatch.setattr(
+        emissao.EC, 'presence_of_element_located',
+        lambda locator: loc.__setitem__('locator', locator),
+    )
+
+    res = emissao._imbe_encontrar_captcha_imagem(MagicMock())
+
+    assert res == 'ELEMENTO'
+    assert esperas['n'] == 1  # uma unica espera, nao 4 seriais
+    _by, xpath = loc['locator']
+    assert xpath.count(' | ') == 3  # uniao dos 4 seletores num so XPath
+    assert 'palavra' in xpath and 'captcha' in xpath and 'verificacao' in xpath

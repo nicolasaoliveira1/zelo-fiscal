@@ -673,20 +673,22 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
 
 
 def _imbe_encontrar_captcha_imagem(driver, timeout=10):
+    # Uniao dos seletores numa UNICA espera: retorna assim que a imagem do captcha
+    # aparece, em vez de tentar cada seletor em serie gastando ate `timeout` naquele
+    # que nao casa (o que atrasava a extracao em varios segundos). A pagina do
+    # captcha tem uma unica imagem, entao a ordem de preferencia nao importa.
     candidatos = [
         "//img[contains(translate(@alt, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'verificacao')]",
         "//img[contains(translate(@alt, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'palavra')]",
         "//img[contains(translate(@src, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'captcha')]",
         "//img[contains(translate(@src, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'verificacao')]",
     ]
-    for xpath in candidatos:
-        try:
-            return WebDriverWait(driver, timeout).until(
-                EC.presence_of_element_located((By.XPATH, xpath))
-            )
-        except TimeoutException:
-            continue
-    return None
+    try:
+        return WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.XPATH, ' | '.join(candidatos)))
+        )
+    except TimeoutException:
+        return None
 
 
 def _imbe_encontrar_campo_captcha(driver, timeout=10):
