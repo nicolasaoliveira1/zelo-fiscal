@@ -145,6 +145,21 @@ def test_upload_rejeita_vazio(app, client):
     mv.assert_not_called()
 
 
+def test_upload_rejeita_excede_limite(app, client):
+    # FED-07: arquivo acima do limite -> 413 json_error, antes de mover/nucleo.
+    fid = _federal_id(app)
+    grande = b'%PDF-1.4 ' + b'x' * 64
+    with patch.object(certidoes, '_MAX_UPLOAD_FEDERAL_BYTES', 8), \
+            patch.object(certidoes.file_manager, 'mover_e_renomear') as mv, \
+            patch.object(certidoes.certidao_service, 'finalizar_federal') as fin:
+        resp = client.post(f'/certidao/federal/registrar/{fid}',
+                           data=_pdf_upload(conteudo=grande), content_type='multipart/form-data')
+    assert resp.status_code == 413
+    assert resp.get_json()['status'] == 'error'
+    mv.assert_not_called()
+    fin.assert_not_called()
+
+
 def test_upload_rejeita_tipo_nao_federal(app, ids):
     # FED-08: alvo de tipo != FEDERAL -> json_error, sem processar arquivo.
     from tests.conftest import USUARIOS_TESTE
