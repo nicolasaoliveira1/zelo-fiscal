@@ -850,10 +850,11 @@ window.showToast = showToast;
                                                 // ignore close errors
                                             }
                                         }
-                                        if (federalMonitorController) federalMonitorController.abort();
-                                        federalMonitorAtivo = false;
-                                        federalFinalize = null;
-                                        hideLoading();
+                                        // Reusa a limpeza completa do finalizarFederal (aborta
+                                        // controller, limpa timer/focus handler); a guarda
+                                        // federalPendingConfirmation evita o modal de pendente.
+                                        federalPendingConfirmation = true;
+                                        finalizarFederal();
                                         setTimeout(function () { window.location.reload(); }, 1200);
                                         return;
                                     }

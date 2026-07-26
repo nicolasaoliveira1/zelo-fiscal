@@ -117,6 +117,31 @@ def salvar_data_confirmada():
         return _json_error(code=500, exc=e)
 
 
+def _resposta_federal(certidao_id, res, mensagem_sucesso):
+    """Monta a resposta JSON de uma finalizacao Federal (COV-01b), compartilhada
+    pelo monitor e pelo upload manual. `res` vem de certidao_service.finalizar_federal:
+    ok=False -> json_error; pendente -> status 'pendente' (sem token/validade);
+    senao -> success com token e validade (data do PDF ou fallback 180d)."""
+    if not res['ok']:
+        return _json_error(res.get('message') or 'Falha ao registrar a Federal.', 500)
+    if res.get('pendente'):
+        return jsonify({
+            'status': 'pendente',
+            'mensagem': res.get('message')
+            or 'Certidão Federal positiva: marcada como pendente.',
+        })
+    validade = res.get('data_validade')
+    payload = {
+        'status': 'success',
+        'mensagem': mensagem_sucesso,
+        'visualizar_token': _gerar_visualizar_token(certidao_id),
+    }
+    if validade:
+        payload['data_validade'] = validade.strftime('%Y-%m-%d')
+        payload['data_validade_formatada'] = validade.strftime('%d/%m/%Y')
+    return jsonify(payload)
+
+
 @bp.route('/certidao/monitorar_download_federal/<int:certidao_id>')
 @requer_papel('operador')
 def monitorar_download_federal(certidao_id):
@@ -199,26 +224,7 @@ def monitorar_download_federal(certidao_id):
                 # decide a validade (data do PDF ou fallback 180d). Mesmo helper do
                 # upload manual (F3) — sem duplicar classificacao/validade.
                 res = certidao_service.finalizar_federal(certidao, msg)
-                if not res['ok']:
-                    return _json_error(res.get('message') or 'Falha ao registrar a Federal.', 500)
-
-                if res.get('pendente'):
-                    return jsonify({
-                        'status': 'pendente',
-                        'mensagem': res.get('message')
-                        or 'Certidão Federal positiva: marcada como pendente.',
-                    })
-
-                validade = res.get('data_validade')
-                payload = {
-                    'status': 'success',
-                    'mensagem': f"Arquivo salvo no servidor: {msg}",
-                    'visualizar_token': _gerar_visualizar_token(certidao_id),
-                }
-                if validade:
-                    payload['data_validade'] = validade.strftime('%Y-%m-%d')
-                    payload['data_validade_formatada'] = validade.strftime('%d/%m/%Y')
-                return jsonify(payload)
+                return _resposta_federal(certidao_id, res, f"Arquivo salvo no servidor: {msg}")
             else:
                 return _json_error(f"Erro ao mover: {msg}", 500)
 
@@ -284,26 +290,7 @@ def registrar_federal_upload(certidao_id):
         log_event('federal_upload_registrado', certidao_id=certidao_id, arquivo=destino)
 
         res = certidao_service.finalizar_federal(certidao, destino)
-        if not res['ok']:
-            return _json_error(res.get('message') or 'Falha ao registrar a Federal.', 500)
-
-        if res.get('pendente'):
-            return jsonify({
-                'status': 'pendente',
-                'mensagem': res.get('message')
-                or 'Certidão Federal positiva: marcada como pendente.',
-            })
-
-        validade = res.get('data_validade')
-        payload = {
-            'status': 'success',
-            'mensagem': f'Certidão Federal registrada: {destino}',
-            'visualizar_token': _gerar_visualizar_token(certidao_id),
-        }
-        if validade:
-            payload['data_validade'] = validade.strftime('%Y-%m-%d')
-            payload['data_validade_formatada'] = validade.strftime('%d/%m/%Y')
-        return jsonify(payload)
+        return _resposta_federal(certidao_id, res, f'Certidão Federal registrada: {destino}')
     except Exception as e:
         db.session.rollback()
         return _json_error(code=500, exc=e)
