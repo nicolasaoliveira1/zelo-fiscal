@@ -832,6 +832,32 @@ window.showToast = showToast;
                                         return;
                                     }
 
+                                    // COV-01b: Federal positiva detectada -> backend ja marcou
+                                    // PENDENTE e removeu o PDF; sem modal de confirmacao de data.
+                                    if (data.status === 'pendente') {
+                                        showToast(
+                                            appendRequestId(
+                                                data.mensagem || data.message
+                                                || 'Certidão Federal positiva: marcada como pendente.',
+                                                data.request_id
+                                            ),
+                                            'warning'
+                                        );
+                                        if (novaAba) {
+                                            try {
+                                                if (!novaAba.closed) novaAba.close();
+                                            } catch (e) {
+                                                // ignore close errors
+                                            }
+                                        }
+                                        if (federalMonitorController) federalMonitorController.abort();
+                                        federalMonitorAtivo = false;
+                                        federalFinalize = null;
+                                        hideLoading();
+                                        setTimeout(function () { window.location.reload(); }, 1200);
+                                        return;
+                                    }
+
                                     showToast(
                                         appendRequestId(
                                             data.message || data.mensagem || 'Monitoramento federal não encontrou arquivo.',

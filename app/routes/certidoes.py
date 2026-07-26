@@ -18,7 +18,6 @@ from flask import (
 )
 
 from app import db, file_manager
-from app.automation import pdf
 from app.automation.emissao import (
     _classe_status_por_data,
     _pick_changed_download_pdf,
@@ -192,20 +191,31 @@ def monitorar_download_federal(certidao_id):
                         'federal_db_save_failed', level='WARNING',
                         certidao_id=certidao_id, error=str(e_db),
                     )
-                validade_pdf = pdf.extrair_validade_federal(msg)
-                if validade_pdf:
+
+                # Nucleo compartilhado (COV-01b): classifica (positiva->PENDENTE) e
+                # decide a validade (data do PDF ou fallback 180d). Mesmo helper do
+                # upload manual (F3) — sem duplicar classificacao/validade.
+                res = certidao_service.finalizar_federal(certidao, msg)
+                if not res['ok']:
+                    return _json_error(res.get('message') or 'Falha ao registrar a Federal.', 500)
+
+                if res.get('pendente'):
                     return jsonify({
-                        'status': 'success',
-                        'mensagem': f"Arquivo salvo no servidor: {msg}",
-                        'visualizar_token': _gerar_visualizar_token(certidao_id),
-                        'data_validade': validade_pdf.strftime('%Y-%m-%d'),
-                        'data_validade_formatada': validade_pdf.strftime('%d/%m/%Y')
+                        'status': 'pendente',
+                        'mensagem': res.get('message')
+                        or 'Certidão Federal positiva: marcada como pendente.',
                     })
-                return jsonify({
+
+                validade = res.get('data_validade')
+                payload = {
                     'status': 'success',
                     'mensagem': f"Arquivo salvo no servidor: {msg}",
-                    'visualizar_token': _gerar_visualizar_token(certidao_id)
-                })
+                    'visualizar_token': _gerar_visualizar_token(certidao_id),
+                }
+                if validade:
+                    payload['data_validade'] = validade.strftime('%Y-%m-%d')
+                    payload['data_validade_formatada'] = validade.strftime('%d/%m/%Y')
+                return jsonify(payload)
             else:
                 return _json_error(f"Erro ao mover: {msg}", 500)
 
