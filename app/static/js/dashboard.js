@@ -1259,12 +1259,6 @@ window.showToast = showToast;
                         return;
                     }
 
-                    if (btn.dataset.tipo === 'FEDERAL') {
-                        showToast("Para Federal, use o botão 'Abrir Site'.", "primary");
-                        resetDownloadButton(btn, originalHTML);
-                        return;
-                    }
-
                     if (btn.dataset.manualOnly === '1') {
                         showToast("Para São Paulo, use o botão 'Abrir Site'.", "primary");
                         resetDownloadButton(btn, originalHTML);

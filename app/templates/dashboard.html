@@ -423,6 +423,8 @@
                                         </button>
 
                                         {% if certidao.tipo.name == 'FEDERAL' %}
+                                        {# Federal e assistido/upload: no lugar de "Emitir" (que so redirecionava
+                                           para "Abrir Site"), a acao util e registrar o PDF baixado/em maos. #}
                                         <button type="button" class="btn btn-sm btn-outline-primary border-0 btn-registrar-federal"
                                             title="Registrar PDF"
                                             data-bs-tooltip="true" data-bs-placement="top"
@@ -431,8 +433,7 @@
                                             data-empresa="{{ empresa.nome }}">
                                             <i class="bi bi-file-earmark-arrow-up fs-5"></i>
                                         </button>
-                                        {% endif %}
-
+                                        {% else %}
                                         <button type="button" class="btn btn-sm btn-outline-primary border-0 btn-baixar-certidao"
                                             title="Emitir"
                                             data-bs-tooltip="true" data-bs-placement="top"
@@ -444,6 +445,7 @@
                                             data-status-especial="{{ certidao.status_especial.value if certidao.status_especial else '' }}">
                                             <i class="bi bi-download fs-5"></i>
                                         </button>
+                                        {% endif %}
                                         {% endif %}
                                     </div>
                                 </td>
