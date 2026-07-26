@@ -422,6 +422,17 @@
                                             <i class="bi bi-pencil-square fs-5"></i>
                                         </button>
 
+                                        {% if certidao.tipo.name == 'FEDERAL' %}
+                                        <button type="button" class="btn btn-sm btn-outline-primary border-0 btn-registrar-federal"
+                                            title="Registrar PDF"
+                                            data-bs-tooltip="true" data-bs-placement="top"
+                                            aria-label="Registrar PDF da certidao Federal de {{ empresa.nome }}"
+                                            data-id="{{ certidao.id }}"
+                                            data-empresa="{{ empresa.nome }}">
+                                            <i class="bi bi-file-earmark-arrow-up fs-5"></i>
+                                        </button>
+                                        {% endif %}
+
                                         <button type="button" class="btn btn-sm btn-outline-primary border-0 btn-baixar-certidao"
                                             title="Emitir"
                                             data-bs-tooltip="true" data-bs-placement="top"
@@ -638,6 +649,28 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-primary" id="btnInfoModalOK">OK, Abrir Site</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="registrarFederalModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Registrar certidão Federal</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">Anexe o PDF da certidão Federal de
+                        <strong id="registrarFederalEmpresa">---</strong>. O sistema classifica
+                        (negativa/positiva) e define a validade automaticamente.</p>
+                    <input type="file" class="form-control" id="registrarFederalInput" accept="application/pdf">
+                    <div class="form-text">Somente PDF, até 15 MB.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="btnRegistrarFederalEnviar">Registrar</button>
                 </div>
             </div>
         </div>

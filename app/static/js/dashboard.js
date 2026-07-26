@@ -922,6 +922,69 @@ window.showToast = showToast;
                 });
             }
 
+            // COV-01b: registrar Federal por upload manual (sem reabrir o portal).
+            const registrarFederalModalEl = document.getElementById('registrarFederalModal');
+            const registrarFederalModal = registrarFederalModalEl ? new bootstrap.Modal(registrarFederalModalEl) : null;
+            const registrarFederalInput = document.getElementById('registrarFederalInput');
+            const registrarFederalEmpresa = document.getElementById('registrarFederalEmpresa');
+            const btnRegistrarFederalEnviar = document.getElementById('btnRegistrarFederalEnviar');
+            let registrarFederalId = null;
+
+            document.querySelectorAll('.btn-registrar-federal').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    registrarFederalId = btn.dataset.id;
+                    if (registrarFederalEmpresa) registrarFederalEmpresa.textContent = btn.dataset.empresa || '';
+                    if (registrarFederalInput) registrarFederalInput.value = '';
+                    if (registrarFederalModal) registrarFederalModal.show();
+                });
+            });
+
+            if (btnRegistrarFederalEnviar) {
+                btnRegistrarFederalEnviar.addEventListener('click', function () {
+                    const arquivo = registrarFederalInput && registrarFederalInput.files
+                        ? registrarFederalInput.files[0] : null;
+                    if (!arquivo) {
+                        showToast('Selecione um arquivo PDF.', 'warning');
+                        return;
+                    }
+                    if (!arquivo.name.toLowerCase().endsWith('.pdf')) {
+                        showToast('Envie um arquivo PDF.', 'warning');
+                        return;
+                    }
+                    const fd = new FormData();
+                    fd.append('arquivo', arquivo);
+                    const htmlOrig = btnRegistrarFederalEnviar.innerHTML;
+                    btnRegistrarFederalEnviar.disabled = true;
+                    btnRegistrarFederalEnviar.innerHTML = 'Registrando...';
+                    // O wrapper global de fetch (base.html) injeta X-CSRFToken; nao setar
+                    // Content-Type para o browser definir o boundary do multipart.
+                    fetch(`/certidao/federal/registrar/${registrarFederalId}`, { method: 'POST', body: fd })
+                        .then(function (r) { return r.json(); })
+                        .then(function (data) {
+                            if (data.status === 'success') {
+                                showToast('Certidão Federal registrada!', 'success');
+                            } else if (data.status === 'pendente') {
+                                showToast(data.mensagem || data.message
+                                    || 'Certidão Federal positiva: marcada como pendente.', 'warning');
+                            } else {
+                                showToast(appendRequestId(
+                                    data.message || data.mensagem || 'Falha ao registrar a certidão.',
+                                    data.request_id), 'error');
+                                return;
+                            }
+                            if (registrarFederalModal) registrarFederalModal.hide();
+                            setTimeout(function () { window.location.reload(); }, 1000);
+                        })
+                        .catch(function () {
+                            showToast('Erro ao registrar a certidão Federal.', 'error');
+                        })
+                        .finally(function () {
+                            btnRegistrarFederalEnviar.disabled = false;
+                            btnRegistrarFederalEnviar.innerHTML = htmlOrig;
+                        });
+                });
+            }
+
             if (confirmModalElement) {
                 confirmModalElement.addEventListener('shown.bs.modal', function () {
                     hideLoading();
