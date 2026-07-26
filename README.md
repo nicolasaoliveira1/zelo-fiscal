@@ -87,7 +87,10 @@ O sistema combina:
 
 ### Automação de emissão
 
-- Federal: fluxo assistido com monitoramento de download.
+- Federal: fluxo assistido melhorado (o gate é hCaptcha invisível Enterprise, inviável sem operador).
+  - "Abrir Site" abre o portal da RFB, copia o CNPJ e monitora o download do PDF que o operador baixa.
+  - O PDF é classificado ao chegar: positiva vira PENDENTE (arquivo removido); negativa/positiva-com-efeitos-de-negativa grava a validade lida do PDF ("Válida até"), com fallback de 180 dias quando a data não é legível — assim a Federal entra no ciclo de alertas.
+  - Alternativa por **upload**: o operador pode anexar um PDF federal que já tem em mãos (botão "Registrar PDF"), sem reabrir o portal; a mesma classificação/validade é aplicada.
 - FGTS:
   - Emissão individual com geração de PDF via Chrome DevTools.
   - Emissão em lote com pausa, retomada, parada e resumo final.
