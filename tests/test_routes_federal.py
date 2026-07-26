@@ -6,6 +6,7 @@ evitar o loop de 180s / sleeps reais; o foco e o WIRING + o mapeamento do JSON.
 """
 from contextlib import contextmanager
 from datetime import date
+from io import BytesIO
 from unittest.mock import patch
 
 from app.models import Certidao, TipoCertidao
@@ -77,4 +78,95 @@ def test_monitor_exige_login(app, client_anon):
     # AD-005: rota protegida — sem sessao, nao executa (redirect/401), sem tocar no nucleo.
     fid = _federal_id(app)
     resp = client_anon.get(f'/certidao/monitorar_download_federal/{fid}')
+    assert resp.status_code in (302, 401)
+
+
+# ---- F3: upload manual (POST /certidao/federal/registrar/<id>) ----
+
+def _pdf_upload(nome='cert.pdf', conteudo=b'%PDF-1.4 fake federal'):
+    return {'arquivo': (BytesIO(conteudo), nome)}
+
+
+def test_upload_negativa_salva_e_reusa_nucleo(app, client):
+    # FED-06: upload de PDF -> salva via file_manager + finalizar_federal (mesmo nucleo).
+    fid = _federal_id(app)
+    with patch.object(certidoes.file_manager, 'mover_e_renomear',
+                      return_value=(True, '/rede/fed.pdf')) as mv, \
+            patch.object(certidoes, '_gerar_visualizar_token', return_value='tok'), \
+            patch.object(certidoes.certidao_service, 'finalizar_federal',
+                         return_value={'ok': True, 'pendente': False,
+                                       'data_validade': date(2026, 12, 31), 'message': None}) as fin:
+        resp = client.post(f'/certidao/federal/registrar/{fid}',
+                           data=_pdf_upload(), content_type='multipart/form-data')
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['status'] == 'success'
+    assert data['data_validade'] == '2026-12-31'
+    assert data['visualizar_token'] == 'tok'
+    mv.assert_called_once()
+    fin.assert_called_once()
+
+
+def test_upload_positiva_retorna_pendente(app, client):
+    # FED-06/04: positiva no upload -> status 'pendente' (nucleo marcou PENDENTE).
+    fid = _federal_id(app)
+    with patch.object(certidoes.file_manager, 'mover_e_renomear',
+                      return_value=(True, '/rede/fed.pdf')), \
+            patch.object(certidoes.certidao_service, 'finalizar_federal',
+                         return_value={'ok': True, 'pendente': True, 'data_validade': None,
+                                       'message': 'Federal POSITIVA: pendente.'}):
+        resp = client.post(f'/certidao/federal/registrar/{fid}',
+                           data=_pdf_upload(), content_type='multipart/form-data')
+    assert resp.status_code == 200
+    assert resp.get_json()['status'] == 'pendente'
+
+
+def test_upload_rejeita_nao_pdf(app, client):
+    # FED-07: arquivo que nao e PDF -> json_error, sem tocar em file_manager/nucleo.
+    fid = _federal_id(app)
+    with patch.object(certidoes.file_manager, 'mover_e_renomear') as mv, \
+            patch.object(certidoes.certidao_service, 'finalizar_federal') as fin:
+        resp = client.post(f'/certidao/federal/registrar/{fid}',
+                           data=_pdf_upload(nome='cert.txt'), content_type='multipart/form-data')
+    assert resp.status_code == 400
+    assert resp.get_json()['status'] == 'error'
+    mv.assert_not_called()
+    fin.assert_not_called()
+
+
+def test_upload_rejeita_vazio(app, client):
+    # FED-07: PDF vazio (0 bytes) -> json_error antes de mover.
+    fid = _federal_id(app)
+    with patch.object(certidoes.file_manager, 'mover_e_renomear') as mv:
+        resp = client.post(f'/certidao/federal/registrar/{fid}',
+                           data=_pdf_upload(conteudo=b''), content_type='multipart/form-data')
+    assert resp.status_code == 400
+    assert resp.get_json()['status'] == 'error'
+    mv.assert_not_called()
+
+
+def test_upload_rejeita_tipo_nao_federal(app, ids):
+    # FED-08: alvo de tipo != FEDERAL -> json_error, sem processar arquivo.
+    from tests.conftest import USUARIOS_TESTE
+    c = app.test_client()
+    c.post('/login', data=dict(zip(('username', 'senha'), USUARIOS_TESTE['operador'])))
+    resp = c.post(f"/certidao/federal/registrar/{ids['fgts']}",
+                  data=_pdf_upload(), content_type='multipart/form-data')
+    assert resp.status_code == 400
+    assert resp.get_json()['status'] == 'error'
+
+
+def test_upload_alvo_inexistente_404(app, client):
+    # FED-08: certidao inexistente -> 404 json_error.
+    resp = client.post('/certidao/federal/registrar/999999',
+                       data=_pdf_upload(), content_type='multipart/form-data')
+    assert resp.status_code == 404
+    assert resp.get_json()['status'] == 'error'
+
+
+def test_upload_exige_login(app, client_anon):
+    # AD-005: sem sessao -> nao executa.
+    fid = _federal_id(app)
+    resp = client_anon.post(f'/certidao/federal/registrar/{fid}',
+                           data=_pdf_upload(), content_type='multipart/form-data')
     assert resp.status_code in (302, 401)

@@ -5,6 +5,7 @@ Extraido de app/routes.py (spec 05, REFA-02). Registra no blueprint "main"
 compartilhado (importado de app.routes). A rota baixar delega a emissao_service.
 """
 import os
+import tempfile
 import time
 from datetime import datetime
 
@@ -16,6 +17,7 @@ from flask import (
     send_file,
     url_for,
 )
+from werkzeug.utils import secure_filename
 
 from app import db, file_manager
 from app.automation.emissao import (
@@ -25,6 +27,7 @@ from app.automation.emissao import (
 )
 from app.models import (
     Certidao,
+    TipoCertidao,
 )
 from app.utils import (
     json_error as _json_error,
@@ -231,6 +234,85 @@ def monitorar_download_federal(certidao_id):
 def interromper_monitoramento_federal():
     file_manager.criar_chave_interrupcao()
     return jsonify({'status': 'ok'})
+
+
+# Limite generoso: certidoes federais em PDF tem ~100 KB; 15 MB cobre com folga.
+_MAX_UPLOAD_FEDERAL_BYTES = 15 * 1024 * 1024
+
+
+@bp.route('/certidao/federal/registrar/<int:certidao_id>', methods=['POST'])
+@requer_papel('operador')
+def registrar_federal_upload(certidao_id):
+    """Registra uma certidao FEDERAL por upload manual (COV-01b F3).
+
+    Alternativa ao 'Abrir Site' + monitor: o operador anexa um PDF que ja tem em
+    maos. Salva o arquivo e aplica a MESMA finalizacao do monitor
+    (`certidao_service.finalizar_federal`) — classificacao + validade/180d — sem
+    duplicar. So o tipo FEDERAL; papel operador (AD-005)."""
+    certidao = db.session.get(Certidao, certidao_id)
+    if not certidao:
+        return _json_error('Certidão não encontrada.', 404)
+    if certidao.tipo != TipoCertidao.FEDERAL:
+        return _json_error('Registro por upload é exclusivo do tipo Federal.', 400)
+
+    arquivo = request.files.get('arquivo')
+    if arquivo is None or not (arquivo.filename or '').strip():
+        return _json_error('Nenhum arquivo enviado.', 400)
+    if not secure_filename(arquivo.filename).lower().endswith('.pdf'):
+        return _json_error('Envie um arquivo PDF.', 400)
+
+    temp_path = None
+    try:
+        fd, temp_path = tempfile.mkstemp(suffix='.pdf')
+        os.close(fd)
+        arquivo.save(temp_path)
+
+        tamanho = os.path.getsize(temp_path)
+        if tamanho == 0:
+            return _json_error('Arquivo vazio.', 400)
+        if tamanho > _MAX_UPLOAD_FEDERAL_BYTES:
+            return _json_error('Arquivo excede o limite de 15 MB.', 413)
+
+        sucesso, destino = file_manager.mover_e_renomear(
+            temp_path, certidao.empresa.nome, certidao.tipo.value)
+        if not sucesso:
+            return _json_error(f'Erro ao salvar o arquivo: {destino}', 500)
+        temp_path = None  # movido para a pasta da empresa; nao remover no finally
+
+        certidao.caminho_arquivo = destino
+        db.session.commit()
+        log_event('federal_upload_registrado', certidao_id=certidao_id, arquivo=destino)
+
+        res = certidao_service.finalizar_federal(certidao, destino)
+        if not res['ok']:
+            return _json_error(res.get('message') or 'Falha ao registrar a Federal.', 500)
+
+        if res.get('pendente'):
+            return jsonify({
+                'status': 'pendente',
+                'mensagem': res.get('message')
+                or 'Certidão Federal positiva: marcada como pendente.',
+            })
+
+        validade = res.get('data_validade')
+        payload = {
+            'status': 'success',
+            'mensagem': f'Certidão Federal registrada: {destino}',
+            'visualizar_token': _gerar_visualizar_token(certidao_id),
+        }
+        if validade:
+            payload['data_validade'] = validade.strftime('%Y-%m-%d')
+            payload['data_validade_formatada'] = validade.strftime('%d/%m/%Y')
+        return jsonify(payload)
+    except Exception as e:
+        db.session.rollback()
+        return _json_error(code=500, exc=e)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
 @bp.route('/certidao/visualizar/<token>')
