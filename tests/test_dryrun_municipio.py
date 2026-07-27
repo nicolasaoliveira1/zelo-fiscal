@@ -330,6 +330,63 @@ def test_config_real_xangri_la_nao_clica_em_imprimir():
     assert rel['resultado'] == dr.PARCIAL
 
 
+def test_sem_skip_cnpj_fill_nenhum_passo_emite():
+    # Porto Alegre: before_cnpj e so um radio pre-CNPJ. Com skip_cnpj_fill=False o
+    # CNPJ ainda nao foi preenchido nessa fase, entao nada pode emitir -> executa.
+    cfg = {'before_cnpj': [{'tipo': 'click', 'by': 'id', 'locator': 'gwt-uid-2'}],
+           'after_cnpj': []}
+    drv = _FakeDriver(encontra=['campoCnpj'])
+    with patch.object(dr.steps_engine, 'executar_municipio', return_value=None) as eng:
+        rel = dr.verificar_municipio(_municipio(nome='Porto Alegre'), drv, config=cfg)
+    assert eng.call_count == 1                       # o radio FOI exercido
+    assert rel['resultado'] == dr.OK                 # nao fica 'parcial' eterno
+
+
+def test_emite_false_explicito_libera_a_execucao():
+    cfg = {'before_cnpj': [{'tipo': 'click', 'by': 'id', 'locator': 'btnSeguro',
+                            'emite': False}], 'skip_cnpj_fill': True}
+    with patch.object(dr.steps_engine, 'executar_municipio', return_value=None) as eng:
+        dr.verificar_municipio(_municipio(), _FakeDriver(), config=cfg)
+    eng.assert_called_once()
+
+
+def test_cnpj_de_empresa_da_cidade_e_preferido(app, ids):
+    # Portais que consultam cadastro devolvem vazio para CNPJ nao inscrito; usar
+    # um contribuinte real da cidade evita falso 'quebrado'. A empresa semeada
+    # pelo fixture fica em Tramandai.
+    with app.app_context():
+        muni_ok = _municipio(nome='Tramandaí')
+        assert dr.cnpj_para_teste(muni_ok) == '11.111.111/1111-11'
+        # cidade sem empresa -> cai no CNPJ publico
+        assert dr.cnpj_para_teste(_municipio(nome='Cidade Sem Empresa')) == dr.CNPJ_TESTE
+
+
+def test_contrato_configs_reais_nunca_executam_passo_que_emite():
+    """Contrato sobre as formas REAIS de config (o que deixou o blocker passar).
+
+    Para cada forma, o(s) locator(s) de emissao NAO podem aparecer entre os
+    passos executados. Cobre as duas familias do seed: IPM (confirmar) e
+    JSF/imobiliario (Imprimir)."""
+    formas = [
+        # (nome, config, locators que NUNCA podem ser executados)
+        ('Gravataí/Osório/Novo Hamburgo', _CONFIG_GRAVATAI_REAL, ['confirmar']),
+        ('Ponta Porã/Xangri-Lá', {
+            'skip_cnpj_fill': True, 'before_cnpj': [
+                {'tipo': 'click', 'by': 'xpath', 'locator': "//a[span[contains(text(),'Contribuinte')]]"},
+                {'tipo': 'fill', 'by': 'css_selector', 'locator': '#itIdent', 'value': 'cnpj'},
+                {'tipo': 'click', 'by': 'css_selector', 'locator': '#btnValidar'},
+                {'tipo': 'click', 'by': 'xpath', 'locator': "//span[contains(text(),'Imprimir')]"},
+            ]}, ["//span[contains(text(),'Imprimir')]"]),
+    ]
+    for nome, cfg, proibidos in formas:
+        drv = _FakeDriver(encontra=proibidos + ['campoCnpj'])
+        with patch.object(dr.steps_engine, 'executar_municipio', return_value=None) as eng:
+            dr.verificar_municipio(_municipio(nome=nome), drv, config=cfg)
+        executados = [c.args[2][0]['locator'] for c in eng.call_args_list]
+        for proibido in proibidos:
+            assert proibido not in executados, f'{nome}: executou passo que emite {proibido}'
+
+
 def test_downloads_bloqueados_no_driver_do_dryrun():
     # Defesa estrutural: mesmo que algo dispare a emissao, nada cai em ~/Downloads
     # (a emissao real pega "o PDF mais novo" de la -> evitaria anexo trocado).
