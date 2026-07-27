@@ -22,6 +22,15 @@ import copy
 from selenium.webdriver.support.ui import WebDriverWait
 
 from app.automation import steps as steps_engine
+from app.automation.driver import (
+    UcIndisponivelError,
+    _criar_driver_chrome,
+    _criar_driver_uc,
+    _municipal_profile_acquire,
+    _municipal_profile_release,
+)
+from app.automation.emissao import _carregar_config_municipio
+from app.automation.sites import is_ipm_atende
 from app.services.execution_logger import log_event
 
 # Vocabulario de resultado (usado pela rota, pelo job e pelo alerta).
@@ -170,3 +179,58 @@ def verificar_municipio(municipio, driver, config=None, timeout=8):
     log_event('municipio_dryrun', municipio=nome, resultado=relatorio['resultado'],
               quebrados=len(relatorio['quebrados']))
     return relatorio
+
+
+def _erro(nome, mensagem):
+    return {'municipio': nome, 'resultado': ERRO, 'checagens': [],
+            'quebrados': [], 'mensagem': mensagem}
+
+
+def executar_dry_run(municipio, timeout=8):
+    """Abre o driver adequado, roda o dry-run e fecha o driver. Nunca levanta.
+
+    A escolha do driver segue o mesmo predicado por URL da emissao (AD-001/AD-002):
+    portal IPM Atende.Net -> `_criar_driver_uc` com o perfil dedicado (serializado
+    pelo lock); demais -> `_criar_driver_chrome`. Sem fallback silencioso: perfil
+    ocupado ou uc indisponivel viram `erro` acionavel (nao 'quebrado', que
+    significaria drift do portal)."""
+    nome = getattr(municipio, 'nome', None) or '?'
+    ipm = is_ipm_atende(getattr(municipio, 'url_certidao', None))
+    driver = None
+    lock_ativo = False
+
+    try:
+        if ipm:
+            if not _municipal_profile_acquire(blocking=False):
+                return _erro(nome, 'Perfil municipal em uso: aguarde a emissão atual terminar.')
+            lock_ativo = True
+            try:
+                driver = _criar_driver_uc()
+            except UcIndisponivelError as exc:
+                return _erro(nome, exc.message)
+        else:
+            driver = _criar_driver_chrome()
+
+        config = _carregar_config_municipio(municipio)
+        return verificar_municipio(municipio, driver, config=config, timeout=timeout)
+    except Exception as exc:
+        log_event('municipio_dryrun_falha', level='ERROR', municipio=nome, error=str(exc))
+        return _erro(nome, f'Falha ao executar a verificação: {exc}')
+    finally:
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+        if lock_ativo:
+            _municipal_profile_release()
+
+
+def executar_dry_run_varios(municipios, timeout=8):
+    """Roda o dry-run de varios municipios (um driver por vez, isolado) e devolve
+    (relatorios, resumo). Usado pela rota sob demanda e pelo job agendado."""
+    relatorios = [executar_dry_run(m, timeout=timeout) for m in municipios]
+    resumo = {'total': len(relatorios)}
+    for chave in (OK, QUEBRADO, PARCIAL, PULADO, ERRO):
+        resumo[chave] = sum(1 for r in relatorios if r['resultado'] == chave)
+    return relatorios, resumo

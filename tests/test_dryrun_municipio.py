@@ -156,6 +156,130 @@ def test_after_cnpj_seguintes_ficam_parciais():
     assert ultimo['etapa'] == 'after_cnpj[2]' and ultimo['status'] == dr.PARCIAL
 
 
+def _patch_driver(chrome=None, uc=None, adquire=True, uc_erro=None):
+    """Contexto com as fabricas de driver e o lock do perfil municipal mockados."""
+    from contextlib import ExitStack
+    pilha = ExitStack()
+    p = pilha.enter_context
+    alvo_uc = patch.object(dr, '_criar_driver_uc', side_effect=uc_erro) if uc_erro \
+        else patch.object(dr, '_criar_driver_uc', return_value=uc or _FakeDriver())
+    mocks = {
+        'chrome': p(patch.object(dr, '_criar_driver_chrome', return_value=chrome or _FakeDriver())),
+        'uc': p(alvo_uc),
+        'adquire': p(patch.object(dr, '_municipal_profile_acquire', return_value=adquire)),
+        'libera': p(patch.object(dr, '_municipal_profile_release')),
+        'config': p(patch.object(dr, '_carregar_config_municipio', return_value={})),
+    }
+    return pilha, mocks
+
+
+def test_executar_dry_run_nao_ipm_usa_chrome_e_fecha():
+    drv = _FakeDriver(encontra=['campoCnpj'])
+    drv.quit = lambda: setattr(drv, 'fechado', True)
+    pilha, mocks = _patch_driver(chrome=drv)
+    with pilha:
+        rel = dr.executar_dry_run(_municipio())
+    assert rel['resultado'] == dr.OK
+    assert drv.fechado is True
+    mocks['uc'].assert_not_called()
+    mocks['adquire'].assert_not_called()   # lock so para IPM
+
+
+def test_executar_dry_run_ipm_usa_uc_e_libera_o_lock():
+    drv = _FakeDriver(encontra=['campoCnpj'])
+    drv.quit = lambda: None
+    muni = _municipio(nome='Gravataí', url_certidao='https://gravatai.atende.net/cnd')
+    pilha, mocks = _patch_driver(uc=drv)
+    with pilha:
+        rel = dr.executar_dry_run(muni)
+    assert rel['resultado'] == dr.OK
+    mocks['uc'].assert_called_once()
+    mocks['chrome'].assert_not_called()
+    mocks['libera'].assert_called_once()   # lock sempre devolvido
+
+
+def test_executar_dry_run_perfil_ocupado_e_erro_sem_driver():
+    muni = _municipio(url_certidao='https://osorio.atende.net/cnd')
+    pilha, mocks = _patch_driver(adquire=False)
+    with pilha:
+        rel = dr.executar_dry_run(muni)
+    assert rel['resultado'] == dr.ERRO       # infra, nao drift do portal
+    assert 'em uso' in rel['mensagem']
+    mocks['uc'].assert_not_called()
+    mocks['libera'].assert_not_called()      # nao adquiriu, nao libera
+
+
+def test_executar_dry_run_uc_indisponivel_libera_lock():
+    from app.automation.driver import UcIndisponivelError
+    muni = _municipio(url_certidao='https://gravatai.atende.net/cnd')
+    pilha, mocks = _patch_driver(uc_erro=UcIndisponivelError('uc fora'))
+    with pilha:
+        rel = dr.executar_dry_run(muni)
+    assert rel['resultado'] == dr.ERRO
+    mocks['libera'].assert_called_once()     # sem vazar o perfil
+
+
+def test_executar_dry_run_varios_resume_por_resultado():
+    with patch.object(dr, 'executar_dry_run', side_effect=[
+            {'resultado': dr.OK}, {'resultado': dr.QUEBRADO}, {'resultado': dr.OK}]):
+        relatorios, resumo = dr.executar_dry_run_varios([1, 2, 3])
+    assert len(relatorios) == 3
+    assert resumo['total'] == 3
+    assert resumo[dr.OK] == 2 and resumo[dr.QUEBRADO] == 1
+    assert resumo[dr.ERRO] == 0
+
+
+# ---- Rotas de diagnostico (COV-05 A2) ----
+
+def _semear_municipio(app, nome='Vila Dryrun Teste'):
+    """Cria um municipio de teste (nome proprio: o seed baseline das migrations
+    ja traz os reais, e `nome` e UNIQUE)."""
+    from app import db
+    from app.models import Municipio
+    with app.app_context():
+        m = Municipio(nome=nome, url_certidao='https://portal.exemplo/cnd',
+                      automacao_ativa=True, cnpj_field_id='campoCnpj', by='id')
+        db.session.add(m)
+        db.session.commit()
+        return m.id
+
+
+def test_rota_lista_municipios(app, client):
+    _semear_municipio(app)
+    resp = client.get('/diagnostico/municipios')
+    assert resp.status_code == 200
+    dados = resp.get_json()
+    assert dados['status'] == 'ok'
+    nosso = [m for m in dados['municipios'] if m['nome'] == 'Vila Dryrun Teste']
+    assert len(nosso) == 1
+    assert nosso[0]['automacao_ativa'] is True
+    assert nosso[0]['url'] == 'https://portal.exemplo/cnd'
+
+
+def test_rota_dryrun_devolve_relatorio(app, client):
+    mid = _semear_municipio(app)
+    from app.routes import dryrun_municipio as dr_rota
+    esperado = {'municipio': 'Imbé', 'resultado': dr.QUEBRADO,
+                'checagens': [], 'quebrados': ['cnpj: id=campoCnpj'], 'mensagem': 'sumiu'}
+    with patch.object(dr_rota, 'executar_dry_run', return_value=esperado) as exe:
+        resp = client.post(f'/diagnostico/municipios/dryrun/{mid}')
+    assert resp.status_code == 200
+    assert resp.get_json()['relatorio'] == esperado
+    exe.assert_called_once()
+
+
+def test_rota_dryrun_municipio_inexistente_404(app, client):
+    resp = client.post('/diagnostico/municipios/dryrun/999999')
+    assert resp.status_code == 404
+    assert resp.get_json()['status'] == 'error'
+
+
+def test_rota_dryrun_exige_admin(app, login_as):
+    mid = _semear_municipio(app)
+    resp = login_as('operador').post(f'/diagnostico/municipios/dryrun/{mid}')
+    assert resp.status_code == 403   # AD-005: diagnostico e admin-only
+
+
 def test_cap_timeout_preserva_valores_menores():
     assert dr._cap_timeout({'timeout': 3}, 8)['timeout'] == 3
     assert dr._cap_timeout({'timeout': 120}, 8)['timeout'] == 8

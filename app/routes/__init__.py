@@ -26,7 +26,7 @@ from app.utils import (
     normalizar_cidade,
     to_bool as _to_bool,
 )
-from app.services import diagnostics
+from app.services import diagnostics, dryrun_municipio
 from app.services.correlation import CorrelationContext
 from app.services.execution_logger import log_event
 from app.services.visualizar_token import _gerar_visualizar_token
@@ -108,6 +108,35 @@ def diagnostico_eventos():
         'eventos': diagnostics.eventos_para_painel(limite=100),
         'alertas': diagnostics.alertas_ativos(),
     })
+
+
+@bp.route('/diagnostico/municipios')
+@requer_papel('admin')
+def diagnostico_municipios():
+    """Municípios cadastrados para o painel de verificação de seletores (COV-05)."""
+    municipios = Municipio.query.order_by(Municipio.nome).all()
+    return jsonify({
+        'status': 'ok',
+        'municipios': [
+            {'id': m.id, 'nome': m.nome, 'url': m.url_certidao,
+             'automacao_ativa': bool(m.automacao_ativa)}
+            for m in municipios
+        ],
+    })
+
+
+@bp.route('/diagnostico/municipios/dryrun/<int:municipio_id>', methods=['POST'])
+@requer_papel('admin')
+def diagnostico_municipio_dryrun(municipio_id):
+    """Verifica os seletores de um município **sem emitir** (COV-05 A).
+
+    Síncrono e um município por vez (abre um navegador, ~10-20s). A varredura
+    de todos é do job diário, que roda em background."""
+    municipio = db.session.get(Municipio, municipio_id)
+    if not municipio:
+        return _json_error('Município não encontrado.', 404)
+    relatorio = dryrun_municipio.executar_dry_run(municipio)
+    return jsonify({'status': 'ok', 'relatorio': relatorio})
 
 
 @bp.route('/diagnostico/2captcha')
