@@ -58,6 +58,7 @@ from app.models import (
 )
 from app.services import batch_engine
 from app.services.correlation import CorrelationContext
+from app.utils import normalizar_cidade
 from app.services.retry import retry_call
 from app.services.execution_logger import log_event
 from app.services.rs_altcha import (
@@ -1826,13 +1827,15 @@ def _carregar_config_municipio(regra_municipio):
 
 
 def _buscar_municipio_por_cidade(cidade):
-    cidade_norm = file_manager.remover_acentos((cidade or '').strip()).upper()
+    """Municipio cuja cidade casa com a da empresa, pela chave canonica compartilhada
+    (`utils.normalizar_cidade`): ignora acento, caixa e separadores, entao
+    'Xangri-La'/'Xangrila' encontram a mesma linha (COV-05)."""
+    cidade_norm = normalizar_cidade(cidade)
     if not cidade_norm:
         return None
 
     for municipio in Municipio.query.all():
-        nome_norm = file_manager.remover_acentos(municipio.nome or '').upper()
-        if nome_norm == cidade_norm:
+        if normalizar_cidade(municipio.nome) == cidade_norm:
             return municipio
     return None
 

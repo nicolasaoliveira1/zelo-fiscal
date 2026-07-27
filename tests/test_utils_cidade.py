@@ -22,8 +22,11 @@ def test_vazio_e_none_viram_string_vazia():
     assert normalizar_cidade('   ') == ''
 
 
-def test_espacos_das_pontas_sao_removidos():
-    assert normalizar_cidade('  Porto Alegre  ') == 'PORTO ALEGRE'
+def test_espacos_sao_removidos():
+    # COV-05: alem do trim, os separadores internos (espaco/hifen) tambem saem —
+    # e o que faz 'Xangri-La' e 'Xangrila' caírem na mesma chave.
+    assert normalizar_cidade('  Porto Alegre  ') == 'PORTOALEGRE'
+    assert normalizar_cidade('Xangri-Lá') == normalizar_cidade('Xangrila')
 
 
 def test_paridade_com_o_alias_do_dashboard():

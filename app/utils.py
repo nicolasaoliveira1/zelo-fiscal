@@ -1,5 +1,6 @@
 """Pequenos utilitarios compartilhados entre modulos do app."""
 import os
+import re
 from datetime import datetime, timezone
 
 from flask import current_app, jsonify
@@ -33,19 +34,21 @@ def get_config_value(name, default=None):
 
 
 def normalizar_cidade(valor):
-    """Chave canonica de cidade: trim -> remover acentos -> maiuscula; '' se vazio.
+    """Chave canonica de cidade: remove acentos, maiusculiza e descarta tudo que
+    nao for letra/digito (hifen, espaco, ponto); '' se vazio.
 
-    Fonte unica compartilhada pelo filtro do dashboard (contagem/recorte por
-    cidade no cliente) e pela exportacao da carteira (recorte replicado no
-    servidor), garantindo que variacoes como 'Imbe'/'IMBE' caiam na mesma chave.
-    Import de `remover_acentos` e lazy para manter `utils` como modulo base sem
-    acoplar seu tempo de import ao de `file_manager`.
+    Fonte unica compartilhada pelo filtro do dashboard, pela exportacao da
+    carteira e pela busca de municipio da automacao. Descartar separadores faz
+    'Xangri-La', 'Xangri La' e 'Xangrila' caírem na MESMA chave — antes o hifen
+    gerava chaves distintas e o cadastro precisava de linhas-espelho por grafia
+    (COV-05). Import de `remover_acentos` e lazy para manter `utils` como modulo
+    base sem acoplar seu tempo de import ao de `file_manager`.
     """
     texto = (valor or '').strip()
     if not texto:
         return ''
     from app.file_manager import remover_acentos
-    return remover_acentos(texto).upper()
+    return re.sub(r'[^0-9A-Z]', '', remover_acentos(texto).upper())
 
 
 def json_error(message=None, code=400, exc=None, **extra):

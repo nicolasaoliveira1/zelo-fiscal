@@ -27,10 +27,22 @@ def test_canonicalizar_ja_correto_idempotente():
 
 def test_canonicalizar_desconhecida_e_vazia():
     assert canonicalizar('Curitiba') == 'Curitiba'   # fora do mapa: inalterada
-    assert canonicalizar('Xangrila') == 'Xangrila'   # duplicado: chave diferente
     assert canonicalizar('  Imbe  ') == 'Imbé'        # trim
     assert canonicalizar('') == ''
     assert canonicalizar(None) is None
+
+
+def test_separadores_nao_criam_cidade_diferente():
+    """COV-05: hifen/espaco deixaram de gerar chaves distintas — as tres grafias
+    de Xangri-Lá convergem para a mesma forma canonica (era o motivo de existir
+    uma linha de municipio duplicada)."""
+    from app.utils import normalizar_cidade
+    assert normalizar_cidade('Xangri-Lá') == normalizar_cidade('Xangrila') \
+        == normalizar_cidade('Xangri La') == 'XANGRILA'
+    for grafia in ('Xangri-Lá', 'Xangrila', 'Xangri La', 'XANGRI-LA'):
+        assert canonicalizar(grafia) == 'Xangri-Lá'
+    # cidades compostas continuam distintas entre si
+    assert normalizar_cidade('Capão da Canoa') != normalizar_cidade('Canoas')
 
 
 def test_padronizar_colunas_transforma_linhas():
@@ -52,7 +64,9 @@ def test_padronizar_colunas_transforma_linhas():
 
     assert muni[1] == 'Imbé'
     assert muni[2] == 'Xangri-Lá'      # ja correto: intocado
-    assert muni[3] == 'Xangrila'       # duplicado fora do mapa: intocado
+    # 'Xangrila' viraria 'Xangri-Lá', mas essa linha ja existe e `nome` e UNIQUE:
+    # a colisao e evitada (a duplicata some na migration de deduplicacao).
+    assert muni[3] == 'Xangrila'
     assert muni[4] == 'Osório'
     assert emp[1] == 'Imbé'
     assert emp[2] == 'Tramandaí'
