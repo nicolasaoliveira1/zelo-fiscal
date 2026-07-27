@@ -49,6 +49,32 @@
         </table>
     </div>
 </div>
+
+<div class="card mt-3">
+    <div class="card-header fw-semibold d-flex align-items-center justify-content-between gap-2">
+        <span>Automação dos municípios</span>
+        <span class="small text-muted fw-normal">Verifica os seletores sem emitir (não gasta captcha)</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th style="width: 180px;">Município</th>
+                    <th style="width: 110px;">Situação</th>
+                    <th>Resultado da verificação</th>
+                    <th style="width: 110px;"></th>
+                </tr>
+            </thead>
+            <tbody id="diag-municipios">
+                <tr><td colspan="4" class="text-center text-muted py-3">Carregando…</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer small text-muted">
+        A verificação abre o portal e confere os seletores até a fronteira da emissão — nunca emite.
+        Também roda sozinha uma vez por dia e alerta por e-mail quando um município quebra.
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -164,6 +190,77 @@
             .then(r => r.json())
             .then(render)
             .catch(() => { notaEl.textContent = 'Falha ao consultar o saldo.'; });
+    })();
+
+    // Verificação de seletores dos municípios (COV-05): lista + teste sob demanda.
+    (function () {
+        const tbody = document.getElementById('diag-municipios');
+        if (!tbody) return;
+
+        // A cor aqui é status — coerente com "a única cor é o status".
+        const BADGE = {
+            ok: 'text-bg-success', quebrado: 'text-bg-danger', parcial: 'text-bg-warning',
+            pulado: 'text-bg-secondary', erro: 'text-bg-secondary'
+        };
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+            c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+        function linha(m) {
+            const situacao = m.automacao_ativa
+                ? '<span class="badge rounded-pill text-bg-secondary">ativa</span>'
+                : '<span class="badge rounded-pill text-bg-secondary">inativa</span>';
+            return '<tr data-id="' + m.id + '">'
+                + '<td class="fw-medium">' + esc(m.nome) + '</td>'
+                + '<td>' + situacao + '</td>'
+                + '<td class="small text-muted" data-col="resultado">—</td>'
+                + '<td class="text-end"><button type="button" class="btn btn-sm btn-soft-primary"'
+                + ' data-testar="' + m.id + '">Testar</button></td>'
+                + '</tr>';
+        }
+
+        function mostrar(tr, rel) {
+            const cel = tr.querySelector('[data-col="resultado"]');
+            const badge = '<span class="badge rounded-pill ' + (BADGE[rel.resultado] || 'text-bg-secondary')
+                + '">' + esc(rel.resultado) + '</span>';
+            const detalhe = (rel.quebrados && rel.quebrados.length)
+                ? ' <span class="text-danger">' + esc(rel.quebrados.join('; ')) + '</span>'
+                : (rel.mensagem ? ' ' + esc(rel.mensagem) : '');
+            cel.innerHTML = badge + detalhe;
+        }
+
+        tbody.addEventListener('click', function (ev) {
+            const btn = ev.target.closest('[data-testar]');
+            if (!btn) return;
+            const tr = btn.closest('tr');
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = 'Testando…';
+            tr.querySelector('[data-col="resultado"]').textContent = 'Abrindo o portal…';
+            fetch('/diagnostico/municipios/dryrun/' + btn.dataset.testar, { method: 'POST' })
+                .then(r => r.json())
+                .then(d => {
+                    if (d.status === 'ok' && d.relatorio) mostrar(tr, d.relatorio);
+                    else tr.querySelector('[data-col="resultado"]').textContent =
+                        d.message || 'Falha na verificação.';
+                })
+                .catch(() => {
+                    tr.querySelector('[data-col="resultado"]').textContent = 'Falha na verificação.';
+                })
+                .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+        });
+
+        fetch('{{ url_for("main.diagnostico_municipios") }}')
+            .then(r => r.json())
+            .then(d => {
+                const lista = (d && d.municipios) || [];
+                tbody.innerHTML = lista.length
+                    ? lista.map(linha).join('')
+                    : '<tr><td colspan="4" class="text-center text-muted py-3">Nenhum município cadastrado.</td></tr>';
+            })
+            .catch(() => {
+                tbody.innerHTML =
+                    '<tr><td colspan="4" class="text-center text-muted py-3">Falha ao carregar municípios.</td></tr>';
+            });
     })();
 </script>
 {% endblock %}
