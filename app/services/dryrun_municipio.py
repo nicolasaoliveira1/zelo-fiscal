@@ -18,6 +18,7 @@ Nao gasta captcha: `wait_for` de portais com captcha (ex.: IPM) expira no teto d
 dry-run e vira `parcial` — sinal de "nao deu para verificar", nao de quebra.
 """
 import copy
+import time
 
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -93,15 +94,36 @@ def _descrever(step):
     return f"{by}={locator}"
 
 
-def _localiza(driver, by_nome, locator):
-    """True se o localizador resolve na pagina atual. Nao age sobre o elemento."""
+def _esperar_pagina(driver, timeout):
+    """Espera o documento terminar de carregar (best-effort, nunca levanta)."""
+    try:
+        WebDriverWait(driver, timeout).until(
+            lambda d: d.execute_script('return document.readyState') == 'complete')
+    except Exception:
+        pass
+
+
+def _localiza(driver, by_nome, locator, timeout=0):
+    """True se o localizador resolve, ESPERANDO ate `timeout` (nunca age sobre o
+    elemento).
+
+    A espera e essencial: portais municipais demoram a renderizar e uma checagem
+    instantanea acusaria 'quebrado' num campo que so ainda nao carregou (falso
+    positivo). Poll proprio (em vez de WebDriverWait) para nao depender de
+    find_element/excecoes do Selenium e manter o teto exato."""
     by = steps_engine.BY_MAP.get(by_nome)
     if not by or not locator:
         return False
-    try:
-        return bool(driver.find_elements(by, locator))
-    except Exception:
-        return False
+    limite = time.monotonic() + max(0, timeout or 0)
+    while True:
+        try:
+            if driver.find_elements(by, locator):
+                return True
+        except Exception:
+            pass
+        if time.monotonic() >= limite:
+            return False
+        time.sleep(0.3)
 
 
 def cnpj_para_teste(municipio):
@@ -122,7 +144,7 @@ def cnpj_para_teste(municipio):
     return CNPJ_TESTE
 
 
-def verificar_municipio(municipio, driver, config=None, timeout=8, cnpj=None):
+def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None):
     """Roda o dry-run de um municipio e devolve um relatorio estruturado.
 
     `config` e o `config_automacao` ja desserializado (dict) ou None. Nunca
@@ -155,6 +177,7 @@ def verificar_municipio(municipio, driver, config=None, timeout=8, cnpj=None):
     config = config or {}
     try:
         driver.get(url)
+        _esperar_pagina(driver, timeout)   # portais municipais demoram a renderizar
         _registrar('url', url, OK)
     except Exception as exc:
         relatorio['resultado'] = ERRO
@@ -180,7 +203,7 @@ def verificar_municipio(municipio, driver, config=None, timeout=8, cnpj=None):
             # Nao clicar: este passo emitiria a certidao. Só confere se o
             # localizador ainda resolve — e o que interessa para detectar drift.
             alvo = _descrever(step)
-            if _localiza(driver, step.get('by'), step.get('locator')):
+            if _localiza(driver, step.get('by'), step.get('locator'), timeout):
                 _registrar(etapa, alvo, PARCIAL, 'passo que emite: verificado sem clicar')
                 continue
             relatorio['resultado'] = QUEBRADO
@@ -215,7 +238,7 @@ def verificar_municipio(municipio, driver, config=None, timeout=8, cnpj=None):
         by_nome = getattr(municipio, 'by', None)
         if campo:
             alvo = f'{by_nome}={campo}'
-            if _localiza(driver, by_nome, campo):
+            if _localiza(driver, by_nome, campo, timeout):
                 _registrar('cnpj', alvo, OK)
             else:
                 relatorio['resultado'] = QUEBRADO
@@ -232,7 +255,7 @@ def verificar_municipio(municipio, driver, config=None, timeout=8, cnpj=None):
         if idx > 1:
             _registrar(etapa, alvo, PARCIAL, 'depende do passo anterior (não emitido)')
             continue
-        if _localiza(driver, step.get('by'), step.get('locator')):
+        if _localiza(driver, step.get('by'), step.get('locator'), timeout):
             _registrar(etapa, alvo, OK)
         else:
             relatorio['resultado'] = QUEBRADO
@@ -268,7 +291,7 @@ def _bloquear_downloads(driver):
         log_event('dryrun_bloqueio_download_falhou', level='WARNING', error=str(exc))
 
 
-def executar_dry_run(municipio, timeout=8):
+def executar_dry_run(municipio, timeout=20):
     """Abre o driver adequado, roda o dry-run e fecha o driver. Nunca levanta.
 
     A escolha do driver segue o mesmo predicado por URL da emissao (AD-001/AD-002):
@@ -310,7 +333,7 @@ def executar_dry_run(municipio, timeout=8):
             _municipal_profile_release()
 
 
-def executar_dry_run_varios(municipios, timeout=8):
+def executar_dry_run_varios(municipios, timeout=20):
     """Roda o dry-run de varios municipios (um driver por vez, isolado) e devolve
     (relatorios, resumo). Usado pela rota sob demanda e pelo job agendado."""
     relatorios = [executar_dry_run(m, timeout=timeout) for m in municipios]

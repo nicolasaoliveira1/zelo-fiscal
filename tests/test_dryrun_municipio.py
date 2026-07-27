@@ -4,6 +4,7 @@ Sem Selenium/rede: driver falso + o engine de steps mockado no seam
 `steps_engine.executar_municipio`. Foco no vocabulario de resultado
 (ok/quebrado/parcial/pulado/erro) e em qual etapa e apontada como quebrada.
 """
+import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -71,10 +72,36 @@ def test_fluxo_simples_ok():
 
 def test_campo_cnpj_sumiu_e_quebrado():
     drv = _FakeDriver(encontra=[])  # campo nao resolve
-    rel = dr.verificar_municipio(_municipio(), drv, config={})
+    rel = dr.verificar_municipio(_municipio(), drv, config={}, timeout=0)
     assert rel['resultado'] == dr.QUEBRADO
     assert rel['quebrados'] == ['cnpj: id=campoCnpj']
     assert 'CNPJ' in rel['mensagem']
+
+
+def test_espera_o_campo_carregar_antes_de_acusar_quebrado():
+    """Regressao (relatado no Imbé): o portal demora a renderizar e a checagem
+    instantanea acusava 'quebrado' num campo que so ainda nao tinha carregado."""
+    class _DriverLento(_FakeDriver):
+        def __init__(self):
+            super().__init__()
+            self.tentativas = 0
+
+        def find_elements(self, by, locator):
+            self.tentativas += 1
+            return ['elemento'] if self.tentativas >= 3 else []   # aparece no 3o poll
+
+    drv = _DriverLento()
+    rel = dr.verificar_municipio(_municipio(), drv, config={}, timeout=5)
+    assert rel['resultado'] == dr.OK          # esperou em vez de acusar drift
+    assert drv.tentativas >= 3
+
+
+def test_localiza_respeita_o_teto_e_desiste():
+    # Sem elemento nenhum, desiste no teto (nao trava o dry-run).
+    inicio = time.monotonic()
+    achou = dr._localiza(_FakeDriver(), 'id', 'inexistente', timeout=0.6)
+    assert achou is False
+    assert 0.5 <= (time.monotonic() - inicio) < 3
 
 
 def test_skip_cnpj_fill_nao_checa_campo():
@@ -135,7 +162,7 @@ def test_passo_que_emite_sumiu_e_quebrado():
     cfg = {'before_cnpj': [{'tipo': 'click', 'by': 'name', 'locator': 'confirmar'}],
            'skip_cnpj_fill': True}
     with patch.object(dr.steps_engine, 'executar_municipio') as eng:
-        rel = dr.verificar_municipio(_municipio(), _FakeDriver(encontra=[]), config=cfg)
+        rel = dr.verificar_municipio(_municipio(), _FakeDriver(encontra=[]), config=cfg, timeout=0)
     eng.assert_not_called()
     assert rel['resultado'] == dr.QUEBRADO
     assert rel['quebrados'] == ['before_cnpj[1]: name=confirmar']
@@ -196,7 +223,7 @@ def test_after_cnpj_primeiro_verificado_sem_clicar():
 def test_after_cnpj_primeiro_sumiu_e_quebrado():
     cfg = {'after_cnpj': [{'tipo': 'click', 'by': 'id', 'locator': 'btnImprimir'}]}
     drv = _FakeDriver(encontra=['campoCnpj'])  # botao sumiu
-    rel = dr.verificar_municipio(_municipio(), drv, config=cfg)
+    rel = dr.verificar_municipio(_municipio(), drv, config=cfg, timeout=0)
     assert rel['resultado'] == dr.QUEBRADO
     assert rel['quebrados'] == ['after_cnpj[1]: id=btnImprimir']
 
