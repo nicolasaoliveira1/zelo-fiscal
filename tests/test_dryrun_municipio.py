@@ -87,17 +87,75 @@ def test_skip_cnpj_fill_nao_checa_campo():
 
 
 def test_before_cnpj_quebrado_aponta_a_etapa():
-    # Timeout num passo de navegacao = seletor sumiu (ou captcha) -> quebrado.
+    # Falha de click num passo de navegacao = o elemento nao esta la -> drift.
+    # (com after_cnpj presente, os passos de before_cnpj sao todos executaveis)
     cfg = {'before_cnpj': [
         {'tipo': 'click', 'by': 'id', 'locator': 'btnEmitir'},
         {'tipo': 'click', 'by': 'id', 'locator': 'btnSegundo'},
-    ]}
+    ], 'after_cnpj': [{'tipo': 'click', 'by': 'id', 'locator': 'btnImprimir'}]}
     with patch.object(dr.steps_engine, 'executar_municipio',
                       side_effect=[None, TimeoutException('sumiu')]):
         rel = dr.verificar_municipio(_municipio(), _FakeDriver(), config=cfg)
     assert rel['resultado'] == dr.QUEBRADO
     assert rel['quebrados'] == ['before_cnpj[2]: id=btnSegundo']
-    assert 'before_cnpj[2]' in rel['mensagem']
+    assert 'seletor mudou' in rel['mensagem']
+
+
+def test_wait_for_expirado_e_parcial_nao_quebrado():
+    # Gate de captcha (IPM espera opcaoEmissao por 120s) NAO e drift: vira
+    # parcial, senao o job diario alertaria falso todo dia.
+    cfg = {'before_cnpj': [
+        {'tipo': 'wait_for', 'by': 'name', 'locator': 'opcaoEmissao', 'timeout': 120},
+    ], 'skip_cnpj_fill': True}
+    with patch.object(dr.steps_engine, 'executar_municipio',
+                      side_effect=TimeoutException('captcha')):
+        rel = dr.verificar_municipio(_municipio(), _FakeDriver(), config=cfg)
+    assert rel['resultado'] == dr.PARCIAL
+    assert rel['quebrados'] == []          # nao entra na lista de quebrados
+    assert 'captcha' in rel['mensagem']
+
+
+def test_passo_que_emite_nao_e_executado_apenas_verificado():
+    # Ultimo click de before_cnpj sem after_cnpj = acao terminal (emite).
+    cfg = {'before_cnpj': [
+        {'tipo': 'select', 'by': 'name', 'locator': 'opcaoEmissao'},
+        {'tipo': 'click', 'by': 'name', 'locator': 'confirmar'},
+    ], 'skip_cnpj_fill': True}
+    drv = _FakeDriver(encontra=['confirmar'])
+    with patch.object(dr.steps_engine, 'executar_municipio', return_value=None) as eng:
+        rel = dr.verificar_municipio(_municipio(), drv, config=cfg)
+    # so o select foi executado; o click de emissao nunca rodou
+    assert eng.call_count == 1
+    assert eng.call_args_list[0].args[2][0]['locator'] == 'opcaoEmissao'
+    assert rel['resultado'] == dr.PARCIAL
+    assert rel['checagens'][-1]['detalhe'] == 'passo que emite: verificado sem clicar'
+
+
+def test_passo_que_emite_sumiu_e_quebrado():
+    cfg = {'before_cnpj': [{'tipo': 'click', 'by': 'name', 'locator': 'confirmar'}],
+           'skip_cnpj_fill': True}
+    with patch.object(dr.steps_engine, 'executar_municipio') as eng:
+        rel = dr.verificar_municipio(_municipio(), _FakeDriver(encontra=[]), config=cfg)
+    eng.assert_not_called()
+    assert rel['resultado'] == dr.QUEBRADO
+    assert rel['quebrados'] == ['before_cnpj[1]: name=confirmar']
+
+
+def test_flag_emite_explicita_vence_a_posicao():
+    # Anotacao explicita protege um passo no MEIO do fluxo (onde a regra
+    # conservadora por posicao nao alcanca). O passo seguinte (fill, nao aciona)
+    # segue executavel.
+    cfg = {'before_cnpj': [
+        {'tipo': 'click', 'by': 'id', 'locator': 'btnEmite', 'emite': True},
+        {'tipo': 'fill', 'by': 'id', 'locator': 'btnDepois', 'value': 'cnpj'},
+    ], 'skip_cnpj_fill': True}
+    drv = _FakeDriver(encontra=['btnEmite'])
+    with patch.object(dr.steps_engine, 'executar_municipio', return_value=None) as eng:
+        rel = dr.verificar_municipio(_municipio(), drv, config=cfg)
+    # o 1o (emite) nao roda; o 2o roda normalmente
+    assert eng.call_count == 1
+    assert eng.call_args_list[0].args[2][0]['locator'] == 'btnDepois'
+    assert rel['resultado'] == dr.PARCIAL
 
 
 def test_before_cnpj_executa_um_passo_por_vez_com_timeout_limitado():
@@ -227,6 +285,62 @@ def test_executar_dry_run_varios_resume_por_resultado():
     assert resumo['total'] == 3
     assert resumo[dr.OK] == 2 and resumo[dr.QUEBRADO] == 1
     assert resumo[dr.ERRO] == 0
+
+
+# Config REAL do Gravatai (migration e6f2c1b9a4d8) — Osorio/Novo Hamburgo tem a
+# mesma forma. Regressao: a fronteira posicional ingenua ("before_cnpj e seguro")
+# executaria o `click confirmar` final, que EMITE a certidao.
+_CONFIG_GRAVATAI_REAL = {
+    'skip_cnpj_fill': True, 'classificar_pdf_status': True,
+    'before_cnpj': [
+        {'tipo': 'wait_for', 'by': 'name', 'locator': 'opcaoEmissao',
+         'timeout': 120, 'state': 'clickable'},
+        {'tipo': 'select', 'by': 'name', 'locator': 'opcaoEmissao', 'text_contains': 'CNPJ'},
+        {'tipo': 'fill', 'by': 'name', 'locator': 'cpfCnpj', 'value': 'cnpj'},
+        {'tipo': 'select', 'by': 'name', 'locator': 'FinalidadeCertidaoDebito.codigo',
+         'text_contains': 'CONTRIBUINTE'},
+        {'tipo': 'click', 'by': 'name', 'locator': 'confirmar'},
+    ],
+}
+
+
+def test_config_real_ipm_nunca_clica_no_passo_que_emite():
+    drv = _FakeDriver(encontra=['confirmar'])
+    with patch.object(dr.steps_engine, 'executar_municipio', return_value=None) as eng:
+        rel = dr.verificar_municipio(_municipio(nome='Gravataí'), drv,
+                                     config=_CONFIG_GRAVATAI_REAL)
+    executados = [c.args[2][0]['locator'] for c in eng.call_args_list]
+    assert 'confirmar' not in executados     # o passo que emite NUNCA roda
+    assert executados == ['opcaoEmissao', 'opcaoEmissao', 'cpfCnpj',
+                          'FinalidadeCertidaoDebito.codigo']
+    assert rel['resultado'] == dr.PARCIAL
+
+
+def test_config_real_xangri_la_nao_clica_em_imprimir():
+    # Ponta Pora/Xangri-La: o passo terminal e um clique em "Imprimir" (emite).
+    cfg = {'skip_cnpj_fill': True, 'before_cnpj': [
+        {'tipo': 'fill', 'by': 'css_selector', 'locator': '#itIdent', 'value': 'cnpj'},
+        {'tipo': 'click', 'by': 'xpath', 'locator': "//span[contains(text(),'Imprimir')]"},
+    ]}
+    drv = _FakeDriver(encontra=["//span[contains(text(),'Imprimir')]"])
+    with patch.object(dr.steps_engine, 'executar_municipio', return_value=None) as eng:
+        rel = dr.verificar_municipio(_municipio(nome='Xangri-Lá'), drv, config=cfg)
+    executados = [c.args[2][0]['locator'] for c in eng.call_args_list]
+    assert executados == ['#itIdent']        # o "Imprimir" nao foi clicado
+    assert rel['resultado'] == dr.PARCIAL
+
+
+def test_downloads_bloqueados_no_driver_do_dryrun():
+    # Defesa estrutural: mesmo que algo dispare a emissao, nada cai em ~/Downloads
+    # (a emissao real pega "o PDF mais novo" de la -> evitaria anexo trocado).
+    drv = _FakeDriver(encontra=['campoCnpj'])
+    drv.quit = lambda: None
+    chamadas = []
+    drv.execute_cdp_cmd = lambda cmd, args: chamadas.append((cmd, args))
+    pilha, _mocks = _patch_driver(chrome=drv)
+    with pilha:
+        dr.executar_dry_run(_municipio())
+    assert ('Page.setDownloadBehavior', {'behavior': 'deny'}) in chamadas
 
 
 # ---- Rotas de diagnostico (COV-05 A2) ----

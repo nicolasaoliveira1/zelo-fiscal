@@ -46,6 +46,27 @@ CNPJ_TESTE = '00000000000191'
 # Passos com efeito destrutivo/condicional que o dry-run nunca executa.
 _TIPOS_NAO_EXECUTAVEIS = {'click_if_text_or_close'}
 
+# Passos que disparam acao no portal (podem concluir a emissao).
+_TIPOS_ACIONAM = {'click', 'click_js'}
+
+
+def _passo_emite(step, indice, total, tem_after_cnpj):
+    """True se o passo pode CONCLUIR a emissao — nunca executado no dry-run.
+
+    A fronteira nao pode ser posicional: nas configs reais (Gravatai/Osorio/Novo
+    Hamburgo com `confirmar`, Ponta Pora/Xangri-La com `Imprimir`) o passo que
+    emite e o ULTIMO de `before_cnpj`, porque `skip_cnpj_fill` move o fluxo todo
+    para la e nao existe `after_cnpj`. Regra:
+      - `emite: true` explicito no passo (anotacao vence sempre); ou
+      - conservador: ultimo passo de `before_cnpj`, do tipo que aciona, quando NAO
+        ha `after_cnpj` — nessa forma a acao terminal do fluxo e a propria emissao.
+    Conservador erra para o lado seguro (marca `parcial`, nunca emite)."""
+    if (step or {}).get('emite') is True:
+        return True
+    return (not tem_after_cnpj
+            and indice == total
+            and (step or {}).get('tipo') in _TIPOS_ACIONAM)
+
 
 def _cap_timeout(step, teto):
     """Copia o passo com o timeout limitado ao teto do dry-run (portais com
@@ -118,26 +139,48 @@ def verificar_municipio(municipio, driver, config=None, timeout=8):
 
     wait = WebDriverWait(driver, timeout)
 
-    # 1) before_cnpj: executa de verdade, um passo por vez (reuso do engine).
-    for idx, step in enumerate(config.get('before_cnpj') or [], start=1):
+    # 1) before_cnpj: executa de verdade, um passo por vez (reuso do engine),
+    #    exceto os passos que podem concluir a emissao (esses so sao verificados).
+    antes = list(config.get('before_cnpj') or [])
+    tem_after = bool(config.get('after_cnpj'))
+    for idx, step in enumerate(antes, start=1):
         etapa = f'before_cnpj[{idx}]'
         tipo = (step or {}).get('tipo')
         if tipo in _TIPOS_NAO_EXECUTAVEIS:
             _registrar(etapa, _descrever(step), PARCIAL,
                        f'passo "{tipo}" não é executado no dry-run')
             continue
+        if _passo_emite(step, idx, len(antes), tem_after):
+            # Nao clicar: este passo emitiria a certidao. Só confere se o
+            # localizador ainda resolve — e o que interessa para detectar drift.
+            alvo = _descrever(step)
+            if _localiza(driver, step.get('by'), step.get('locator')):
+                _registrar(etapa, alvo, PARCIAL, 'passo que emite: verificado sem clicar')
+                continue
+            relatorio['resultado'] = QUEBRADO
+            _registrar(etapa, alvo, QUEBRADO, 'elemento não encontrado')
+            relatorio['mensagem'] = f'Passo {etapa} ({alvo}) não existe mais no portal.'
+            return relatorio
         try:
             steps_engine.executar_municipio(
                 driver, wait, [_cap_timeout(step, timeout)],
                 CNPJ_TESTE, '', etapa_label='dryrun')
             _registrar(etapa, _descrever(step), OK)
         except Exception as exc:
-            # Timeout aqui = seletor sumiu OU gate de captcha (portais IPM).
+            # `wait_for` que expira e o idioma de "esperar o operador/captcha"
+            # (ex.: IPM espera opcaoEmissao por 120s) -> parcial, nao drift.
+            # Falha de click/fill/select = o elemento nao esta la -> drift real.
+            if tipo == 'wait_for':
+                _registrar(etapa, _descrever(step), PARCIAL,
+                           'aguardando condição que depende de captcha/operador')
+                relatorio['resultado'] = PARCIAL
+                relatorio['mensagem'] = (
+                    f'Verificação parou em {etapa}: o portal exige captcha/ação manual.')
+                return relatorio
             relatorio['resultado'] = QUEBRADO
             _registrar(etapa, _descrever(step), QUEBRADO, type(exc).__name__)
             relatorio['mensagem'] = (
-                f'Passo {etapa} ({_descrever(step)}) não resolveu — '
-                'seletor mudou ou o portal exige captcha.')
+                f'Passo {etapa} ({_descrever(step)}) não resolveu — o seletor mudou.')
             return relatorio
 
     # 2) campo de CNPJ: so localiza (nao submete nada).
@@ -186,6 +229,19 @@ def _erro(nome, mensagem):
             'quebrados': [], 'mensagem': mensagem}
 
 
+def _bloquear_downloads(driver):
+    """Nega downloads no driver do dry-run (defesa em profundidade).
+
+    As fabricas de driver habilitam download automatico; aqui invertemos por CDP
+    para que, mesmo se um clique inesperado disparar a emissao, nenhum PDF caia em
+    ~/Downloads — de onde a emissao real pega "o PDF mais novo" (evita anexar um
+    arquivo a certidao errada). Best-effort: nunca impede o dry-run de rodar."""
+    try:
+        driver.execute_cdp_cmd('Page.setDownloadBehavior', {'behavior': 'deny'})
+    except Exception as exc:
+        log_event('dryrun_bloqueio_download_falhou', level='WARNING', error=str(exc))
+
+
 def executar_dry_run(municipio, timeout=8):
     """Abre o driver adequado, roda o dry-run e fecha o driver. Nunca levanta.
 
@@ -211,6 +267,7 @@ def executar_dry_run(municipio, timeout=8):
         else:
             driver = _criar_driver_chrome()
 
+        _bloquear_downloads(driver)
         config = _carregar_config_municipio(municipio)
         return verificar_municipio(municipio, driver, config=config, timeout=timeout)
     except Exception as exc:
