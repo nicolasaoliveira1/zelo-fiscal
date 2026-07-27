@@ -214,3 +214,44 @@ def enviar_alertas(app):
             enviados += 1
 
     return enviados
+
+
+def alertar_municipios_quebrados(app, relatorios):
+    """Alerta os municipios cujo dry-run acusou seletor quebrado (COV-05 A3).
+
+    Um alerta POR MUNICIPIO (chave anti-spam propria), para que consertar um nao
+    silencie os demais dentro da janela. So `quebrado` alerta: `erro` e infra
+    (driver/perfil ocupado) e `parcial` e captcha — nenhum dos dois e drift.
+    Retorna quantos alertas foram enviados agora."""
+    from app.services.dryrun_municipio import QUEBRADO
+
+    cfg = _config()
+    destinatarios = _destinatarios(cfg)
+    if not email_sender.smtp_configurado(app.config) or not destinatarios:
+        log_event('notif_municipios_sem_smtp', level='WARNING',
+                  destinatarios=len(destinatarios))
+        return 0
+
+    janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
+    enviados = 0
+
+    for relatorio in relatorios or []:
+        if (relatorio or {}).get('resultado') != QUEBRADO:
+            continue
+        nome = relatorio.get('municipio') or '?'
+        quebrados = relatorio.get('quebrados') or []
+        detalhe = '; '.join(quebrados) or 'seletor nao identificado'
+        assunto = f'[Certidoes] Alerta: automacao do municipio {nome} pode ter quebrado'
+        corpo = '\n'.join([
+            f'A verificacao diaria (sem emitir) falhou em {nome}.',
+            f'Passos que nao resolveram: {detalhe}',
+            f'Detalhe: {relatorio.get("mensagem") or "-"}',
+            '',
+            'Provavel mudanca de layout do portal. Revise os seletores do municipio',
+            '(tabela municipio / config_automacao) e rode a verificacao novamente.',
+        ])
+        if _enviar_alerta(app, destinatarios, f'municipio_quebrado:{nome}',
+                          'alerta_municipio', assunto, corpo, janela, detalhe=detalhe):
+            enviados += 1
+
+    return enviados

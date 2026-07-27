@@ -280,6 +280,96 @@ def test_rota_dryrun_exige_admin(app, login_as):
     assert resp.status_code == 403   # AD-005: diagnostico e admin-only
 
 
+# ---- Alerta + job diario (COV-05 A3) ----
+
+def _mocks_alerta(pilha, smtp=True, destinatarios=('op@escritorio.com',)):
+    from app.services import notificacoes as nt
+    p = pilha.enter_context
+    p(patch.object(nt, '_config', return_value=object()))
+    p(patch.object(nt, '_destinatarios', return_value=list(destinatarios)))
+    p(patch.object(nt.email_sender, 'smtp_configurado', return_value=smtp))
+    return p(patch.object(nt, '_enviar_alerta', return_value=True))
+
+
+def test_alerta_so_para_quebrados(app):
+    # erro (infra) e parcial (captcha) NAO sao drift -> nao alertam.
+    from contextlib import ExitStack
+
+    from app.services import notificacoes as nt
+    relatorios = [
+        {'municipio': 'Imbé', 'resultado': dr.QUEBRADO,
+         'quebrados': ['cnpj: id=campoCnpj'], 'mensagem': 'campo sumiu'},
+        {'municipio': 'Gravataí', 'resultado': dr.ERRO, 'quebrados': [], 'mensagem': 'uc fora'},
+        {'municipio': 'Osório', 'resultado': dr.PARCIAL, 'quebrados': [], 'mensagem': 'captcha'},
+        {'municipio': 'Canoas', 'resultado': dr.OK, 'quebrados': [], 'mensagem': None},
+    ]
+    with ExitStack() as pilha:
+        enviar = _mocks_alerta(pilha)
+        enviados = nt.alertar_municipios_quebrados(app, relatorios)
+    assert enviados == 1
+    (_app, _dest, chave, tipo, assunto, corpo, _janela), _kw = enviar.call_args
+    assert chave == 'municipio_quebrado:Imbé'   # anti-spam por municipio
+    assert tipo == 'alerta_municipio'
+    assert 'Imbé' in assunto
+    assert 'cnpj: id=campoCnpj' in corpo
+
+
+def test_alerta_um_por_municipio(app):
+    # Dois quebrados -> duas chaves distintas (consertar um nao silencia o outro).
+    from contextlib import ExitStack
+
+    from app.services import notificacoes as nt
+    relatorios = [
+        {'municipio': 'Imbé', 'resultado': dr.QUEBRADO, 'quebrados': ['a'], 'mensagem': ''},
+        {'municipio': 'Canoas', 'resultado': dr.QUEBRADO, 'quebrados': ['b'], 'mensagem': ''},
+    ]
+    with ExitStack() as pilha:
+        enviar = _mocks_alerta(pilha)
+        enviados = nt.alertar_municipios_quebrados(app, relatorios)
+    assert enviados == 2
+    chaves = {c.args[2] for c in enviar.call_args_list}
+    assert chaves == {'municipio_quebrado:Imbé', 'municipio_quebrado:Canoas'}
+
+
+def test_alerta_sem_smtp_nao_envia(app):
+    from contextlib import ExitStack
+
+    from app.services import notificacoes as nt
+    with ExitStack() as pilha:
+        enviar = _mocks_alerta(pilha, smtp=False)
+        enviados = nt.alertar_municipios_quebrados(
+            app, [{'municipio': 'Imbé', 'resultado': dr.QUEBRADO, 'quebrados': [], 'mensagem': ''}])
+    assert enviados == 0
+    enviar.assert_not_called()
+
+
+def test_job_diario_so_verifica_ativos_e_alerta(app, ids):
+    from app import db
+    from app.models import Municipio
+    from app.services import agendador
+    with app.app_context():
+        db.session.add(Municipio(nome='Vila Ativa Teste', url_certidao='https://a.exemplo',
+                                 automacao_ativa=True))
+        db.session.add(Municipio(nome='Vila Inativa Teste', url_certidao='https://b.exemplo',
+                                 automacao_ativa=False))
+        db.session.commit()
+
+    relatorio = {'municipio': 'Vila Ativa Teste', 'resultado': dr.QUEBRADO,
+                 'quebrados': ['x'], 'mensagem': 'y'}
+    with patch.object(dr, 'executar_dry_run_varios',
+                      return_value=([relatorio], {'total': 1, dr.QUEBRADO: 1})) as varios, \
+            patch('app.services.notificacoes.alertar_municipios_quebrados',
+                  return_value=1) as alerta:
+        agendador.job_verificacao_municipios(app)
+
+    (municipios,), _kw = varios.call_args
+    nomes = [m.nome for m in municipios]
+    assert 'Vila Ativa Teste' in nomes
+    assert 'Vila Inativa Teste' not in nomes   # automacao_ativa=False fica de fora
+    alerta.assert_called_once()
+    assert alerta.call_args.args[1] == [relatorio]
+
+
 def test_cap_timeout_preserva_valores_menores():
     assert dr._cap_timeout({'timeout': 3}, 8)['timeout'] == 3
     assert dr._cap_timeout({'timeout': 120}, 8)['timeout'] == 8

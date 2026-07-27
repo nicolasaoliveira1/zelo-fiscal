@@ -40,8 +40,15 @@ def test_init_idempotente_nao_duplica(app, ids, sched_limpo):
     s1 = agendador.init(app)
     s2 = agendador.init(app)
     assert s1 is s2
-    # 2 jobs: snapshot + renovacao (ativo por padrao), sem duplicar
-    assert len(s1.get_jobs()) == 2
+    # snapshot + renovacao (ativa por padrao) + verificacao de municipios (COV-05).
+    # A invariante e "nao duplica": ids unicos, um job por id.
+    ids_jobs = [j.id for j in s1.get_jobs()]
+    assert sorted(ids_jobs) == sorted(set(ids_jobs))
+    assert set(ids_jobs) == {
+        agendador._JOB_SNAPSHOT,
+        agendador._JOB_RENOVACAO,
+        agendador._JOB_VERIF_MUNICIPIOS,
+    }
 
 
 def test_init_reconcilia_orfas(app, ids, sched_limpo):

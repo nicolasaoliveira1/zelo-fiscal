@@ -22,6 +22,10 @@ from app.services.execution_logger import log_event
 
 _JOB_RENOVACAO = 'agendador_renovacao_diaria'
 _JOB_SNAPSHOT = 'agendador_snapshot_diario'
+_JOB_VERIF_MUNICIPIOS = 'agendador_verificacao_municipios'
+# Offset em horas para a verificacao de municipios nao concorrer com o lote da
+# renovacao (que roda na hora cheia e pode demorar): abre navegador, nao captcha.
+_OFFSET_VERIFICACAO_H = 3
 # 6h: se o PC ligou depois do horário, o job ainda roda atrasado (catch-up).
 _MISFIRE_GRACE = 6 * 3600
 
@@ -123,6 +127,14 @@ def _agendar_jobs(app):
         args=[app], id=_JOB_SNAPSHOT, replace_existing=True,
         misfire_grace_time=_MISFIRE_GRACE, coalesce=True, max_instances=1)
 
+    # Verificacao de seletores dos municipios (COV-05 A3): roda sempre — nao gasta
+    # captcha nem emite; so abre o portal e confere se os seletores resolvem.
+    _scheduler.add_job(
+        job_verificacao_municipios,
+        CronTrigger(hour=(hora + _OFFSET_VERIFICACAO_H) % 24, minute=30),
+        args=[app], id=_JOB_VERIF_MUNICIPIOS, replace_existing=True,
+        misfire_grace_time=_MISFIRE_GRACE, coalesce=True, max_instances=1)
+
     if ativo:
         _scheduler.add_job(
             job_renovacao_diaria, CronTrigger(hour=hora, minute=0),
@@ -146,6 +158,28 @@ def job_snapshot_diario(app):
             notificacoes.enviar_digest_se_devido(app)
         except Exception as exc:
             log_event('notif_digest_job_falhou', level='ERROR', error=str(exc))
+
+
+def job_verificacao_municipios(app):
+    """Dry-run diário dos municípios ativos (COV-05 A3): detecta mudança de layout
+    antes que uma emissão real falhe. Não emite nem gasta captcha; só municípios
+    com `quebrado` viram alerta (erro=infra e parcial=captcha não alertam)."""
+    from app.models import Municipio
+    from app.services import dryrun_municipio
+
+    with app.app_context():
+        municipios = (Municipio.query
+                      .filter_by(automacao_ativa=True)
+                      .order_by(Municipio.nome).all())
+        relatorios, resumo = dryrun_municipio.executar_dry_run_varios(municipios)
+        log_event('municipios_verificacao_diaria', **resumo)
+
+        try:
+            from app.services import notificacoes
+            notificacoes.alertar_municipios_quebrados(app, relatorios)
+        except Exception as exc:
+            log_event('municipios_verificacao_alerta_falhou', level='ERROR', error=str(exc))
+        return relatorios
 
 
 def _avisar_saldo_baixo(app):
