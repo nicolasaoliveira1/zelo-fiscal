@@ -30,6 +30,13 @@ _COLUNAS = (
 )
 
 
+def _citar(conn, colunas):
+    """Cita identificadores conforme o dialeto (`by` e palavra RESERVADA no MySQL:
+    sem crase o SELECT/INSERT vira erro de sintaxe la, embora passe no SQLite)."""
+    preparer = conn.dialect.identifier_preparer
+    return [preparer.quote(coluna) for coluna in colunas]
+
+
 def upgrade():
     conn = op.get_bind()
     # So remove se a linha canonica existir (nao deixa a cidade sem municipio).
@@ -45,8 +52,9 @@ def downgrade():
     ja_existe = conn.execute(
         sa.text('SELECT id FROM municipio WHERE nome = :n'), {'n': _DUPLICADO}
     ).fetchone()
+    colunas_citadas = _citar(conn, _COLUNAS)
     origem = conn.execute(
-        sa.text(f"SELECT {', '.join(_COLUNAS)} FROM municipio WHERE nome = :n"),
+        sa.text(f"SELECT {', '.join(colunas_citadas)} FROM municipio WHERE nome = :n"),
         {'n': _MANTIDO}
     ).fetchone()
     if ja_existe or not origem:
@@ -54,6 +62,6 @@ def downgrade():
     # Recria a duplicata copiando a linha canonica (eram identicas).
     dados = dict(zip(_COLUNAS, origem))
     dados['nome'] = _DUPLICADO
-    campos = ', '.join(dados)
+    campos = ', '.join(_citar(conn, dados))
     valores = ', '.join(f':{c}' for c in dados)
     conn.execute(sa.text(f'INSERT INTO municipio ({campos}) VALUES ({valores})'), dados)
