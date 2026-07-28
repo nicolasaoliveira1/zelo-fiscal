@@ -2,7 +2,6 @@
 
 Extraído de routes.py (C1). Sem dependência do estado de lote.
 """
-import json
 import os
 
 try:
@@ -17,11 +16,10 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from threading import Lock
 from webdriver_manager.chrome import ChromeDriverManager
 
+from app.automation import cert_policy
+from app.automation.cert_policy import PoliticaCertificado
 from app.services.execution_logger import log_event
 from app.utils import get_config_value as _get_config_value, to_bool as _to_bool
-
-RS_CERT_POLICY_LOCK = Lock()
-RS_CERT_POLICY_ACTIVE_COUNT = 0
 
 
 def _get_chrome_profile_settings(profile_dir=None, profile_name=None):
@@ -50,82 +48,37 @@ def _get_chrome_profile_settings(profile_dir=None, profile_name=None):
     return profile_dir, profile_name
 
 
+def _politica_autoselect_rs():
+    """Alvo do RS (pattern/indice/issuer/subject) a partir das envs RS_CERT_AUTOSELECT_*.
+
+    Sem o gate de habilitado: a remocao do registro sempre valeu para o indice
+    configurado, independente da flag (comportamento preservado — ND-002b).
+    """
+    return PoliticaCertificado(
+        pattern=_get_config_value('RS_CERT_AUTOSELECT_PATTERN', 'https://www.sefaz.rs.gov.br'),
+        indice=_get_config_value('RS_CERT_AUTOSELECT_POLICY_INDEX', '1'),
+        issuer_cn=_get_config_value('RS_CERT_AUTOSELECT_ISSUER_CN', ''),
+        subject_cn=_get_config_value('RS_CERT_AUTOSELECT_SUBJECT_CN', ''),
+        prefixo_log='rs_autoselect',
+    )
+
+
 def _montar_politica_autoselect_rs():
     if not _to_bool(_get_config_value('RS_CERT_AUTOSELECT_ENABLED', False), False):
         return None
 
-    pattern = (_get_config_value('RS_CERT_AUTOSELECT_PATTERN', 'https://www.sefaz.rs.gov.br') or '').strip()
-    issuer_cn = (_get_config_value('RS_CERT_AUTOSELECT_ISSUER_CN', '') or '').strip()
-    subject_cn = (_get_config_value('RS_CERT_AUTOSELECT_SUBJECT_CN', '') or '').strip()
-
-    if not pattern:
-        return None
-
-    filtro = {}
-    if issuer_cn:
-        filtro['ISSUER'] = {'CN': issuer_cn}
-    if subject_cn:
-        filtro['SUBJECT'] = {'CN': subject_cn}
-
-    if not filtro:
-        return None
-
-    return {
-        'pattern': pattern,
-        'filter': filtro,
-    }
-
-
-def _sincronizar_politica_autoselect_rs(aplicar=True):
-    if os.name != 'nt' or winreg is None:
-        return
-
-    indice = str(_get_config_value('RS_CERT_AUTOSELECT_POLICY_INDEX', '1') or '1').strip() or '1'
-    politica = _montar_politica_autoselect_rs() if aplicar else None
-    chave_registro = r"Software\Policies\Google\Chrome\AutoSelectCertificateForUrls"
-
-    try:
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, chave_registro) as chave:
-            if politica is None:
-                try:
-                    winreg.DeleteValue(chave, indice)
-                    log_event('rs_autoselect_removida', indice=indice)
-                except FileNotFoundError:
-                    pass
-                return
-
-            valor = json.dumps(politica, ensure_ascii=False, separators=(',', ':'))
-            winreg.SetValueEx(chave, indice, 0, winreg.REG_SZ, valor)
-            log_event('rs_autoselect_aplicada', indice=indice)
-    except OSError as exc:
-        log_event('rs_autoselect_sync_error', level='WARNING', error=str(exc))
+    return _politica_autoselect_rs().montar()
 
 
 def _ativar_politica_autoselect_rs_temporaria():
-    global RS_CERT_POLICY_ACTIVE_COUNT
-
     if not _montar_politica_autoselect_rs():
         return False
 
-    with RS_CERT_POLICY_LOCK:
-        RS_CERT_POLICY_ACTIVE_COUNT += 1
-        if RS_CERT_POLICY_ACTIVE_COUNT == 1:
-            _sincronizar_politica_autoselect_rs(aplicar=True)
-    return True
+    return cert_policy.ativar(_politica_autoselect_rs())
 
 
 def _desativar_politica_autoselect_rs_temporaria():
-    global RS_CERT_POLICY_ACTIVE_COUNT
-
-    with RS_CERT_POLICY_LOCK:
-        if RS_CERT_POLICY_ACTIVE_COUNT <= 0:
-            RS_CERT_POLICY_ACTIVE_COUNT = 0
-            _sincronizar_politica_autoselect_rs(aplicar=False)
-            return
-
-        RS_CERT_POLICY_ACTIVE_COUNT -= 1
-        if RS_CERT_POLICY_ACTIVE_COUNT == 0:
-            _sincronizar_politica_autoselect_rs(aplicar=False)
+    cert_policy.desativar(_politica_autoselect_rs())
 
 
 def _build_chrome_options(anonimo=True, usar_perfil=False, profile_dir=None, profile_name=None):

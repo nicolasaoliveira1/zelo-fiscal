@@ -15,7 +15,7 @@ import sys
 
 import pytest
 
-from app.automation import driver
+from app.automation import cert_policy, driver
 
 CHAVE_REGISTRO = r"Software\Policies\Google\Chrome\AutoSelectCertificateForUrls"
 
@@ -152,3 +152,79 @@ def test_ativar_com_autoselect_desligado_devolve_false_e_nao_grava(monkeypatch, 
     _config_rs(monkeypatch, RS_CERT_AUTOSELECT_ENABLED='false')
     assert driver._ativar_politica_autoselect_rs_temporaria() is False
     assert registro.politica('1') is None
+
+
+# --- T2: nucleo generico com refcount por indice (NFSE-10 / ND-002c / ND-006) ---
+
+NFSE_PATTERN = 'https://certificado.nfse.gov.br'
+NFSE_ISSUER = 'AC SyngularID Multipla'
+NFSE_SUBJECT = 'JURACI DA ROSA OLIVEIRA:94645405000120'
+
+POLITICA_NFSE = {
+    'pattern': NFSE_PATTERN,
+    'filter': {
+        'ISSUER': {'CN': NFSE_ISSUER},
+        'SUBJECT': {'CN': NFSE_SUBJECT},
+    },
+}
+
+
+def _politica_nfse():
+    return cert_policy.PoliticaCertificado(
+        pattern=NFSE_PATTERN,
+        indice='2',
+        issuer_cn=NFSE_ISSUER,
+        subject_cn=NFSE_SUBJECT,
+    )
+
+
+@pytest.fixture()
+def registro_por_indice(registro):
+    """Como `registro`, mas zerando tambem o refcount do indice da NFSe."""
+    def _drenar():
+        for _ in range(5):
+            cert_policy.desativar(_politica_nfse())
+
+    _drenar()
+    registro.valores.clear()
+    yield registro
+    _drenar()
+
+
+def test_desativar_a_politica_da_nfse_nao_apaga_a_do_rs(monkeypatch, registro_por_indice):
+    _config_rs(monkeypatch)
+    driver._ativar_politica_autoselect_rs_temporaria()
+    cert_policy.ativar(_politica_nfse())
+    # as duas convivem: indices distintos, cada uma com seu certificado (ND-006)
+    assert json.loads(registro_por_indice.politica('1')) == POLITICA_RS
+    assert json.loads(registro_por_indice.politica('2')) == POLITICA_NFSE
+
+    cert_policy.desativar(_politica_nfse())
+
+    assert registro_por_indice.politica('2') is None
+    # regressao que o contador global causaria: o RS perderia a policy no meio do lote
+    assert json.loads(registro_por_indice.politica('1')) == POLITICA_RS
+
+
+def test_refcount_do_indice_conta_as_proprias_ativacoes(registro_por_indice):
+    politica = _politica_nfse()
+    cert_policy.ativar(politica)
+    cert_policy.ativar(politica)
+
+    cert_policy.desativar(politica)
+    assert json.loads(registro_por_indice.politica('2')) == POLITICA_NFSE
+
+    cert_policy.desativar(politica)
+    assert registro_por_indice.politica('2') is None
+
+
+def test_desativar_a_politica_do_rs_nao_apaga_a_da_nfse(monkeypatch, registro_por_indice):
+    _config_rs(monkeypatch)
+    driver._ativar_politica_autoselect_rs_temporaria()
+    cert_policy.ativar(_politica_nfse())
+
+    driver._desativar_politica_autoselect_rs_temporaria()
+
+    # o isolamento vale nos dois sentidos (ND-002c: "nem vice-versa")
+    assert registro_por_indice.politica('1') is None
+    assert json.loads(registro_por_indice.politica('2')) == POLITICA_NFSE
