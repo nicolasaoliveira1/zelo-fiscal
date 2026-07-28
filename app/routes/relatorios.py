@@ -145,7 +145,7 @@ def relatorios():
     # ordena por atividade mais recente e corta o topo
     lista_pendentes.sort(key=lambda x: x['ordem'], reverse=True)
     ultimas_emitidas.sort(key=lambda x: x['ordem'], reverse=True)
-    ultimas_emitidas = ultimas_emitidas[:10]
+    ultimas_emitidas = ultimas_emitidas[:100]
 
     # distribuição por tipo na ordem canônica do enum
     distribuicao_tipo = [(t.value, por_tipo[t.value]) for t in TipoCertidao]

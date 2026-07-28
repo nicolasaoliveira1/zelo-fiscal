@@ -374,9 +374,10 @@
 {# ── Últimas certidões emitidas ─────────────────────────────────────── #}
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
-        <p class="rel-section-title mb-3">Últimas certidões emitidas</p>
+        <p class="rel-section-title">Últimas certidões emitidas</p>
+        <p class="text-body-secondary small mb-3">{{ ultimas_emitidas|length }} certidão(ões) mais recentes.</p>
         {% if ultimas_emitidas %}
-        <div class="table-responsive">
+        <div class="rel-list-scroll table-responsive">
             <table class="table table-sm rel-table align-middle mb-0">
                 <thead>
                     <tr class="text-body-secondary">
