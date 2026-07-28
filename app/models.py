@@ -389,6 +389,147 @@ class ConfiguracaoSistema(db.Model):
         return f'<ConfiguracaoSistema {self.id}>'
 
 
+class StatusNotaNfse:
+    """Status da NotaNfse em String, nao db.Enum nativo (AD-016/AD-020: o enum
+    nativo diverge entre SQLite e MySQL e a suite roda nos dois).
+
+    Fluxo feliz: EMPRESA_PENDENTE -> PRONTA -> PREENCHENDO ->
+    AGUARDANDO_CONFIRMACAO -> EMITIDA. Ramos: DUPLICATA (exige liberacao),
+    CADASTRO_PENDENTE (CNPJ digitado, empresa a cadastrar), INVALIDA (linha
+    malformada), PULADA, FALHA."""
+    EMPRESA_PENDENTE = 'empresa_pendente'
+    CADASTRO_PENDENTE = 'cadastro_pendente'
+    PRONTA = 'pronta'
+    PREENCHENDO = 'preenchendo'
+    AGUARDANDO_CONFIRMACAO = 'aguardando_confirmacao'
+    EMITIDA = 'emitida'
+    DUPLICATA = 'duplicata'
+    INVALIDA = 'invalida'
+    PULADA = 'pulada'
+    FALHA = 'falha'
+
+
+class OrigemVinculoNfse:
+    """Como o CNPJ da nota foi resolvido — trilha de auditoria do match (NFSE-03)."""
+    EXATO = 'exato'
+    APELIDO = 'apelido'
+    FUZZY = 'fuzzy'
+    MANUAL = 'manual'
+
+
+class ConfiguracaoNfse(db.Model):
+    """Campos fixos da NFSe (registro unico, id=1) — NFSE-08/09.
+
+    Todos os defaults vieram da recon do Emissor Nacional (T0), nao de suposicao.
+    O template da descricao precisa conter o placeholder `{competencia}`; a
+    validacao vive em `app/services/nfse_config.py`."""
+    __tablename__ = 'configuracao_nfse'
+
+    id = db.Column(db.Integer, primary_key=True)
+    regime_apuracao_sn = db.Column(db.String(4), nullable=False, default='1')
+    municipio_servico_codigo = db.Column(db.String(10), nullable=False, default='4310330')
+    municipio_servico_nome = db.Column(db.String(60), nullable=False, default='Imbé/RS')
+    codigo_tributacao = db.Column(db.String(20), nullable=False, default='17.19.01')
+    item_nbs = db.Column(db.String(20), nullable=False, default='113022100')
+    descricao_template = db.Column(
+        db.String(300), nullable=False,
+        default='HONORÁRIOS PROFISSIONAIS REFERENTES AO MÊS DE {competencia}')
+    piscofins_situacao = db.Column(db.String(4), nullable=False, default='0')
+    piscofins_tipo_retencao = db.Column(db.String(4), nullable=False, default='0')
+    # P3 opt-in, desligado por default (ND-005): a automacao nao emite sozinha
+    emissao_automatica = db.Column(db.Boolean, nullable=False, default=False)
+
+    def __repr__(self):
+        return f'<ConfiguracaoNfse {self.id}>'
+
+
+class LoteNfse(db.Model):
+    """Uma importacao do CSV de cobrancas do banco (NFSE-06).
+
+    Carimbo em hora local naive (AD-004), como Certidao.atualizado_em."""
+    __tablename__ = 'lote_nfse'
+
+    id = db.Column(db.Integer, primary_key=True)
+    nome_arquivo = db.Column(db.String(200), nullable=True)
+    criado_em = db.Column(db.DateTime, nullable=False, default=datetime.now, index=True)
+    total = db.Column(db.Integer, nullable=False, default=0)
+    execution_id = db.Column(db.String(40), nullable=True)
+
+    notas = db.relationship(
+        'NotaNfse', backref='lote', lazy='selectin', cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<LoteNfse {self.id} {self.nome_arquivo} ({self.total})>'
+
+
+class NotaNfse(db.Model):
+    """Uma linha do CSV do banco = uma NFSe a emitir (NFSE-01..07).
+
+    Valores monetarios em Numeric(12,2), nunca Float: o numero vai para um
+    documento fiscal e Float acumula erro de arredondamento. `valor_final`
+    (coluna I do CSV) e o valor a emitir; `divergencia_valor` sinaliza quando
+    F+G-H nao bate com I (rede de seguranca contra CSV corrompido)."""
+    __tablename__ = 'nota_nfse'
+
+    id = db.Column(db.Integer, primary_key=True)
+    lote_id = db.Column(
+        db.Integer, db.ForeignKey('lote_nfse.id'), nullable=False, index=True)
+    # nulo = pendente de resolucao (empresa nao vinculada)
+    empresa_id = db.Column(
+        db.Integer, db.ForeignKey('empresa.id'), nullable=True, index=True)
+
+    nome_csv = db.Column(db.String(140), nullable=True)
+    # normalizado (caixa alta, sem acento, espacos colapsados): chave do apelido
+    nome_csv_norm = db.Column(db.String(140), nullable=True, index=True)
+    cnpj = db.Column(db.String(18), nullable=True)
+
+    data_pagamento = db.Column(db.Date, nullable=True)
+    vencimento = db.Column(db.Date, nullable=True)
+
+    valor_titulo = db.Column(db.Numeric(12, 2), nullable=True)
+    acrescimos = db.Column(db.Numeric(12, 2), nullable=True)
+    deducoes = db.Column(db.Numeric(12, 2), nullable=True)
+    valor_final = db.Column(db.Numeric(12, 2), nullable=True)
+
+    # competencia da descricao: mes anterior ao vencimento, 'MM/AAAA'
+    competencia = db.Column(db.String(7), nullable=True, index=True)
+
+    status = db.Column(
+        db.String(24), nullable=False,
+        default=StatusNotaNfse.EMPRESA_PENDENTE, index=True)
+    origem_vinculo = db.Column(db.String(10), nullable=True)
+    score_match = db.Column(db.Integer, nullable=True)
+    divergencia_valor = db.Column(db.Boolean, nullable=False, default=False)
+
+    duplicata_de_id = db.Column(
+        db.Integer, db.ForeignKey('nota_nfse.id'), nullable=True)
+    duplicata_liberada = db.Column(db.Boolean, nullable=False, default=False)
+
+    emitida_em = db.Column(db.DateTime, nullable=True)
+    erro = db.Column(db.String(500), nullable=True)
+
+    def __repr__(self):
+        return f'<NotaNfse {self.nome_csv} {self.competencia} {self.status}>'
+
+
+class ApelidoNfse(db.Model):
+    """Memoria do matching nome do banco -> Empresa (NFSE-03).
+
+    N:1 de proposito: o banco escreve o mesmo cliente de varias formas ao longo
+    do tempo (truncamento em 35 chars, abreviacoes), e uma coluna unica em
+    Empresa so guardaria uma. Carimbo em hora local naive (AD-004)."""
+    __tablename__ = 'apelido_nfse'
+
+    id = db.Column(db.Integer, primary_key=True)
+    nome_norm = db.Column(db.String(140), unique=True, nullable=False)
+    empresa_id = db.Column(
+        db.Integer, db.ForeignKey('empresa.id'), nullable=False, index=True)
+    criado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+    def __repr__(self):
+        return f'<ApelidoNfse {self.nome_norm} -> {self.empresa_id}>'
+
+
 _COLUNA_POR_TIPO = {
     'Federal': 'a_vencer_dias_federal',
     'FGTS': 'a_vencer_dias_fgts',
