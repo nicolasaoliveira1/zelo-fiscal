@@ -22,6 +22,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from app.file_manager import remover_acentos
+from app.models import OrigemVinculoNfse
 
 DELIMITADOR = ';'
 COLUNAS_ESPERADAS = 10
@@ -189,3 +190,90 @@ def _montar_linha(numero, campos):
         linha.invalida = True
         linha.motivo = f'Linha {numero}: ' + ', '.join(motivos) + '.'
     return linha
+
+
+# --- resolucao nome do banco -> Empresa (NFSE-03) --------------------------
+
+# Limiar DUPLO, deliberado (ND-003): score alto sozinho nao distingue "match
+# bom" de "match bom mas ambiguo". Errar aqui emite nota fiscal com o CNPJ de
+# outro cliente, o que exige cancelamento — entao um segundo colocado proximo
+# manda a linha para conferencia humana em vez de chutar.
+LIMIAR_SCORE = 90
+LIMIAR_GAP = 10
+
+
+@dataclass
+class Vinculo:
+    """Resultado da resolucao. `empresa is None` = pendente de conferencia."""
+    empresa: object | None = None
+    origem: str | None = None
+    score: int | None = None
+
+    @property
+    def resolvido(self):
+        return self.empresa is not None
+
+
+def _indice_por_nome(empresas):
+    """nome normalizado -> empresa. Em caso de nomes repetidos no cadastro,
+    guarda a lista para poder recusar o match exato ambiguo."""
+    indice = {}
+    for empresa in empresas:
+        indice.setdefault(normalizar_nome(empresa.nome), []).append(empresa)
+    return indice
+
+
+def resolver_empresa(nome, empresas, apelidos=None):
+    """Resolve o nome cru do banco para uma `Empresa` cadastrada.
+
+    Cascata: exato normalizado -> apelido salvo -> fuzzy com limiar duplo.
+    `empresas` e `apelidos` sao pre-carregados pelo chamador (uma consulta por
+    importacao, nao uma por linha).
+
+    O scorer e `token_set_ratio` porque o cadastro guarda apelido curto
+    ('ALUMAP') enquanto o banco manda a razao social truncada em 35 caracteres
+    ('ALUMAP COMERCIO DE ALUMINIOS LTDA'): token_set_ratio pontua 100 quando um
+    conjunto de tokens e subconjunto do outro. Mesmo scorer de file_manager.
+    """
+    from thefuzz import fuzz, process
+
+    chave = normalizar_nome(nome)
+    if not chave:
+        return Vinculo()
+
+    indice = _indice_por_nome(empresas)
+
+    # 1) exato normalizado — so vale se for inequivoco
+    candidatas = indice.get(chave) or []
+    if len(candidatas) == 1:
+        return Vinculo(candidatas[0], OrigemVinculoNfse.EXATO, 100)
+    if len(candidatas) > 1:
+        return Vinculo()
+
+    # 2) apelido salvo (decisao humana anterior) tem precedencia sobre o fuzzy
+    for apelido in (apelidos or []):
+        if apelido.nome_norm == chave:
+            for empresa in empresas:
+                if empresa.id == apelido.empresa_id:
+                    return Vinculo(empresa, OrigemVinculoNfse.APELIDO, 100)
+
+    # 3) fuzzy com limiar duplo
+    chaves = list(indice.keys())
+    if not chaves:
+        return Vinculo()
+
+    ranking = process.extract(chave, chaves, scorer=fuzz.token_set_ratio, limit=2)
+    if not ranking:
+        return Vinculo()
+
+    melhor_chave, melhor = ranking[0]
+    segundo = ranking[1][1] if len(ranking) > 1 else 0
+
+    if melhor < LIMIAR_SCORE or (melhor - segundo) < LIMIAR_GAP:
+        # bom demais para ignorar, ambiguo demais para arriscar: vai para o humano
+        return Vinculo()
+
+    empatadas = indice.get(melhor_chave) or []
+    if len(empatadas) != 1:
+        return Vinculo()
+    return Vinculo(empatadas[0], OrigemVinculoNfse.FUZZY, int(melhor))
