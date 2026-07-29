@@ -398,7 +398,11 @@ class StatusNotaNfse:
     CADASTRO_PENDENTE (CNPJ digitado, empresa a cadastrar), INVALIDA (linha
     malformada), PULADA, FALHA."""
     EMPRESA_PENDENTE = 'empresa_pendente'
+    # CNPJ informado a mao, empresa ainda nao cadastrada: emite e mantem o
+    # convite para cadastrar nos meses seguintes
     CADASTRO_PENDENTE = 'cadastro_pendente'
+    # tomador pessoa fisica: estado FINAL, nunca vira cadastro de Empresa
+    PESSOA_FISICA = 'pessoa_fisica'
     PRONTA = 'pronta'
     PREENCHENDO = 'preenchendo'
     AGUARDANDO_CONFIRMACAO = 'aguardando_confirmacao'
@@ -481,7 +485,9 @@ class NotaNfse(db.Model):
     nome_csv = db.Column(db.String(140), nullable=True)
     # normalizado (caixa alta, sem acento, espacos colapsados): chave do apelido
     nome_csv_norm = db.Column(db.String(140), nullable=True, index=True)
-    cnpj = db.Column(db.String(18), nullable=True)
+    # CPF ou CNPJ do tomador: nem todo cliente e pessoa juridica
+    documento = db.Column(db.String(18), nullable=True, index=True)
+    tipo_documento = db.Column(db.String(4), nullable=True)
 
     data_pagamento = db.Column(db.Date, nullable=True)
     vencimento = db.Column(db.Date, nullable=True)
@@ -506,6 +512,9 @@ class NotaNfse(db.Model):
     duplicata_liberada = db.Column(db.Boolean, nullable=False, default=False)
 
     emitida_em = db.Column(db.DateTime, nullable=True)
+    # 'automacao' | 'manual': o operador pode marcar nota que ja emitiu fora do
+    # sistema, e ela passa a contar na trava de duplicidade
+    origem_emissao = db.Column(db.String(12), nullable=True)
     erro = db.Column(db.String(500), nullable=True)
 
     def __repr__(self):
@@ -513,7 +522,15 @@ class NotaNfse(db.Model):
 
 
 class ApelidoNfse(db.Model):
-    """Memoria do matching nome do banco -> Empresa (NFSE-03).
+    """Memoria do que fazer com um nome vindo do banco (NFSE-03).
+
+    Guarda DOIS tipos de vinculo, por isso `empresa_id` e opcional:
+
+    - nome -> Empresa cadastrada (o caso comum);
+    - nome -> documento avulso (CPF, ou CNPJ de empresa ainda nao cadastrada).
+
+    O segundo existe porque parte dos tomadores e pessoa fisica e nunca vai
+    virar cadastro: sem essa memoria o operador redigitaria o CPF todo mes.
 
     N:1 de proposito: o banco escreve o mesmo cliente de varias formas ao longo
     do tempo (truncamento em 35 chars, abreviacoes), e uma coluna unica em
@@ -523,11 +540,13 @@ class ApelidoNfse(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nome_norm = db.Column(db.String(140), unique=True, nullable=False)
     empresa_id = db.Column(
-        db.Integer, db.ForeignKey('empresa.id'), nullable=False, index=True)
+        db.Integer, db.ForeignKey('empresa.id'), nullable=True, index=True)
+    documento = db.Column(db.String(18), nullable=True)
+    tipo_documento = db.Column(db.String(4), nullable=True)
     criado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
 
     def __repr__(self):
-        return f'<ApelidoNfse {self.nome_norm} -> {self.empresa_id}>'
+        return f'<ApelidoNfse {self.nome_norm} -> {self.empresa_id or self.documento}>'
 
 
 _COLUNA_POR_TIPO = {

@@ -76,7 +76,7 @@ def test_nota_resolvida_recebe_cnpj_competencia_e_trilha(banco):
     lote = imp.importar(_linha(), nome_arquivo='extrato.csv')
     nota = _notas(lote)[0]
     assert nota.empresa_id == empresa.id
-    assert nota.cnpj == '11.111.111/0001-11'
+    assert nota.documento == '11.111.111/0001-11'
     assert nota.competencia == '06/2026'
     assert nota.valor_final == Decimal('826.09')
     assert nota.status == StatusNotaNfse.PRONTA
@@ -90,7 +90,7 @@ def test_nome_sem_cadastro_fica_pendente_de_empresa(banco):
     nota = _notas(lote)[0]
     assert nota.status == StatusNotaNfse.EMPRESA_PENDENTE
     assert nota.empresa_id is None
-    assert nota.cnpj is None
+    assert nota.documento is None
 
 
 def test_apelido_salvo_resolve_na_importacao(banco):

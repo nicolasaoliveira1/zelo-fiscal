@@ -120,7 +120,7 @@ def preencher_nota(nota_id, hoje=None, execution_id=None):
         'status': 'aguardando_confirmacao',
         'nota_id': nota.id,
         'competencia': nota.competencia,
-        'cnpj': nota.cnpj,
+        'documento': nota.documento,
         'valor': automacao.formatar_valor(nota.valor_final),
         'descricao': descricao,
         'message': 'Nota preenchida no portal. Confira os dados e emita no navegador.',

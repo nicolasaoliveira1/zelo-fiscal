@@ -12,7 +12,8 @@ const ROTULO_STATUS = {
   aguardando_confirmacao: 'Aguardando você emitir',
   emitida: 'Emitida',
   empresa_pendente: 'Sem empresa',
-  cadastro_pendente: 'Cadastrar empresa',
+  cadastro_pendente: 'Ainda não cadastrada',
+  pessoa_fisica: 'Pessoa física',
   duplicata: 'Possível duplicata',
   invalida: 'Linha inválida',
   pulada: 'Pulada',
@@ -67,39 +68,58 @@ function celulaEmpresa(nota) {
       <select class="form-select form-select-sm" data-empresa-de="${nota.id}" style="min-width: 12rem;">
         ${opcoesEmpresa(null)}
       </select>
-      <input class="form-control form-control-sm" data-cnpj-de="${nota.id}"
-             placeholder="ou CNPJ" style="max-width: 11rem;"
-             value="${esc(nota.cnpj || '')}">
+      <input class="form-control form-control-sm" data-doc-de="${nota.id}"
+             placeholder="ou CNPJ/CPF" style="max-width: 11rem;"
+             value="${esc(nota.documento || '')}">
       <button class="btn btn-soft-primary btn-sm" data-resolver="${nota.id}">Vincular</button>
     </div>`;
 }
 
 function acoesDaLinha(nota) {
   const partes = [];
+
+  if (nota.status === 'emitida') {
+    // so o que o operador marcou na mao pode ser desmarcado; o que a automacao
+    // emitiu de fato nao volta atras por um clique
+    if (nota.origem_emissao === 'manual') {
+      partes.push(`<button class="btn btn-ghost btn-sm" data-desmarcar="${nota.id}">Desmarcar</button>`);
+    }
+    return partes.join('');
+  }
+
   if (nota.status === 'duplicata' && !nota.duplicata_liberada) {
     partes.push(`<button class="btn btn-ghost btn-sm" data-liberar="${nota.id}">Emitir mesmo assim</button>`);
   }
-  if (nota.status === 'cadastro_pendente' && nota.cnpj) {
-    const url = `/empresa/nova?nome=${encodeURIComponent(nota.nome_csv || '')}&cnpj=${encodeURIComponent(nota.cnpj)}`;
+
+  // Cadastrar so faz sentido para CNPJ: pessoa fisica nunca vira cadastro de
+  // empresa, e o convite ficaria pendurado para sempre.
+  if (nota.status === 'cadastro_pendente' && nota.tipo_documento === 'cnpj') {
+    const url = `/empresa/nova?nome=${encodeURIComponent(nota.nome_csv || '')}&cnpj=${encodeURIComponent(nota.documento)}`;
     partes.push(`<a class="btn btn-ghost btn-sm" href="${url}">Cadastrar</a>`);
   }
-  const podePreencher = ['pronta', 'cadastro_pendente', 'falha', 'pulada'].includes(nota.status)
-    || (nota.status === 'duplicata' && nota.duplicata_liberada);
+
+  const podePreencher = ['pronta', 'cadastro_pendente', 'pessoa_fisica', 'falha', 'pulada']
+    .includes(nota.status) || (nota.status === 'duplicata' && nota.duplicata_liberada);
   if (podePreencher) {
+    partes.push(`<button class="btn btn-ghost btn-sm" data-jaemitida="${nota.id}" title="Marcar como já emitida por fora">Já emiti</button>`);
     partes.push(`<button class="btn btn-primary btn-sm" data-preencher="${nota.id}">Preencher</button>`);
+  }
+  if (nota.status === 'aguardando_confirmacao') {
+    partes.push(`<button class="btn btn-primary btn-sm" data-jaemitida="${nota.id}">Emiti no portal</button>`);
   }
   return partes.join('');
 }
 
 function linha(nota) {
-  const alerta = nota.divergencia_valor ? ' nfse-linha-alerta' : '';
+  const alerta = (nota.divergencia_valor ? ' nfse-linha-alerta' : '')
+    + (nota.origem_emissao === 'manual' ? ' nfse-emitida-manual' : '');
   const aviso = nota.divergencia_valor
     ? ' <i class="bi bi-exclamation-triangle" title="Soma das parcelas não bate com o valor final"></i>' : '';
   return `
     <tr class="${alerta}" data-linha="${nota.id}">
       <td>${esc(nota.nome_csv)}</td>
       <td>${celulaEmpresa(nota)}</td>
-      <td class="nfse-mono">${esc(nota.cnpj || '—')}</td>
+      <td class="nfse-mono">${esc(nota.documento || '—')}</td>
       <td class="nfse-mono">${esc(nota.competencia || '—')}</td>
       <td class="nfse-mono text-end">${esc(nota.valor || '—')}${aviso}</td>
       <td><span class="nfse-status st-${nota.status}">${esc(ROTULO_STATUS[nota.status] || nota.status)}</span>
@@ -181,11 +201,11 @@ async function prepararSessao(botao) {
 
 async function resolverEmpresa(id) {
   const select = document.querySelector(`[data-empresa-de="${id}"]`);
-  const campo = document.querySelector(`[data-cnpj-de="${id}"]`);
+  const campo = document.querySelector(`[data-doc-de="${id}"]`);
   const corpo = {};
   if (select?.value) corpo.empresa_id = Number(select.value);
-  else if (campo?.value.trim()) corpo.cnpj = campo.value.trim();
-  else { showToast('Escolha uma empresa ou informe o CNPJ.', 'error'); return; }
+  else if (campo?.value.trim()) corpo.documento = campo.value.trim();
+  else { showToast('Escolha uma empresa ou informe o CNPJ/CPF.', 'error'); return; }
 
   try {
     const dados = await chamar(`/nfse/nota/${id}/resolver`, { body: JSON.stringify(corpo) });
@@ -201,6 +221,17 @@ async function liberarDuplicata(id) {
     const dados = await chamar(`/nfse/nota/${id}/liberar-duplicata`);
     substituir(dados.nota);
     showToast('Duplicata liberada para emissão.', 'info');
+  } catch (erro) {
+    showToast(erro.message, 'error');
+  }
+}
+
+async function marcarEmitidaManual(id, marcar) {
+  try {
+    const dados = await chamar(`/nfse/nota/${id}/emitida-manual`,
+      { body: JSON.stringify({ marcar }) });
+    substituir(dados.nota);
+    showToast(marcar ? 'Marcada como emitida.' : 'Marcação desfeita.', 'info');
   } catch (erro) {
     showToast(erro.message, 'error');
   }
@@ -292,6 +323,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!alvo) return;
     if (alvo.dataset.resolver) resolverEmpresa(Number(alvo.dataset.resolver));
     else if (alvo.dataset.liberar) liberarDuplicata(Number(alvo.dataset.liberar));
+    else if (alvo.dataset.jaemitida) marcarEmitidaManual(Number(alvo.dataset.jaemitida), true);
+    else if (alvo.dataset.desmarcar) marcarEmitidaManual(Number(alvo.dataset.desmarcar), false);
     else if (alvo.dataset.preencher) preencherNota(Number(alvo.dataset.preencher), alvo);
   });
 

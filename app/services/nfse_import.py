@@ -22,6 +22,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from app.file_manager import remover_acentos
+from app.utils import TIPO_CPF, detectar_tipo_documento
 from app.models import OrigemVinculoNfse
 
 DELIMITADOR = ';'
@@ -204,14 +205,23 @@ LIMIAR_GAP = 10
 
 @dataclass
 class Vinculo:
-    """Resultado da resolucao. `empresa is None` = pendente de conferencia."""
+    """Resultado da resolucao do tomador.
+
+    Tres desfechos possiveis:
+    - `empresa` preenchida: tomador cadastrado (caso comum);
+    - so `documento`: CPF, ou CNPJ de empresa ainda nao cadastrada, lembrado de
+      um mes anterior — emite normalmente, sem cadastro;
+    - nada: vai para conferencia humana.
+    """
     empresa: object | None = None
     origem: str | None = None
     score: int | None = None
+    documento: str | None = None
+    tipo_documento: str | None = None
 
     @property
     def resolvido(self):
-        return self.empresa is not None
+        return self.empresa is not None or bool(self.documento)
 
 
 def _indice_por_nome(empresas):
@@ -252,10 +262,18 @@ def resolver_empresa(nome, empresas, apelidos=None):
 
     # 2) apelido salvo (decisao humana anterior) tem precedencia sobre o fuzzy
     for apelido in (apelidos or []):
-        if apelido.nome_norm == chave:
+        if apelido.nome_norm != chave:
+            continue
+        if apelido.empresa_id:
             for empresa in empresas:
                 if empresa.id == apelido.empresa_id:
                     return Vinculo(empresa, OrigemVinculoNfse.APELIDO, 100)
+        if apelido.documento:
+            # documento avulso: CPF (nunca vira cadastro) ou CNPJ de empresa
+            # ainda nao cadastrada. Evita redigitar o numero todo mes.
+            return Vinculo(origem=OrigemVinculoNfse.APELIDO, score=100,
+                           documento=apelido.documento,
+                           tipo_documento=apelido.tipo_documento)
 
     # 3) fuzzy com limiar duplo
     chaves = list(indice.keys())
@@ -299,13 +317,18 @@ def _divergiu(linha):
 
 
 def _competencias_ja_emitidas():
-    """(empresa_id, competencia) das notas ja EMITIDAS — base da trava (ND-004)."""
+    """(documento, competencia) das notas ja EMITIDAS — base da trava (ND-004).
+
+    A chave e o DOCUMENTO, nao o `empresa_id`: parte dos tomadores e pessoa
+    fisica ou empresa nao cadastrada, e nesses casos `empresa_id` e nulo — com
+    a chave antiga a duplicata nunca seria detectada justamente para eles.
+    """
     from app.models import NotaNfse, StatusNotaNfse
     consulta = (NotaNfse.query
                 .filter(NotaNfse.status == StatusNotaNfse.EMITIDA)
-                .with_entities(NotaNfse.empresa_id, NotaNfse.competencia))
-    return {(empresa_id, competencia) for empresa_id, competencia in consulta
-            if empresa_id is not None}
+                .with_entities(NotaNfse.documento, NotaNfse.competencia))
+    return {(documento, competencia) for documento, competencia in consulta
+            if documento}
 
 
 def importar(conteudo, nome_arquivo=None, execution_id=None):
@@ -333,8 +356,10 @@ def importar(conteudo, nome_arquivo=None, execution_id=None):
             nota = _montar_nota(linha, empresas, apelidos, NotaNfse, StatusNotaNfse)
             nota.lote = lote
 
-            chave = (nota.empresa_id, nota.competencia)
-            if nota.empresa_id is not None and nota.status == StatusNotaNfse.PRONTA:
+            chave = (nota.documento, nota.competencia)
+            if nota.documento and nota.status in (StatusNotaNfse.PRONTA,
+                                                  StatusNotaNfse.PESSOA_FISICA,
+                                                  StatusNotaNfse.CADASTRO_PENDENTE):
                 if chave in emitidas or chave in vistas_no_lote:
                     nota.status = StatusNotaNfse.DUPLICATA
                     nota.duplicata_de_id = vistas_no_lote.get(chave)
@@ -374,9 +399,20 @@ def _montar_nota(linha, empresas, apelidos, NotaNfse, StatusNotaNfse):
         nota.status = StatusNotaNfse.EMPRESA_PENDENTE
         return nota
 
-    nota.empresa_id = vinculo.empresa.id
-    nota.cnpj = vinculo.empresa.cnpj
     nota.origem_vinculo = vinculo.origem
     nota.score_match = vinculo.score
-    nota.status = StatusNotaNfse.PRONTA
+
+    if vinculo.empresa is not None:
+        nota.empresa_id = vinculo.empresa.id
+        nota.documento = vinculo.empresa.cnpj
+        nota.tipo_documento = detectar_tipo_documento(vinculo.empresa.cnpj)
+        nota.status = StatusNotaNfse.PRONTA
+        return nota
+
+    # documento avulso lembrado de um mes anterior
+    nota.documento = vinculo.documento
+    nota.tipo_documento = vinculo.tipo_documento or detectar_tipo_documento(vinculo.documento)
+    nota.status = (StatusNotaNfse.PESSOA_FISICA
+                   if nota.tipo_documento == TIPO_CPF
+                   else StatusNotaNfse.CADASTRO_PENDENTE)
     return nota

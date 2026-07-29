@@ -66,10 +66,11 @@
         background: var(--zelo-danger-soft); color: var(--zelo-danger);
         border-color: var(--zelo-danger);
     }
-    .st-pulada {
+    .st-pulada, .st-pessoa_fisica {
         background: var(--zelo-muted-soft); color: var(--zelo-muted);
         border-color: var(--zelo-muted);
     }
+    .nfse-emitida-manual { opacity: 0.62; }
     .nfse-linha-alerta { background: var(--zelo-mist); }
     .nfse-contadores { display: flex; flex-wrap: wrap; gap: 1.25rem; }
     .nfse-contador .valor {
@@ -216,7 +217,11 @@
         </div>
         <div class="nfse-contador">
             <div class="valor" data-contador="empresa_pendente">{{ resumo.por_status.get('empresa_pendente', 0) }}</div>
-            <div class="rotulo">Sem empresa</div>
+            <div class="rotulo">Sem documento</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="pessoa_fisica">{{ resumo.por_status.get('pessoa_fisica', 0) }}</div>
+            <div class="rotulo">Pessoa física</div>
         </div>
         <div class="nfse-contador">
             <div class="valor" data-contador="duplicata">{{ resumo.por_status.get('duplicata', 0) }}</div>
@@ -242,7 +247,7 @@
                 <tr>
                     <th>Nome no banco</th>
                     <th>Empresa</th>
-                    <th>CNPJ</th>
+                    <th>CNPJ/CPF</th>
                     <th>Competência</th>
                     <th class="text-end">Valor</th>
                     <th>Status</th>

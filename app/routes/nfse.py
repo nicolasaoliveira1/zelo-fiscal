@@ -4,6 +4,8 @@ Registra no blueprint "main" compartilhado (AD-013). Rotas finas: toda a
 logica vive em `app/services/nfse_*`; aqui so entra validacao de entrada,
 autorizacao e montagem da resposta.
 """
+from datetime import datetime
+
 from flask import render_template, request
 
 from app import db
@@ -19,36 +21,19 @@ from app.models import (
 from app.routes import bp
 from app.services import nfse_config, nfse_import, nfse_service
 from app.services.nfse_session import SESSAO
-from app.utils import json_error
+from app.utils import (
+    TIPO_CNPJ,
+    TIPO_CPF,
+    detectar_tipo_documento,
+    documento_valido,
+    formatar_documento,
+    json_error,
+)
 
 TAMANHO_MAXIMO_CSV = 5 * 1024 * 1024  # 5 MB: o extrato mensal tem ~7 KB
 
-
-def _so_digitos(valor):
-    return ''.join(c for c in str(valor or '') if c.isdigit())
-
-
-def cnpj_valido(valor):
-    """Valida CNPJ por digitos verificadores.
-
-    Existe porque o operador digita o CNPJ na mao para empresa nao cadastrada,
-    e um digito trocado emite nota fiscal no CNPJ de outra pessoa."""
-    numeros = _so_digitos(valor)
-    if len(numeros) != 14 or numeros == numeros[0] * 14:
-        return False
-    for tamanho in (12, 13):
-        pesos = list(range(tamanho - 7, 1, -1)) + list(range(9, 1, -1))
-        soma = sum(int(d) * p for d, p in zip(numeros[:tamanho], pesos))
-        resto = soma % 11
-        digito = 0 if resto < 2 else 11 - resto
-        if int(numeros[tamanho]) != digito:
-            return False
-    return True
-
-
-def formatar_cnpj(valor):
-    n = _so_digitos(valor)
-    return f'{n[:2]}.{n[2:5]}.{n[5:8]}/{n[8:12]}-{n[12:]}'
+ORIGEM_AUTOMACAO = 'automacao'
+ORIGEM_MANUAL = 'manual'
 
 
 def _nota_para_json(nota):
@@ -58,7 +43,8 @@ def _nota_para_json(nota):
         'nome_csv': nota.nome_csv,
         'empresa': empresa.nome if empresa else None,
         'empresa_id': nota.empresa_id,
-        'cnpj': nota.cnpj,
+        'documento': nota.documento,
+        'tipo_documento': nota.tipo_documento,
         'competencia': nota.competencia,
         'valor': f'{nota.valor_final:.2f}'.replace('.', ',') if nota.valor_final else None,
         'vencimento': nota.vencimento.strftime('%d/%m/%Y') if nota.vencimento else None,
@@ -68,6 +54,7 @@ def _nota_para_json(nota):
         'divergencia_valor': nota.divergencia_valor,
         'duplicata_liberada': nota.duplicata_liberada,
         'erro': nota.erro,
+        'origem_emissao': nota.origem_emissao,
     }
 
 
@@ -146,31 +133,40 @@ def nfse_resolver_empresa(nota_id):
 
     dados = request.get_json(silent=True) or {}
     empresa_id = dados.get('empresa_id')
-    cnpj = (dados.get('cnpj') or '').strip()
+    documento = (dados.get('documento') or dados.get('cnpj') or '').strip()
 
     if empresa_id:
         empresa = db.session.get(Empresa, int(empresa_id))
         if empresa is None:
             return json_error('Empresa nao encontrada.', 404)
         _vincular(nota, empresa)
-        _salvar_apelido(nota.nome_csv_norm, empresa.id)
-    elif cnpj:
-        if not cnpj_valido(cnpj):
+        _lembrar(nota.nome_csv_norm, empresa_id=empresa.id)
+    elif documento:
+        tipo = detectar_tipo_documento(documento)
+        if not documento_valido(documento):
+            rotulo = {TIPO_CPF: 'CPF', TIPO_CNPJ: 'CNPJ'}.get(tipo, 'CPF/CNPJ')
             return json_error(
-                'CNPJ invalido: confira os digitos. Um digito trocado emite a '
-                'nota no CNPJ de outra empresa.', 400)
-        formatado = formatar_cnpj(cnpj)
-        empresa = Empresa.query.filter_by(cnpj=formatado).first()
+                f'{rotulo} invalido: confira os digitos. Um digito trocado '
+                'emite a nota no documento de outra pessoa.', 400)
+
+        formatado = formatar_documento(documento)
+        empresa = (Empresa.query.filter_by(cnpj=formatado).first()
+                   if tipo == TIPO_CNPJ else None)
         if empresa is not None:
             _vincular(nota, empresa)
-            _salvar_apelido(nota.nome_csv_norm, empresa.id)
+            _lembrar(nota.nome_csv_norm, empresa_id=empresa.id)
         else:
-            nota.cnpj = formatado
+            # documento avulso: emite normalmente, sem cadastro. CPF e estado
+            # final; CNPJ segue convidando a cadastrar nos proximos meses.
             nota.empresa_id = None
+            nota.documento = formatado
+            nota.tipo_documento = tipo
             nota.origem_vinculo = OrigemVinculoNfse.MANUAL
-            nota.status = StatusNotaNfse.CADASTRO_PENDENTE
+            nota.status = (StatusNotaNfse.PESSOA_FISICA if tipo == TIPO_CPF
+                           else StatusNotaNfse.CADASTRO_PENDENTE)
+            _lembrar(nota.nome_csv_norm, documento=formatado, tipo=tipo)
     else:
-        return json_error('Informe uma empresa ou um CNPJ.', 400)
+        return json_error('Informe uma empresa ou um CPF/CNPJ.', 400)
 
     db.session.commit()
     return {'status': 'ok', 'nota': _nota_para_json(nota)}
@@ -178,21 +174,30 @@ def nfse_resolver_empresa(nota_id):
 
 def _vincular(nota, empresa):
     nota.empresa_id = empresa.id
-    nota.cnpj = empresa.cnpj
+    nota.documento = empresa.cnpj
+    nota.tipo_documento = detectar_tipo_documento(empresa.cnpj)
     nota.origem_vinculo = OrigemVinculoNfse.MANUAL
     nota.score_match = None
-    if nota.status in (StatusNotaNfse.EMPRESA_PENDENTE, StatusNotaNfse.CADASTRO_PENDENTE):
+    if nota.status in (StatusNotaNfse.EMPRESA_PENDENTE,
+                       StatusNotaNfse.CADASTRO_PENDENTE,
+                       StatusNotaNfse.PESSOA_FISICA):
         nota.status = StatusNotaNfse.PRONTA
 
 
-def _salvar_apelido(nome_norm, empresa_id):
+def _lembrar(nome_norm, empresa_id=None, documento=None, tipo=None):
+    """Memoriza o que fazer com este nome do banco no proximo import.
+
+    Guarda vinculo com Empresa OU documento avulso — para CPF e para CNPJ ainda
+    nao cadastrado, que de outro modo seriam redigitados todo mes."""
     if not nome_norm:
         return
-    existente = ApelidoNfse.query.filter_by(nome_norm=nome_norm).first()
-    if existente is None:
-        db.session.add(ApelidoNfse(nome_norm=nome_norm, empresa_id=empresa_id))
-    else:
-        existente.empresa_id = empresa_id
+    apelido = ApelidoNfse.query.filter_by(nome_norm=nome_norm).first()
+    if apelido is None:
+        apelido = ApelidoNfse(nome_norm=nome_norm)
+        db.session.add(apelido)
+    apelido.empresa_id = empresa_id
+    apelido.documento = documento
+    apelido.tipo_documento = tipo
 
 
 # --- liberar duplicata (ND-004) --------------------------------------------
@@ -209,6 +214,56 @@ def nfse_liberar_duplicata(nota_id):
     nota.duplicata_liberada = True
     db.session.commit()
     return {'status': 'ok', 'nota': _nota_para_json(nota)}
+
+
+# --- nota emitida fora do sistema ------------------------------------------
+
+@bp.route('/nfse/nota/<int:nota_id>/emitida-manual', methods=['POST'])
+@requer_papel('operador')
+def nfse_marcar_emitida_manual(nota_id):
+    """Marca/desmarca uma nota que o operador emitiu na mao.
+
+    Marcar conta na trava de duplicidade: se o mesmo tomador e a mesma
+    competencia voltarem no CSV do mes seguinte, o sistema avisa. A origem fica
+    registrada para distinguir do que passou pela automacao.
+    """
+    nota = db.session.get(NotaNfse, nota_id)
+    if nota is None:
+        return json_error('Nota nao encontrada.', 404)
+
+    dados = request.get_json(silent=True) or {}
+    marcar = dados.get('marcar', True)
+
+    if marcar:
+        if nota.origem_emissao == ORIGEM_AUTOMACAO:
+            return json_error(
+                'Esta nota foi emitida pela automacao; nao da para marcar como '
+                'manual.', 409)
+        nota.status = StatusNotaNfse.EMITIDA
+        nota.origem_emissao = ORIGEM_MANUAL
+        nota.emitida_em = datetime.now()
+    else:
+        if nota.origem_emissao != ORIGEM_MANUAL:
+            return json_error(
+                'So da para desmarcar nota que voce marcou como emitida na mao.',
+                409)
+        nota.status = _status_apos_desmarcar(nota)
+        nota.origem_emissao = None
+        nota.emitida_em = None
+
+    db.session.commit()
+    return {'status': 'ok', 'nota': _nota_para_json(nota)}
+
+
+def _status_apos_desmarcar(nota):
+    """Volta ao estado que a linha teria sem a marcacao manual."""
+    if nota.empresa_id:
+        return StatusNotaNfse.PRONTA
+    if nota.tipo_documento == TIPO_CPF:
+        return StatusNotaNfse.PESSOA_FISICA
+    if nota.documento:
+        return StatusNotaNfse.CADASTRO_PENDENTE
+    return StatusNotaNfse.EMPRESA_PENDENTE
 
 
 # --- configuracao (NFSE-08/09) ---------------------------------------------

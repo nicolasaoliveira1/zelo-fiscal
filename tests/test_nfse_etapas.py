@@ -29,7 +29,7 @@ CONFIG = SimpleNamespace(
 )
 
 NOTA = SimpleNamespace(
-    cnpj='33.684.001/0001-51',
+    documento='33.684.001/0001-51',
     valor_final=Decimal('826.09'),
     competencia='06/2026',
 )

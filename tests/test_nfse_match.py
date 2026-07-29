@@ -24,8 +24,11 @@ def _empresa(id_, nome):
     return SimpleNamespace(id=id_, nome=nome, cnpj=f'00.000.000/{id_:04d}-00')
 
 
-def _apelido(nome_norm, empresa_id):
-    return SimpleNamespace(nome_norm=nome_norm, empresa_id=empresa_id)
+def _apelido(nome_norm, empresa_id=None, documento=None, tipo_documento=None):
+    """Espelha os campos reais de ApelidoNfse: o vinculo pode ser para uma
+    Empresa cadastrada OU para um documento avulso (CPF/CNPJ)."""
+    return SimpleNamespace(nome_norm=nome_norm, empresa_id=empresa_id,
+                           documento=documento, tipo_documento=tipo_documento)
 
 
 # --- 1) exato --------------------------------------------------------------
@@ -164,3 +167,38 @@ def test_nenhum_vinculo_incorreto_na_fixture():
         assert tokens_cadastro <= tokens_banco, (
             f'vinculo incorreto: "{linha.nome}" -> "{v.empresa.nome}"')
     assert resolvidas > 0, 'a fixture precisa ter casos que resolvem sozinhos'
+
+
+# --- memoria de documento avulso (CPF ou CNPJ nao cadastrado) --------------
+
+def test_apelido_com_documento_avulso_resolve_sem_empresa():
+    """Parte dos tomadores e pessoa fisica e nunca vai virar cadastro. Sem essa
+    memoria o operador redigitaria o CPF todo mes."""
+    empresas = [_empresa(1, 'OUTRA COISA')]
+    apelidos = [_apelido('RODRIGO FERREIRA FARIA', documento='529.982.247-25',
+                         tipo_documento='cpf')]
+    v = imp.resolver_empresa('RODRIGO FERREIRA FARIA', empresas, apelidos)
+    assert v.resolvido
+    assert v.empresa is None
+    assert v.documento == '529.982.247-25'
+    assert v.tipo_documento == 'cpf'
+    assert v.origem == OrigemVinculoNfse.APELIDO
+
+
+def test_apelido_com_cnpj_avulso_tambem_resolve():
+    apelidos = [_apelido('CONSTRUTORA NOVA LTDA', documento='33.684.001/0001-51',
+                         tipo_documento='cnpj')]
+    v = imp.resolver_empresa('CONSTRUTORA NOVA LTDA', [], apelidos)
+    assert v.documento == '33.684.001/0001-51'
+    assert v.empresa is None
+
+
+def test_empresa_cadastrada_tem_precedencia_sobre_documento_avulso():
+    """Se a empresa foi cadastrada depois, o cadastro passa a mandar: ele e a
+    fonte de verdade do CNPJ."""
+    empresas = [_empresa(1, 'CONSTRUTORA NOVA')]
+    apelidos = [_apelido('CONSTRUTORA NOVA LTDA', empresa_id=1,
+                         documento='99.999.999/9999-99', tipo_documento='cnpj')]
+    v = imp.resolver_empresa('CONSTRUTORA NOVA LTDA', empresas, apelidos)
+    assert v.empresa.id == 1
+    assert v.documento is None

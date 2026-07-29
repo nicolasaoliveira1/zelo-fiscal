@@ -275,7 +275,7 @@ def preencher_etapa_pessoas(driver, nota, config, data_competencia, pausa=None):
     _set_chosen(driver, 'SimplesNacional_RegimeApuracaoTributosSN',
                 config.regime_apuracao_sn)
     _marcar_radio(driver, 'Tomador.LocalDomicilio', '1')  # Brasil
-    _preencher(driver, 'Tomador_Inscricao', nota.cnpj)
+    _preencher(driver, 'Tomador_Inscricao', nota.documento)
     if pausa:
         pausa()
     _avancar(driver)

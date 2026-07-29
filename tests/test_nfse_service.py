@@ -62,7 +62,8 @@ def _nota(status=StatusNotaNfse.PRONTA, **kw):
         db.session.commit()
     dados = dict(
         lote_id=lote.id, empresa_id=empresa.id, nome_csv='ACME TRANSPORTES LTDA',
-        cnpj=empresa.cnpj, competencia='06/2026', valor_final=Decimal('826.09'),
+        documento=empresa.cnpj, tipo_documento='cnpj',
+        competencia='06/2026', valor_final=Decimal('826.09'),
         status=status,
     )
     dados.update(kw)
