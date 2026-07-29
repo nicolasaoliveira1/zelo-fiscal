@@ -275,6 +275,40 @@
     </p>
 </div>
 
+<!-- Aviso confirmavel: aliquota nao conferida nesta sessao (modal de decisao) -->
+<div class="modal fade" id="modalAliquota" tabindex="-1" aria-hidden="true"
+     data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="h6 nfse-title mb-0">Alíquota não conferida</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">
+                    Você ainda não conferiu a alíquota do Simples Nacional nesta sessão.
+                </p>
+                <p class="nfse-hint mb-0">
+                    Ela muda mês a mês e sai na nota. Se já sabe que está correta,
+                    pode preencher mesmo assim.
+                </p>
+            </div>
+            <div class="modal-footer batch-modal-footer">
+                <button type="button" class="btn btn-ghost btn-sm" data-bs-dismiss="modal">
+                    Cancelar
+                </button>
+                <button type="button" class="btn btn-soft-primary btn-sm" id="btnConferirAliquota">
+                    Conferir alíquota
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" id="btnPreencherMesmoAssim">
+                    Preencher mesmo assim
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script type="application/json" id="dadosNotas">{{ notas | tojson }}</script>
 <script type="application/json" id="dadosEmpresas">{{ empresas | tojson }}</script>
 <script type="module" src="{{ static_versionado('js/nfse.js') }}"></script>

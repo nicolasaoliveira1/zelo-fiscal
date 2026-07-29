@@ -360,11 +360,20 @@ def nfse_preencher_nota(nota_id):
     """Preenche a nota no portal ate a tela de revisao e para.
 
     A emissao em si continua sendo um clique do operador no navegador."""
+    dados = request.get_json(silent=True) or {}
+    ignorar_aliquota = bool(dados.get('ignorar_aliquota'))
+
     if not SESSAO.adquirir():
         return json_error(
             'Ja existe uma emissao da NFSe em andamento. Aguarde terminar.', 409)
     try:
-        resultado = nfse_service.preencher_nota(nota_id)
+        resultado = nfse_service.preencher_nota(
+            nota_id, ignorar_aliquota=ignorar_aliquota)
+    except nfse_service.AliquotaNaoConfirmadaError as exc:
+        # motivo legivel pela interface: ela transforma isso num aviso que o
+        # operador pode confirmar, em vez de um erro que trava o botao
+        return json_error(str(exc), 409, motivo='aliquota_nao_confirmada',
+                          aliquota=SESSAO.aliquota)
     except nfse_service.NotaNaoEmitivelError as exc:
         return json_error(str(exc), 409)
     except Exception as exc:

@@ -157,16 +157,52 @@ def test_nota_inexistente_recusa(ambiente):
 
 # --- trava da aliquota (NFSE-12) -------------------------------------------
 
-def test_sem_aliquota_confirmada_nao_preenche_nada(ambiente):
-    """A aliquota muda mes a mes e sai na nota: emitir sem conferir produz
-    documento fiscal com tributo errado."""
+def test_sem_aliquota_confirmada_avisa_em_vez_de_preencher(ambiente):
+    """A aliquota muda mes a mes e sai na nota. Sem conferir, o padrao e AVISAR:
+    levanta um erro de tipo proprio que a interface transforma em confirmacao,
+    e nao preenche nada nesse primeiro clique."""
     ambiente['sessao'].aliquota_confirmada = False
     nota = _nota()
-    with pytest.raises(nfse_service.NotaNaoEmitivelError) as exc:
+    with pytest.raises(nfse_service.AliquotaNaoConfirmadaError) as exc:
         nfse_service.preencher_nota(nota.id)
     assert 'aliquota' in str(exc.value).lower()
     assert not ambiente['automacao'].preencher_etapa_pessoas.called
     assert db.session.get(NotaNfse, nota.id).status == StatusNotaNfse.PRONTA
+
+
+def test_aviso_da_aliquota_e_subtipo_do_erro_generico(ambiente):
+    """A rota antiga captura NotaNaoEmitivelError; o subtipo tem de continuar
+    passando por esse except para nao virar um 500."""
+    assert issubclass(nfse_service.AliquotaNaoConfirmadaError,
+                      nfse_service.NotaNaoEmitivelError)
+
+
+def test_operador_pode_preencher_sem_conferir_a_aliquota(ambiente):
+    """Bloquear obrigaria a abrir o portal e olhar mesmo quando o operador ja
+    sabe que a aliquota esta certa."""
+    ambiente['sessao'].aliquota_confirmada = False
+    nota = _nota()
+    resultado = nfse_service.preencher_nota(
+        nota.id, hoje=date(2026, 7, 28), ignorar_aliquota=True)
+    assert resultado['status'] == 'aguardando_confirmacao'
+    assert ambiente['automacao'].preencher_etapa_pessoas.called
+
+
+def test_seguir_sem_conferir_deixa_rastro_no_log(ambiente):
+    """Se a nota sair com tributo errado, o log precisa dizer que o operador
+    seguiu sem conferir."""
+    ambiente['sessao'].aliquota_confirmada = False
+    nota = _nota()
+    nfse_service.preencher_nota(nota.id, hoje=date(2026, 7, 28), ignorar_aliquota=True)
+    eventos = [c[0][0] for c in nfse_service.log_event.call_args_list]
+    assert 'nfse_aliquota_nao_conferida' in eventos
+
+
+def test_aliquota_confirmada_nao_gera_o_aviso_no_log(ambiente):
+    nota = _nota()
+    nfse_service.preencher_nota(nota.id, hoje=date(2026, 7, 28), ignorar_aliquota=True)
+    eventos = [c[0][0] for c in nfse_service.log_event.call_args_list]
+    assert 'nfse_aliquota_nao_conferida' not in eventos
 
 
 # --- falha isola a nota (NFSE-16) ------------------------------------------

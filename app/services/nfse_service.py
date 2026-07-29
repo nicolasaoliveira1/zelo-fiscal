@@ -46,6 +46,16 @@ class NotaNaoEmitivelError(RuntimeError):
     """A nota nao esta em estado de ser preenchida. Mensagem pronta para a UI."""
 
 
+class AliquotaNaoConfirmadaError(NotaNaoEmitivelError):
+    """A aliquota do Simples nao foi conferida nesta sessao.
+
+    Subclasse propria para a rota poder devolver um motivo que a interface
+    reconhece e transformar num aviso confirmavel, em vez de um erro seco: a
+    conferencia importa (a aliquota sai na nota), mas travar o preenchimento
+    obrigaria o operador a passar pelo fluxo de abrir o portal e olhar mesmo
+    quando ele ja sabe que esta certa."""
+
+
 def _pode_emitir(nota):
     if nota.status == StatusNotaNfse.DUPLICATA and nota.duplicata_liberada:
         return
@@ -71,7 +81,7 @@ def preparar_sessao():
     }
 
 
-def preencher_nota(nota_id, hoje=None, execution_id=None):
+def preencher_nota(nota_id, hoje=None, execution_id=None, ignorar_aliquota=False):
     """Preenche uma nota no portal ate a tela de revisao e PARA (NFSE-14).
 
     Nunca clica no botao de emitir. Ao final a nota fica
@@ -83,10 +93,10 @@ def preencher_nota(nota_id, hoje=None, execution_id=None):
 
     _pode_emitir(nota)
 
-    if not SESSAO.aliquota_confirmada:
-        raise NotaNaoEmitivelError(
-            'Confira a aliquota do Simples Nacional antes de emitir: ela muda '
-            'mes a mes e sai na nota.')
+    if not SESSAO.aliquota_confirmada and not ignorar_aliquota:
+        raise AliquotaNaoConfirmadaError(
+            'A aliquota do Simples Nacional nao foi conferida nesta sessao. Ela '
+            'muda mes a mes e sai na nota.')
 
     config = nfse_config.get_config_nfse()
     descricao = nfse_config.renderizar_descricao(config, nota.competencia)
@@ -95,6 +105,12 @@ def preencher_nota(nota_id, hoje=None, execution_id=None):
     nota.status = StatusNotaNfse.PREENCHENDO
     nota.erro = None
     db.session.commit()
+
+    if ignorar_aliquota and not SESSAO.aliquota_confirmada:
+        # deixa rastro: se a nota sair com tributo errado, o log diz que o
+        # operador seguiu sem conferir
+        log_event('nfse_aliquota_nao_conferida', level='WARNING',
+                  nota_id=nota.id, execution_id=execution_id)
 
     log_event('nfse_preenchimento_inicio', nota_id=nota.id,
               competencia=nota.competencia, execution_id=execution_id)

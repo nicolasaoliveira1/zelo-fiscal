@@ -198,3 +198,64 @@ def test_falha_do_preenchimento_vira_erro_http(client, app, sessao_falsa, monkey
 def test_preencher_exige_papel_operador(login_as, client, app, sessao_falsa):
     nota_id = _nota_pronta(client, app)
     assert login_as('leitura').post(f'/nfse/nota/{nota_id}/preencher').status_code == 403
+
+
+# --- aliquota: aviso confirmavel, nao bloqueio ------------------------------
+
+def test_sem_aliquota_conferida_a_rota_devolve_motivo_reconhecivel(
+        client, app, sessao_falsa, monkeypatch):
+    """A interface precisa distinguir "nao conferiu a aliquota" (aviso que o
+    operador pode confirmar) de um erro seco — daí o campo `motivo`."""
+    nota_id = _nota_pronta(client, app)
+
+    def recusa(_id, **kw):
+        raise nfse_service.AliquotaNaoConfirmadaError('Aliquota nao conferida.')
+    monkeypatch.setattr(nfse_service, 'preencher_nota', recusa)
+
+    resposta = client.post(f'/nfse/nota/{nota_id}/preencher')
+    assert resposta.status_code == 409
+    assert resposta.get_json()['motivo'] == 'aliquota_nao_confirmada'
+
+
+def test_confirmando_o_aviso_a_rota_repassa_o_override(
+        client, app, sessao_falsa, monkeypatch):
+    recebido = {}
+
+    def registra(_id, **kw):
+        recebido.update(kw)
+        return {'status': 'aguardando_confirmacao', 'nota_id': _id, 'message': 'ok'}
+    monkeypatch.setattr(nfse_service, 'preencher_nota', registra)
+
+    nota_id = _nota_pronta(client, app)
+    resposta = client.post(f'/nfse/nota/{nota_id}/preencher',
+                           json={'ignorar_aliquota': True})
+    assert resposta.status_code == 200
+    assert recebido['ignorar_aliquota'] is True
+
+
+def test_sem_corpo_o_override_fica_desligado(client, app, sessao_falsa, monkeypatch):
+    """Clique normal em Preencher nao pode pular a conferencia por acidente."""
+    recebido = {}
+
+    def registra(_id, **kw):
+        recebido.update(kw)
+        return {'status': 'aguardando_confirmacao', 'nota_id': _id, 'message': 'ok'}
+    monkeypatch.setattr(nfse_service, 'preencher_nota', registra)
+
+    nota_id = _nota_pronta(client, app)
+    client.post(f'/nfse/nota/{nota_id}/preencher')
+    assert recebido['ignorar_aliquota'] is False
+
+
+def test_outros_motivos_de_recusa_nao_ganham_o_motivo_da_aliquota(
+        client, app, sessao_falsa, monkeypatch):
+    """Uma linha sem empresa nao pode abrir o modal da aliquota."""
+    nota_id = _nota_pronta(client, app)
+
+    def recusa(_id, **kw):
+        raise nfse_service.NotaNaoEmitivelError('Esta linha nao tem empresa vinculada.')
+    monkeypatch.setattr(nfse_service, 'preencher_nota', recusa)
+
+    resposta = client.post(f'/nfse/nota/{nota_id}/preencher')
+    assert resposta.status_code == 409
+    assert 'motivo' not in resposta.get_json()

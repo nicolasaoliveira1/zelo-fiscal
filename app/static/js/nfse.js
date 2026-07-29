@@ -45,7 +45,10 @@ async function chamar(url, opcoes = {}) {
   });
   const dados = await resposta.json().catch(() => ({}));
   if (!resposta.ok) {
-    throw new Error(dados.message || `Falha na requisição (${resposta.status}).`);
+    const erro = new Error(dados.message || `Falha na requisição (${resposta.status}).`);
+    // o corpo carrega `motivo`, que distingue um aviso confirmável de um erro seco
+    erro.dados = dados;
+    throw erro;
   }
   return dados;
 }
@@ -264,18 +267,26 @@ async function marcarEmitidaManual(id, marcar) {
   }
 }
 
-async function preencherNota(id, botao) {
-  if (!aliquotaConfirmada) {
-    showToast('Confira a alíquota do Simples antes de preencher.', 'error');
-    return;
-  }
+// Guarda a linha aguardando decisão no modal da alíquota.
+let pendenteAliquota = null;
+
+async function preencherNota(id, botao, ignorarAliquota = false) {
   botao.disabled = true;
   botao.textContent = 'Preenchendo…';
   try {
-    const dados = await chamar(`/nfse/nota/${id}/preencher`);
+    const dados = await chamar(`/nfse/nota/${id}/preencher`, {
+      body: JSON.stringify({ ignorar_aliquota: ignorarAliquota }),
+    });
     if (dados.nota) substituir(dados.nota);
     showToast('Nota preenchida. Confira no navegador e emita.', 'success');
   } catch (erro) {
+    // Alíquota não conferida é aviso, não erro: pergunta em vez de recusar, e a
+    // linha NÃO é marcada como falha — nada foi tentado no portal.
+    if (erro.dados?.motivo === 'aliquota_nao_confirmada') {
+      pendenteAliquota = id;
+      abrirModalAliquota();
+      return;
+    }
     showToast(erro.message, 'error');
     const linhaAtual = notas.find((n) => n.id === id);
     if (linhaAtual) { linhaAtual.status = 'falha'; linhaAtual.erro = erro.message; renderizar(); }
@@ -283,6 +294,21 @@ async function preencherNota(id, botao) {
     botao.disabled = false;
     botao.textContent = 'Preencher';
   }
+}
+
+function abrirModalAliquota() {
+  const el = document.getElementById('modalAliquota');
+  if (!el) { showToast('Confira a alíquota antes de preencher.', 'error'); return; }
+  bootstrap.Modal.getOrCreateInstance(el).show();
+}
+
+function fecharModalAliquota() {
+  const el = document.getElementById('modalAliquota');
+  if (el) bootstrap.Modal.getOrCreateInstance(el).hide();
+}
+
+function botaoDaLinha(id) {
+  return document.querySelector(`[data-preencher="${id}"]`);
 }
 
 // --- ligacao --------------------------------------------------------------
@@ -338,6 +364,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  document.getElementById('btnPreencherMesmoAssim')?.addEventListener('click', () => {
+    const id = pendenteAliquota;
+    pendenteAliquota = null;
+    fecharModalAliquota();
+    if (id == null) return;
+    const botao = botaoDaLinha(id);
+    if (botao) preencherNota(id, botao, true);
+  });
+
+  document.getElementById('btnConferirAliquota')?.addEventListener('click', (ev) => {
+    // não perde a linha: depois de conferir e confirmar, o operador clica em
+    // Preencher de novo e a sessão já está liberada
+    pendenteAliquota = null;
+    fecharModalAliquota();
+    prepararSessao(document.getElementById('btnPrepararSessao') || ev.currentTarget);
+  });
+
+  document.getElementById('modalAliquota')?.addEventListener('hidden.bs.modal', () => {
+    pendenteAliquota = null;
+  });
+
   document.getElementById('btnEncerrarSessao')?.addEventListener('click', async () => {
     try {
       await chamar('/nfse/sessao/encerrar');
@@ -374,7 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (alvo.dataset.liberar) liberarDuplicata(Number(alvo.dataset.liberar));
     else if (alvo.dataset.jaemitida) marcarEmitidaManual(Number(alvo.dataset.jaemitida), true);
     else if (alvo.dataset.desmarcar) marcarEmitidaManual(Number(alvo.dataset.desmarcar), false);
-    else if (alvo.dataset.preencher) preencherNota(Number(alvo.dataset.preencher), alvo);
+    else if (alvo.dataset.preencher) preencherNota(Number(alvo.dataset.preencher), alvo, false);
   });
 
   fetch('/nfse/sessao/status')
