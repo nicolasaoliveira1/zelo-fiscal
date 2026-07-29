@@ -27,12 +27,14 @@
                     <div class="col-12">
                         <label for="nome" class="form-label">Nome da Empresa</label>
                         <input type="text" class="form-control" id="nome" name="nome" required
-                               maxlength="120" autocomplete="organization">
+                               maxlength="120" autocomplete="organization"
+                               value="{{ nome_inicial | default('', true) }}">
                     </div>
 
                     <div class="col-12 col-lg-6">
                         <label for="cnpj" class="form-label">CNPJ</label>
                         <input type="text" class="form-control" id="cnpj" name="cnpj"
+                               value="{{ cnpj_inicial | default('', true) }}"
                                placeholder="XX.XXX.XXX/XXXX-XX" required
                                oninput="mascaraCnpj(this)" maxlength="18"
                                minlength="18" inputmode="numeric" autocomplete="off"

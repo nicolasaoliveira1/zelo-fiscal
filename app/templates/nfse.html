@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+{% block titulo %}NFSe{% endblock %}
+
+{% block content %}
+<style>
+    .nfse-title {
+        font-family: var(--zelo-font-display);
+        font-weight: 600;
+        letter-spacing: -0.01em;
+    }
+    .nfse-card {
+        background: var(--zelo-paper);
+        border: 1px solid var(--zelo-line);
+        border-radius: 10px;
+        padding: 1rem 1.15rem;
+    }
+    .nfse-hint {
+        color: var(--zelo-slate);
+        font-size: 0.86rem;
+    }
+    .nfse-tabela { font-size: 0.9rem; }
+    .nfse-tabela th {
+        font-weight: 600;
+        color: var(--zelo-slate);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-size: 0.72rem;
+        border-bottom: 1px solid var(--zelo-line);
+        white-space: nowrap;
+    }
+    .nfse-tabela td {
+        border-bottom: 1px solid var(--zelo-line);
+        vertical-align: middle;
+    }
+    .nfse-mono {
+        font-family: var(--zelo-font-mono);
+        font-size: 0.84rem;
+        white-space: nowrap;
+    }
+    /* A unica cor da tela e o status da nota. */
+    .nfse-status {
+        display: inline-block;
+        padding: 0.12rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.74rem;
+        font-weight: 600;
+        white-space: nowrap;
+        border: 1px solid transparent;
+    }
+    .st-pronta, .st-emitida {
+        background: var(--zelo-ok-soft); color: var(--zelo-ok);
+        border-color: var(--zelo-ok);
+    }
+    /* `pend` nao tem variante `-soft` no style.css; usa o mesmo color-mix que o
+       CSS ja aplica nas bandas de pendente (style.css:802). */
+    .st-empresa_pendente, .st-cadastro_pendente {
+        background: color-mix(in srgb, var(--zelo-pend) 12%, transparent);
+        color: var(--zelo-pend);
+        border-color: color-mix(in srgb, var(--zelo-pend) 40%, transparent);
+    }
+    .st-duplicata, .st-aguardando_confirmacao, .st-preenchendo {
+        background: var(--zelo-warn-soft); color: var(--zelo-warn);
+        border-color: var(--zelo-warn);
+    }
+    .st-invalida, .st-falha {
+        background: var(--zelo-danger-soft); color: var(--zelo-danger);
+        border-color: var(--zelo-danger);
+    }
+    .st-pulada {
+        background: var(--zelo-muted-soft); color: var(--zelo-muted);
+        border-color: var(--zelo-muted);
+    }
+    .nfse-linha-alerta { background: var(--zelo-mist); }
+    .nfse-contadores { display: flex; flex-wrap: wrap; gap: 1.25rem; }
+    .nfse-contador .valor {
+        font-family: var(--zelo-font-mono);
+        font-size: 1.35rem;
+        font-weight: 600;
+        line-height: 1.1;
+    }
+    .nfse-contador .rotulo {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--zelo-slate);
+    }
+    .nfse-acoes-linha { display: flex; gap: 0.35rem; justify-content: flex-end; }
+    .nfse-tabela-wrap { overflow-x: auto; }
+    #nfseAliquota { font-family: var(--zelo-font-mono); font-weight: 600; }
+</style>
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <h1 class="h4 mb-0 nfse-title">Emissão de NFSe</h1>
+    <button class="btn btn-ghost btn-sm" type="button" id="btnConfigNfse"
+            data-bs-toggle="collapse" data-bs-target="#painelConfig">
+        <i class="bi bi-sliders"></i> Configurações da nota
+    </button>
+</div>
+
+<!-- Configuracao dos campos fixos -->
+<div class="collapse mb-3" id="painelConfig">
+    <div class="nfse-card">
+        <p class="nfse-hint mb-3">
+            Valores fixos usados em toda nota. Só mexa aqui se o portal mudar.
+        </p>
+        <form id="formConfig" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_codigo_tributacao">Código de tributação</label>
+                <input class="form-control" id="cfg_codigo_tributacao"
+                       name="codigo_tributacao" value="{{ config.codigo_tributacao }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_item_nbs">Item da NBS</label>
+                <input class="form-control" id="cfg_item_nbs"
+                       name="item_nbs" value="{{ config.item_nbs }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_municipio_servico_codigo">Município (código)</label>
+                <input class="form-control" id="cfg_municipio_servico_codigo"
+                       name="municipio_servico_codigo" value="{{ config.municipio_servico_codigo }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_municipio_servico_nome">Município (nome)</label>
+                <input class="form-control" id="cfg_municipio_servico_nome"
+                       name="municipio_servico_nome" value="{{ config.municipio_servico_nome }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_regime_apuracao_sn">Regime de apuração</label>
+                <input class="form-control" id="cfg_regime_apuracao_sn"
+                       name="regime_apuracao_sn" value="{{ config.regime_apuracao_sn }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_piscofins_situacao">Situação PIS/COFINS</label>
+                <input class="form-control" id="cfg_piscofins_situacao"
+                       name="piscofins_situacao" value="{{ config.piscofins_situacao }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_piscofins_tipo_retencao">Retenção PIS/COFINS/CSLL</label>
+                <input class="form-control" id="cfg_piscofins_tipo_retencao"
+                       name="piscofins_tipo_retencao" value="{{ config.piscofins_tipo_retencao }}">
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="cfg_descricao_template">Descrição do serviço</label>
+                <input class="form-control" id="cfg_descricao_template"
+                       name="descricao_template" value="{{ config.descricao_template }}">
+                <div class="nfse-hint mt-1">
+                    Use <code>{competencia}</code> onde entra o mês de referência de cada nota.
+                </div>
+            </div>
+            <div class="col-12 d-flex justify-content-end">
+                <button class="btn btn-primary btn-sm" type="submit">Salvar configurações</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <!-- Importacao do extrato -->
+    <div class="col-lg-6">
+        <div class="nfse-card h-100">
+            <h2 class="h6 nfse-title mb-2">1. Importar o extrato do banco</h2>
+            <p class="nfse-hint mb-3">
+                O CSV de cobranças, como sai do banco. O CNPJ de cada tomador é
+                resolvido aqui, antes de abrir o navegador.
+            </p>
+            <form id="formImportar" class="d-flex gap-2 align-items-center flex-wrap">
+                <input class="form-control form-control-sm" type="file" id="arquivoCsv"
+                       name="arquivo" accept=".csv,text/csv" style="max-width: 22rem;">
+                <button class="btn btn-primary btn-sm" type="submit">Importar</button>
+            </form>
+            {% if lote %}
+            <div class="nfse-hint mt-2">
+                Último import: <strong>{{ lote.nome_arquivo }}</strong>
+                — {{ lote.criado_em.strftime('%d/%m/%Y %H:%M') }}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Sessao do navegador -->
+    <div class="col-lg-6">
+        <div class="nfse-card h-100">
+            <h2 class="h6 nfse-title mb-2">2. Abrir o portal e conferir a alíquota</h2>
+            <p class="nfse-hint mb-3">
+                Abre o Emissor Nacional com o certificado. A alíquota do Simples muda
+                mês a mês e sai na nota — nada é preenchido antes de você conferir.
+            </p>
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+                <button class="btn btn-soft-primary btn-sm" type="button" id="btnPrepararSessao">
+                    Abrir portal
+                </button>
+                <span class="nfse-hint">Alíquota:</span>
+                <span id="nfseAliquota">—</span>
+                <button class="btn btn-primary btn-sm d-none" type="button" id="btnConfirmarAliquota">
+                    Está correta
+                </button>
+                <button class="btn btn-ghost btn-sm" type="button" id="btnEncerrarSessao">
+                    Encerrar sessão
+                </button>
+            </div>
+            <div class="nfse-hint mt-2" id="nfseSessaoEstado"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Contadores -->
+<div class="nfse-card mb-3">
+    <div class="nfse-contadores" id="nfseContadores">
+        <div class="nfse-contador">
+            <div class="valor" data-contador="total">{{ resumo.total }}</div>
+            <div class="rotulo">Notas</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="pronta">{{ resumo.por_status.get('pronta', 0) }}</div>
+            <div class="rotulo">Prontas</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="empresa_pendente">{{ resumo.por_status.get('empresa_pendente', 0) }}</div>
+            <div class="rotulo">Sem empresa</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="duplicata">{{ resumo.por_status.get('duplicata', 0) }}</div>
+            <div class="rotulo">Duplicatas</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="emitida">{{ resumo.por_status.get('emitida', 0) }}</div>
+            <div class="rotulo">Emitidas</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="divergencias">{{ resumo.divergencias }}</div>
+            <div class="rotulo">Divergências</div>
+        </div>
+    </div>
+</div>
+
+<!-- Tabela de conferencia -->
+<div class="nfse-card">
+    <h2 class="h6 nfse-title mb-3">3. Conferir e preencher</h2>
+    <div class="nfse-tabela-wrap">
+        <table class="table table-sm align-middle nfse-tabela mb-0" id="tabelaNotas">
+            <thead>
+                <tr>
+                    <th>Nome no banco</th>
+                    <th>Empresa</th>
+                    <th>CNPJ</th>
+                    <th>Competência</th>
+                    <th class="text-end">Valor</th>
+                    <th>Status</th>
+                    <th class="text-end">Ação</th>
+                </tr>
+            </thead>
+            <tbody id="corpoNotas"></tbody>
+        </table>
+    </div>
+    <p class="nfse-hint mt-3 mb-0" id="nfseVazio">
+        Nenhuma nota importada ainda. Comece pelo passo 1.
+    </p>
+</div>
+
+<script type="application/json" id="dadosNotas">{{ notas | tojson }}</script>
+<script type="application/json" id="dadosEmpresas">{{ empresas | tojson }}</script>
+<script type="module" src="{{ static_versionado('js/nfse.js') }}"></script>
+{% endblock %}

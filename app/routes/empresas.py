@@ -245,7 +245,15 @@ def pagina_nova_empresa():
         if exibicao not in vistos:
             vistos.add(exibicao)
             municipios.append((m.nome, exibicao))
-    return render_template('nova_empresa.html', municipios=municipios)
+    # Pre-preenchimento opcional vindo da NFSe (NFSE-23): a linha do extrato ja
+    # tem nome e CNPJ, entao o operador nao redigita. Sem querystring, a pagina
+    # se comporta exatamente como antes.
+    return render_template(
+        'nova_empresa.html',
+        municipios=municipios,
+        nome_inicial=(request.args.get('nome') or '').strip(),
+        cnpj_inicial=(request.args.get('cnpj') or '').strip(),
+    )
 
 
 @bp.route('/empresa/adicionar', methods=['POST'])
