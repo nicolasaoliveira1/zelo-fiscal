@@ -20,6 +20,13 @@ from selenium.webdriver.common.by import By
 from app.automation import nfse
 
 
+@pytest.fixture(autouse=True)
+def _espera_curta(monkeypatch):
+    """Encurta a espera pelo portal: os casos de falha segurariam a suite pelo
+    timeout real de 15s cada, e teste lento e teste que ninguem roda."""
+    monkeypatch.setattr(nfse, 'TIMEOUT_AUTOPREENCHIMENTO', 0.05)
+
+
 def _driver(url='', valor_chosen=None, elemento=None, falha_find=False):
     driver = MagicMock()
     driver.current_url = url
@@ -108,11 +115,28 @@ def test_preencher_limpa_escreve_e_sai_do_campo():
     from selenium.webdriver.common.keys import Keys
     elemento = MagicMock()
     driver = _driver(elemento=elemento)
+    elemento.parent = driver
     nfse._preencher(driver, 'Tomador_Inscricao', '33.684.001/0001-51')
 
     assert elemento.clear.called
     enviados = [chamada.args[0] for chamada in elemento.send_keys.call_args_list]
-    assert enviados == ['33.684.001/0001-51', Keys.ESCAPE, Keys.TAB]
+    assert enviados == ['33.684.001/0001-51', Keys.ESCAPE]
+
+
+def test_sair_do_campo_nao_usa_tab():
+    """Ao lado do campo de data existe o botao "Abrir calendario": o TAB leva o
+    foco para ele em vez de sair do campo, e o portal nao processa o valor.
+    O blur e feito por JS justamente para nao mexer no foco."""
+    from selenium.webdriver.common.keys import Keys
+    elemento = MagicMock()
+    driver = _driver(elemento=elemento)
+    elemento.parent = driver
+    nfse._preencher(driver, 'DataCompetencia', '28/07/2026')
+
+    enviados = [chamada.args[0] for chamada in elemento.send_keys.call_args_list]
+    assert Keys.TAB not in enviados
+    script = driver.execute_script.call_args[0][0]
+    assert 'blur' in script and 'change' in script
 
 
 def test_preencher_sem_sair_nao_manda_teclas():

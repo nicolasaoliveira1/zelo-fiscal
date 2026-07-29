@@ -112,32 +112,68 @@ def _preencher(driver, elemento_id, valor, sair=True):
     - o portal so processa o valor quando o campo perde o foco — e e isso que
       dispara o preenchimento automatico do emitente e do tomador (TAB).
     """
+    if not _esperar_interagivel(driver, elemento_id):
+        raise InteracaoPortalError(
+            f'O campo "{elemento_id}" nao ficou disponivel para preenchimento. '
+            'A tela pode nao ter terminado de carregar ou o campo depende de '
+            'uma escolha anterior que nao foi aplicada.')
     try:
         elemento = driver.find_element(By.ID, elemento_id)
+        elemento.clear()
+        elemento.send_keys(str(valor))
     except WebDriverException as exc:
         raise InteracaoPortalError(
-            f'Campo "{elemento_id}" nao encontrado na pagina.') from exc
-    elemento.clear()
-    elemento.send_keys(str(valor))
+            f'Nao foi possivel preencher o campo "{elemento_id}": '
+            f'{(str(exc).strip().splitlines() or [""])[0]}') from exc
     if sair:
         _sair_do_campo(elemento)
     return elemento
 
 
+_JS_SAIR = (
+    "arguments[0].dispatchEvent(new Event('input', {bubbles: true}));"
+    "arguments[0].dispatchEvent(new Event('change', {bubbles: true}));"
+    "arguments[0].blur();"
+    "arguments[0].dispatchEvent(new Event('focusout', {bubbles: true}));"
+)
+
+
 def _sair_do_campo(elemento):
-    """Fecha overlay (datepicker) e tira o foco, para o portal processar."""
+    """Fecha overlay e tira o foco, para o portal processar o valor.
+
+    ESC pelo teclado (fecha o datepicker, que so responde a tecla real) e o
+    blur por JS. Deliberadamente NAO usa TAB: ao lado do campo de data existe o
+    botao "Abrir calendario", e o TAB leva o foco justamente para ele — o campo
+    nunca chega a sair de foco de verdade e o portal nao processa o valor.
+    """
     from selenium.webdriver.common.keys import Keys
     try:
         elemento.send_keys(Keys.ESCAPE)
-        elemento.send_keys(Keys.TAB)
     except WebDriverException:
-        # ultimo recurso: dispara os eventos direto, sem teclado
+        pass
+    try:
+        elemento.parent.execute_script(_JS_SAIR, elemento)
+    except WebDriverException:
+        pass
+
+
+def _esperar_interagivel(driver, elemento_id, timeout=None, intervalo=0.2):
+    """Espera o campo estar visivel e habilitado.
+
+    Existir no DOM nao basta: partes do formulario so sao reveladas depois de
+    outra escolha (os campos do tomador aparecem apos marcar "Brasil"), e
+    digitar antes disso levanta "element not interactable".
+    """
+    timeout = TIMEOUT_AUTOPREENCHIMENTO if timeout is None else timeout
+
+    def pronto():
         try:
-            elemento.parent.execute_script(
-                "arguments[0].dispatchEvent(new Event('change', {bubbles: true}));"
-                "arguments[0].blur();", elemento)
+            elemento = driver.find_element(By.ID, elemento_id)
+            return bool(elemento.is_displayed() and elemento.is_enabled())
         except WebDriverException:
-            pass
+            return False
+
+    return esperar(pronto, timeout=timeout, intervalo=intervalo)
 
 
 def _esperar_preenchido(driver, elemento_id, timeout=None, intervalo=0.3):
@@ -332,7 +368,10 @@ def preencher_etapa_pessoas(driver, nota, config, data_competencia, pausa=None):
 
     _set_chosen(driver, 'SimplesNacional_RegimeApuracaoTributosSN',
                 config.regime_apuracao_sn)
-    _marcar_radio(driver, 'Tomador.LocalDomicilio', '1')  # Brasil
+
+    # Marcar "Brasil" e o que REVELA os campos do tomador; o _preencher abaixo
+    # ja espera o CNPJ ficar interagivel antes de digitar.
+    _marcar_radio(driver, 'Tomador.LocalDomicilio', '1')
     _preencher(driver, 'Tomador_Inscricao', nota.documento)
 
     # mesma logica: o nome/endereco do tomador vem do portal apos o documento

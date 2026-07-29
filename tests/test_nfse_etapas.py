@@ -58,6 +58,9 @@ class DriverEspiao:
             'Prestador_Inscricao': '94.645.405/0001-20',
             'Tomador_Nome': 'L. LUIS PETRY',
         }
+        # campos que o portal ainda nao revelou / mantem travados
+        self.ocultos = set()
+        self.desabilitados = set()
         self.preenchidos = {}
         self.chosen = {}
         self.selects = {}
@@ -80,6 +83,8 @@ class DriverEspiao:
             self.preenchidos.get(valor, self.autopreenchidos.get(valor, ''))
             if attr == 'value' else None)
         elemento.click.side_effect = lambda: self.clicados.append(valor)
+        elemento.is_displayed.side_effect = lambda: valor not in self.ocultos
+        elemento.is_enabled.side_effect = lambda: valor not in self.desabilitados
         if valor.startswith('input[name='):
             nome = valor.split('"')[1]
             marcado = valor.split('"')[3]
@@ -248,10 +253,11 @@ def test_nenhuma_etapa_toca_os_campos_intocaveis(driver):
 def test_sai_do_campo_depois_de_digitar(driver):
     """Bug relatado no uso real: sem sair do campo da data, o portal nao
     processa o valor e os campos seguintes ficam nao-interagiveis
-    ('element not interactable'). O datepicker aberto ainda cobre o proximo
-    campo — por isso ESC antes do TAB."""
+    ("element not interactable"). ESC fecha o datepicker; o blur e por JS
+    porque o TAB levaria o foco para o botao "Abrir calendario" ao lado."""
     from selenium.webdriver.common.keys import Keys
     enviados = []
+    scripts = []
 
     class Espiao(DriverEspiao):
         def find_element(self, by, valor):
@@ -261,11 +267,32 @@ def test_sai_do_campo_depois_de_digitar(driver):
                                                         original(t))[1]
             return elemento
 
+        def execute_script(self, script, *args):
+            scripts.append(script)
+            return super().execute_script(script, *args)
+
     nfse.preencher_etapa_pessoas(Espiao(), NOTA, CONFIG, date(2026, 7, 28))
+
     teclas_da_data = [t for campo, t in enviados if campo == 'DataCompetencia']
     assert Keys.ESCAPE in teclas_da_data, 'datepicker aberto cobre o proximo campo'
-    assert Keys.TAB in teclas_da_data, 'sem sair do campo o portal nao processa a data'
-    assert teclas_da_data.index(Keys.ESCAPE) < teclas_da_data.index(Keys.TAB)
+    assert Keys.TAB not in teclas_da_data, 'TAB cai no botao de abrir calendario'
+    assert any('blur' in s for s in scripts), 'o portal so processa no blur'
+
+
+def test_espera_o_campo_ficar_interagivel_antes_de_digitar(driver):
+    """Os campos do tomador so aparecem depois de marcar "Brasil". Digitar
+    antes disso e exatamente o "element not interactable" relatado."""
+    driver.ocultos.add('Tomador_Inscricao')
+    with pytest.raises(nfse.InteracaoPortalError) as exc:
+        nfse.preencher_etapa_pessoas(driver, NOTA, CONFIG, date(2026, 7, 28))
+    assert 'Tomador_Inscricao' in str(exc.value)
+    assert 'btnAvancar' not in driver.clicados
+
+
+def test_campo_desabilitado_tambem_e_esperado(driver):
+    driver.desabilitados.add('Tomador_Inscricao')
+    with pytest.raises(nfse.InteracaoPortalError):
+        nfse.preencher_etapa_pessoas(driver, NOTA, CONFIG, date(2026, 7, 28))
 
 
 def test_espera_o_portal_carregar_o_emitente_antes_de_seguir(driver):
