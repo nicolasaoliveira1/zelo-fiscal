@@ -168,3 +168,113 @@ def test_deteccao_nao_levanta_com_driver_morto():
 def test_paths_de_revisao_e_confirmacao_sao_distintos():
     assert nfse.PATH_REVISAO != nfse.PATH_CONFIRMACAO
     assert nfse.PATH_CONFIRMACAO not in nfse.PATH_REVISAO
+
+
+# --- espera com cancelamento ----------------------------------------------
+
+def test_esperar_retorna_true_assim_que_a_condicao_vira():
+    chamadas = []
+
+    def condicao():
+        chamadas.append(1)
+        return len(chamadas) >= 2
+
+    assert nfse.esperar(condicao, timeout=5, intervalo=0)
+    assert len(chamadas) == 2
+
+
+def test_esperar_retorna_false_no_timeout():
+    assert not nfse.esperar(lambda: False, timeout=0, intervalo=0)
+
+
+def test_esperar_desiste_quando_cancelado():
+    """Base do pausar/parar durante a espera pela confirmacao humana (P2).
+
+    Precisa medir o TEMPO, nao so o retorno: com um timeout longo, "cancelou"
+    e "estourou o timeout" devolvem False do mesmo jeito, e a assercao passaria
+    mesmo se o cancelamento fosse ignorado.
+    """
+    import time
+    inicio = time.monotonic()
+    assert not nfse.esperar(lambda: False, timeout=30, intervalo=0.1,
+                            cancelado=lambda: True)
+    assert time.monotonic() - inicio < 1, 'desistiu por timeout, nao por cancelamento'
+
+
+def test_esperar_checa_cancelamento_antes_da_condicao():
+    condicao = MagicMock(return_value=True)
+    assert not nfse.esperar(condicao, timeout=9, intervalo=0, cancelado=lambda: True)
+    assert not condicao.called
+
+
+# --- login por certificado -------------------------------------------------
+
+def _driver_login(urls):
+    """Driver cujo current_url percorre a sequencia dada a cada leitura."""
+    driver = MagicMock()
+    sequencia = list(urls)
+
+    def proxima(_self):
+        return sequencia.pop(0) if len(sequencia) > 1 else sequencia[0]
+
+    type(driver).current_url = property(proxima)
+    return driver
+
+
+def test_login_abre_o_portal_e_clica_no_link_do_certificado():
+    link = MagicMock()
+    driver = _driver_login([nfse.URL_LOGIN, 'https://x/EmissorNacional/Dashboard'])
+    driver.find_element.return_value = link
+
+    nfse.login_certificado(driver, timeout=1, intervalo=0)
+
+    driver.get.assert_called_once_with(nfse.URL_LOGIN)
+    by, seletor = driver.find_element.call_args[0]
+    assert (by, seletor) == (By.CSS_SELECTOR, nfse.SEL_LINK_CERTIFICADO)
+    assert link.click.called
+
+
+def test_login_levanta_quando_nao_chega_ao_painel():
+    driver = _driver_login(['https://x/EmissorNacional/Login'])
+    driver.find_element.return_value = MagicMock()
+    with pytest.raises(nfse.LoginNfseError) as exc:
+        nfse.login_certificado(driver, timeout=0, intervalo=0)
+    # a acao precisa citar o e-CNPJ: confundir com o e-CPF do RS ja aconteceu
+    assert 'CNPJ' in (exc.value.acao or '')
+
+
+def test_login_levanta_quando_o_link_do_certificado_sumiu():
+    driver = _driver_login(['https://x/EmissorNacional/Login'])
+    driver.find_element.side_effect = NoSuchElementException('sumiu')
+    with pytest.raises(nfse.LoginNfseError):
+        nfse.login_certificado(driver, timeout=0, intervalo=0)
+
+
+def test_login_nao_preenche_nada_quando_falha():
+    driver = _driver_login(['https://x/EmissorNacional/Login'])
+    driver.find_element.return_value = MagicMock()
+    with pytest.raises(nfse.LoginNfseError):
+        nfse.login_certificado(driver, timeout=0, intervalo=0)
+    # so navegou para o login: nenhuma outra pagina foi aberta
+    assert driver.get.call_count == 1
+
+
+# --- leitura da aliquota ---------------------------------------------------
+
+def test_le_a_aliquota_do_perfil():
+    elemento = MagicMock()
+    elemento.get_attribute.return_value = '3,87'
+    driver = _driver(elemento=elemento)
+    assert nfse.ler_aliquota_simples(driver) == '3,87'
+    driver.get.assert_called_once_with(nfse.URL_CONFIGURACAO)
+
+
+def test_aliquota_ausente_devolve_none_e_nao_levanta():
+    """None nunca pode virar zero: quem chama pede confirmacao manual."""
+    assert nfse.ler_aliquota_simples(_driver(falha_find=True)) is None
+
+
+def test_aliquota_em_branco_devolve_none():
+    elemento = MagicMock()
+    elemento.get_attribute.return_value = '   '
+    assert nfse.ler_aliquota_simples(_driver(elemento=elemento)) is None

@@ -140,3 +140,86 @@ def detectar_emitida(driver):
     E o sinal que faz o lote assistido avancar para a proxima nota (P2). Exige
     o botao de download do DANFSe, que so existe depois da emissao."""
     return PATH_CONFIRMACAO in _url(driver) and _tem_elemento(driver, ID_BTN_DANFSE)
+
+
+# --- espera generica -------------------------------------------------------
+
+def esperar(condicao, timeout=30, intervalo=0.5, cancelado=None):
+    """Espera `condicao()` virar verdadeira. False se estourar o timeout.
+
+    Nao usa WebDriverWait de proposito: precisa aceitar um callback
+    `cancelado()` para responder a pausar/parar do lote enquanto aguarda a
+    confirmacao humana (P2), e ser exercitavel com driver falso.
+    """
+    import time
+    limite = time.monotonic() + timeout
+    while True:
+        if cancelado is not None and cancelado():
+            return False
+        if condicao():
+            return True
+        if time.monotonic() >= limite:
+            return False
+        time.sleep(intervalo)
+
+
+# --- login por certificado -------------------------------------------------
+
+class LoginNfseError(RuntimeError):
+    """Nao foi possivel autenticar no portal com o certificado.
+
+    Erro acionavel: nenhuma nota e preenchida depois disso (NFSE-11)."""
+
+    def __init__(self, mensagem, acao=None):
+        super().__init__(mensagem)
+        self.mensagem = mensagem
+        self.acao = acao
+
+
+def logado(driver):
+    return PATH_DASHBOARD in _url(driver)
+
+
+def login_certificado(driver, timeout=40, intervalo=0.5):
+    """Abre o login e entra pelo certificado digital.
+
+    O clique e no link de acesso por certificado; a escolha do certificado em
+    si acontece FORA do DOM — e o dialogo nativo do Chrome, resolvido pela
+    policy de registro aplicada antes de abrir o navegador (cert_policy).
+    Sem a policy, o dialogo trava aqui ate o timeout.
+    """
+    driver.get(URL_LOGIN)
+    try:
+        driver.find_element(By.CSS_SELECTOR, SEL_LINK_CERTIFICADO).click()
+    except WebDriverException as exc:
+        raise LoginNfseError(
+            'Link de acesso por certificado nao encontrado na tela de login.',
+            acao='O portal pode ter mudado a tela; refaca a recon.') from exc
+
+    if not esperar(lambda: logado(driver), timeout=timeout, intervalo=intervalo):
+        raise LoginNfseError(
+            'O portal nao chegou ao painel apos o acesso por certificado.',
+            acao='Confira se o certificado da NFSe esta instalado e valido e se '
+                 'as variaveis NFSE_CERT_AUTOSELECT_* apontam para o e-CNPJ '
+                 'correto (o do RS e um e-CPF diferente).')
+    return True
+
+
+def ler_aliquota_simples(driver):
+    """Le a aliquota do Simples configurada no perfil do emitente.
+
+    Devolve o texto como esta no portal (ex.: '3,87') ou None se nao der para
+    ler. None NAO e tratado como zero em lugar nenhum: quem chama pede
+    confirmacao manual ao operador em vez de seguir calado (NFSE-12).
+    """
+    driver.get(URL_CONFIGURACAO)
+    try:
+        elemento = driver.find_element(By.ID, ID_ALIQUOTA_SN)
+    except WebDriverException:
+        return None
+    try:
+        valor = elemento.get_attribute('value')
+    except WebDriverException:
+        return None
+    valor = (valor or '').strip()
+    return valor or None
