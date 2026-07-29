@@ -223,3 +223,110 @@ def ler_aliquota_simples(driver):
         return None
     valor = (valor or '').strip()
     return valor or None
+
+
+# --- etapas do assistente DPS ---------------------------------------------
+
+# Campos que o portal ja traz corretos e que a automacao NAO deve tocar.
+# Mexer neles reabre secoes condicionais do formulario e muda a nota.
+CAMPOS_INTOCAVEIS = (
+    'ISSQN.HaSuspensao',            # ja vem "Nao"
+    'ISSQN.HaBeneficioMunicipal',   # ja vem "Nao"
+    'ISSQN_TributacaoISSQN',        # ja vem "Operacao Tributavel"
+    'ISSQN_RegimeEspecial',         # ja vem "Nenhum"
+    'ValorTributos.TipoValorTributos',  # ja vem "Informar aliquota do Simples"
+    'ISSQN_BaseDeCalculo',          # calculados e bloqueados pelo portal
+    'ISSQN_Valor',
+    'ISSQN_Aliquota',
+)
+
+
+def formatar_valor(valor):
+    """Decimal('826.09') -> '826,09' (o portal usa o padrao brasileiro)."""
+    return f'{valor:.2f}'.replace('.', ',')
+
+
+def formatar_data(data):
+    return data.strftime('%d/%m/%Y')
+
+
+def abrir_nova_dps(driver):
+    driver.get(URL_NOVA_DPS)
+
+
+def _avancar(driver):
+    try:
+        driver.find_element(By.ID, ID_BTN_AVANCAR).click()
+    except WebDriverException as exc:
+        raise InteracaoPortalError('Botao "Avancar" nao encontrado.') from exc
+
+
+def preencher_etapa_pessoas(driver, nota, config, data_competencia, pausa=None):
+    """Etapa 1: competencia, regime de apuracao e tomador.
+
+    `data_competencia` e a data da EMISSAO (hoje) — nao confundir com a
+    competencia da descricao, que vem do vencimento. Emitente, nome do tomador
+    e endereco sao preenchidos pelo proprio portal apos a data e o CNPJ; a
+    automacao nao os toca.
+    """
+    _preencher(driver, 'DataCompetencia', formatar_data(data_competencia))
+    if pausa:
+        pausa()
+    _set_chosen(driver, 'SimplesNacional_RegimeApuracaoTributosSN',
+                config.regime_apuracao_sn)
+    _marcar_radio(driver, 'Tomador.LocalDomicilio', '1')  # Brasil
+    _preencher(driver, 'Tomador_Inscricao', nota.cnpj)
+    if pausa:
+        pausa()
+    _avancar(driver)
+
+
+def preencher_etapa_servico(driver, nota, config, descricao, pausa=None):
+    """Etapa 2: local, codigo de tributacao, descricao e item da NBS.
+
+    Municipio e codigo de tributacao sao selects VISIVEIS (nao usam Chosen);
+    o item da NBS e Chosen com 919 opcoes.
+    """
+    from selenium.webdriver.support.ui import Select
+
+    _selecionar_visivel(driver, Select, 'LocalPrestacao_CodigoMunicipioPrestacao',
+                        config.municipio_servico_codigo)
+    _selecionar_visivel(driver, Select, 'ServicoPrestado_CodigoTributacaoNacional',
+                        config.codigo_tributacao)
+    # "Nao" para imunidade/exportacao: ja e o default, mas marcar explicitamente
+    # evita depender de o portal manter esse default.
+    _marcar_radio(driver, 'ServicoPrestado.HaExportacaoImunidadeNaoIncidencia', '0')
+    _preencher(driver, 'ServicoPrestado_Descricao', descricao)
+    _set_chosen(driver, 'ServicoPrestado_CodigoNBS', config.item_nbs)
+    if pausa:
+        pausa()
+    _avancar(driver)
+
+
+def preencher_etapa_tributacao(driver, nota, config, pausa=None):
+    """Etapa 3: valor do servico e retencoes.
+
+    A retencao do ISSQN NAO vem marcada (nem Sim nem Nao) — e obrigatoria.
+    Os campos de base de calculo/valor/aliquota do ISSQN sao calculados e
+    bloqueados pelo portal; a automacao nao os toca.
+    """
+    _preencher(driver, 'Valores_ValorServico', formatar_valor(nota.valor_final))
+    _marcar_radio(driver, 'ISSQN.HaRetencao', '0')  # Nao
+    _set_chosen(driver, 'TributacaoFederal_PISCofins_SituacaoTributaria',
+                config.piscofins_situacao)
+    _set_chosen(driver, 'TributacaoFederal_PISCofins_TipoRetencao',
+                config.piscofins_tipo_retencao)
+    if pausa:
+        pausa()
+    _avancar(driver)
+
+
+def _selecionar_visivel(driver, Select, elemento_id, valor):
+    """Select comum (sem Chosen), conferindo o valor depois de escolher."""
+    try:
+        elemento = driver.find_element(By.ID, elemento_id)
+    except WebDriverException as exc:
+        raise InteracaoPortalError(
+            f'Campo "{elemento_id}" nao encontrado na pagina.') from exc
+    Select(elemento).select_by_value(str(valor))
+    return elemento
