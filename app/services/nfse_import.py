@@ -277,3 +277,106 @@ def resolver_empresa(nome, empresas, apelidos=None):
     if len(empatadas) != 1:
         return Vinculo()
     return Vinculo(empatadas[0], OrigemVinculoNfse.FUZZY, int(melhor))
+
+
+# --- importacao transacional (NFSE-04..07) ---------------------------------
+
+# Tolerancia da conferencia F + G - H == I. Um centavo cobre arredondamento do
+# extrato sem deixar passar erro real.
+TOLERANCIA_VALOR = Decimal('0.01')
+
+
+def _divergiu(linha):
+    """True quando a soma das parcelas nao bate com o valor final do extrato.
+
+    Nao muda o valor a emitir (a coluna I manda): e rede de seguranca contra
+    CSV corrompido, sinalizada para o operador conferir."""
+    parcelas = (linha.valor_titulo, linha.acrescimos, linha.deducoes, linha.valor_final)
+    if any(parcela is None for parcela in parcelas):
+        return False
+    esperado = linha.valor_titulo + linha.acrescimos - linha.deducoes
+    return abs(esperado - linha.valor_final) > TOLERANCIA_VALOR
+
+
+def _competencias_ja_emitidas():
+    """(empresa_id, competencia) das notas ja EMITIDAS — base da trava (ND-004)."""
+    from app.models import NotaNfse, StatusNotaNfse
+    consulta = (NotaNfse.query
+                .filter(NotaNfse.status == StatusNotaNfse.EMITIDA)
+                .with_entities(NotaNfse.empresa_id, NotaNfse.competencia))
+    return {(empresa_id, competencia) for empresa_id, competencia in consulta
+            if empresa_id is not None}
+
+
+def importar(conteudo, nome_arquivo=None, execution_id=None):
+    """Le o extrato, resolve os CNPJs e persiste lote + notas numa transacao.
+
+    Arquivo invalido levanta `ArquivoInvalidoError` ANTES de qualquer escrita:
+    nunca sobra lote parcial (NFSE-07). Devolve o `LoteNfse` criado.
+    """
+    from app import db
+    from app.models import ApelidoNfse, Empresa, LoteNfse, NotaNfse, StatusNotaNfse
+
+    # parse primeiro: se o arquivo nao presta, nada e persistido
+    linhas = parse_csv(conteudo)
+
+    empresas = Empresa.query.all()
+    apelidos = ApelidoNfse.query.all()
+    emitidas = _competencias_ja_emitidas()
+    vistas_no_lote = {}
+
+    lote = LoteNfse(nome_arquivo=nome_arquivo, total=len(linhas), execution_id=execution_id)
+    db.session.add(lote)
+
+    try:
+        for linha in linhas:
+            nota = _montar_nota(linha, empresas, apelidos, NotaNfse, StatusNotaNfse)
+            nota.lote = lote
+
+            chave = (nota.empresa_id, nota.competencia)
+            if nota.empresa_id is not None and nota.status == StatusNotaNfse.PRONTA:
+                if chave in emitidas or chave in vistas_no_lote:
+                    nota.status = StatusNotaNfse.DUPLICATA
+                    nota.duplicata_de_id = vistas_no_lote.get(chave)
+                else:
+                    vistas_no_lote[chave] = None
+            db.session.add(nota)
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+    return lote
+
+
+def _montar_nota(linha, empresas, apelidos, NotaNfse, StatusNotaNfse):
+    nota = NotaNfse(
+        nome_csv=linha.nome or None,
+        nome_csv_norm=linha.nome_norm or None,
+        data_pagamento=linha.data_pagamento,
+        vencimento=linha.vencimento,
+        valor_titulo=linha.valor_titulo,
+        acrescimos=linha.acrescimos,
+        deducoes=linha.deducoes,
+        valor_final=linha.valor_final,
+        divergencia_valor=_divergiu(linha),
+    )
+
+    if linha.invalida:
+        nota.status = StatusNotaNfse.INVALIDA
+        nota.erro = linha.motivo
+        return nota
+
+    nota.competencia = competencia_da_descricao(linha.vencimento)
+
+    vinculo = resolver_empresa(linha.nome, empresas, apelidos)
+    if not vinculo.resolvido:
+        nota.status = StatusNotaNfse.EMPRESA_PENDENTE
+        return nota
+
+    nota.empresa_id = vinculo.empresa.id
+    nota.cnpj = vinculo.empresa.cnpj
+    nota.origem_vinculo = vinculo.origem
+    nota.score_match = vinculo.score
+    nota.status = StatusNotaNfse.PRONTA
+    return nota
