@@ -28,13 +28,23 @@ def _espera_curta(monkeypatch):
 
 
 def _driver(url='', valor_chosen=None, elemento=None, falha_find=False):
+    """Driver falso.
+
+    Implementa `find_elements` (plural) alem do singular: o modulo passou a
+    procurar TODOS os elementos que casam e escolher o visivel, porque o portal
+    repete `id` entre as etapas do assistente.
+    """
     driver = MagicMock()
     driver.current_url = url
     driver.execute_script.return_value = valor_chosen
     if falha_find:
         driver.find_element.side_effect = NoSuchElementException('nao achou')
+        driver.find_elements.return_value = []
     elif elemento is not None:
         driver.find_element.return_value = elemento
+        driver.find_elements.return_value = [elemento]
+    else:
+        driver.find_elements.return_value = [MagicMock()]
     return driver
 
 
@@ -87,7 +97,7 @@ def test_marcar_radio_localiza_por_name_e_value_nao_por_id():
     driver = _driver(elemento=elemento)
     nfse._marcar_radio(driver, 'Tomador.LocalDomicilio', '1')
 
-    by, seletor = driver.find_element.call_args[0]
+    by, seletor = driver.find_elements.call_args[0]
     assert by == By.CSS_SELECTOR, 'radio nao pode ser localizado por id'
     assert seletor == 'input[name="Tomador.LocalDomicilio"][value="1"]'
 
@@ -314,3 +324,68 @@ def test_aliquota_em_branco_devolve_none():
     elemento = MagicMock()
     elemento.get_attribute.return_value = '   '
     assert nfse.ler_aliquota_simples(_driver(elemento=elemento)) is None
+
+
+# --- id duplicado entre etapas: usar o VISIVEL -----------------------------
+
+def test_localiza_o_elemento_visivel_e_nao_o_primeiro_do_dom():
+    """O portal repete id entre as etapas do assistente (ja confirmado nos
+    radios). Pegar o primeiro do DOM entrega um elemento de uma etapa oculta:
+    o clique falha, ou pior, acontece num campo que ninguem esta vendo."""
+    oculto = MagicMock()
+    oculto.is_displayed.return_value = False
+    visivel = MagicMock()
+    visivel.is_displayed.return_value = True
+    visivel.is_enabled.return_value = True
+
+    driver = MagicMock()
+    driver.find_elements.return_value = [oculto, visivel]
+    assert nfse._localizar(driver, By.ID, 'btnAvancar') is visivel
+
+
+def test_elemento_so_desabilitado_tambem_e_ignorado():
+    desabilitado = MagicMock()
+    desabilitado.is_displayed.return_value = True
+    desabilitado.is_enabled.return_value = False
+    driver = MagicMock()
+    driver.find_elements.return_value = [desabilitado]
+    assert nfse._localizar(driver, By.ID, 'x') is None
+
+
+def test_avancar_rola_ate_o_botao_antes_de_clicar():
+    """O botao fica no fim de um formulario longo."""
+    botao = MagicMock()
+    botao.is_displayed.return_value = True
+    botao.is_enabled.return_value = True
+    driver = MagicMock()
+    driver.find_elements.return_value = [botao]
+
+    nfse._avancar(driver)
+    scripts = [c[0][0] for c in driver.execute_script.call_args_list]
+    assert any('scrollIntoView' in s for s in scripts)
+    assert botao.click.called
+
+
+def test_avancar_cai_para_clique_por_js_quando_o_nativo_falha():
+    """Aviso ou rodape fixo por cima interceptam o clique nativo."""
+    from selenium.common.exceptions import ElementClickInterceptedException
+    botao = MagicMock()
+    botao.is_displayed.return_value = True
+    botao.is_enabled.return_value = True
+    botao.click.side_effect = ElementClickInterceptedException('coberto')
+    driver = MagicMock()
+    driver.find_elements.return_value = [botao]
+
+    nfse._avancar(driver)
+    scripts = [c[0][0] for c in driver.execute_script.call_args_list]
+    assert any('click' in s for s in scripts), 'sem fallback o avanco morreria aqui'
+
+
+def test_avancar_sem_botao_visivel_da_mensagem_certa():
+    """A mensagem antiga dizia "nao encontrado" tanto para ausencia quanto para
+    clique falho — e mandava investigar o lado errado."""
+    driver = MagicMock()
+    driver.find_elements.return_value = []
+    with pytest.raises(nfse.InteracaoPortalError) as exc:
+        nfse._avancar(driver)
+    assert 'nao esta disponivel' in str(exc.value)

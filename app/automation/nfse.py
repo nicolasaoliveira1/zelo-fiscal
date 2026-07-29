@@ -92,11 +92,10 @@ def _marcar_radio(driver, name, valor):
 
     NUNCA por id: no portal os tres radios do mesmo grupo compartilham o id."""
     seletor = f'input[name="{name}"][value="{valor}"]'
-    try:
-        elemento = driver.find_element(By.CSS_SELECTOR, seletor)
-    except WebDriverException as exc:
+    elemento = _localizar(driver, By.CSS_SELECTOR, seletor)
+    if elemento is None:
         raise InteracaoPortalError(
-            f'Opcao "{valor}" do grupo "{name}" nao encontrada na pagina.') from exc
+            f'Opcao "{valor}" do grupo "{name}" nao esta disponivel nesta tela.')
     driver.execute_script('arguments[0].click();', elemento)
     return elemento
 
@@ -118,10 +117,10 @@ def _preencher(driver, elemento_id, valor, sair=True):
             'A tela pode nao ter terminado de carregar ou o campo depende de '
             'uma escolha anterior que nao foi aplicada.')
     try:
-        elemento = driver.find_element(By.ID, elemento_id)
+        elemento = _localizar(driver, By.ID, elemento_id)
         elemento.clear()
         elemento.send_keys(str(valor))
-    except WebDriverException as exc:
+    except (WebDriverException, AttributeError) as exc:
         raise InteracaoPortalError(
             f'Nao foi possivel preencher o campo "{elemento_id}": '
             f'{(str(exc).strip().splitlines() or [""])[0]}') from exc
@@ -157,6 +156,31 @@ def _sair_do_campo(elemento):
         pass
 
 
+def _visivel(elemento):
+    try:
+        return bool(elemento.is_displayed() and elemento.is_enabled())
+    except WebDriverException:
+        return False
+
+
+def _localizar(driver, by, alvo):
+    """Primeiro elemento VISIVEL que casa, e nao o primeiro do DOM.
+
+    O portal repete `id` entre secoes do assistente (ja confirmado nos radios,
+    onde as tres opcoes do grupo compartilham o mesmo id). Pegar o primeiro do
+    DOM entrega um elemento de uma etapa oculta: o clique falha, ou pior,
+    acontece num campo que ninguem esta vendo.
+    """
+    try:
+        candidatos = driver.find_elements(by, alvo)
+    except WebDriverException:
+        return None
+    for elemento in candidatos:
+        if _visivel(elemento):
+            return elemento
+    return None
+
+
 def _esperar_interagivel(driver, elemento_id, timeout=None, intervalo=0.2):
     """Espera o campo estar visivel e habilitado.
 
@@ -166,14 +190,8 @@ def _esperar_interagivel(driver, elemento_id, timeout=None, intervalo=0.2):
     """
     timeout = TIMEOUT_AUTOPREENCHIMENTO if timeout is None else timeout
 
-    def pronto():
-        try:
-            elemento = driver.find_element(By.ID, elemento_id)
-            return bool(elemento.is_displayed() and elemento.is_enabled())
-        except WebDriverException:
-            return False
-
-    return esperar(pronto, timeout=timeout, intervalo=intervalo)
+    return esperar(lambda: _localizar(driver, By.ID, elemento_id) is not None,
+                   timeout=timeout, intervalo=intervalo)
 
 
 def _esperar_preenchido(driver, elemento_id, timeout=None, intervalo=0.3):
@@ -339,11 +357,44 @@ def abrir_nova_dps(driver):
     driver.get(URL_NOVA_DPS)
 
 
-def _avancar(driver):
+def _clicar(driver, by, alvo, rotulo):
+    """Clica no elemento visivel, rolando ate ele e caindo para clique por JS.
+
+    Separa "nao achei" de "achei mas o clique falhou": mensagens iguais para as
+    duas coisas ja mandaram investigar o lado errado. O botao de avancar fica no
+    fim de um formulario longo, entao rolar ate ele importa; e se algo ficar por
+    cima (aviso, rodape fixo), o clique por JS ainda resolve.
+    """
+    if not esperar(lambda: _localizar(driver, by, alvo) is not None,
+                   timeout=TIMEOUT_AUTOPREENCHIMENTO, intervalo=0.2):
+        raise InteracaoPortalError(
+            f'{rotulo} nao esta disponivel nesta tela. O portal pode ter mudado '
+            'o formulario ou a etapa nao terminou de carregar.')
+
+    elemento = _localizar(driver, by, alvo)
     try:
-        driver.find_element(By.ID, ID_BTN_AVANCAR).click()
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block: 'center'});", elemento)
+    except WebDriverException:
+        pass
+
+    try:
+        elemento.click()
+        return elemento
+    except WebDriverException:
+        pass
+
+    try:
+        driver.execute_script('arguments[0].click();', elemento)
     except WebDriverException as exc:
-        raise InteracaoPortalError('Botao "Avancar" nao encontrado.') from exc
+        raise InteracaoPortalError(
+            f'{rotulo} foi encontrado mas nao aceitou o clique: '
+            f'{(str(exc).strip().splitlines() or [""])[0]}') from exc
+    return elemento
+
+
+def _avancar(driver):
+    _clicar(driver, By.ID, ID_BTN_AVANCAR, 'O botao "Avancar"')
 
 
 def preencher_etapa_pessoas(driver, nota, config, data_competencia, pausa=None):

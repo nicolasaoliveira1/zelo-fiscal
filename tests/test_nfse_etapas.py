@@ -91,7 +91,14 @@ class DriverEspiao:
             self.radios[nome] = marcado
         return elemento
 
+    def find_elements(self, by, valor):
+        """O modulo procura todos os que casam e usa o primeiro VISIVEL: o
+        portal repete id entre as etapas do assistente."""
+        return [self.find_element(by, valor)]
+
     def execute_script(self, script, *args):
+        if 'scrollIntoView' in script:
+            return None
         if 'chosen:updated' in script:
             self.chosen[args[0]] = args[1]
             return args[1]
