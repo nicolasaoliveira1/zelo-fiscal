@@ -150,8 +150,14 @@ def test_mesmo_tomador_com_competencias_diferentes_nao_e_duplicata(banco):
 
 
 def test_mesma_competencia_no_mesmo_arquivo_marca_a_segunda_como_duplicata(banco):
+    """Duas cobrancas DIFERENTES do mesmo tomador na mesma competencia.
+
+    Linhas identicas nao servem para este caso: elas sao descartadas na leitura
+    (dedupe entre arquivos). Aqui os valores diferem, entao sao duas linhas
+    legitimas do extrato — e cabe ao operador decidir se emite as duas.
+    """
     _empresa()
-    bruto = _linha() + '\n' + _linha()
+    bruto = _linha(i='826,09') + '\n' + _linha(i='500,00')
     notas = _notas(imp.importar(bruto))
     assert notas[0].status == StatusNotaNfse.PRONTA
     assert notas[1].status == StatusNotaNfse.DUPLICATA
@@ -183,3 +189,59 @@ def test_pendente_de_empresa_nao_vira_duplicata(banco):
     bruto = _linha(nome='SEM CADASTRO SA') + '\n' + _linha(nome='SEM CADASTRO SA')
     notas = _notas(imp.importar(bruto))
     assert all(n.status == StatusNotaNfse.EMPRESA_PENDENTE for n in notas)
+
+
+# --- varios arquivos de uma vez --------------------------------------------
+
+def test_importa_varios_arquivos_num_lote_so(banco):
+    _empresa()
+    a = _linha(nome='ACME TRANSPORTES LTDA')
+    b = _linha(nome='ACME TRANSPORTES LTDA', venc='05/08/2026', i='500,00')
+    lote = imp.importar([('julho.csv', a), ('agosto.csv', b)])
+    notas = _notas(lote)
+    assert len(notas) == 2
+    assert [n.competencia for n in notas] == ['06/2026', '07/2026']
+    assert 'julho.csv' in lote.nome_arquivo and 'agosto.csv' in lote.nome_arquivo
+
+
+def test_linha_identica_em_dois_arquivos_entra_uma_vez_so(banco):
+    """O operador baixa periodos que se sobrepoem e a mesma cobranca aparece
+    nos dois arquivos. Descartar so o que e identico nao perde informacao."""
+    _empresa()
+    lote = imp.importar([('a.csv', _linha()), ('b.csv', _linha())])
+    assert len(_notas(lote)) == 1
+    assert lote.ignoradas_duplicadas == 1
+
+
+def test_linha_repetida_dentro_do_mesmo_arquivo_tambem_e_descartada(banco):
+    _empresa()
+    lote = imp.importar([('a.csv', _linha() + '\n' + _linha())])
+    assert len(_notas(lote)) == 1
+    assert lote.ignoradas_duplicadas == 1
+
+
+def test_linhas_parecidas_mas_diferentes_nao_sao_descartadas(banco):
+    """Difere so no valor: sao duas cobrancas de verdade, ambas entram (e a
+    segunda vira duplicata para o operador decidir)."""
+    _empresa()
+    lote = imp.importar([('a.csv', _linha(i='826,09')), ('b.csv', _linha(i='500,00'))])
+    assert len(_notas(lote)) == 2
+    assert lote.ignoradas_duplicadas == 0
+
+
+def test_um_arquivo_invalido_recusa_a_importacao_inteira(banco):
+    """Aceitar os validos deixaria o operador achando que importou tudo."""
+    _empresa()
+    with pytest.raises(imp.ArquivoInvalidoError) as exc:
+        imp.importar([('bom.csv', _linha()), ('ruim.csv', 'nome,valor\nx,1\n')])
+    assert 'ruim.csv' in str(exc.value)
+    assert LoteNfse.query.count() == 0
+    assert NotaNfse.query.count() == 0
+
+
+def test_um_arquivo_so_continua_funcionando(banco):
+    """Compatibilidade: a assinatura antiga (bytes/str direto) segue valendo."""
+    _empresa()
+    lote = imp.importar(_linha(), nome_arquivo='extrato.csv')
+    assert len(_notas(lote)) == 1
+    assert lote.nome_arquivo == 'extrato.csv'

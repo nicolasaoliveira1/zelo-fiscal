@@ -73,6 +73,9 @@ class LinhaCsv:
     valor_final: Decimal | None = None
     invalida: bool = False
     motivo: str | None = None
+    # identidade da linha crua, usada para deduplicar quando varios arquivos
+    # do banco se sobrepoem (o operador baixa periodos que se cruzam)
+    assinatura: str | None = None
 
 
 def normalizar_nome(valor):
@@ -167,10 +170,23 @@ def parse_csv(conteudo):
     return linhas
 
 
+def _assinatura(campos):
+    """Identidade da linha crua: todos os campos normalizados.
+
+    Deliberadamente a linha INTEIRA, e nao so o 'nosso numero' do banco: usar um
+    identificador isolado descartaria em silencio uma linha que fosse de fato
+    diferente. Aqui, duas linhas so somem se forem identicas — nenhuma
+    informacao se perde. Divergencias reais (mesmo tomador e competencia em
+    linhas diferentes) continuam aparecendo como duplicata para o operador
+    decidir."""
+    return ''.join((campo or '').strip() for campo in campos[:COLUNAS_ESPERADAS])
+
+
 def _montar_linha(numero, campos):
     nome = (campos[COL_NOME] or '').strip()
     linha = LinhaCsv(
         numero=numero,
+        assinatura=_assinatura(campos),
         nome=nome,
         nome_norm=normalizar_nome(nome),
         data_pagamento=_para_data(campos[COL_DATA_PAGAMENTO]),
@@ -331,24 +347,65 @@ def _competencias_ja_emitidas():
             if documento}
 
 
-def importar(conteudo, nome_arquivo=None, execution_id=None):
-    """Le o extrato, resolve os CNPJs e persiste lote + notas numa transacao.
+def _ler_arquivos(arquivos):
+    """Le e concatena varios extratos numa lista unica de linhas.
 
-    Arquivo invalido levanta `ArquivoInvalidoError` ANTES de qualquer escrita:
-    nunca sobra lote parcial (NFSE-07). Devolve o `LoteNfse` criado.
+    `arquivos` e uma sequencia de (nome, conteudo). Linhas identicas entre
+    arquivos sao descartadas uma unica vez — o operador costuma baixar periodos
+    que se sobrepoem, e a mesma cobranca aparece nos dois.
+
+    Se QUALQUER arquivo nao for o extrato do banco, a importacao inteira e
+    recusada citando o nome dele: aceitar os demais deixaria o operador achando
+    que importou tudo.
+    """
+    linhas = []
+    vistas = set()
+    ignoradas = 0
+
+    for nome, conteudo in arquivos:
+        try:
+            do_arquivo = parse_csv(conteudo)
+        except ArquivoInvalidoError as exc:
+            rotulo = f' "{nome}"' if nome else ''
+            raise ArquivoInvalidoError(f'Arquivo{rotulo}: {exc}') from exc
+
+        for linha in do_arquivo:
+            if linha.assinatura and linha.assinatura in vistas:
+                ignoradas += 1
+                continue
+            if linha.assinatura:
+                vistas.add(linha.assinatura)
+            linhas.append(linha)
+
+    return linhas, ignoradas
+
+
+def importar(conteudo, nome_arquivo=None, execution_id=None):
+    """Le um ou varios extratos, resolve os documentos e persiste numa transacao.
+
+    `conteudo` aceita um arquivo so (bytes/str) ou uma lista de (nome, conteudo).
+    Arquivo invalido levanta ANTES de qualquer escrita: nunca sobra lote parcial
+    (NFSE-07). Devolve o `LoteNfse` criado, com `ignoradas_duplicadas` anotado.
     """
     from app import db
     from app.models import ApelidoNfse, Empresa, LoteNfse, NotaNfse, StatusNotaNfse
 
-    # parse primeiro: se o arquivo nao presta, nada e persistido
-    linhas = parse_csv(conteudo)
+    if isinstance(conteudo, (bytes, bytearray, str)):
+        arquivos = [(nome_arquivo, conteudo)]
+    else:
+        arquivos = list(conteudo)
+
+    # parse primeiro: se algum arquivo nao presta, nada e persistido
+    linhas, ignoradas = _ler_arquivos(arquivos)
 
     empresas = Empresa.query.all()
     apelidos = ApelidoNfse.query.all()
     emitidas = _competencias_ja_emitidas()
     vistas_no_lote = {}
 
-    lote = LoteNfse(nome_arquivo=nome_arquivo, total=len(linhas), execution_id=execution_id)
+    nomes = [nome for nome, _ in arquivos if nome]
+    lote = LoteNfse(nome_arquivo=', '.join(nomes)[:200] or nome_arquivo,
+                    total=len(linhas), execution_id=execution_id)
     db.session.add(lote)
 
     try:
@@ -371,6 +428,8 @@ def importar(conteudo, nome_arquivo=None, execution_id=None):
     except Exception:
         db.session.rollback()
         raise
+
+    lote.ignoradas_duplicadas = ignoradas
     return lote
 
 

@@ -161,12 +161,13 @@
         <div class="nfse-card h-100">
             <h2 class="h6 nfse-title mb-2">1. Importar o extrato do banco</h2>
             <p class="nfse-hint mb-3">
-                O CSV de cobranças, como sai do banco. O CNPJ de cada tomador é
-                resolvido aqui, antes de abrir o navegador.
+                Os CSVs de cobranças, como saem do banco — pode escolher vários de
+                uma vez. Linhas repetidas entre arquivos entram uma só vez. O
+                documento de cada tomador é resolvido aqui, antes de abrir o navegador.
             </p>
             <form id="formImportar" class="d-flex gap-2 align-items-center flex-wrap">
                 <input class="form-control form-control-sm" type="file" id="arquivoCsv"
-                       name="arquivo" accept=".csv,text/csv" style="max-width: 22rem;">
+                       name="arquivo" accept=".csv,text/csv" multiple style="max-width: 22rem;">
                 <button class="btn btn-primary btn-sm" type="submit">Importar</button>
             </form>
             {% if lote %}

@@ -93,17 +93,23 @@ def nfse_painel():
 @bp.route('/nfse/importar', methods=['POST'])
 @requer_papel('operador')
 def nfse_importar():
-    arquivo = request.files.get('arquivo')
-    if arquivo is None or not (arquivo.filename or '').strip():
-        return json_error('Selecione o arquivo CSV exportado do banco.', 400)
+    enviados = [a for a in request.files.getlist('arquivo')
+                if a is not None and (a.filename or '').strip()]
+    if not enviados:
+        return json_error('Selecione ao menos um arquivo CSV exportado do banco.', 400)
 
-    conteudo = arquivo.read()
-    if len(conteudo) > TAMANHO_MAXIMO_CSV:
-        return json_error(
-            'Arquivo grande demais para ser o extrato mensal de cobrancas.', 400)
+    arquivos = []
+    total = 0
+    for arquivo in enviados:
+        conteudo = arquivo.read()
+        total += len(conteudo)
+        if total > TAMANHO_MAXIMO_CSV:
+            return json_error(
+                'Arquivos grandes demais para serem extratos mensais de cobrancas.', 400)
+        arquivos.append((arquivo.filename, conteudo))
 
     try:
-        lote = nfse_import.importar(conteudo, nome_arquivo=arquivo.filename)
+        lote = nfse_import.importar(arquivos)
     except nfse_import.ArquivoInvalidoError as exc:
         return json_error(str(exc), 400)
 
@@ -113,6 +119,8 @@ def nfse_importar():
         'lote_id': lote.id,
         'notas': [_nota_para_json(n) for n in notas],
         'resumo': _resumo(notas),
+        'arquivos': len(arquivos),
+        'ignoradas_duplicadas': getattr(lote, 'ignoradas_duplicadas', 0),
     }
 
 

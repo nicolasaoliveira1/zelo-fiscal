@@ -266,16 +266,19 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('formImportar')?.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const campo = document.getElementById('arquivoCsv');
-    if (!campo?.files?.length) { showToast('Selecione o arquivo CSV.', 'error'); return; }
+    if (!campo?.files?.length) { showToast('Selecione ao menos um arquivo CSV.', 'error'); return; }
     const corpo = new FormData();
-    corpo.append('arquivo', campo.files[0]);
+    Array.from(campo.files).forEach((f) => corpo.append('arquivo', f));
     try {
       const resposta = await fetch('/nfse/importar', { method: 'POST', body: corpo });
       const dados = await resposta.json().catch(() => ({}));
       if (!resposta.ok) throw new Error(dados.message || 'Falha ao importar.');
       notas = dados.notas;
       renderizar();
-      showToast(`${dados.resumo.total} notas importadas.`, 'success');
+      const deArquivos = dados.arquivos > 1 ? ` de ${dados.arquivos} arquivos` : '';
+      const repetidas = dados.ignoradas_duplicadas
+        ? ` (${dados.ignoradas_duplicadas} linha(s) repetida(s) ignorada(s))` : '';
+      showToast(`${dados.resumo.total} notas importadas${deArquivos}${repetidas}.`, 'success');
     } catch (erro) {
       showToast(erro.message, 'error');
     }

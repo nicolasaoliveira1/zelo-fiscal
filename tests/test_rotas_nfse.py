@@ -201,3 +201,52 @@ def test_querystring_e_escapada_no_template(login_as):
     resposta = login_as('operador').get('/empresa/nova?nome=%3Cscript%3Ex%3C/script%3E')
     corpo = resposta.get_data(as_text=True)
     assert '<script>x</script>' not in corpo
+
+
+# --- varios arquivos de uma vez --------------------------------------------
+
+def _csv_multi(*grupos):
+    """grupos = sequencia de (nome_arquivo, [nomes de empresa])."""
+    campos = []
+    for nome_arquivo, nomes in grupos:
+        corpo = '\n'.join(LINHA.format(nome=n) for n in nomes)
+        campos.append((io.BytesIO(corpo.encode('utf-8')), nome_arquivo))
+    return {'arquivo': campos}
+
+
+def test_importa_varios_arquivos_de_uma_vez(client):
+    resposta = client.post(
+        '/nfse/importar',
+        data=_csv_multi(('julho.csv', ['EMPRESA TESTE LTDA']),
+                        ('extra.csv', ['OUTRA EMPRESA LTDA'])),
+        content_type='multipart/form-data')
+    assert resposta.status_code == 200
+    dados = resposta.get_json()
+    assert dados['arquivos'] == 2
+    assert dados['resumo']['total'] == 2
+
+
+def test_linha_repetida_entre_arquivos_entra_uma_vez(client):
+    resposta = client.post(
+        '/nfse/importar',
+        data=_csv_multi(('a.csv', ['EMPRESA TESTE LTDA']),
+                        ('b.csv', ['EMPRESA TESTE LTDA'])),
+        content_type='multipart/form-data')
+    dados = resposta.get_json()
+    assert dados['resumo']['total'] == 1
+    assert dados['ignoradas_duplicadas'] == 1
+
+
+def test_um_arquivo_ruim_recusa_tudo_e_diz_qual(client):
+    dados = _csv_multi(('bom.csv', ['EMPRESA TESTE LTDA']))
+    dados['arquivo'].append((io.BytesIO(b'nome,valor\nx,1\n'), 'ruim.csv'))
+    resposta = client.post('/nfse/importar', data=dados,
+                           content_type='multipart/form-data')
+    assert resposta.status_code == 400
+    assert 'ruim.csv' in resposta.get_json()['message']
+
+
+def test_nenhum_arquivo_selecionado_devolve_400(client):
+    resposta = client.post('/nfse/importar', data={'arquivo': []},
+                           content_type='multipart/form-data')
+    assert resposta.status_code == 400
