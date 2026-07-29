@@ -229,3 +229,55 @@ def test_marcar_exige_papel_operador(login_as, client, app):
     nota_id = _ultima_nota(app)
     assert login_as('leitura').post(
         f'/nfse/nota/{nota_id}/emitida-manual', json={}).status_code == 403
+
+
+# --- entrada ambigua no vinculo --------------------------------------------
+
+def test_empresa_e_documento_juntos_e_recusado(client, app):
+    """Bug real: o operador escolhia uma empresa sem querer, digitava o CNPJ
+    certo e o vinculo saia pela empresa errada — memorizando o apelido errado
+    para os meses seguintes. Eleger um dos dois em silencio nao e opcao."""
+    _importar(client, 'ALGUMA EMPRESA LTDA')
+    nota_id = _ultima_nota(app)
+    with app.app_context():
+        empresa_id = Empresa.query.first().id
+
+    resposta = client.post(f'/nfse/nota/{nota_id}/resolver',
+                           json={'empresa_id': empresa_id, 'documento': CNPJ_OK})
+    assert resposta.status_code == 400
+    assert 'OU' in resposta.get_json()['message']
+
+
+def test_recusa_ambigua_nao_altera_a_nota_nem_o_apelido(client, app):
+    _importar(client, 'ALGUMA EMPRESA LTDA')
+    nota_id = _ultima_nota(app)
+    with app.app_context():
+        empresa_id = Empresa.query.first().id
+        status_antes = db.session.get(NotaNfse, nota_id).status
+
+    client.post(f'/nfse/nota/{nota_id}/resolver',
+                json={'empresa_id': empresa_id, 'documento': CNPJ_OK})
+
+    with app.app_context():
+        nota = db.session.get(NotaNfse, nota_id)
+        assert nota.status == status_antes
+        assert nota.empresa_id is None
+        assert ApelidoNfse.query.count() == 0
+
+
+def test_revincular_corrige_o_apelido_memorizado(client, app):
+    """Depois de um vinculo errado, refazer precisa consertar tambem a memoria
+    — senao o erro voltaria sozinho no proximo import."""
+    _importar(client, 'ALGUMA EMPRESA LTDA')
+    nota_id = _ultima_nota(app)
+    with app.app_context():
+        empresa_id = Empresa.query.first().id
+
+    client.post(f'/nfse/nota/{nota_id}/resolver', json={'empresa_id': empresa_id})
+    client.post(f'/nfse/nota/{nota_id}/resolver', json={'documento': CNPJ_OK})
+
+    with app.app_context():
+        apelido = ApelidoNfse.query.filter_by(nome_norm='ALGUMA EMPRESA LTDA').first()
+        assert apelido.empresa_id is None
+        assert apelido.documento == CNPJ_OK
+        assert db.session.get(NotaNfse, nota_id).documento == CNPJ_OK

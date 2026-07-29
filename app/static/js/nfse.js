@@ -28,6 +28,8 @@ const lerJson = (id) => {
 let notas = lerJson('dadosNotas');
 const empresas = lerJson('dadosEmpresas');
 let aliquotaConfirmada = false;
+// linhas cujo vinculo o operador reabriu para corrigir
+const editando = new Set();
 
 const esc = (texto) => {
   const div = document.createElement('div');
@@ -57,22 +59,39 @@ function opcoesEmpresa(selecionada) {
   return `<option value="">Escolher empresa…</option>${itens}`;
 }
 
-function celulaEmpresa(nota) {
-  if (nota.empresa) {
-    const origem = nota.origem_vinculo === 'fuzzy' && nota.score_match
-      ? ` <span class="nfse-hint">(aproximado, ${nota.score_match})</span>` : '';
-    return `${esc(nota.empresa)}${origem}`;
-  }
+function editorVinculo(nota) {
+  // Os dois campos sao mutuamente exclusivos: preencher um limpa o outro (ver
+  // trocaEmpresa/trocaDocumento). Antes, com os dois preenchidos, o vinculo
+  // saia pela empresa e ignorava o documento digitado — em silencio.
+  const cancelar = nota.documento || nota.empresa
+    ? `<button class="btn btn-ghost btn-sm" data-cancelar="${nota.id}">Cancelar</button>` : '';
   return `
     <div class="d-flex gap-1 flex-wrap align-items-center">
       <select class="form-select form-select-sm" data-empresa-de="${nota.id}" style="min-width: 12rem;">
-        ${opcoesEmpresa(null)}
+        ${opcoesEmpresa(nota.empresa_id)}
       </select>
       <input class="form-control form-control-sm" data-doc-de="${nota.id}"
              placeholder="ou CNPJ/CPF" style="max-width: 11rem;"
-             value="${esc(nota.documento || '')}">
+             value="${esc(nota.empresa_id ? '' : (nota.documento || ''))}">
       <button class="btn btn-soft-primary btn-sm" data-resolver="${nota.id}">Vincular</button>
+      ${cancelar}
     </div>`;
+}
+
+function celulaEmpresa(nota) {
+  const resolvido = nota.empresa || nota.documento;
+  if (!resolvido || editando.has(nota.id)) return editorVinculo(nota);
+
+  const origem = nota.origem_vinculo === 'fuzzy' && nota.score_match
+    ? ` <span class="nfse-hint">(aproximado, ${nota.score_match})</span>` : '';
+  const rotulo = nota.empresa
+    ? `${esc(nota.empresa)}${origem}`
+    : `<span class="nfse-hint">sem cadastro</span>`;
+  const podeEditar = nota.status !== 'emitida';
+  const editar = podeEditar
+    ? ` <button class="btn btn-ghost btn-sm py-0 px-1" data-editar="${nota.id}"
+               title="Trocar a empresa ou o documento desta linha">Editar</button>` : '';
+  return `${rotulo}${editar}`;
 }
 
 function acoesDaLinha(nota) {
@@ -202,13 +221,21 @@ async function prepararSessao(botao) {
 async function resolverEmpresa(id) {
   const select = document.querySelector(`[data-empresa-de="${id}"]`);
   const campo = document.querySelector(`[data-doc-de="${id}"]`);
+  const empresaId = select?.value ? Number(select.value) : null;
+  const documento = campo?.value.trim() || '';
+
+  if (empresaId && documento) {
+    showToast('Escolha uma empresa OU informe um CPF/CNPJ. Limpe o que não quer usar.', 'error');
+    return;
+  }
   const corpo = {};
-  if (select?.value) corpo.empresa_id = Number(select.value);
-  else if (campo?.value.trim()) corpo.documento = campo.value.trim();
+  if (empresaId) corpo.empresa_id = empresaId;
+  else if (documento) corpo.documento = documento;
   else { showToast('Escolha uma empresa ou informe o CNPJ/CPF.', 'error'); return; }
 
   try {
     const dados = await chamar(`/nfse/nota/${id}/resolver`, { body: JSON.stringify(corpo) });
+    editando.delete(id);
     substituir(dados.nota);
     showToast('Vinculada.', 'success');
   } catch (erro) {
@@ -321,10 +348,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Um campo limpa o outro: assim a ambiguidade nao chega a existir.
+  document.getElementById('corpoNotas')?.addEventListener('input', (ev) => {
+    const campo = ev.target.closest('[data-doc-de]');
+    if (campo && campo.value.trim()) {
+      const select = document.querySelector(`[data-empresa-de="${campo.dataset.docDe}"]`);
+      if (select) select.value = '';
+    }
+  });
+
+  document.getElementById('corpoNotas')?.addEventListener('change', (ev) => {
+    const select = ev.target.closest('[data-empresa-de]');
+    if (select && select.value) {
+      const campo = document.querySelector(`[data-doc-de="${select.dataset.empresaDe}"]`);
+      if (campo) campo.value = '';
+    }
+  });
+
   document.getElementById('corpoNotas')?.addEventListener('click', (ev) => {
     const alvo = ev.target.closest('button');
     if (!alvo) return;
-    if (alvo.dataset.resolver) resolverEmpresa(Number(alvo.dataset.resolver));
+    if (alvo.dataset.editar) { editando.add(Number(alvo.dataset.editar)); renderizar(); }
+    else if (alvo.dataset.cancelar) { editando.delete(Number(alvo.dataset.cancelar)); renderizar(); }
+    else if (alvo.dataset.resolver) resolverEmpresa(Number(alvo.dataset.resolver));
     else if (alvo.dataset.liberar) liberarDuplicata(Number(alvo.dataset.liberar));
     else if (alvo.dataset.jaemitida) marcarEmitidaManual(Number(alvo.dataset.jaemitida), true);
     else if (alvo.dataset.desmarcar) marcarEmitidaManual(Number(alvo.dataset.desmarcar), false);

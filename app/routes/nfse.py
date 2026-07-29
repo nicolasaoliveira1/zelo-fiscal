@@ -143,6 +143,14 @@ def nfse_resolver_empresa(nota_id):
     empresa_id = dados.get('empresa_id')
     documento = (dados.get('documento') or dados.get('cnpj') or '').strip()
 
+    # Recusa entrada ambigua em vez de eleger um dos dois em silencio: escolher
+    # sozinho ja vinculou nota ao tomador errado E memorizou o apelido errado
+    # para os meses seguintes.
+    if empresa_id and documento:
+        return json_error(
+            'Escolha uma empresa OU informe um CPF/CNPJ, nao os dois. '
+            'Limpe o campo que nao quer usar.', 400)
+
     if empresa_id:
         empresa = db.session.get(Empresa, int(empresa_id))
         if empresa is None:
