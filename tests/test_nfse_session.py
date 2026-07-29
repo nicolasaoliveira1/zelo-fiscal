@@ -234,3 +234,54 @@ def test_politica_desligada_devolve_none(monkeypatch):
     monkeypatch.setattr(sessao_mod, 'get_config_value',
                         lambda nome, default=None: 'false' if 'ENABLED' in nome else default)
     assert sessao_mod.politica_nfse() is None
+
+
+# --- fiacao da configuracao (bug real, escapou dos testes acima) -----------
+
+def test_as_envs_da_nfse_existem_no_config_da_aplicacao(app):
+    """Regressao de um bug que chegou ao uso real.
+
+    `get_config_value` le de `current_app.config` dentro de um request e devolve
+    o DEFAULT quando a chave nao existe — nunca cai para `os.environ`. As envs
+    NFSE_CERT_AUTOSELECT_* estavam so no `.env`, sem declaracao em `config.py`:
+    dentro da aplicacao `politica_nfse()` devolvia None, nenhuma policy era
+    gravada e o dialogo de certificado do Chrome aparecia para o operador.
+
+    Os testes de politica acima nao pegaram porque monkeypatcham
+    `get_config_value` — dublavam justamente a peca quebrada. Este roda com o
+    config real da aplicacao.
+    """
+    esperadas = (
+        'NFSE_CERT_AUTOSELECT_ENABLED',
+        'NFSE_CERT_AUTOSELECT_PATTERN',
+        'NFSE_CERT_AUTOSELECT_POLICY_INDEX',
+        'NFSE_CERT_AUTOSELECT_ISSUER_CN',
+        'NFSE_CERT_AUTOSELECT_SUBJECT_CN',
+    )
+    faltando = [nome for nome in esperadas if nome not in app.config]
+    assert not faltando, (
+        f'sem declaracao em config.py, get_config_value devolve o default e a '
+        f'auto-selecao do certificado nao acontece: {faltando}')
+
+
+def test_politica_e_montada_a_partir_do_config_da_aplicacao(app):
+    """Prova a fiacao ponta a ponta, sem dublar get_config_value."""
+    with app.app_context():
+        app.config.update(
+            NFSE_CERT_AUTOSELECT_ENABLED=True,
+            NFSE_CERT_AUTOSELECT_PATTERN='https://certificado.nfse.gov.br',
+            NFSE_CERT_AUTOSELECT_POLICY_INDEX='2',
+            NFSE_CERT_AUTOSELECT_ISSUER_CN='AC SyngularID Multipla',
+            NFSE_CERT_AUTOSELECT_SUBJECT_CN='FULANO:94645405000120',
+        )
+        politica = sessao_mod.politica_nfse()
+
+    assert politica is not None, 'policy nao montada dentro do app context'
+    assert politica.montar() is not None, 'filtro vazio: o Chrome ignoraria a policy'
+    assert politica.indice == '2'
+
+
+def test_indice_da_nfse_nunca_colide_com_o_do_rs(app):
+    """Mesmo indice sobrescreveria a policy do RS no registro do Windows."""
+    assert (str(app.config.get('NFSE_CERT_AUTOSELECT_POLICY_INDEX'))
+            != str(app.config.get('RS_CERT_AUTOSELECT_POLICY_INDEX')))
