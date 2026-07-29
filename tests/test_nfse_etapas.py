@@ -35,10 +35,29 @@ NOTA = SimpleNamespace(
 )
 
 
+def _e_tecla(texto):
+    """True para teclas especiais do Selenium (TAB, ESC...).
+
+    Elas vivem no bloco unicode de uso privado a partir de U+E000. Comparado
+    por codigo, e nao por caractere literal, para nao depender do encoding com
+    que este arquivo for lido.
+    """
+    return isinstance(texto, str) and len(texto) == 1 and ord(texto) >= 0xE000
+
+
 class DriverEspiao:
-    """Driver falso que registra tudo que foi tocado, por id/seletor."""
+    """Driver falso que registra tudo que foi tocado, por id/seletor.
+
+    `autopreenchidos` simula os campos que o PORTAL preenche sozinho (emitente
+    apos a data, tomador apos o documento) — sem eles a automacao espera para
+    sempre, que e exatamente o que deve acontecer quando o portal nao responde.
+    """
 
     def __init__(self):
+        self.autopreenchidos = {
+            'Prestador_Inscricao': '94.645.405/0001-20',
+            'Tomador_Nome': 'L. LUIS PETRY',
+        }
         self.preenchidos = {}
         self.chosen = {}
         self.selects = {}
@@ -51,7 +70,15 @@ class DriverEspiao:
         elemento = MagicMock()
         elemento._by = by
         elemento._valor = valor
-        elemento.send_keys.side_effect = lambda texto: self.preenchidos.__setitem__(valor, texto)
+        elemento.parent = self
+        # o modulo manda ESC/TAB depois de digitar (fecha datepicker e tira o
+        # foco). Teclas especiais nao sao "o valor do campo": registra-las
+        # sobrescreveria o texto digitado e mascararia o que foi preenchido.
+        elemento.send_keys.side_effect = lambda texto: (
+            None if _e_tecla(texto) else self.preenchidos.__setitem__(valor, texto))
+        elemento.get_attribute.side_effect = lambda attr: (
+            self.preenchidos.get(valor, self.autopreenchidos.get(valor, ''))
+            if attr == 'value' else None)
         elemento.click.side_effect = lambda: self.clicados.append(valor)
         if valor.startswith('input[name='):
             nome = valor.split('"')[1]
@@ -81,6 +108,15 @@ def _select_falso(espiao):
         def select_by_value(self, valor):
             espiao.selects[self._id] = valor
     return Select
+
+
+@pytest.fixture(autouse=True)
+def _espera_curta(monkeypatch):
+    """Encurta a espera pelo autopreenchimento do portal.
+
+    Sem isso, cada teste do caminho de falha segura a suite pelo timeout real
+    de 15s — e teste lento e teste que ninguem roda."""
+    monkeypatch.setattr(nfse, 'TIMEOUT_AUTOPREENCHIMENTO', 0.05)
 
 
 @pytest.fixture()
@@ -205,3 +241,50 @@ def test_nenhuma_etapa_toca_os_campos_intocaveis(driver):
     tocados = driver.tocados()
     for campo in nfse.CAMPOS_INTOCAVEIS:
         assert campo not in tocados, f'{campo} nao pode ser tocado pela automacao'
+
+
+# --- saida do campo e espera pelo portal (bug real) ------------------------
+
+def test_sai_do_campo_depois_de_digitar(driver):
+    """Bug relatado no uso real: sem sair do campo da data, o portal nao
+    processa o valor e os campos seguintes ficam nao-interagiveis
+    ('element not interactable'). O datepicker aberto ainda cobre o proximo
+    campo — por isso ESC antes do TAB."""
+    from selenium.webdriver.common.keys import Keys
+    enviados = []
+
+    class Espiao(DriverEspiao):
+        def find_element(self, by, valor):
+            elemento = super().find_element(by, valor)
+            original = elemento.send_keys.side_effect
+            elemento.send_keys.side_effect = lambda t: (enviados.append((valor, t)),
+                                                        original(t))[1]
+            return elemento
+
+    nfse.preencher_etapa_pessoas(Espiao(), NOTA, CONFIG, date(2026, 7, 28))
+    teclas_da_data = [t for campo, t in enviados if campo == 'DataCompetencia']
+    assert Keys.ESCAPE in teclas_da_data, 'datepicker aberto cobre o proximo campo'
+    assert Keys.TAB in teclas_da_data, 'sem sair do campo o portal nao processa a data'
+    assert teclas_da_data.index(Keys.ESCAPE) < teclas_da_data.index(Keys.TAB)
+
+
+def test_espera_o_portal_carregar_o_emitente_antes_de_seguir(driver):
+    """O emitente so aparece depois que a data perde o foco; seguir antes disso
+    encontra os campos ainda travados."""
+    driver.autopreenchidos.pop('Prestador_Inscricao')
+    with pytest.raises(nfse.InteracaoPortalError) as exc:
+        nfse.preencher_etapa_pessoas(driver, NOTA, CONFIG, date(2026, 7, 28),
+                                     )
+    assert 'emitente' in str(exc.value).lower()
+    # nao seguiu para os campos do tomador
+    assert 'Tomador_Inscricao' not in driver.preenchidos
+
+
+def test_documento_nao_reconhecido_pelo_portal_da_erro_acionavel(driver):
+    """Sem o nome do tomador, o portal nao reconheceu o documento — emitir
+    assim geraria nota sem tomador."""
+    driver.autopreenchidos.pop('Tomador_Nome')
+    with pytest.raises(nfse.InteracaoPortalError) as exc:
+        nfse.preencher_etapa_pessoas(driver, NOTA, CONFIG, date(2026, 7, 28))
+    assert NOTA.documento in str(exc.value)
+    assert 'btnAvancar' not in driver.clicados, 'avancou com o tomador vazio'

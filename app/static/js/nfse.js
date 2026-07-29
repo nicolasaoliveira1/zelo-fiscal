@@ -142,7 +142,7 @@ function linha(nota) {
       <td class="nfse-mono">${esc(nota.competencia || '—')}</td>
       <td class="nfse-mono text-end">${esc(nota.valor || '—')}${aviso}</td>
       <td><span class="nfse-status st-${nota.status}">${esc(ROTULO_STATUS[nota.status] || nota.status)}</span>
-          ${nota.erro ? `<div class="nfse-hint">${esc(nota.erro)}</div>` : ''}</td>
+          ${nota.erro ? `<div class="nfse-hint nfse-erro" title="${esc(nota.erro)}">${esc(nota.erro)}</div>` : ''}</td>
       <td><div class="nfse-acoes-linha">${acoesDaLinha(nota)}</div></td>
     </tr>`;
 }

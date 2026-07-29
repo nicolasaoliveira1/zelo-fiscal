@@ -42,6 +42,10 @@ ID_BTN_EMITIR = 'btnProsseguir'
 # Presente so na tela de confirmacao: e o sinal de "nota emitida" do lote (P2).
 ID_BTN_DANFSE = 'btnDownloadDANFSE'
 
+# Quanto esperar o portal preencher sozinho emitente e tomador.
+# Modulo-level para os testes reduzirem sem esperar o tempo real.
+TIMEOUT_AUTOPREENCHIMENTO = 15
+
 
 class InteracaoPortalError(RuntimeError):
     """Interacao com o portal nao produziu o efeito esperado.
@@ -97,8 +101,17 @@ def _marcar_radio(driver, name, valor):
     return elemento
 
 
-def _preencher(driver, elemento_id, valor):
-    """Limpa e preenche um input de texto comum."""
+def _preencher(driver, elemento_id, valor, sair=True):
+    """Limpa e preenche um input de texto, saindo do campo ao final.
+
+    `sair` manda ESC + TAB depois de digitar, por dois motivos observados no
+    portal:
+
+    - o campo de data abre um datepicker que fica POR CIMA do proximo campo, e
+      o clique seguinte falha com "element not interactable" (ESC fecha);
+    - o portal so processa o valor quando o campo perde o foco — e e isso que
+      dispara o preenchimento automatico do emitente e do tomador (TAB).
+    """
     try:
         elemento = driver.find_element(By.ID, elemento_id)
     except WebDriverException as exc:
@@ -106,7 +119,43 @@ def _preencher(driver, elemento_id, valor):
             f'Campo "{elemento_id}" nao encontrado na pagina.') from exc
     elemento.clear()
     elemento.send_keys(str(valor))
+    if sair:
+        _sair_do_campo(elemento)
     return elemento
+
+
+def _sair_do_campo(elemento):
+    """Fecha overlay (datepicker) e tira o foco, para o portal processar."""
+    from selenium.webdriver.common.keys import Keys
+    try:
+        elemento.send_keys(Keys.ESCAPE)
+        elemento.send_keys(Keys.TAB)
+    except WebDriverException:
+        # ultimo recurso: dispara os eventos direto, sem teclado
+        try:
+            elemento.parent.execute_script(
+                "arguments[0].dispatchEvent(new Event('change', {bubbles: true}));"
+                "arguments[0].blur();", elemento)
+        except WebDriverException:
+            pass
+
+
+def _esperar_preenchido(driver, elemento_id, timeout=None, intervalo=0.3):
+    """Espera o PORTAL preencher um campo sozinho.
+
+    Ancora a espera num efeito observavel em vez de dormir um tempo fixo: o
+    emitente aparece depois da data, e os dados do tomador depois do CNPJ.
+    """
+    timeout = TIMEOUT_AUTOPREENCHIMENTO if timeout is None else timeout
+
+    def tem_valor():
+        try:
+            return bool((driver.find_element(By.ID, elemento_id)
+                         .get_attribute('value') or '').strip())
+        except WebDriverException:
+            return False
+
+    return esperar(tem_valor, timeout=timeout, intervalo=intervalo)
 
 
 # --- deteccao de etapa ----------------------------------------------------
@@ -270,12 +319,27 @@ def preencher_etapa_pessoas(driver, nota, config, data_competencia, pausa=None):
     automacao nao os toca.
     """
     _preencher(driver, 'DataCompetencia', formatar_data(data_competencia))
+
+    # O portal so carrega o emitente depois que a data sai do foco, e os campos
+    # seguintes ficam nao-interagiveis ate la. Esperar o CNPJ do emitente
+    # aparecer e o sinal de que a etapa esta pronta.
+    if not _esperar_preenchido(driver, 'Prestador_Inscricao'):
+        raise InteracaoPortalError(
+            'O portal nao carregou os dados do emitente apos a data de '
+            'competencia. A tela pode estar lenta ou ter mudado.')
     if pausa:
         pausa()
+
     _set_chosen(driver, 'SimplesNacional_RegimeApuracaoTributosSN',
                 config.regime_apuracao_sn)
     _marcar_radio(driver, 'Tomador.LocalDomicilio', '1')  # Brasil
     _preencher(driver, 'Tomador_Inscricao', nota.documento)
+
+    # mesma logica: o nome/endereco do tomador vem do portal apos o documento
+    if not _esperar_preenchido(driver, 'Tomador_Nome'):
+        raise InteracaoPortalError(
+            f'O portal nao reconheceu o documento {nota.documento} do tomador. '
+            'Confira se esta correto e ativo na Receita.')
     if pausa:
         pausa()
     _avancar(driver)

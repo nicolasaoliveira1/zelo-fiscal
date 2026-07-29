@@ -102,12 +102,24 @@ def test_marcar_radio_levanta_quando_a_opcao_nao_existe():
 
 # --- preencher -------------------------------------------------------------
 
-def test_preencher_limpa_antes_de_escrever():
+def test_preencher_limpa_escreve_e_sai_do_campo():
+    """Sair do campo faz parte do preenchimento, nao e um extra: o portal so
+    processa o valor no blur, e o datepicker aberto cobre o campo seguinte."""
+    from selenium.webdriver.common.keys import Keys
     elemento = MagicMock()
     driver = _driver(elemento=elemento)
     nfse._preencher(driver, 'Tomador_Inscricao', '33.684.001/0001-51')
+
     assert elemento.clear.called
-    elemento.send_keys.assert_called_once_with('33.684.001/0001-51')
+    enviados = [chamada.args[0] for chamada in elemento.send_keys.call_args_list]
+    assert enviados == ['33.684.001/0001-51', Keys.ESCAPE, Keys.TAB]
+
+
+def test_preencher_sem_sair_nao_manda_teclas():
+    elemento = MagicMock()
+    driver = _driver(elemento=elemento)
+    nfse._preencher(driver, 'Tomador_Inscricao', '123', sair=False)
+    elemento.send_keys.assert_called_once_with('123')
 
 
 def test_preencher_levanta_quando_o_campo_nao_existe():

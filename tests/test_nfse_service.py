@@ -218,3 +218,52 @@ def test_preparar_sessao_devolve_a_aliquota_sem_liberar_emissao(ambiente):
 def test_preparar_sessao_com_aliquota_ilegivel(ambiente):
     ambiente['sessao'].ler_aliquota.return_value = None
     assert nfse_service.preparar_sessao()['aliquota'] is None
+
+
+# --- mensagem de falha legivel na linha ------------------------------------
+
+def test_falha_do_selenium_nao_leva_stacktrace_para_a_nota(ambiente):
+    """Bug relatado: o despejo do Selenium (stacktrace + enderecos de memoria)
+    aparecia dentro da celula da tabela, estourando a linha. O texto cru
+    continua no log, alcancavel pelo request_id."""
+    from selenium.common.exceptions import ElementNotInteractableException
+    cru = ('Message: element not interactable\n'
+           '  (Session info: chrome=150.0.7871.187)\n'
+           'Stacktrace: chromedriver!GetHandleVerifier [0x475843+10883]')
+    ambiente['automacao'].preencher_etapa_pessoas.side_effect = \
+        ElementNotInteractableException(cru)
+
+    nota = _nota()
+    nfse_service.preencher_nota(nota.id, hoje=date(2026, 7, 28))
+
+    erro = db.session.get(NotaNfse, nota.id).erro
+    assert 'Stacktrace' not in erro
+    assert 'chromedriver' not in erro
+    assert '0x' not in erro
+    assert len(erro) <= 300
+
+
+def test_falha_conhecida_do_selenium_vira_explicacao_correta(ambiente):
+    """Amigavel porem errado e pior que cru: o tradutor compartilhado classifica
+    'element not interactable' como 'portal indisponivel', o que mandaria o
+    operador conferir a coisa errada."""
+    from selenium.common.exceptions import ElementNotInteractableException
+    assert 'overlay' in nfse_service.mensagem_da_falha(
+        ElementNotInteractableException('Message: element not interactable'))
+    assert 'indispon' not in nfse_service.mensagem_da_falha(
+        ElementNotInteractableException('x')).lower()
+
+
+def test_erro_da_propria_automacao_e_mostrado_como_escrito(ambiente):
+    from app.automation.nfse import InteracaoPortalError
+    texto = 'O portal nao reconheceu o documento 33.684.001/0001-51 do tomador.'
+    assert nfse_service.mensagem_da_falha(InteracaoPortalError(texto)) == texto
+
+
+def test_erro_generico_usa_so_a_primeira_linha(ambiente):
+    assert nfse_service.mensagem_da_falha(
+        RuntimeError('primeira linha\nsegunda linha')) == 'primeira linha'
+
+
+def test_erro_sem_texto_ainda_produz_mensagem(ambiente):
+    assert nfse_service.mensagem_da_falha(RuntimeError(''))

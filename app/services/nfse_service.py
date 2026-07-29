@@ -127,6 +127,56 @@ def preencher_nota(nota_id, hoje=None, execution_id=None):
     }
 
 
+# Erros que a propria automacao levanta ja tem texto escrito para o operador.
+_ERROS_COM_MENSAGEM_PRONTA = (
+    automacao.InteracaoPortalError,
+    automacao.LoginNfseError,
+)
+
+# Traducao das falhas do Selenium que este fluxo realmente produz. Nao usa o
+# `errors.mensagem_usuario` compartilhado: a taxonomia dele foi calibrada para
+# os fluxos de certidao e classifica "element not interactable" como "portal
+# indisponivel" — amigavel, porem falso, e mandaria o operador conferir a coisa
+# errada. Aqui e melhor ser curto e correto.
+_FALHAS_SELENIUM = {
+    'ElementNotInteractableException':
+        'O campo existe mas nao aceitou interacao — a tela pode nao ter '
+        'terminado de carregar ou ter um overlay aberto.',
+    'ElementClickInterceptedException':
+        'Algo ficou por cima do elemento (aviso ou calendario aberto) e '
+        'bloqueou o clique.',
+    'NoSuchElementException':
+        'Um campo esperado nao existe nesta tela. O portal pode ter mudado o '
+        'formulario.',
+    'StaleElementReferenceException':
+        'A tela mudou no meio do preenchimento.',
+    'TimeoutException':
+        'O portal demorou demais para responder.',
+    'InvalidSessionIdException':
+        'A sessao do navegador foi encerrada.',
+    'NoSuchWindowException':
+        'A janela do navegador foi fechada durante o preenchimento.',
+}
+
+
+def mensagem_da_falha(exc):
+    """Frase curta e correta para mostrar na linha da nota.
+
+    Excecao do Selenium traz stacktrace e endereco de memoria — util no log,
+    ilegivel na tabela. O texto cru continua inteiro no log e na captura,
+    alcancavel pelo request_id.
+    """
+    if isinstance(exc, _ERROS_COM_MENSAGEM_PRONTA):
+        return str(getattr(exc, 'mensagem', exc)).strip()
+
+    conhecida = _FALHAS_SELENIUM.get(type(exc).__name__)
+    if conhecida:
+        return conhecida
+
+    primeira = (str(exc).strip().splitlines() or [''])[0].strip()
+    return primeira[:200] or 'Falha na automacao.'
+
+
 def _registrar_falha(nota, driver, exc, execution_id):
     """Marca SO esta nota como falha; as demais do lote ficam intactas."""
     try:
@@ -135,14 +185,16 @@ def _registrar_falha(nota, driver, exc, execution_id):
     except Exception:
         pass
 
+    mensagem = mensagem_da_falha(exc)
     nota.status = StatusNotaNfse.FALHA
-    nota.erro = str(exc)[:500]
+    nota.erro = mensagem[:300]
     db.session.commit()
 
+    # o texto cru (com stacktrace) fica so no log, alcancavel pelo request_id
     log_event('nfse_preenchimento_erro', level='ERROR', nota_id=nota.id,
               error=str(exc), execution_id=execution_id)
     return {
         'status': 'error',
         'nota_id': nota.id,
-        'message': str(exc),
+        'message': mensagem,
     }
