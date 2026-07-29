@@ -281,3 +281,87 @@ def test_revincular_corrige_o_apelido_memorizado(client, app):
         assert apelido.empresa_id is None
         assert apelido.documento == CNPJ_OK
         assert db.session.get(NotaNfse, nota_id).documento == CNPJ_OK
+
+
+# --- reconciliacao apos usar o atalho "Cadastrar" --------------------------
+
+def _cadastrar_empresa(app, nome, cnpj):
+    with app.app_context():
+        db.session.add(Empresa(nome=nome, cnpj=cnpj, cidade='Imbé', estado='RS'))
+        db.session.commit()
+        return Empresa.query.filter_by(cnpj=cnpj).first().id
+
+
+def test_voltar_a_pagina_apos_cadastrar_reflete_o_cadastro(client, app):
+    """Bug real: o operador usava o atalho Cadastrar, cadastrava, voltava — e a
+    linha continuava "sem cadastro", porque a nota seguia apontando so para o
+    documento."""
+    _importar(client, 'CONSTRUTORA NOVA LTDA')
+    nota_id = _ultima_nota(app)
+    client.post(f'/nfse/nota/{nota_id}/resolver', json={'documento': CNPJ_OK})
+
+    empresa_id = _cadastrar_empresa(app, 'CONSTRUTORA NOVA', CNPJ_OK)
+    assert client.get('/nfse').status_code == 200
+
+    with app.app_context():
+        nota = db.session.get(NotaNfse, nota_id)
+        assert nota.empresa_id == empresa_id
+        assert nota.status == StatusNotaNfse.PRONTA
+
+
+def test_reconciliacao_corrige_tambem_o_apelido_memorizado(client, app):
+    """Sem isso, o proximo import voltaria a resolver so pelo documento avulso
+    e a linha reapareceria como 'ainda nao cadastrada'."""
+    _importar(client, 'CONSTRUTORA NOVA LTDA')
+    client.post(f'/nfse/nota/{_ultima_nota(app)}/resolver', json={'documento': CNPJ_OK})
+    empresa_id = _cadastrar_empresa(app, 'CONSTRUTORA NOVA', CNPJ_OK)
+    client.get('/nfse')
+
+    with app.app_context():
+        apelido = ApelidoNfse.query.filter_by(nome_norm='CONSTRUTORA NOVA LTDA').first()
+        assert apelido.empresa_id == empresa_id
+        assert apelido.documento is None
+
+
+def test_import_seguinte_ja_sai_vinculado_a_empresa(client, app):
+    _importar(client, 'CONSTRUTORA NOVA LTDA')
+    client.post(f'/nfse/nota/{_ultima_nota(app)}/resolver', json={'documento': CNPJ_OK})
+    empresa_id = _cadastrar_empresa(app, 'CONSTRUTORA NOVA', CNPJ_OK)
+    client.get('/nfse')
+
+    resposta = _importar(client, 'CONSTRUTORA NOVA LTDA', venc='05/08/2026')
+    nota = resposta.get_json()['notas'][0]
+    assert nota['empresa_id'] == empresa_id
+    assert nota['status'] == StatusNotaNfse.PRONTA
+
+
+def test_pessoa_fisica_nao_e_reconciliada_nem_com_empresa_de_mesmo_documento(client, app):
+    """CPF e estado final da linha: o tomador e uma pessoa, nao uma empresa.
+
+    O cenario precisa de uma Empresa cadastrada COM o CPF no campo de CNPJ —
+    erro de digitacao plausivel no cadastro. Sem isso o teste passaria de
+    qualquer forma (nao ha empresa com esse documento para casar), provando
+    nada: foi assim que a primeira versao deste teste deixou passar o mutante
+    que reconciliava pessoa fisica.
+    """
+    _importar(client, 'RODRIGO FERREIRA FARIA')
+    nota_id = _ultima_nota(app)
+    client.post(f'/nfse/nota/{nota_id}/resolver', json={'documento': CPF_OK})
+    _cadastrar_empresa(app, 'CADASTRO ERRADO COM CPF', CPF_OK)
+
+    client.get('/nfse')
+
+    with app.app_context():
+        nota = db.session.get(NotaNfse, nota_id)
+        assert nota.status == StatusNotaNfse.PESSOA_FISICA
+        assert nota.empresa_id is None
+
+
+def test_sem_empresa_cadastrada_a_linha_continua_pendente(client, app):
+    _importar(client, 'CONSTRUTORA NOVA LTDA')
+    nota_id = _ultima_nota(app)
+    client.post(f'/nfse/nota/{nota_id}/resolver', json={'documento': CNPJ_OK})
+    client.get('/nfse')
+
+    with app.app_context():
+        assert db.session.get(NotaNfse, nota_id).status == StatusNotaNfse.CADASTRO_PENDENTE

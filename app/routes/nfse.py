@@ -77,6 +77,10 @@ def nfse_painel():
     lote = LoteNfse.query.order_by(LoteNfse.id.desc()).first()
     notas = (NotaNfse.query.filter_by(lote_id=lote.id).order_by(NotaNfse.id).all()
              if lote else [])
+    # o operador pode ter acabado de usar o atalho "Cadastrar": liga as linhas
+    # cuja Empresa passou a existir, para a volta a pagina refletir o cadastro
+    if nfse_import.reconciliar_com_cadastro(notas):
+        notas = NotaNfse.query.filter_by(lote_id=lote.id).order_by(NotaNfse.id).all()
     return render_template(
         'nfse.html',
         lote=lote,

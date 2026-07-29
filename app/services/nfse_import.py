@@ -475,3 +475,53 @@ def _montar_nota(linha, empresas, apelidos, NotaNfse, StatusNotaNfse):
                    if nota.tipo_documento == TIPO_CPF
                    else StatusNotaNfse.CADASTRO_PENDENTE)
     return nota
+
+
+def reconciliar_com_cadastro(notas=None):
+    """Liga notas de documento avulso a Empresas que passaram a existir.
+
+    Depois que o operador usa o atalho "Cadastrar", a Empresa existe mas a nota
+    continua apontando so para o documento — na volta a linha ainda diria "sem
+    cadastro", e o apelido memorizado repetiria isso no mes seguinte.
+
+    Roda na abertura da pagina e no import. So mexe em `cadastro_pendente` (CNPJ
+    aguardando cadastro); `pessoa_fisica` e estado final e nao e reconciliado.
+    Devolve quantas linhas foram ligadas.
+    """
+    from app import db
+    from app.models import ApelidoNfse, Empresa, NotaNfse, StatusNotaNfse
+
+    if notas is None:
+        notas = NotaNfse.query.filter_by(status=StatusNotaNfse.CADASTRO_PENDENTE).all()
+
+    pendentes = [n for n in notas
+                 if n.status == StatusNotaNfse.CADASTRO_PENDENTE and n.documento]
+    if not pendentes:
+        return 0
+
+    documentos = {n.documento for n in pendentes}
+    por_cnpj = {e.cnpj: e for e in Empresa.query.filter(Empresa.cnpj.in_(documentos)).all()}
+    if not por_cnpj:
+        return 0
+
+    ligadas = 0
+    for nota in pendentes:
+        empresa = por_cnpj.get(nota.documento)
+        if empresa is None:
+            continue
+        nota.empresa_id = empresa.id
+        nota.status = StatusNotaNfse.PRONTA
+        ligadas += 1
+
+        # o apelido tambem precisa passar a apontar para a Empresa, senao o
+        # proximo import voltaria a resolver so pelo documento avulso
+        if nota.nome_csv_norm:
+            apelido = ApelidoNfse.query.filter_by(nome_norm=nota.nome_csv_norm).first()
+            if apelido is not None:
+                apelido.empresa_id = empresa.id
+                apelido.documento = None
+                apelido.tipo_documento = None
+
+    if ligadas:
+        db.session.commit()
+    return ligadas
