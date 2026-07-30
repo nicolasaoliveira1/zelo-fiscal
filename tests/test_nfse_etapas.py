@@ -171,22 +171,30 @@ def test_etapa_pessoas_marca_brasil_e_nao_a_primeira_opcao(driver):
 
 # --- etapa 2: servico ------------------------------------------------------
 
-def test_etapa_servico_usa_select_comum_nos_campos_visiveis(driver):
+def test_etapa_servico_seleciona_municipio_tributacao_e_nbs(driver):
+    """Os tres passam pela MESMA via. Nenhum e manipulavel por Select() do
+    Selenium: municipio e codigo de tributacao sao Select2 (escondidos por
+    classe) e o item da NBS e Chosen (display:none inline)."""
     nfse.preencher_etapa_servico(driver, NOTA, CONFIG, 'HONORARIOS DE 06/2026')
 
-    # visiveis: Select() do Selenium
-    assert driver.selects['LocalPrestacao_CodigoMunicipioPrestacao'] == '4310330'
-    assert driver.selects['ServicoPrestado_CodigoTributacaoNacional'] == '17.19.01'
-    # ocultos atras do Chosen: via jQuery
+    assert driver.chosen['LocalPrestacao_CodigoMunicipioPrestacao'] == '4310330'
+    assert driver.chosen['ServicoPrestado_CodigoTributacaoNacional'] == '17.19.01'
     assert driver.chosen['ServicoPrestado_CodigoNBS'] == '113022100'
 
 
-def test_etapa_servico_nao_usa_chosen_nos_campos_visiveis(driver):
-    """Municipio e codigo de tributacao NAO tem Chosen; usar a via do plugin
-    neles seria mexer num elemento que nao existe."""
-    nfse.preencher_etapa_servico(driver, NOTA, CONFIG, 'HONORARIOS DE 06/2026')
-    assert 'LocalPrestacao_CodigoMunicipioPrestacao' not in driver.chosen
-    assert 'ServicoPrestado_CodigoTributacaoNacional' not in driver.chosen
+def test_municipio_do_servico_e_sempre_o_configurado(driver):
+    """O select do portal so oferece uma opcao (o municipio do emitente), e ela
+    nao vem marcada como selected — setar explicitamente importa."""
+    nfse.preencher_etapa_servico(driver, NOTA, CONFIG, 'x')
+    assert driver.chosen['LocalPrestacao_CodigoMunicipioPrestacao'] ==         CONFIG.municipio_servico_codigo
+
+
+def test_nenhum_select_usa_o_Select_do_selenium(driver):
+    """Regressao: Select() falha em todos eles, e a falha aparece so no portal
+    real — o dublê aceitaria em silencio."""
+    nfse.preencher_etapa_servico(driver, NOTA, CONFIG, 'x')
+    nfse.preencher_etapa_tributacao(driver, NOTA, CONFIG)
+    assert driver.selects == {}, 'nenhum select do assistente aceita Select()' 
 
 
 def test_etapa_servico_escreve_a_descricao_com_a_competencia(driver):

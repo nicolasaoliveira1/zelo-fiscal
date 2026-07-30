@@ -56,34 +56,44 @@ class InteracaoPortalError(RuntimeError):
 
 # --- primitivas de interacao ----------------------------------------------
 
-_JS_CHOSEN = """
+# Nenhum select do assistente e manipulavel por Select() do Selenium: o portal
+# usa DOIS plugins que escondem o <select> real de formas diferentes — Select2
+# (classe `select2-hidden-accessible`) no municipio e no codigo de tributacao,
+# Chosen (`form-chosen` + display:none) no item da NBS. Esta via serve os dois:
+# `change` atualiza Select2 e o select nativo, `chosen:updated` atualiza o
+# Chosen; disparar o evento do outro plugin e inofensivo.
+_JS_SELECIONAR = """
 var el = document.getElementById(arguments[0]);
 if (!el) { return 'ausente'; }
+var valor = arguments[1];
 var jq = window.jQuery || window.$;
-if (!jq) { return 'sem-jquery'; }
-jq(el).val(arguments[1]).trigger('chosen:updated').trigger('change');
+if (jq) {
+  jq(el).val(valor).trigger('change');
+  jq(el).trigger('chosen:updated');
+} else {
+  el.value = valor;
+  el.dispatchEvent(new Event('change', {bubbles: true}));
+}
 return el.value;
 """
 
 
-def _set_chosen(driver, elemento_id, valor):
-    """Escolhe uma opcao de select oculto atras do plugin Chosen.
+def _selecionar(driver, elemento_id, valor):
+    """Escolhe uma opcao de select, seja ele Select2, Chosen ou nativo.
 
-    Confere o valor apos setar e levanta se nao pegou: sem essa checagem, um
-    seletor que mudou de nome no portal passaria despercebido e a nota sairia
-    com o campo em branco (ND-008)."""
-    resultado = driver.execute_script(_JS_CHOSEN, elemento_id, str(valor))
+    Confere o valor apos setar e levanta se nao pegou. Sem essa checagem, um
+    seletor renomeado no portal — ou um codigo que nao existe mais na lista —
+    passaria despercebido e a nota sairia com o campo em branco (ND-008)."""
+    resultado = driver.execute_script(_JS_SELECIONAR, elemento_id, str(valor))
     if resultado == 'ausente':
         raise InteracaoPortalError(
             f'Campo "{elemento_id}" nao existe na pagina. O portal pode ter '
             'mudado o formulario; refaca a recon.')
-    if resultado == 'sem-jquery':
-        raise InteracaoPortalError(
-            f'jQuery indisponivel na pagina ao preencher "{elemento_id}".')
     if str(resultado) != str(valor):
         raise InteracaoPortalError(
             f'Campo "{elemento_id}" nao aceitou o valor "{valor}" '
-            f'(ficou "{resultado}"). Confira a configuracao da NFSe.')
+            f'(ficou "{resultado}"). O codigo pode nao existir mais na lista do '
+            'portal — confira a configuracao da NFSe.')
     return resultado
 
 
@@ -428,7 +438,7 @@ def preencher_etapa_pessoas(driver, nota, config, data_competencia, pausa=None):
     if pausa:
         pausa()
 
-    _set_chosen(driver, 'SimplesNacional_RegimeApuracaoTributosSN',
+    _selecionar(driver, 'SimplesNacional_RegimeApuracaoTributosSN',
                 config.regime_apuracao_sn)
 
     # Marcar "Brasil" e o que REVELA os campos do tomador; o _preencher abaixo
@@ -452,17 +462,15 @@ def preencher_etapa_servico(driver, nota, config, descricao, pausa=None):
     Municipio e codigo de tributacao sao selects VISIVEIS (nao usam Chosen);
     o item da NBS e Chosen com 919 opcoes.
     """
-    from selenium.webdriver.support.ui import Select
-
-    _selecionar_visivel(driver, Select, 'LocalPrestacao_CodigoMunicipioPrestacao',
-                        config.municipio_servico_codigo)
-    _selecionar_visivel(driver, Select, 'ServicoPrestado_CodigoTributacaoNacional',
-                        config.codigo_tributacao)
+    _selecionar(driver, 'LocalPrestacao_CodigoMunicipioPrestacao',
+                config.municipio_servico_codigo)
+    _selecionar(driver, 'ServicoPrestado_CodigoTributacaoNacional',
+                config.codigo_tributacao)
     # "Nao" para imunidade/exportacao: ja e o default, mas marcar explicitamente
     # evita depender de o portal manter esse default.
     _marcar_radio(driver, 'ServicoPrestado.HaExportacaoImunidadeNaoIncidencia', '0')
     _preencher(driver, 'ServicoPrestado_Descricao', descricao)
-    _set_chosen(driver, 'ServicoPrestado_CodigoNBS', config.item_nbs)
+    _selecionar(driver, 'ServicoPrestado_CodigoNBS', config.item_nbs)
     if pausa:
         pausa()
     _avancar(driver)
@@ -477,21 +485,12 @@ def preencher_etapa_tributacao(driver, nota, config, pausa=None):
     """
     _preencher(driver, 'Valores_ValorServico', formatar_valor(nota.valor_final))
     _marcar_radio(driver, 'ISSQN.HaRetencao', '0')  # Nao
-    _set_chosen(driver, 'TributacaoFederal_PISCofins_SituacaoTributaria',
+    _selecionar(driver, 'TributacaoFederal_PISCofins_SituacaoTributaria',
                 config.piscofins_situacao)
-    _set_chosen(driver, 'TributacaoFederal_PISCofins_TipoRetencao',
+    _selecionar(driver, 'TributacaoFederal_PISCofins_TipoRetencao',
                 config.piscofins_tipo_retencao)
     if pausa:
         pausa()
     _avancar(driver)
 
 
-def _selecionar_visivel(driver, Select, elemento_id, valor):
-    """Select comum (sem Chosen), conferindo o valor depois de escolher."""
-    try:
-        elemento = driver.find_element(By.ID, elemento_id)
-    except WebDriverException as exc:
-        raise InteracaoPortalError(
-            f'Campo "{elemento_id}" nao encontrado na pagina.') from exc
-    Select(elemento).select_by_value(str(valor))
-    return elemento

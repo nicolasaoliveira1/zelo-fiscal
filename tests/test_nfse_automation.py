@@ -48,44 +48,58 @@ def _driver(url='', valor_chosen=None, elemento=None, falha_find=False):
     return driver
 
 
-# --- Chosen: o valor tem de ser conferido depois de setar ------------------
+# --- selects: uma via so para Select2, Chosen e nativo ---------------------
 
-def test_set_chosen_envia_id_e_valor_para_o_script():
+def test_selecionar_envia_id_e_valor_para_o_script():
     driver = _driver(valor_chosen='113022100')
-    nfse._set_chosen(driver, 'ServicoPrestado_CodigoNBS', '113022100')
+    nfse._selecionar(driver, 'ServicoPrestado_CodigoNBS', '113022100')
 
     script, elemento_id, valor = driver.execute_script.call_args[0]
     assert elemento_id == 'ServicoPrestado_CodigoNBS'
     assert valor == '113022100'
-    # a API do plugin, nao Select() do Selenium
-    assert 'chosen:updated' in script
-    assert 'change' in script
 
 
-def test_set_chosen_levanta_quando_o_valor_nao_pegou():
-    """O caso perigoso: o DOM aceita, a tela ignora, a nota sai em branco."""
+def test_selecionar_avisa_os_dois_plugins():
+    """O portal usa DOIS plugins: Select2 (municipio, codigo de tributacao,
+    escondidos por classe) e Chosen (item da NBS, display:none inline). Nenhum
+    dos dois e manipulavel por Select() do Selenium. `change` atualiza Select2 e
+    o select nativo; `chosen:updated` atualiza o Chosen."""
+    driver = _driver(valor_chosen='1')
+    nfse._selecionar(driver, 'SimplesNacional_RegimeApuracaoTributosSN', '1')
+
+    script = driver.execute_script.call_args[0][0]
+    assert 'chosen:updated' in script, 'sem isso o Chosen nao atualiza'
+    assert "trigger('change')" in script, 'sem isso o Select2 nao atualiza'
+
+
+def test_selecionar_funciona_sem_jquery():
+    """Fallback nativo: sem jQuery ainda seta o valor e dispara change."""
+    driver = _driver(valor_chosen='1')
+    nfse._selecionar(driver, 'Campo', '1')
+    script = driver.execute_script.call_args[0][0]
+    assert 'el.value = valor' in script
+    assert "new Event('change'" in script
+
+
+def test_selecionar_levanta_quando_o_valor_nao_pegou():
+    """O caso perigoso: o DOM aceita, a tela ignora, a nota sai em branco.
+    Tambem cobre um codigo que saiu da lista do portal."""
     driver = _driver(valor_chosen='')
     with pytest.raises(nfse.InteracaoPortalError) as exc:
-        nfse._set_chosen(driver, 'ServicoPrestado_CodigoNBS', '113022100')
+        nfse._selecionar(driver, 'ServicoPrestado_CodigoNBS', '113022100')
     assert '113022100' in str(exc.value)
 
 
-def test_set_chosen_levanta_quando_o_campo_sumiu_do_portal():
+def test_selecionar_levanta_quando_o_campo_sumiu_do_portal():
     driver = _driver(valor_chosen='ausente')
     with pytest.raises(nfse.InteracaoPortalError) as exc:
-        nfse._set_chosen(driver, 'CampoQueSumiu', '1')
+        nfse._selecionar(driver, 'CampoQueSumiu', '1')
     assert 'recon' in str(exc.value).lower()
 
 
-def test_set_chosen_levanta_sem_jquery():
-    driver = _driver(valor_chosen='sem-jquery')
-    with pytest.raises(nfse.InteracaoPortalError):
-        nfse._set_chosen(driver, 'ServicoPrestado_CodigoNBS', '113022100')
-
-
-def test_set_chosen_aceita_valor_nao_string():
+def test_selecionar_aceita_valor_nao_string():
     driver = _driver(valor_chosen='1')
-    nfse._set_chosen(driver, 'SimplesNacional_RegimeApuracaoTributosSN', 1)
+    nfse._selecionar(driver, 'SimplesNacional_RegimeApuracaoTributosSN', 1)
 
 
 # --- radio: por (name, value), NUNCA por id --------------------------------
