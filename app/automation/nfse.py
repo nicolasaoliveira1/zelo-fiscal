@@ -180,8 +180,8 @@ def _visivel(elemento):
 def _localizar(driver, by, alvo, exigir_visivel=True):
     """Elemento visivel que casa; com `exigir_visivel=False`, o primeiro que casar.
 
-    Preferir o visivel importa porque o portal repete identificadores entre
-    secoes do assistente, e o primeiro do DOM pode estar numa parte oculta.
+    Preferir o visivel importa porque o portal reaproveita identificadores em
+    partes ocultas do formulario, e o primeiro do DOM pode estar numa delas.
 
     Mas `exigir_visivel` NAO serve para radio: no portal os `<input type=radio>`
     sao escondidos por CSS e o que aparece na tela e um label estilizado por
@@ -507,7 +507,7 @@ def abrir_nova_dps(driver):
     driver.get(URL_NOVA_DPS)
 
 
-def _clicar(driver, by, alvo, rotulo):
+def _clicar(driver, localizadores, rotulo):
     """Clica no elemento visivel, rolando ate ele e caindo para clique por JS.
 
     Separa "nao achei" de "achei mas o clique falhou": mensagens iguais para as
@@ -515,13 +515,20 @@ def _clicar(driver, by, alvo, rotulo):
     fim de um formulario longo, entao rolar ate ele importa; e se algo ficar por
     cima (aviso, rodape fixo), o clique por JS ainda resolve.
     """
-    if not esperar(lambda: _localizar(driver, by, alvo) is not None,
+    def achar():
+        for by, alvo in localizadores:
+            elemento = _localizar(driver, by, alvo)
+            if elemento is not None:
+                return elemento
+        return None
+
+    if not esperar(lambda: achar() is not None,
                    timeout=TIMEOUT_AUTOPREENCHIMENTO, intervalo=0.2):
         raise InteracaoPortalError(
             f'{rotulo} nao esta disponivel nesta tela. O portal pode ter mudado '
             'o formulario ou a etapa nao terminou de carregar.')
 
-    elemento = _localizar(driver, by, alvo)
+    elemento = achar()
     try:
         driver.execute_script(
             "arguments[0].scrollIntoView({block: 'center'});", elemento)
@@ -543,8 +550,52 @@ def _clicar(driver, by, alvo, rotulo):
     return elemento
 
 
+# O botao "Avancar" so tem id na etapa 1; nas etapas 2 e 3 e o mesmo elemento
+# sem identificador nenhum. As classes sao iguais nas tres, entao a busca vai do
+# mais especifico ao mais generico e para no primeiro que aparecer.
+LOCALIZADORES_AVANCAR = (
+    (By.ID, ID_BTN_AVANCAR),
+    (By.CSS_SELECTOR, 'button[type="submit"].direita.has-spin'),
+    (By.XPATH, '//button[@type="submit"][.//span[normalize-space()="Avançar"]]'),
+)
+
+
 def _avancar(driver):
-    _clicar(driver, By.ID, ID_BTN_AVANCAR, 'O botao "Avancar"')
+    """Avanca para a proxima etapa do assistente."""
+    if not esperar(lambda: _achar_avancar(driver) is not None,
+                   timeout=TIMEOUT_AUTOPREENCHIMENTO, intervalo=0.2):
+        raise InteracaoPortalError(
+            'O botao "Avancar" nao esta disponivel nesta tela. A etapa pode nao '
+            'ter terminado de carregar ou o portal mudou o formulario.')
+
+    elemento = _achar_avancar(driver)
+    try:
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block: 'center'});", elemento)
+    except WebDriverException:
+        pass
+
+    try:
+        elemento.click()
+        return elemento
+    except WebDriverException:
+        pass
+
+    try:
+        driver.execute_script('arguments[0].click();', elemento)
+    except WebDriverException as exc:
+        raise InteracaoPortalError(
+            'O botao "Avancar" foi encontrado mas nao aceitou o clique: '
+            f'{(str(exc).strip().splitlines() or [""])[0]}') from exc
+    return elemento
+
+
+def _achar_avancar(driver):
+    for by, alvo in LOCALIZADORES_AVANCAR:
+        elemento = _localizar(driver, by, alvo)
+        if elemento is not None:
+            return elemento
+    return None
 
 
 def preencher_etapa_pessoas(driver, nota, config, data_competencia, pausa=None):

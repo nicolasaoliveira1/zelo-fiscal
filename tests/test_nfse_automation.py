@@ -406,3 +406,58 @@ def test_avancar_sem_botao_visivel_da_mensagem_certa():
     with pytest.raises(nfse.InteracaoPortalError) as exc:
         nfse._avancar(driver)
     assert 'nao esta disponivel' in str(exc.value)
+
+
+# --- botao Avancar: o id so existe na etapa 1 ------------------------------
+
+def _driver_avancar(com_id):
+    """Driver cujo #btnAvancar existe ou nao, conforme a etapa.
+
+    Na etapa 1 o botao e <button id="btnAvancar" ...>; nas etapas 2 e 3 e o
+    mesmo elemento SEM identificador nenhum, so as classes.
+    """
+    botao = MagicMock()
+    botao.is_displayed.return_value = True
+    botao.is_enabled.return_value = True
+
+    driver = MagicMock()
+    driver.find_elements.side_effect = lambda by, alvo: (
+        [botao] if (by == By.ID and com_id) or by != By.ID else []
+    )
+    return driver, botao
+
+
+def test_avancar_acha_pelo_id_na_primeira_etapa():
+    driver, botao = _driver_avancar(com_id=True)
+    nfse._avancar(driver)
+    assert botao.click.called
+    primeira_busca = driver.find_elements.call_args_list[0][0]
+    assert primeira_busca[0] == By.ID, 'o id e o localizador mais especifico'
+
+
+def test_avancar_acha_sem_id_nas_etapas_seguintes():
+    """Regressao: nas etapas 2 e 3 o botao nao tem id, e procurar so por
+    #btnAvancar travava o assistente depois de preencher tudo."""
+    driver, botao = _driver_avancar(com_id=False)
+    nfse._avancar(driver)
+    assert botao.click.called
+
+    usados = [c[0] for c in driver.find_elements.call_args_list]
+    assert any(by == By.ID for by, _ in usados), 'tentou o id primeiro'
+    assert any(by != By.ID for by, _ in usados), 'caiu para o localizador sem id'
+
+
+def test_localizadores_do_avancar_cobrem_classe_e_texto():
+    """Se o portal trocar as classes, ainda resta achar pelo texto do botao."""
+    porBy = {by: alvo for by, alvo in nfse.LOCALIZADORES_AVANCAR}
+    assert porBy[By.ID] == 'btnAvancar'
+    assert 'has-spin' in porBy[By.CSS_SELECTOR]
+    assert 'Avançar' in porBy[By.XPATH]
+
+
+def test_avancar_sem_nenhum_localizador_da_erro_acionavel():
+    driver = MagicMock()
+    driver.find_elements.return_value = []
+    with pytest.raises(nfse.InteracaoPortalError) as exc:
+        nfse._avancar(driver)
+    assert 'Avancar' in str(exc.value)
