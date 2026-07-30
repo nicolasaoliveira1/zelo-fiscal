@@ -186,17 +186,35 @@ URL_CONFIRMACAO = 'https://www.nfse.gov.br/EmissorNacional/DPS/NFSe?idr=RXN1Q0x5
 
 
 def test_revisao_exige_path_e_botao():
-    assert nfse.esperar_revisao(_driver(URL_REVISAO, elemento=MagicMock()))
+    assert nfse.na_revisao(_driver(URL_REVISAO, elemento=MagicMock()))
 
 
 def test_revisao_falsa_quando_o_botao_nao_esta_na_pagina():
     # mesmo path, mas pagina de erro: nao pode ser tratada como revisao
-    assert not nfse.esperar_revisao(_driver(URL_REVISAO, falha_find=True))
+    assert not nfse.na_revisao(_driver(URL_REVISAO, falha_find=True))
 
 
 def test_revisao_falsa_em_outra_etapa():
     url = 'https://www.nfse.gov.br/EmissorNacional/DPS/Tributacao?idr=X'
-    assert not nfse.esperar_revisao(_driver(url, elemento=MagicMock()))
+    assert not nfse.na_revisao(_driver(url, elemento=MagicMock()))
+
+
+def test_esperar_revisao_espera_a_pagina_carregar():
+    """O ultimo "Avancar" pode ser clicado por JS, que nao bloqueia ate a
+    navegacao terminar. Uma leitura unica reprovaria uma nota corretamente
+    preenchida — e reprovar aqui marca FALHA numa nota que esta certa."""
+    driver = _driver(URL_REVISAO, elemento=MagicMock())
+    telas = ['https://www.nfse.gov.br/EmissorNacional/DPS/Tributacao?idr=X',
+             'https://www.nfse.gov.br/EmissorNacional/DPS/Tributacao?idr=X',
+             URL_REVISAO]
+    type(driver).current_url = property(lambda self: telas.pop(0) if telas else URL_REVISAO)
+
+    assert nfse.esperar_revisao(driver, timeout=2)
+
+
+def test_esperar_revisao_desiste_no_prazo():
+    url = 'https://www.nfse.gov.br/EmissorNacional/DPS/Tributacao?idr=X'
+    assert not nfse.esperar_revisao(_driver(url, elemento=MagicMock()), timeout=0.3)
 
 
 def test_emitida_exige_path_e_botao_do_danfse():
@@ -223,7 +241,7 @@ def test_deteccao_nao_levanta_com_driver_morto():
     driver = MagicMock()
     type(driver).current_url = property(
         lambda self: (_ for _ in ()).throw(WebDriverException('sessao morta')))
-    assert not nfse.esperar_revisao(driver)
+    assert not nfse.na_revisao(driver)
     assert not nfse.detectar_emitida(driver)
 
 

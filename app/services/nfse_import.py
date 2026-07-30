@@ -342,9 +342,12 @@ def _competencias_ja_emitidas():
     from app.models import NotaNfse, StatusNotaNfse
     consulta = (NotaNfse.query
                 .filter(NotaNfse.status == StatusNotaNfse.EMITIDA)
-                .with_entities(NotaNfse.documento, NotaNfse.competencia))
-    return {(documento, competencia) for documento, competencia in consulta
-            if documento}
+                .with_entities(NotaNfse.id, NotaNfse.documento,
+                               NotaNfse.competencia))
+    # Devolve o id junto para a duplicata poder apontar para a nota que ja foi
+    # emitida — sem ele o operador ve "duplicata" sem saber de qual.
+    return {(documento, competencia): nota_id
+            for nota_id, documento, competencia in consulta if documento}
 
 
 def _ler_arquivos(arquivos):
@@ -417,11 +420,17 @@ def importar(conteudo, nome_arquivo=None, execution_id=None):
             if nota.documento and nota.status in (StatusNotaNfse.PRONTA,
                                                   StatusNotaNfse.PESSOA_FISICA,
                                                   StatusNotaNfse.CADASTRO_PENDENTE):
-                if chave in emitidas or chave in vistas_no_lote:
+                anterior = vistas_no_lote.get(chave)
+                if chave in emitidas or anterior is not None:
                     nota.status = StatusNotaNfse.DUPLICATA
-                    nota.duplicata_de_id = vistas_no_lote.get(chave)
+                    if anterior is not None:
+                        # a original ainda nao tem id (nada foi para o banco);
+                        # o relacionamento resolve a FK no flush
+                        nota.duplicata_de = anterior
+                    else:
+                        nota.duplicata_de_id = emitidas.get(chave)
                 else:
-                    vistas_no_lote[chave] = None
+                    vistas_no_lote[chave] = nota
             db.session.add(nota)
 
         db.session.commit()

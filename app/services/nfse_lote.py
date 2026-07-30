@@ -135,6 +135,19 @@ def _marcar_pulada(nota):
     db.session.commit()
 
 
+def _falhar(nota_id, exc, execution_id):
+    """Marca a nota como falha com texto legivel e devolve a mensagem."""
+    mensagem = nfse_service.mensagem_da_falha(exc)
+    nota = db.session.get(NotaNfse, nota_id)
+    if nota is not None:
+        nota.status = StatusNotaNfse.FALHA
+        nota.erro = mensagem[:300]
+        db.session.commit()
+    log_event('nfse_lote_erro', level='ERROR', nota_id=nota_id,
+              error=str(exc), execution_id=execution_id)
+    return mensagem
+
+
 def _emitir_nota(nota_id, driver_do_motor, execution_id):
     """`emit_fn` do motor: preenche uma nota e espera o operador emitir.
 
@@ -153,6 +166,14 @@ def _emitir_nota(nota_id, driver_do_motor, execution_id):
         # falha tecnica, e motivo para pular sem sujar a contagem de erros
         batch_engine.marcar_resultado_pendente(NFSE_BATCH_STATE, NFSE_BATCH_LOCK)
         return False, None, str(exc)
+    except Exception as exc:
+        # `preencher_nota` trata os erros de DENTRO do preenchimento, mas abre a
+        # sessao antes disso: uma falha de login (certificado ausente, portal
+        # fora) sai por aqui. Sem este except ela atravessaria o `run_batch_loop`
+        # e mataria a thread do worker — o lote ficaria eternamente `running`
+        # (toda nova emissao virando 409) e a nota travada em `preenchendo`, que
+        # nao tem acao nenhuma na interface.
+        return False, batch_engine.GRAVE_FATAL, _falhar(nota_id, exc, execution_id)
 
     if resultado.get('status') == 'error':
         # `preencher_nota` ja gravou o status FALHA e a mensagem curta na nota
@@ -247,6 +268,26 @@ def _liberar_sessao(_ctx):
 
 
 def worker(app):
+    """Rede de seguranca em volta do motor.
+
+    Qualquer excecao que escape daqui mata a thread e deixa o estado em
+    `running` para sempre: nao ha quem o conserte, e todo inicio seguinte
+    responde 409. Melhor terminar em `error`, que a interface sabe mostrar."""
+    try:
+        _rodar_lote(app)
+    except Exception as exc:
+        with NFSE_BATCH_LOCK:
+            NFSE_BATCH_STATE['status'] = 'error'
+            NFSE_BATCH_STATE['message'] = (
+                'A emissao parou por um erro inesperado. Confira o log e comece '
+                'de novo.')
+        # `liberar` e idempotente: o teardown do motor pode ja ter rodado, mas
+        # se a excecao veio antes dele o lock ficaria preso para sempre.
+        SESSAO.liberar()
+        log_event('nfse_lote_worker_morreu', level='ERROR', error=str(exc))
+
+
+def _rodar_lote(app):
     batch_engine.run_batch_loop(
         app,
         lock=NFSE_BATCH_LOCK,

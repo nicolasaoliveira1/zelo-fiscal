@@ -509,6 +509,11 @@ class NotaNfse(db.Model):
 
     duplicata_de_id = db.Column(
         db.Integer, db.ForeignKey('nota_nfse.id'), nullable=True)
+    # Relacionamento (nao muda o schema) para o import poder apontar a duplicata
+    # para a nota original ANTES de ela existir no banco: no laco do import
+    # nenhuma das duas tem id ainda, e so o objeto esta disponivel.
+    duplicata_de = db.relationship(
+        'NotaNfse', remote_side=[id], foreign_keys=[duplicata_de_id])
     duplicata_liberada = db.Column(db.Boolean, nullable=False, default=False)
 
     emitida_em = db.Column(db.DateTime, nullable=True)

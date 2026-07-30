@@ -93,14 +93,21 @@ class NfseSession:
     def garantir(self):
         """Devolve um navegador autenticado, reaproveitando o que ja existe.
 
-        So faz login quando nao ha driver vivo — e o que evita repetir
-        certificado e aliquota a cada nota."""
-        if self.driver_vivo() and automacao.logado(self._driver):
+        So faz login quando nao ha driver vivo ou a sessao caiu — e o que evita
+        repetir certificado e aliquota a cada nota. A pergunta e "a sessao ainda
+        vale?" (`sessao_valida`), nao "estamos no painel?": depois de ler a
+        aliquota o navegador esta em /Perfil/Configuracao e depois de uma nota
+        em /DPS/..., e exigir o Dashboard derrubaria a sessao nas duas."""
+        if self.driver_vivo() and automacao.sessao_valida(self._driver):
             return self._driver
 
         if self._driver is not None:
             self._descartar_driver()
 
+        # Uma nova tentativa nao pode empilhar policy: o refcount e por indice e
+        # so zera com o mesmo numero de desativacoes, senao a chave
+        # AutoSelectCertificateForUrls fica no registro depois de `encerrar`.
+        self._liberar_politica()
         self._politica = politica_nfse()
         if self._politica is not None:
             ativar(self._politica)
@@ -130,15 +137,21 @@ class NfseSession:
         """Fecha o navegador e libera a policy. Idempotente e a prova de erro:
         um `quit()` que levanta nao pode deixar a policy presa no registro."""
         self._descartar_driver()
-        if self._politica is not None:
-            try:
-                desativar(self._politica)
-            except Exception as exc:
-                log_event('nfse_policy_release_falhou', level='WARNING', error=str(exc))
-            self._politica = None
+        self._liberar_politica()
         self.aliquota = None
         self.aliquota_confirmada = False
         log_event('nfse_sessao_encerrada')
+
+    def _liberar_politica(self):
+        """Devolve a policy ativa, se houver. Idempotente."""
+        if self._politica is None:
+            return
+        try:
+            desativar(self._politica)
+        except Exception as exc:
+            log_event('nfse_policy_release_falhou', level='WARNING', error=str(exc))
+        finally:
+            self._politica = None
 
     def _descartar_driver(self):
         if self._driver is None:

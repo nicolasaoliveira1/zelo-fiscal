@@ -423,6 +423,17 @@ def nfse_lote_iniciar():
         return json_error(
             'Ja existe uma emissao da NFSe em andamento. Aguarde terminar.', 409)
 
+    # Recusar ANTES de gravar as opcoes. `init_batch_run` tambem recusa lote em
+    # andamento, mas la o modo ja teria sido trocado: um inicio individual
+    # rejeitado viraria o modo de um lote PAUSADO para individual, e o Retomar
+    # fecharia o navegador depois da primeira nota. As duas checagens sao
+    # seguras juntas porque a sessao ja esta tomada acima.
+    with NFSE_BATCH_LOCK:
+        em_andamento = NFSE_BATCH_STATE.get('status') in ('running', 'paused')
+    if em_andamento:
+        SESSAO.liberar()
+        return json_error('Ja existe um lote de NFSe em andamento.', 409)
+
     definir_nfse_batch_opcoes(modo, ignorar_aliquota)
     nfse_lote.preparar_nova_fila()
     lote = LoteNfse.query.order_by(LoteNfse.id.desc()).first()

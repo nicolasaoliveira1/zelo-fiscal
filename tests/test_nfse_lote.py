@@ -385,3 +385,52 @@ def test_espera_sem_driver_nao_estoura(sessao):
     """Se a sessao perder o navegador entre o preenchimento e a espera, o
     desfecho e "nao sei" — nao um AttributeError no meio do lote."""
     assert nfse_lote.aguardar_confirmacao(None) == nfse_lote.JANELA_FECHADA
+
+
+# --- excecao inesperada nao pode matar a thread ----------------------------
+
+def test_falha_de_login_marca_a_nota_e_para_o_lote(fila, monkeypatch):
+    """`preencher_nota` abre a sessao ANTES do seu proprio try, entao um erro de
+    login sai por fora. Sem tratamento aqui ele atravessa o motor e mata a
+    thread: o lote fica `running` para sempre (toda emissao seguinte vira 409) e
+    a nota trava em `preenchendo`, estado que a interface nao sabe destravar."""
+    from app.automation.nfse import LoginNfseError
+    fila['preencher'].side_effect = LoginNfseError(
+        'O portal nao chegou ao painel apos o acesso por certificado.')
+    nota = _nota()
+
+    sucesso, grave, mensagem = nfse_lote._emitir_nota(nota.id, None, 'exec-1')
+    db.session.refresh(nota)
+
+    assert (sucesso, grave) == (False, batch_engine.GRAVE_FATAL)
+    assert nota.status == StatusNotaNfse.FALHA
+    assert nota.status != StatusNotaNfse.PREENCHENDO
+    assert 'certificado' in mensagem or 'painel' in mensagem
+
+
+def test_erro_inesperado_no_preenchimento_nao_deixa_a_nota_presa(fila, monkeypatch):
+    fila['preencher'].side_effect = RuntimeError('estourou algo novo')
+    nota = _nota()
+
+    sucesso, grave, _ = nfse_lote._emitir_nota(nota.id, None, 'exec-1')
+    db.session.refresh(nota)
+
+    assert (sucesso, grave) == (False, batch_engine.GRAVE_FATAL)
+    assert nota.status == StatusNotaNfse.FALHA
+
+
+def test_worker_que_explode_termina_em_erro_e_nao_em_running(monkeypatch, banco):
+    """Estado preso em `running` nao tem quem conserte: nao ha rota que o
+    reinicie e todo inicio novo responde 409."""
+    monkeypatch.setattr(nfse_lote, 'log_event', MagicMock())
+    monkeypatch.setattr(nfse_lote, '_rodar_lote', MagicMock(
+        side_effect=RuntimeError('motor quebrou')))
+    liberou = MagicMock()
+    monkeypatch.setattr(nfse_lote, 'SESSAO', liberou)
+    NFSE_BATCH_STATE['status'] = 'running'
+
+    nfse_lote.worker(banco)
+
+    assert NFSE_BATCH_STATE['status'] == 'error'
+    assert NFSE_BATCH_STATE['message']
+    assert liberou.liberar.called, 'a sessao ficaria presa se o teardown nao rodou'

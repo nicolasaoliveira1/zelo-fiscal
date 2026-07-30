@@ -337,3 +337,20 @@ def test_lista_de_notas_reflete_o_banco_durante_a_fila(client, app, sessao_falsa
 
 def test_lista_de_notas_exige_papel(login_as):
     assert login_as('leitura').get('/nfse/notas').status_code == 403
+
+
+def test_inicio_recusado_nao_troca_o_modo_de_um_lote_pausado(
+        client, app, sessao_falsa, worker_falso):
+    """Um clique em Preencher (individual) com lote pausado nao pode virar o
+    modo do lote: no Retomar o navegador fecharia depois da primeira nota."""
+    sessao_falsa.aliquota_confirmada = True
+    nota_id = _nota_pronta(client, app)
+    _iniciar(client, modo='lote')          # grava modo 'lote'
+    NFSE_BATCH_STATE['status'] = 'paused'
+    sessao_falsa.livre = True              # o worker falso nao devolveu o lock
+
+    resposta = _iniciar(client, modo='individual', nota_id=nota_id)
+    assert resposta.status_code == 409
+    assert nfse_batch_opcoes()['modo'] == 'lote', (
+        'o modo do lote pausado foi trocado por um inicio que falhou')
+    assert sessao_falsa.livre, 'a recusa precisa devolver a sessao'

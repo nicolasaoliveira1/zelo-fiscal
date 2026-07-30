@@ -245,3 +245,34 @@ def test_um_arquivo_so_continua_funcionando(banco):
     lote = imp.importar(_linha(), nome_arquivo='extrato.csv')
     assert len(_notas(lote)) == 1
     assert lote.nome_arquivo == 'extrato.csv'
+
+
+# --- a duplicata aponta para a original ------------------------------------
+
+def test_duplicata_no_mesmo_arquivo_aponta_para_a_original(banco):
+    """Sem o vinculo o operador ve "duplicata" e nao sabe de qual — e a linha
+    original pode estar em qualquer lugar de uma lista de 50."""
+    _empresa()
+    notas = _notas(imp.importar(_linha(i='826,09') + '\n' + _linha(i='500,00')))
+
+    assert notas[1].status == StatusNotaNfse.DUPLICATA
+    assert notas[1].duplicata_de_id == notas[0].id
+
+
+def test_duplicata_de_reimportacao_aponta_para_a_nota_ja_emitida(banco):
+    _empresa()
+    primeira = _notas(imp.importar(_linha()))[0]
+    primeira.status = StatusNotaNfse.EMITIDA
+    db.session.commit()
+    id_emitida = primeira.id
+
+    notas = _notas(imp.importar(_linha()))
+    assert notas[0].status == StatusNotaNfse.DUPLICATA
+    assert notas[0].duplicata_de_id == id_emitida
+
+
+def test_linha_normal_nao_ganha_vinculo_de_duplicata(banco):
+    _empresa()
+    notas = _notas(imp.importar(_linha()))
+    assert notas[0].status == StatusNotaNfse.PRONTA
+    assert notas[0].duplicata_de_id is None

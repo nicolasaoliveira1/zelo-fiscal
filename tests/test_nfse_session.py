@@ -285,3 +285,58 @@ def test_indice_da_nfse_nunca_colide_com_o_do_rs(app):
     """Mesmo indice sobrescreveria a policy do RS no registro do Windows."""
     assert (str(app.config.get('NFSE_CERT_AUTOSELECT_POLICY_INDEX'))
             != str(app.config.get('RS_CERT_AUTOSELECT_POLICY_INDEX')))
+
+
+# --- reuso do navegador fora do painel -------------------------------------
+#
+# O operador sai do Dashboard na PRIMEIRA acao: ler a aliquota vai para
+# /Perfil/Configuracao e preencher uma nota termina em /DPS/... Exigir o painel
+# para reusar a sessao fazia o proximo `garantir()` fechar o Chrome e pedir o
+# certificado de novo — o oposto do que a sessao persistente existe para fazer.
+
+URLS_DEPOIS_DO_LOGIN = [
+    'https://www.nfse.gov.br/EmissorNacional/Perfil/Configuracao',
+    'https://www.nfse.gov.br/EmissorNacional/DPS/Pessoas?idr=RXN1Q0x5',
+    'https://www.nfse.gov.br/EmissorNacional/DPS/EmitirNFSe?idr=RXN1Q0x5',
+    'https://www.nfse.gov.br/EmissorNacional/DPS/NFSe?idr=RXN1Q0x5',
+]
+
+
+@pytest.mark.parametrize('url', URLS_DEPOIS_DO_LOGIN)
+def test_reusa_o_navegador_fora_do_painel(sessao, url):
+    driver = sessao.garantir()
+    driver.current_url = url
+
+    assert sessao.garantir() is driver
+    assert sessao_mod.automacao.login_certificado.call_count == 1, (
+        f'sair do painel para {url} nao pode custar um novo certificado')
+    assert len(sessao._criados) == 1
+
+
+def test_ler_aliquota_nao_derruba_a_sessao(sessao, monkeypatch):
+    """Sequencia real do operador: abrir portal, conferir aliquota, preencher.
+    O certificado tem de ser pedido uma vez so nas tres."""
+    def _le(driver):
+        driver.current_url = 'https://www.nfse.gov.br/EmissorNacional/Perfil/Configuracao'
+        return '3,87'
+    monkeypatch.setattr(sessao_mod.automacao, 'ler_aliquota_simples', _le)
+
+    sessao.garantir()
+    sessao.ler_aliquota()
+    sessao.garantir()
+
+    assert sessao_mod.automacao.login_certificado.call_count == 1
+    assert sessao_mod.ativar.call_count == 1
+
+
+def test_relogin_devolve_a_policy_antiga(sessao):
+    """O refcount da policy e por indice e so zera com o mesmo numero de
+    desativacoes. Empilhar duas ativacoes e liberar uma deixa a chave
+    AutoSelectCertificateForUrls no registro depois de encerrar a sessao."""
+    primeiro = sessao.garantir()
+    primeiro.current_url = 'https://www.nfse.gov.br/EmissorNacional/Login'
+    sessao.garantir()
+    sessao.encerrar()
+
+    assert sessao_mod.ativar.call_count == sessao_mod.desativar.call_count, (
+        'ativacoes e desativacoes desbalanceadas deixam policy presa no registro')

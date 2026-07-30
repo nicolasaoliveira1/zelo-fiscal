@@ -52,6 +52,9 @@ ID_BTN_DANFSE = 'btnDownloadDANFSE'
 SEL_ALERTA_SUCESSO = 'div.alert-success'
 TEXTO_EMISSAO_OK = 'gerada com sucesso'
 
+# Quanto esperar a tela de revisao aparecer depois do ultimo "Avancar".
+TIMEOUT_REVISAO = 20
+
 # Quanto esperar o portal preencher sozinho emitente e tomador.
 # Modulo-level para os testes reduzirem sem esperar o tempo real.
 TIMEOUT_AUTOPREENCHIMENTO = 15
@@ -124,13 +127,17 @@ def _marcar_radio(driver, name, valor):
 def _preencher(driver, elemento_id, valor, sair=True):
     """Limpa e preenche um input de texto, saindo do campo ao final.
 
-    `sair` manda ESC + TAB depois de digitar, por dois motivos observados no
-    portal:
+    `sair` simula um clique fora do campo depois de digitar, por dois motivos
+    observados no portal:
 
     - o campo de data abre um datepicker que fica POR CIMA do proximo campo, e
-      o clique seguinte falha com "element not interactable" (ESC fecha);
+      o clique seguinte falha com "element not interactable";
     - o portal so processa o valor quando o campo perde o foco — e e isso que
-      dispara o preenchimento automatico do emitente e do tomador (TAB).
+      dispara o preenchimento automatico do emitente e do tomador.
+
+    Por teclado nao funciona: o TAB leva o foco ao botao "Abrir calendario" ao
+    lado da data (o campo nunca sai de foco) e o ESC ABRE o datepicker em vez
+    de fechar. Ver `_JS_SAIR`.
     """
     if not _esperar_interagivel(driver, elemento_id):
         raise InteracaoPortalError(
@@ -389,12 +396,24 @@ def _url(driver):
         return ''
 
 
-def esperar_revisao(driver):
-    """True quando o navegador esta na tela de revisao, com o botao de emitir.
+def na_revisao(driver):
+    """True quando o navegador ESTA na tela de revisao, com o botao de emitir.
 
     Exige path E elemento: so a URL nao basta porque uma pagina de erro no
     mesmo path passaria."""
     return PATH_REVISAO in _url(driver) and _tem_elemento(driver, ID_BTN_EMITIR)
+
+
+def esperar_revisao(driver, timeout=None):
+    """Espera o portal chegar a tela de revisao. False se estourar o prazo.
+
+    Espera de verdade, ao contrario de uma leitura unica: o ultimo "Avancar"
+    pode ser clicado por JS (o fallback de `_clicar`), e clique por JS nao
+    bloqueia ate a navegacao terminar. Conferir na hora reprova uma nota
+    corretamente preenchida so porque a pagina ainda estava carregando — e
+    reprovar aqui marca FALHA numa nota que esta certa esperando no portal."""
+    timeout = TIMEOUT_REVISAO if timeout is None else timeout
+    return esperar(lambda: na_revisao(driver), timeout=timeout)
 
 
 def _tem_alerta_sucesso(driver):
@@ -461,7 +480,29 @@ class LoginNfseError(RuntimeError):
 
 
 def logado(driver):
+    """True quando o navegador chegou ao painel.
+
+    E o alvo do LOGIN — "entrou e caiu no Dashboard". Nao serve para perguntar
+    "a sessao ainda vale?" depois, porque o operador sai do painel na primeira
+    acao: ler a aliquota vai para /Perfil/Configuracao e preencher uma nota
+    termina em /DPS/... Para isso existe `sessao_valida`."""
     return PATH_DASHBOARD in _url(driver)
+
+
+def sessao_valida(driver):
+    """True enquanto o navegador continua autenticado no Emissor Nacional.
+
+    Vale em qualquer tela de dentro do sistema, nao so no painel. O portal
+    devolve para /Login quando a sessao cai, entao e a presenca dessa tela que
+    denuncia a perda — nao a ausencia do Dashboard.
+
+    A distincao nao e cosmetica: usar `logado` aqui fazia o proximo `garantir()`
+    fechar o Chrome e pedir o certificado outra vez a cada nota, que e
+    exatamente o que a sessao persistente existe para evitar."""
+    url = _url(driver)
+    if not url or '/EmissorNacional' not in url:
+        return False
+    return '/Login' not in url
 
 
 def login_certificado(driver, timeout=40, intervalo=0.5):

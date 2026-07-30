@@ -31,10 +31,14 @@ let aliquotaConfirmada = false;
 // linhas cujo vinculo o operador reabriu para corrigir
 const editando = new Set();
 
+// `textContent` -> `innerHTML` escapa &, < e >, mas NAO aspas: como o resultado
+// tambem entra em atributos (title="${esc(...)}"), faltavam justamente as duas
+// que quebram o atributo. As mensagens da automacao citam o campo entre aspas
+// (`Campo "DataCompetencia" nao existe`), entao isso acontece de verdade.
 const esc = (texto) => {
   const div = document.createElement('div');
   div.textContent = texto == null ? '' : String(texto);
-  return div.innerHTML;
+  return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 };
 
 async function chamar(url, opcoes = {}) {
