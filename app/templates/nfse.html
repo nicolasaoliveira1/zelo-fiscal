@@ -18,6 +18,35 @@
         color: var(--zelo-slate);
         font-size: 0.86rem;
     }
+    /* Toggle de modo: monocromatico como todo o chrome — a unica cor da tela
+       continua sendo o status da nota. */
+    .nfse-modo .btn-check:checked + .btn {
+        background: var(--zelo-ink);
+        border-color: var(--zelo-ink);
+        color: var(--zelo-paper);
+    }
+    .nfse-modo-desc {
+        color: var(--zelo-slate);
+        font-size: 0.82rem;
+        margin-top: 0.4rem;
+    }
+    .nfse-progresso {
+        border-top: 1px solid var(--zelo-line);
+        margin-top: 0.9rem;
+        padding-top: 0.75rem;
+    }
+    .nfse-progresso-barra {
+        height: 6px;
+        border-radius: 999px;
+        background: var(--zelo-mist);
+        overflow: hidden;
+    }
+    .nfse-progresso-barra > span {
+        display: block;
+        height: 100%;
+        background: var(--zelo-ink);
+        transition: width 0.3s ease;
+    }
     .nfse-tabela { font-size: 0.9rem; }
     .nfse-tabela th {
         font-weight: 600;
@@ -251,9 +280,57 @@
     </div>
 </div>
 
+<!-- Modo de emissao -->
+<div class="nfse-card mb-3">
+    <h2 class="h6 nfse-title mb-2">3. Como emitir</h2>
+    <p class="nfse-hint mb-2">
+        Nos dois modos a automação preenche as três etapas e <strong>para na tela de
+        revisão</strong>. Quem confere e clica em "Emitir NFS-e" é você.
+    </p>
+
+    <div class="btn-group nfse-modo" role="group" aria-label="Modo de emissão">
+        <input type="radio" class="btn-check" name="nfseModo" id="modoIndividual"
+               value="individual" autocomplete="off" checked>
+        <label class="btn btn-soft-primary btn-sm" for="modoIndividual">Uma por vez</label>
+
+        <input type="radio" class="btn-check" name="nfseModo" id="modoLote"
+               value="lote" autocomplete="off">
+        <label class="btn btn-soft-primary btn-sm" for="modoLote">Lista inteira</label>
+    </div>
+
+    <div class="nfse-modo-desc" id="nfseModoDesc"></div>
+
+    <div class="d-flex gap-2 align-items-center flex-wrap mt-3" id="nfseAcoesLote">
+        <button class="btn btn-primary btn-sm d-none" type="button" id="btnIniciarLote">
+            Emitir a lista inteira
+        </button>
+        <button class="btn btn-soft-primary btn-sm d-none" type="button" id="btnPularNota">
+            Pular esta nota
+        </button>
+        <button class="btn btn-ghost btn-sm d-none" type="button" id="btnPausarLote">
+            Pausar
+        </button>
+        <button class="btn btn-soft-primary btn-sm d-none" type="button" id="btnRetomarLote">
+            Retomar
+        </button>
+        <button class="btn btn-outline-danger btn-sm d-none" type="button" id="btnPararLote">
+            Parar
+        </button>
+    </div>
+
+    <div class="nfse-progresso d-none" id="nfseProgresso">
+        <div class="d-flex justify-content-between align-items-baseline mb-1">
+            <span class="nfse-hint" id="nfseProgressoRotulo"></span>
+            <span class="nfse-mono" id="nfseProgressoContagem"></span>
+        </div>
+        <div class="nfse-progresso-barra"><span id="nfseProgressoBarra" style="width: 0%"></span></div>
+        <div class="nfse-hint mt-2" id="nfseProgressoMensagem"></div>
+    </div>
+</div>
+
 <!-- Tabela de conferencia -->
 <div class="nfse-card">
-    <h2 class="h6 nfse-title mb-3">3. Conferir e preencher</h2>
+    <h2 class="h6 nfse-title mb-3">4. Conferir e preencher</h2>
     <div class="nfse-tabela-wrap">
         <table class="table table-sm align-middle nfse-tabela mb-0" id="tabelaNotas">
             <thead>

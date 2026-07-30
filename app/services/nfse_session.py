@@ -70,6 +70,16 @@ class NfseSession:
 
     # --- ciclo de vida do navegador ---------------------------------------
 
+    @property
+    def driver(self):
+        """O navegador atual, sem abrir nem relogar — None se nao ha.
+
+        Existe para quem so quer OBSERVAR a janela (a espera pela confirmacao
+        do operador): chamar `garantir()` ali reabriria o navegador e refaria o
+        login justamente quando o operador acabou de fecha-lo, escondendo o
+        unico sinal de que ele saiu do fluxo."""
+        return self._driver
+
     def driver_vivo(self):
         """False quando nao ha driver ou a janela foi fechada na mao."""
         if self._driver is None:

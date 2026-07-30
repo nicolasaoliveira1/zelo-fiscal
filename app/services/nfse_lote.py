@@ -1,0 +1,273 @@
+"""Emissao assistida de NFSe em fila, nos dois modos (NFSE-19/20).
+
+Os dois modos que o operador escolhe na pagina sao o MESMO laco; mudam so duas
+coisas:
+
+- **individual**: a fila tem uma nota so, escolhida na linha da tabela, e o
+  navegador fecha assim que a emissao e detectada;
+- **lote**: a fila tem todas as notas emitiveis, e o navegador fica aberto e
+  autenticado do inicio ao fim — e isso que evita repetir certificado e
+  aliquota a cada nota.
+
+Em nenhum dos dois a automacao clica em emitir (ND-005): ela preenche, para na
+revisao e ESPERA o operador conferir e emitir. O que a espera observa e o
+portal, nao um aviso da interface — a nota so vira `emitida` quando a tela de
+confirmacao aparece de verdade.
+
+O laco, o estado e os comandos pausar/parar vem do `batch_engine`, como os
+lotes de certidao. A diferenca e que aqui o `create_driver` do motor fica None
+de proposito: o dono do navegador e a `NfseSession`, e deixar o motor
+`quit()`-ar no finally fecharia a sessao compartilhada pelas costas dela.
+"""
+import time
+from datetime import datetime
+
+from app import db
+from app.automation import nfse as automacao
+from app.automation.batch_state import (
+    NFSE_BATCH_LOCK,
+    NFSE_BATCH_STATE,
+    nfse_batch_opcoes,
+)
+from app.models import NotaNfse, StatusNotaNfse
+from app.services import batch_engine, nfse_service
+from app.services.execution_logger import log_event
+from app.services.nfse_session import SESSAO
+
+MODO_INDIVIDUAL = 'individual'
+MODO_LOTE = 'lote'
+MODOS = (MODO_INDIVIDUAL, MODO_LOTE)
+
+ORIGEM_AUTOMACAO = 'automacao'
+
+# Quanto esperar o operador conferir e emitir uma nota. Generoso de proposito:
+# quem revisa documento fiscal as vezes sai para confirmar um valor. Estourar
+# nao perde nada — pausa o lote na nota atual, que segue esperando confirmacao.
+TIMEOUT_CONFIRMACAO = 15 * 60
+INTERVALO_CONFIRMACAO = 1.0
+
+# Desfechos da espera pela confirmacao humana.
+EMITIDA = 'emitida'
+PULADA = 'pulada'
+CANCELADA = 'cancelada'
+TIMEOUT = 'timeout'
+JANELA_FECHADA = 'janela_fechada'
+
+
+# --- espera pela confirmacao humana ----------------------------------------
+
+def aguardar_confirmacao(driver, timeout=None, agora=None, dormir=None):
+    """Fica observando a janela ate a nota ser emitida ou o operador desistir.
+
+    Devolve um dos desfechos do modulo. A ordem das verificacoes nao e
+    arbitraria: `EMITIDA` vem primeiro porque a emissao e a unica verdade
+    irreversivel aqui. Se o operador emitir e clicar em "pular" quase junto,
+    tratar como pulada gravaria no banco que a nota nao saiu — e ela voltaria
+    no CSV do mes seguinte para ser emitida de novo, gerando nota duplicada
+    para o mesmo tomador e competencia.
+
+    `agora`/`dormir` sao injetaveis so para o teste nao gastar tempo real.
+    """
+    agora = agora or time.monotonic
+    dormir = dormir or time.sleep
+    timeout = TIMEOUT_CONFIRMACAO if timeout is None else timeout
+    limite = agora() + timeout
+
+    # Sem driver nao ha o que observar. Cair aqui e o mesmo caso de janela
+    # fechada: nao da para afirmar se a nota saiu.
+    if driver is None:
+        return JANELA_FECHADA
+
+    while True:
+        if automacao.detectar_emitida(driver):
+            return EMITIDA
+
+        # Janela fechada: nao da para saber se emitiu antes de fechar, entao o
+        # desfecho e "nao sei" — quem decide e o operador, pela marcacao manual.
+        if not SESSAO.driver_vivo():
+            return JANELA_FECHADA
+
+        with NFSE_BATCH_LOCK:
+            if NFSE_BATCH_STATE.get('pular_atual'):
+                NFSE_BATCH_STATE['pular_atual'] = False
+                return PULADA
+            if NFSE_BATCH_STATE.get('stop_requested'):
+                return CANCELADA
+
+        if agora() >= limite:
+            return TIMEOUT
+
+        dormir(INTERVALO_CONFIRMACAO)
+
+
+def preparar_nova_fila():
+    """Zera pedidos pendurados antes de uma execucao comecar.
+
+    `pular_atual` nao e chave do `batch_state_defaults()`, entao
+    `reset_batch_state` nao a apaga: um "pular" que chegou tarde demais na
+    execucao anterior ficaria guardado e pularia a PRIMEIRA nota da proxima
+    fila, sem ninguem pedir."""
+    with NFSE_BATCH_LOCK:
+        NFSE_BATCH_STATE['pular_atual'] = False
+
+
+def pedir_pular():
+    """Manda a espera abandonar a nota atual e seguir para a proxima."""
+    with NFSE_BATCH_LOCK:
+        if NFSE_BATCH_STATE.get('status') != 'running':
+            return False
+        NFSE_BATCH_STATE['pular_atual'] = True
+        return True
+
+
+# --- desfecho de uma nota --------------------------------------------------
+
+def _marcar_emitida(nota):
+    nota.status = StatusNotaNfse.EMITIDA
+    nota.origem_emissao = ORIGEM_AUTOMACAO
+    nota.emitida_em = datetime.now()
+    nota.erro = None
+    db.session.commit()
+
+
+def _marcar_pulada(nota):
+    nota.status = StatusNotaNfse.PULADA
+    db.session.commit()
+
+
+def _emitir_nota(nota_id, driver_do_motor, execution_id):
+    """`emit_fn` do motor: preenche uma nota e espera o operador emitir.
+
+    Assinatura ditada pelo `batch_engine`; devolve (sucesso, grave, mensagem).
+    O `driver_do_motor` chega None de proposito (ver docstring do modulo) — o
+    navegador vem da sessao.
+    """
+    opcoes = nfse_batch_opcoes()
+
+    try:
+        resultado = nfse_service.preencher_nota(
+            nota_id, execution_id=execution_id,
+            ignorar_aliquota=opcoes['ignorar_aliquota'])
+    except nfse_service.NotaNaoEmitivelError as exc:
+        # linha que nao devia estar na fila (ja emitida, sem empresa...): nao e
+        # falha tecnica, e motivo para pular sem sujar a contagem de erros
+        batch_engine.marcar_resultado_pendente(NFSE_BATCH_STATE, NFSE_BATCH_LOCK)
+        return False, None, str(exc)
+
+    if resultado.get('status') == 'error':
+        # `preencher_nota` ja gravou o status FALHA e a mensagem curta na nota
+        return False, None, resultado.get('message')
+
+    nota = db.session.get(NotaNfse, nota_id)
+    desfecho = aguardar_confirmacao(SESSAO.driver)
+    log_event('nfse_lote_desfecho', nota_id=nota_id, desfecho=desfecho,
+              modo=opcoes['modo'], execution_id=execution_id)
+
+    if desfecho == EMITIDA:
+        _marcar_emitida(nota)
+        if opcoes['modo'] == MODO_INDIVIDUAL:
+            # o combinado do modo individual: emitiu, fecha o navegador. No modo
+            # lote a janela continua aberta e autenticada para a proxima nota.
+            SESSAO.encerrar()
+        return True, None, f'Nota {nota_id} emitida.'
+
+    if desfecho == PULADA:
+        _marcar_pulada(nota)
+        batch_engine.marcar_resultado_pendente(NFSE_BATCH_STATE, NFSE_BATCH_LOCK)
+        return False, None, f'Nota {nota_id} pulada pelo operador.'
+
+    if desfecho == JANELA_FECHADA:
+        # A nota fica AGUARDANDO_CONFIRMACAO: pode ter sido emitida antes de
+        # fechar, e marcar qualquer um dos dois lados por conta propria erra
+        # feio — ou perde uma nota emitida, ou emite de novo mes que vem.
+        batch_engine.marcar_resultado_pendente(NFSE_BATCH_STATE, NFSE_BATCH_LOCK)
+        return False, batch_engine.GRAVE_FATAL, (
+            f'O navegador foi fechado com a nota {nota_id} na tela de revisao. '
+            'Se voce chegou a emitir, marque a linha como emitida na lista.')
+
+    if desfecho == TIMEOUT:
+        # Pausa em vez de pular: a nota preenchida continua no portal esperando,
+        # e retomar recomeca por ela (o motor nao avanca o indice ao pausar).
+        batch_engine.request_pause(NFSE_BATCH_LOCK, NFSE_BATCH_STATE)
+        batch_engine.marcar_resultado_pendente(NFSE_BATCH_STATE, NFSE_BATCH_LOCK)
+        return False, None, (
+            f'Sem confirmacao da nota {nota_id} no tempo previsto. Lote pausado '
+            'nesta nota — retome quando quiser continuar.')
+
+    # CANCELADA: pausar/parar chegou durante a espera; o motor decide o status
+    batch_engine.marcar_resultado_pendente(NFSE_BATCH_STATE, NFSE_BATCH_LOCK)
+    return False, None, f'Espera da nota {nota_id} interrompida.'
+
+
+# --- montagem da fila ------------------------------------------------------
+
+def _emitivel(nota):
+    if nota.status == StatusNotaNfse.DUPLICATA:
+        return bool(nota.duplicata_liberada)
+    return nota.status in nfse_service.STATUS_EMITIVEIS
+
+
+def calcular_alvos(nota_id=None, lote_id=None):
+    """Fila do lote, no formato que o `batch_engine` espera.
+
+    `nota_id` monta a fila de uma nota so (modo individual). Sem ele, entram
+    todas as notas emitiveis do lote importado, na ordem da planilha.
+
+    Os contadores `vencidas`/`a_vencer` existem so porque o payload de status e
+    compartilhado com os lotes de certidao; aqui nao ha vencimento a apurar.
+    """
+    if nota_id is not None:
+        nota = db.session.get(NotaNfse, nota_id)
+        ids = [nota.id] if nota is not None and _emitivel(nota) else []
+    else:
+        notas = (NotaNfse.query.filter_by(lote_id=lote_id)
+                 .order_by(NotaNfse.id).all())
+        ids = [n.id for n in notas if _emitivel(n)]
+
+    return {
+        'ids': ids,
+        'total': len(ids),
+        'scope': 'default',
+        'vencidas': 0,
+        'a_vencer': 0,
+        'pendentes': 0,
+    }
+
+
+# --- worker ----------------------------------------------------------------
+
+def _liberar_sessao(_ctx):
+    """Solta a sessao tomada pela rota que iniciou o lote.
+
+    O lock e adquirido na thread da requisicao e liberado aqui, na thread do
+    worker: `threading.Lock` nao tem dono, entao isso e valido — e e o unico
+    jeito de a checagem "ja tem lote rodando" ser atomica com o inicio dele.
+    """
+    SESSAO.liberar()
+
+
+def worker(app):
+    batch_engine.run_batch_loop(
+        app,
+        lock=NFSE_BATCH_LOCK,
+        state=NFSE_BATCH_STATE,
+        emit_fn=_emitir_nota,
+        nome_lote='NFSe',
+        curto='NFSe',
+        tag='NFSE-LOTE',
+        event_prefix='nfse_batch',
+        # sem create_driver: o navegador e da NfseSession, e o motor fecharia
+        # a sessao compartilhada no finally
+        create_driver=None,
+        on_teardown=_liberar_sessao,
+    )
+
+
+def status():
+    """Payload de status com o que e proprio da NFSe."""
+    with NFSE_BATCH_LOCK:
+        dados = batch_engine.build_batch_status_payload(NFSE_BATCH_STATE)
+        dados['nota_id'] = NFSE_BATCH_STATE.get('current_id')
+    dados['modo'] = nfse_batch_opcoes()['modo']
+    dados['sessao_ativa'] = SESSAO.driver_vivo()
+    return dados

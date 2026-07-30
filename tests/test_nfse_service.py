@@ -143,6 +143,15 @@ def test_duplicata_liberada_pode_emitir(ambiente):
     assert resultado['status'] == 'aguardando_confirmacao'
 
 
+def test_tomador_pessoa_fisica_pode_emitir(ambiente):
+    """Regressao: a tabela oferece "Preencher" para linha de CPF, mas o status
+    `pessoa_fisica` tinha ficado de fora dos emitiveis — o botao aparecia e o
+    servidor recusava. Emitir para CPF nao exige cadastro de Empresa."""
+    nota = _nota(status=StatusNotaNfse.PESSOA_FISICA)
+    resultado = nfse_service.preencher_nota(nota.id, hoje=date(2026, 7, 28))
+    assert resultado['status'] == 'aguardando_confirmacao'
+
+
 def test_falha_anterior_pode_ser_retentada(ambiente):
     nota = _nota(status=StatusNotaNfse.FALHA, erro='timeout')
     resultado = nfse_service.preencher_nota(nota.id, hoje=date(2026, 7, 28))

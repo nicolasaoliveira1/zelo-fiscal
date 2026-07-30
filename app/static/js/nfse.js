@@ -267,32 +267,146 @@ async function marcarEmitidaManual(id, marcar) {
   }
 }
 
-// Guarda a linha aguardando decisão no modal da alíquota.
-let pendenteAliquota = null;
+// --- emissao assistida ----------------------------------------------------
+//
+// Os dois modos entram pela mesma rota; o que muda e o que vai na fila e se o
+// navegador fecha no fim. Como a automacao ESPERA voce conferir e emitir, o
+// disparo e assincrono e o progresso vem por polling — uma requisicao nao pode
+// ficar pendurada pelos minutos de uma revisao.
 
-async function preencherNota(id, botao, ignorarAliquota = false) {
-  botao.disabled = true;
-  botao.textContent = 'Preenchendo…';
+// Guarda o que fazer se o operador confirmar o aviso da alíquota.
+let pendenteAliquota = null;
+let timerLote = null;
+
+function modoAtual() {
+  return document.querySelector('input[name="nfseModo"]:checked')?.value || 'individual';
+}
+
+async function iniciarEmissao({ notaId = null, ignorarAliquota = false } = {}) {
+  const modo = notaId ? 'individual' : modoAtual();
   try {
-    const dados = await chamar(`/nfse/nota/${id}/preencher`, {
-      body: JSON.stringify({ ignorar_aliquota: ignorarAliquota }),
+    const dados = await chamar('/nfse/lote/iniciar', {
+      body: JSON.stringify({ modo, nota_id: notaId, ignorar_aliquota: ignorarAliquota }),
     });
-    if (dados.nota) substituir(dados.nota);
-    showToast('Nota preenchida. Confira no navegador e emita.', 'success');
+    showToast(modo === 'individual'
+      ? 'Preenchendo. Confira no navegador e clique em Emitir NFS-e.'
+      : `Fila iniciada: ${dados.total} nota(s). Confira e emita uma a uma.`, 'info');
+    acompanharLote();
   } catch (erro) {
-    // Alíquota não conferida é aviso, não erro: pergunta em vez de recusar, e a
-    // linha NÃO é marcada como falha — nada foi tentado no portal.
+    // Alíquota não conferida é aviso, não erro: pergunta em vez de recusar, e
+    // nada foi tentado no portal — nenhuma linha vira falha.
     if (erro.dados?.motivo === 'aliquota_nao_confirmada') {
-      pendenteAliquota = id;
+      pendenteAliquota = { notaId };
       abrirModalAliquota();
       return;
     }
     showToast(erro.message, 'error');
-    const linhaAtual = notas.find((n) => n.id === id);
-    if (linhaAtual) { linhaAtual.status = 'falha'; linhaAtual.erro = erro.message; renderizar(); }
-  } finally {
-    botao.disabled = false;
-    botao.textContent = 'Preencher';
+  }
+}
+
+function acompanharLote() {
+  if (timerLote) return;
+  timerLote = setInterval(consultarLote, 2000);
+  consultarLote();
+}
+
+function pararAcompanhamento() {
+  clearInterval(timerLote);
+  timerLote = null;
+}
+
+async function consultarLote() {
+  let lote;
+  try {
+    lote = (await chamar('/nfse/lote/status', { method: 'GET' })).lote;
+  } catch {
+    return;   // erro de rede num poll nao merece toast a cada 2s
+  }
+  pintarLote(lote);
+
+  if (['completed', 'stopped', 'error', 'idle'].includes(lote.status)) {
+    pararAcompanhamento();
+    await recarregarNotas();
+    if (lote.status === 'completed') {
+      showToast(`Fila concluída: ${lote.success} emitida(s).`, 'success');
+    }
+  }
+}
+
+function pintarLote(lote) {
+  const rodando = lote.status === 'running';
+  const pausado = lote.status === 'paused';
+  const painel = document.getElementById('nfseProgresso');
+  const emLote = modoAtual() === 'lote';
+
+  document.getElementById('btnIniciarLote')?.classList.toggle(
+    'd-none', !emLote || rodando || pausado);
+  document.getElementById('btnPularNota')?.classList.toggle('d-none', !rodando);
+  document.getElementById('btnPausarLote')?.classList.toggle(
+    'd-none', !rodando || lote.total <= 1);
+  document.getElementById('btnRetomarLote')?.classList.toggle('d-none', !pausado);
+  document.getElementById('btnPararLote')?.classList.toggle(
+    'd-none', !(rodando || pausado));
+
+  if (!painel) return;
+  painel.classList.toggle('d-none', lote.status === 'idle');
+  if (lote.status === 'idle') return;
+
+  const feitas = Math.min(lote.processed, lote.total);
+  const pct = lote.total ? Math.round((feitas / lote.total) * 100) : 0;
+  const barra = document.getElementById('nfseProgressoBarra');
+  if (barra) barra.style.width = `${pct}%`;
+
+  const contagem = document.getElementById('nfseProgressoContagem');
+  if (contagem) contagem.textContent = `${feitas}/${lote.total}`;
+
+  const rotulo = document.getElementById('nfseProgressoRotulo');
+  if (rotulo) rotulo.textContent = ROTULO_LOTE[lote.status] || lote.status;
+
+  const mensagem = document.getElementById('nfseProgressoMensagem');
+  if (mensagem) mensagem.textContent = lote.message || '';
+
+  destacarNotaAtual(lote.nota_id, rodando);
+
+  // Enquanto a fila anda, clicar em Preencher noutra linha so renderia 409:
+  // o navegador esta ocupado com a nota atual.
+  document.querySelectorAll('[data-preencher]').forEach((botao) => {
+    botao.disabled = rodando || pausado;
+  });
+}
+
+const ROTULO_LOTE = {
+  running: 'Emitindo — aguardando você conferir e emitir no navegador',
+  paused: 'Pausado nesta nota',
+  stopped: 'Interrompido',
+  completed: 'Concluído',
+  error: 'Interrompido por erro',
+};
+
+function destacarNotaAtual(notaId, rodando) {
+  document.querySelectorAll('#corpoNotas tr[data-linha]').forEach((tr) => {
+    tr.classList.toggle('table-active',
+      rodando && Number(tr.dataset.linha) === notaId);
+  });
+}
+
+async function recarregarNotas() {
+  try {
+    const resposta = await fetch('/nfse/notas');
+    if (!resposta.ok) return;
+    const dados = await resposta.json();
+    notas = dados.notas;
+    renderizar();
+  } catch { /* a pagina continua util com o que ja tem na tela */ }
+}
+
+async function comandoLote(url, rotulo) {
+  try {
+    await chamar(url);
+    showToast(rotulo, 'info');
+    acompanharLote();
+  } catch (erro) {
+    showToast(erro.message, 'error');
   }
 }
 
@@ -305,10 +419,6 @@ function abrirModalAliquota() {
 function fecharModalAliquota() {
   const el = document.getElementById('modalAliquota');
   if (el) bootstrap.Modal.getOrCreateInstance(el).hide();
-}
-
-function botaoDaLinha(id) {
-  return document.querySelector(`[data-preencher="${id}"]`);
 }
 
 // --- ligacao --------------------------------------------------------------
@@ -365,12 +475,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btnPreencherMesmoAssim')?.addEventListener('click', () => {
-    const id = pendenteAliquota;
+    const alvo = pendenteAliquota;
     pendenteAliquota = null;
     fecharModalAliquota();
-    if (id == null) return;
-    const botao = botaoDaLinha(id);
-    if (botao) preencherNota(id, botao, true);
+    if (!alvo) return;
+    iniciarEmissao({ notaId: alvo.notaId, ignorarAliquota: true });
   });
 
   document.getElementById('btnConferirAliquota')?.addEventListener('click', (ev) => {
@@ -421,11 +530,56 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (alvo.dataset.liberar) liberarDuplicata(Number(alvo.dataset.liberar));
     else if (alvo.dataset.jaemitida) marcarEmitidaManual(Number(alvo.dataset.jaemitida), true);
     else if (alvo.dataset.desmarcar) marcarEmitidaManual(Number(alvo.dataset.desmarcar), false);
-    else if (alvo.dataset.preencher) preencherNota(Number(alvo.dataset.preencher), alvo, false);
+    else if (alvo.dataset.preencher) iniciarEmissao({ notaId: Number(alvo.dataset.preencher) });
+  });
+
+  // --- modo de emissao ---
+  const DESCRICAO_MODO = {
+    individual: 'Preenche a nota que você escolher na lista e fecha o navegador '
+      + 'assim que a emissão for detectada. Cada nota pede o certificado de novo.',
+    lote: 'Percorre a lista inteira sem fechar o navegador: a mesma janela já '
+      + 'autenticada volta para a emissão e preenche a próxima assim que você '
+      + 'emitir a atual. O certificado é pedido uma vez só.',
+  };
+
+  function pintarModo() {
+    const desc = document.getElementById('nfseModoDesc');
+    if (desc) desc.textContent = DESCRICAO_MODO[modoAtual()] || '';
+    document.getElementById('btnIniciarLote')?.classList.toggle(
+      'd-none', modoAtual() !== 'lote');
+  }
+
+  document.querySelectorAll('input[name="nfseModo"]').forEach((radio) => {
+    radio.addEventListener('change', pintarModo);
+  });
+  pintarModo();
+
+  document.getElementById('btnIniciarLote')?.addEventListener('click', () => {
+    iniciarEmissao();
+  });
+  document.getElementById('btnPularNota')?.addEventListener('click', () => {
+    comandoLote('/nfse/lote/pular', 'Pulando esta nota.');
+  });
+  document.getElementById('btnPausarLote')?.addEventListener('click', () => {
+    comandoLote('/nfse/lote/pausar', 'Pausa pedida — termina a nota atual.');
+  });
+  document.getElementById('btnRetomarLote')?.addEventListener('click', () => {
+    comandoLote('/nfse/lote/retomar', 'Retomando de onde parou.');
+  });
+  document.getElementById('btnPararLote')?.addEventListener('click', () => {
+    comandoLote('/nfse/lote/parar', 'Interrompendo a fila.');
   });
 
   fetch('/nfse/sessao/status')
     .then((r) => r.json())
     .then((d) => pintarSessao({ ...d, ativa: d.ativa }))
     .catch(() => {});
+
+  // Reabrir a pagina no meio de uma fila precisa reencontrar o progresso: o
+  // lote vive no servidor, nao nesta aba.
+  consultarLote().then(() => {
+    if (document.getElementById('nfseProgresso')?.classList.contains('d-none') === false) {
+      acompanharLote();
+    }
+  });
 });

@@ -1,4 +1,4 @@
-"""Rotas de sessao e disparo do preenchimento (NFSE-11/12/14/15).
+"""Rotas de sessao e disparo da emissao assistida (NFSE-11/12/14/15/19/20).
 
 A sessao e o navegador real; aqui ela e dublada. O que importa provar e o
 contrato HTTP: 409 quando ja ha emissao em andamento (sem derrubar a que
@@ -10,7 +10,8 @@ import pytest
 
 from app.models import NotaNfse, StatusNotaNfse
 from app.routes import nfse as rotas_nfse
-from app.services import nfse_service
+from app.automation.batch_state import NFSE_BATCH_STATE, nfse_batch_opcoes
+from app.services import batch_engine, nfse_lote, nfse_service
 
 LINHA = ('"13/07/2026";"EMPRESA TESTE LTDA";"0001443038";"062623";"05/07/2026";'
          '"811,00";"16,22";"1,13";"826,09";"COBRANCA SIMPLES"')
@@ -55,6 +56,8 @@ def sessao_falsa(monkeypatch):
 
     falsa = SessaoFalsa()
     monkeypatch.setattr(rotas_nfse, 'SESSAO', falsa)
+    # a rota checa a aliquota pelo servico, que tem a sua propria referencia
+    monkeypatch.setattr(nfse_service, 'SESSAO', falsa)
     return falsa
 
 
@@ -126,136 +129,211 @@ def test_encerrar_sem_sessao_aberta_e_sucesso(client, sessao_falsa):
     assert sessao_falsa.encerrada == 2
 
 
-# --- preencher uma nota (NFSE-13/14/15) ------------------------------------
+# --- inicio da emissao assistida (NFSE-14/15/19/20) ------------------------
+#
+# Nao ha rota sincrona de "preencher uma nota": os dois modos entram por
+# /nfse/lote/iniciar. O modo individual espera o operador conferir e emitir, o
+# que pode levar minutos — uma requisicao nao pode ficar pendurada nisso.
+
+@pytest.fixture()
+def worker_falso(monkeypatch):
+    """Impede a thread real de subir: ela abriria o Chrome de verdade."""
+    chamadas = []
+    monkeypatch.setattr(nfse_lote, 'worker', lambda app: chamadas.append(app))
+    return chamadas
+
+
+@pytest.fixture(autouse=True)
+def _lote_limpo():
+    batch_engine.reset_batch_state(NFSE_BATCH_STATE)
+    nfse_lote.preparar_nova_fila()
+    yield
+    batch_engine.reset_batch_state(NFSE_BATCH_STATE)
+    nfse_lote.preparar_nova_fila()
+
 
 def _nota_pronta(client, app):
     _importar(client)
     with app.app_context():
+        from app import db
         nota = NotaNfse.query.order_by(NotaNfse.id).first()
         nota.status = StatusNotaNfse.PRONTA
-        from app import db
         db.session.commit()
         return nota.id
 
 
-def test_preencher_devolve_a_nota_atualizada(client, app, sessao_falsa, monkeypatch):
+def _iniciar(client, **corpo):
+    return client.post('/nfse/lote/iniciar', json=corpo)
+
+
+def test_individual_enfileira_so_a_nota_escolhida(
+        client, app, sessao_falsa, worker_falso):
+    sessao_falsa.aliquota_confirmada = True
     nota_id = _nota_pronta(client, app)
-    monkeypatch.setattr(nfse_service, 'preencher_nota',
-                        lambda _id, **kw: {'status': 'aguardando_confirmacao',
-                                           'nota_id': _id, 'message': 'ok'})
-    resposta = client.post(f'/nfse/nota/{nota_id}/preencher')
+
+    resposta = _iniciar(client, modo='individual', nota_id=nota_id)
     assert resposta.status_code == 200
-    assert resposta.get_json()['nota']['id'] == nota_id
+    assert resposta.get_json()['total'] == 1
+    assert NFSE_BATCH_STATE['ids'] == [nota_id]
 
 
-def test_preencher_com_sessao_ocupada_devolve_409_sem_derrubar_a_existente(
-        client, app, sessao_falsa, monkeypatch):
+def test_lote_enfileira_todas_as_emitiveis(client, app, sessao_falsa, worker_falso):
+    sessao_falsa.aliquota_confirmada = True
+    _nota_pronta(client, app)
+
+    resposta = _iniciar(client, modo='lote')
+    assert resposta.status_code == 200
+    assert resposta.get_json()['total'] >= 1
+
+
+def test_individual_sem_nota_escolhida_e_recusado(
+        client, app, sessao_falsa, worker_falso):
+    sessao_falsa.aliquota_confirmada = True
+    _nota_pronta(client, app)
+    assert _iniciar(client, modo='individual').status_code == 400
+
+
+def test_modo_desconhecido_e_recusado(client, app, sessao_falsa, worker_falso):
+    sessao_falsa.aliquota_confirmada = True
+    assert _iniciar(client, modo='automatico').status_code == 400
+
+
+def test_fila_vazia_avisa_em_vez_de_iniciar(client, app, sessao_falsa, worker_falso):
+    """Sem nota emitivel nao ha lote — e o lock precisa voltar."""
+    sessao_falsa.aliquota_confirmada = True
+    _importar(client)
+    with app.app_context():
+        from app import db
+        nota = NotaNfse.query.order_by(NotaNfse.id).first()
+        nota.status = StatusNotaNfse.EMPRESA_PENDENTE
+        db.session.commit()
+
+    resposta = _iniciar(client, modo='lote')
+    assert resposta.status_code == 400
+    assert sessao_falsa.livre, 'lock preso deixaria a feature inutilizavel'
+    assert worker_falso == []
+
+
+def test_sessao_ocupada_devolve_409_sem_derrubar_a_existente(
+        client, app, sessao_falsa, worker_falso):
     """Uma segunda aba nao pode roubar o navegador de quem ja esta emitindo."""
+    sessao_falsa.aliquota_confirmada = True
     nota_id = _nota_pronta(client, app)
-    chamou = []
-    monkeypatch.setattr(nfse_service, 'preencher_nota',
-                        lambda _id, **kw: chamou.append(_id))
     sessao_falsa.livre = False
 
-    resposta = client.post(f'/nfse/nota/{nota_id}/preencher')
+    resposta = _iniciar(client, modo='individual', nota_id=nota_id)
     assert resposta.status_code == 409
-    assert chamou == [], 'a sessao em andamento foi usada por outra requisicao'
+    assert worker_falso == []
     assert sessao_falsa.encerrada == 0, 'a sessao existente foi encerrada'
 
 
-def test_preencher_sem_aliquota_confirmada_devolve_409(client, app, sessao_falsa, monkeypatch):
-    nota_id = _nota_pronta(client, app)
-
-    def recusa(_id, **kw):
-        raise nfse_service.NotaNaoEmitivelError('Confira a aliquota antes de emitir.')
-    monkeypatch.setattr(nfse_service, 'preencher_nota', recusa)
-
-    resposta = client.post(f'/nfse/nota/{nota_id}/preencher')
-    assert resposta.status_code == 409
-    assert 'aliquota' in resposta.get_json()['message'].lower()
-
-
-def test_preencher_libera_o_lock_mesmo_quando_falha(client, app, sessao_falsa, monkeypatch):
-    nota_id = _nota_pronta(client, app)
-
-    def explode(_id, **kw):
-        raise RuntimeError('portal fora do ar')
-    monkeypatch.setattr(nfse_service, 'preencher_nota', explode)
-
-    assert client.post(f'/nfse/nota/{nota_id}/preencher').status_code == 500
-    assert sessao_falsa.livre, 'lock preso deixaria a feature inutilizavel'
-
-
-def test_falha_do_preenchimento_vira_erro_http(client, app, sessao_falsa, monkeypatch):
-    nota_id = _nota_pronta(client, app)
-    monkeypatch.setattr(nfse_service, 'preencher_nota',
-                        lambda _id, **kw: {'status': 'error', 'message': 'campo sumiu'})
-    resposta = client.post(f'/nfse/nota/{nota_id}/preencher')
-    assert resposta.status_code == 500
-    assert 'campo sumiu' in resposta.get_json()['message']
-
-
-def test_preencher_exige_papel_operador(login_as, client, app, sessao_falsa):
-    nota_id = _nota_pronta(client, app)
-    assert login_as('leitura').post(f'/nfse/nota/{nota_id}/preencher').status_code == 403
+def test_iniciar_exige_papel_operador(login_as, client, app, sessao_falsa):
+    assert login_as('leitura').post('/nfse/lote/iniciar').status_code == 403
 
 
 # --- aliquota: aviso confirmavel, nao bloqueio ------------------------------
 
 def test_sem_aliquota_conferida_a_rota_devolve_motivo_reconhecivel(
-        client, app, sessao_falsa, monkeypatch):
+        client, app, sessao_falsa, worker_falso):
     """A interface precisa distinguir "nao conferiu a aliquota" (aviso que o
-    operador pode confirmar) de um erro seco — daí o campo `motivo`."""
+    operador pode confirmar) de um erro seco — dai o campo `motivo`."""
     nota_id = _nota_pronta(client, app)
 
-    def recusa(_id, **kw):
-        raise nfse_service.AliquotaNaoConfirmadaError('Aliquota nao conferida.')
-    monkeypatch.setattr(nfse_service, 'preencher_nota', recusa)
-
-    resposta = client.post(f'/nfse/nota/{nota_id}/preencher')
+    resposta = _iniciar(client, modo='individual', nota_id=nota_id)
     assert resposta.status_code == 409
     assert resposta.get_json()['motivo'] == 'aliquota_nao_confirmada'
+    assert worker_falso == []
+    assert sessao_falsa.livre, 'o aviso nao pode consumir a sessao'
 
 
-def test_confirmando_o_aviso_a_rota_repassa_o_override(
-        client, app, sessao_falsa, monkeypatch):
-    recebido = {}
-
-    def registra(_id, **kw):
-        recebido.update(kw)
-        return {'status': 'aguardando_confirmacao', 'nota_id': _id, 'message': 'ok'}
-    monkeypatch.setattr(nfse_service, 'preencher_nota', registra)
-
+def test_confirmando_o_aviso_a_emissao_comeca(
+        client, app, sessao_falsa, worker_falso):
     nota_id = _nota_pronta(client, app)
-    resposta = client.post(f'/nfse/nota/{nota_id}/preencher',
-                           json={'ignorar_aliquota': True})
+    resposta = _iniciar(client, modo='individual', nota_id=nota_id,
+                        ignorar_aliquota=True)
     assert resposta.status_code == 200
-    assert recebido['ignorar_aliquota'] is True
+    assert nfse_batch_opcoes()['ignorar_aliquota'] is True
 
 
-def test_sem_corpo_o_override_fica_desligado(client, app, sessao_falsa, monkeypatch):
-    """Clique normal em Preencher nao pode pular a conferencia por acidente."""
-    recebido = {}
+def test_sem_confirmar_o_override_fica_desligado(client, app, sessao_falsa,
+                                                 worker_falso):
+    """Clique normal nao pode pular a conferencia por acidente."""
+    _nota_pronta(client, app)
+    assert _iniciar(client, modo='lote').status_code == 409
 
-    def registra(_id, **kw):
-        recebido.update(kw)
-        return {'status': 'aguardando_confirmacao', 'nota_id': _id, 'message': 'ok'}
-    monkeypatch.setattr(nfse_service, 'preencher_nota', registra)
 
+# --- comandos durante a emissao --------------------------------------------
+
+@pytest.mark.parametrize('rota', [
+    '/nfse/lote/pausar', '/nfse/lote/parar', '/nfse/lote/retomar',
+    '/nfse/lote/pular',
+])
+def test_comandos_exigem_papel_operador(login_as, rota):
+    assert login_as('leitura').post(rota).status_code == 403
+
+
+def test_status_do_lote_exige_papel(login_as):
+    assert login_as('leitura').get('/nfse/lote/status').status_code == 403
+
+
+def test_pausar_pede_pausa_sem_descartar_a_fila(client, sessao_falsa):
+    NFSE_BATCH_STATE.update({'status': 'running', 'ids': [1, 2], 'total': 2})
+    assert client.post('/nfse/lote/pausar').status_code == 200
+    assert NFSE_BATCH_STATE['stop_action'] == 'pause'
+    assert NFSE_BATCH_STATE['ids'] == [1, 2]
+
+
+def test_parar_marca_interrupcao(client, sessao_falsa):
+    NFSE_BATCH_STATE.update({'status': 'running', 'ids': [1], 'total': 1})
+    assert client.post('/nfse/lote/parar').status_code == 200
+    assert NFSE_BATCH_STATE['stop_action'] == 'stop'
+
+
+def test_retomar_so_funciona_com_lote_pausado(client, sessao_falsa, worker_falso):
+    assert client.post('/nfse/lote/retomar').status_code == 400
+    assert sessao_falsa.livre, 'retomar recusado nao pode reter a sessao'
+
+
+def test_retomar_recomeca_pela_nota_onde_parou(client, sessao_falsa, worker_falso):
+    NFSE_BATCH_STATE.update({'status': 'paused', 'ids': [7, 8], 'total': 2,
+                             'index': 0, 'stop_requested': True})
+    assert client.post('/nfse/lote/retomar').status_code == 200
+    assert NFSE_BATCH_STATE['index'] == 0, 'retomar nao pode saltar a nota atual'
+    assert NFSE_BATCH_STATE['stop_requested'] is False
+
+
+def test_pular_sem_emissao_em_andamento_e_recusado(client, sessao_falsa):
+    assert client.post('/nfse/lote/pular').status_code == 400
+
+
+def test_pular_durante_a_emissao_marca_o_pedido(client, sessao_falsa):
+    NFSE_BATCH_STATE['status'] = 'running'
+    assert client.post('/nfse/lote/pular').status_code == 200
+    assert NFSE_BATCH_STATE['pular_atual'] is True
+
+
+def test_status_traz_o_modo_e_a_nota_atual(client, sessao_falsa):
+    NFSE_BATCH_STATE.update({'status': 'running', 'current_id': 42,
+                             'ids': [42], 'total': 1})
+    dados = client.get('/nfse/lote/status').get_json()['lote']
+    assert dados['nota_id'] == 42
+    assert dados['modo'] in ('individual', 'lote')
+
+
+def test_lista_de_notas_reflete_o_banco_durante_a_fila(client, app, sessao_falsa):
+    """A tabela envelhece enquanto a fila roda: e por esta rota que ela volta
+    a bater com o que a automacao ja gravou."""
     nota_id = _nota_pronta(client, app)
-    client.post(f'/nfse/nota/{nota_id}/preencher')
-    assert recebido['ignorar_aliquota'] is False
+    with app.app_context():
+        from app import db
+        nota = NotaNfse.query.get(nota_id)
+        nota.status = StatusNotaNfse.EMITIDA
+        db.session.commit()
+
+    dados = client.get('/nfse/notas').get_json()
+    assert [n['status'] for n in dados['notas']] == [StatusNotaNfse.EMITIDA]
+    assert dados['resumo']['total'] == 1
 
 
-def test_outros_motivos_de_recusa_nao_ganham_o_motivo_da_aliquota(
-        client, app, sessao_falsa, monkeypatch):
-    """Uma linha sem empresa nao pode abrir o modal da aliquota."""
-    nota_id = _nota_pronta(client, app)
-
-    def recusa(_id, **kw):
-        raise nfse_service.NotaNaoEmitivelError('Esta linha nao tem empresa vinculada.')
-    monkeypatch.setattr(nfse_service, 'preencher_nota', recusa)
-
-    resposta = client.post(f'/nfse/nota/{nota_id}/preencher')
-    assert resposta.status_code == 409
-    assert 'motivo' not in resposta.get_json()
+def test_lista_de_notas_exige_papel(login_as):
+    assert login_as('leitura').get('/nfse/notas').status_code == 403

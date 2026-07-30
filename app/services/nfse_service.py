@@ -22,6 +22,7 @@ from app.services.nfse_session import SESSAO
 STATUS_EMITIVEIS = (
     StatusNotaNfse.PRONTA,
     StatusNotaNfse.CADASTRO_PENDENTE,   # CNPJ digitado na mao pelo operador
+    StatusNotaNfse.PESSOA_FISICA,       # tomador CPF: emite sem virar Empresa
     StatusNotaNfse.FALHA,               # nova tentativa apos erro
     StatusNotaNfse.PULADA,
 )
@@ -54,6 +55,22 @@ class AliquotaNaoConfirmadaError(NotaNaoEmitivelError):
     conferencia importa (a aliquota sai na nota), mas travar o preenchimento
     obrigaria o operador a passar pelo fluxo de abrir o portal e olhar mesmo
     quando ele ja sabe que esta certa."""
+
+
+MSG_ALIQUOTA_NAO_CONFERIDA = (
+    'A aliquota do Simples Nacional nao foi conferida nesta sessao. Ela muda '
+    'mes a mes e sai na nota.')
+
+
+def checar_aliquota(ignorar=False):
+    """Guarda da aliquota, aplicada na ENTRADA do fluxo.
+
+    Existe separada de `preencher_nota` porque o preenchimento agora roda em
+    thread: se a unica checagem fosse la dentro, o aviso confirmavel apareceria
+    so no log do lote, e o operador clicaria em emitir sem nunca ve-lo.
+    `preencher_nota` mantem a sua como ultima linha de defesa."""
+    if not SESSAO.aliquota_confirmada and not ignorar:
+        raise AliquotaNaoConfirmadaError(MSG_ALIQUOTA_NAO_CONFERIDA)
 
 
 def _pode_emitir(nota):
@@ -93,10 +110,7 @@ def preencher_nota(nota_id, hoje=None, execution_id=None, ignorar_aliquota=False
 
     _pode_emitir(nota)
 
-    if not SESSAO.aliquota_confirmada and not ignorar_aliquota:
-        raise AliquotaNaoConfirmadaError(
-            'A aliquota do Simples Nacional nao foi conferida nesta sessao. Ela '
-            'muda mes a mes e sai na nota.')
+    checar_aliquota(ignorar_aliquota)
 
     config = nfse_config.get_config_nfse()
     descricao = nfse_config.renderizar_descricao(config, nota.competencia)

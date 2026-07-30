@@ -18,8 +18,20 @@ from app.models import (
     OrigemVinculoNfse,
     StatusNotaNfse,
 )
-from app.routes import bp
-from app.services import nfse_config, nfse_import, nfse_service
+from app.automation.batch_state import (
+    NFSE_BATCH_LOCK,
+    NFSE_BATCH_STATE,
+    definir_nfse_batch_opcoes,
+)
+from app.routes import _current_app_object, bp
+from app.services import (
+    batch_engine,
+    nfse_config,
+    nfse_import,
+    nfse_lote,
+    nfse_service,
+)
+from app.services.execution_logger import log_event
 from app.services.nfse_session import SESSAO
 from app.utils import (
     TIPO_CNPJ,
@@ -90,6 +102,23 @@ def nfse_painel():
         empresas=[{'id': e.id, 'nome': e.nome, 'cnpj': e.cnpj}
                   for e in Empresa.query.order_by(Empresa.nome).all()],
     )
+
+
+@bp.route('/nfse/notas')
+@requer_papel('operador')
+def nfse_listar_notas():
+    """Lista atual do lote importado, para a pagina se atualizar sem recarregar.
+
+    A fila roda no servidor, entao o que a tabela mostra envelhece enquanto a
+    emissao anda; e por aqui que ela volta a bater com o banco."""
+    lote = LoteNfse.query.order_by(LoteNfse.id.desc()).first()
+    notas = (NotaNfse.query.filter_by(lote_id=lote.id).order_by(NotaNfse.id).all()
+             if lote else [])
+    return {
+        'status': 'ok',
+        'notas': [_nota_para_json(n) for n in notas],
+        'resumo': _resumo(notas),
+    }
 
 
 # --- importacao (NFSE-01..07) ----------------------------------------------
@@ -352,38 +381,116 @@ def nfse_status_sessao():
     }
 
 
-# --- preenchimento de uma nota (NFSE-13/14) --------------------------------
+# O preenchimento de uma nota nao tem mais rota propria: os dois modos entram
+# por /nfse/lote/iniciar. Uma rota sincrona nao serviria ao modo individual, que
+# agora espera o operador conferir e emitir — a requisicao ficaria pendurada por
+# minutos — e manter as duas seria dois caminhos para a mesma coisa.
 
-@bp.route('/nfse/nota/<int:nota_id>/preencher', methods=['POST'])
+
+# --- emissao assistida: fila de uma nota ou do lote (NFSE-19/20) ------------
+
+@bp.route('/nfse/lote/iniciar', methods=['POST'])
 @requer_papel('operador')
-def nfse_preencher_nota(nota_id):
-    """Preenche a nota no portal ate a tela de revisao e para.
+def nfse_lote_iniciar():
+    """Poe notas na fila da emissao assistida, no modo escolhido na pagina.
 
-    A emissao em si continua sendo um clique do operador no navegador."""
+    `individual` enfileira so a nota da linha clicada e fecha o navegador
+    quando ela sai; `lote` enfileira todas as emitiveis e mantem a janela
+    autenticada entre uma nota e outra. Nos dois a automacao para na revisao —
+    quem clica em emitir e o operador.
+    """
     dados = request.get_json(silent=True) or {}
-    ignorar_aliquota = bool(dados.get('ignorar_aliquota'))
+    modo = dados.get('modo') or nfse_lote.MODO_LOTE
+    if modo not in nfse_lote.MODOS:
+        return json_error('Modo de emissao desconhecido.', 400)
 
+    nota_id = dados.get('nota_id')
+    if modo == nfse_lote.MODO_INDIVIDUAL and not nota_id:
+        return json_error('Escolha a linha que deve ser preenchida.', 400)
+
+    ignorar_aliquota = bool(dados.get('ignorar_aliquota'))
+    try:
+        nfse_service.checar_aliquota(ignorar_aliquota)
+    except nfse_service.AliquotaNaoConfirmadaError as exc:
+        # a interface transforma isso num aviso confirmavel, nao num bloqueio
+        return json_error(str(exc), 409, motivo='aliquota_nao_confirmada',
+                          aliquota=SESSAO.aliquota)
+
+    # Toma a sessao aqui e nao no worker para que "ja tem emissao rodando" seja
+    # decidido antes de qualquer thread nascer. Quem devolve o lock e o
+    # `on_teardown` do worker (ou os caminhos de erro logo abaixo).
     if not SESSAO.adquirir():
         return json_error(
             'Ja existe uma emissao da NFSe em andamento. Aguarde terminar.', 409)
+
+    definir_nfse_batch_opcoes(modo, ignorar_aliquota)
+    nfse_lote.preparar_nova_fila()
+    lote = LoteNfse.query.order_by(LoteNfse.id.desc()).first()
+
     try:
-        resultado = nfse_service.preencher_nota(
-            nota_id, ignorar_aliquota=ignorar_aliquota)
-    except nfse_service.AliquotaNaoConfirmadaError as exc:
-        # motivo legivel pela interface: ela transforma isso num aviso que o
-        # operador pode confirmar, em vez de um erro que trava o botao
-        return json_error(str(exc), 409, motivo='aliquota_nao_confirmada',
-                          aliquota=SESSAO.aliquota)
-    except nfse_service.NotaNaoEmitivelError as exc:
-        return json_error(str(exc), 409)
+        dados_lote = batch_engine.init_batch_run(
+            NFSE_BATCH_LOCK, NFSE_BATCH_STATE, nota_id,
+            lambda inicio: nfse_lote.calcular_alvos(
+                inicio, lote_id=lote.id if lote else None),
+            nfse_lote.worker, app_factory=_current_app_object,
+        )
     except Exception as exc:
-        return json_error(exc=exc, code=500)
-    finally:
         SESSAO.liberar()
+        return json_error(exc=exc, code=500)
 
-    if resultado.get('status') == 'error':
-        return json_error(resultado.get('message'), 500, nota_id=nota_id)
+    if dados_lote is None:
+        SESSAO.liberar()
+        return json_error('Ja existe um lote de NFSe em andamento.', 409)
+    if not dados_lote:
+        SESSAO.liberar()
+        return json_error(
+            'Nenhuma nota desta lista esta pronta para emissao.', 400)
 
-    nota = db.session.get(NotaNfse, nota_id)
-    resultado['nota'] = _nota_para_json(nota)
-    return resultado
+    log_event('nfse_lote_iniciado', modo=modo, total=dados_lote['total'],
+              execution_id=NFSE_BATCH_STATE.get('execution_id'))
+    return {'status': 'ok', 'modo': modo, 'total': dados_lote['total']}
+
+
+@bp.route('/nfse/lote/pular', methods=['POST'])
+@requer_papel('operador')
+def nfse_lote_pular():
+    """Abandona a nota que esta na tela e segue para a proxima da fila."""
+    if not nfse_lote.pedir_pular():
+        return json_error('Nao ha emissao em andamento para pular.', 400)
+    return {'status': 'ok'}
+
+
+@bp.route('/nfse/lote/pausar', methods=['POST'])
+@requer_papel('operador')
+def nfse_lote_pausar():
+    batch_engine.request_pause(NFSE_BATCH_LOCK, NFSE_BATCH_STATE)
+    return {'status': 'ok', 'message': 'Emissao pausada.'}
+
+
+@bp.route('/nfse/lote/parar', methods=['POST'])
+@requer_papel('operador')
+def nfse_lote_parar():
+    batch_engine.request_stop(NFSE_BATCH_LOCK, NFSE_BATCH_STATE)
+    return {'status': 'ok', 'message': 'Emissao interrompida.'}
+
+
+@bp.route('/nfse/lote/retomar', methods=['POST'])
+@requer_papel('operador')
+def nfse_lote_retomar():
+    """Recomeca pela nota onde parou — o motor nao avanca o indice ao pausar."""
+    if not SESSAO.adquirir():
+        return json_error(
+            'Ja existe uma emissao da NFSe em andamento. Aguarde terminar.', 409)
+    nfse_lote.preparar_nova_fila()
+    if not batch_engine.resume_batch(NFSE_BATCH_LOCK, NFSE_BATCH_STATE,
+                                     nfse_lote.worker,
+                                     app_factory=_current_app_object):
+        SESSAO.liberar()
+        return json_error('A emissao nao esta pausada.', 400)
+    return {'status': 'ok'}
+
+
+@bp.route('/nfse/lote/status')
+@requer_papel('operador')
+def nfse_lote_status():
+    return {'status': 'ok', 'lote': nfse_lote.status()}
