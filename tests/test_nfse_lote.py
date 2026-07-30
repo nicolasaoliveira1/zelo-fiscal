@@ -460,3 +460,72 @@ def test_status_reporta_sessao_fechada(monkeypatch):
     falsa.tem_driver = False
     monkeypatch.setattr(nfse_lote, 'SESSAO', falsa)
     assert nfse_lote.status()['sessao_ativa'] is False
+
+
+# --- retomada depois da pausa ----------------------------------------------
+
+def test_retomar_volta_a_esperar_em_vez_de_preencher_de_novo(fila, monkeypatch):
+    """O bug da pausa: ao retomar, a nota esta em `aguardando_confirmacao`, que
+    NAO esta em STATUS_EMITIVEIS. `preencher_nota` recusava, o motor contava
+    pendente e passava para a proxima — deixando sem vigia justamente a nota que
+    o operador ia emitir, que por isso nunca era marcada."""
+    nota = _nota(status=StatusNotaNfse.AGUARDANDO_CONFIRMACAO)
+    monkeypatch.setattr(nfse_lote, 'aguardar_confirmacao',
+                        lambda _d: nfse_lote.EMITIDA)
+
+    sucesso, grave, _ = nfse_lote._emitir_nota(nota.id, None, 'exec-1')
+    db.session.refresh(nota)
+
+    assert not fila['preencher'].called, (
+        'preencher de novo abriria uma SEGUNDA DPS para o mesmo tomador')
+    assert (sucesso, grave) == (True, None)
+    assert nota.status == StatusNotaNfse.EMITIDA
+    assert nota.origem_emissao == 'automacao'
+
+
+def test_retomada_respeita_pular_e_timeout_como_qualquer_nota(fila, monkeypatch):
+    nota = _nota(status=StatusNotaNfse.AGUARDANDO_CONFIRMACAO)
+    monkeypatch.setattr(nfse_lote, 'aguardar_confirmacao',
+                        lambda _d: nfse_lote.PULADA)
+
+    nfse_lote._emitir_nota(nota.id, None, 'exec-1')
+    db.session.refresh(nota)
+    assert nota.status == StatusNotaNfse.PULADA
+
+
+def test_nota_pronta_continua_sendo_preenchida(fila, monkeypatch):
+    """O atalho da retomada nao pode valer para quem ainda nao foi preenchida."""
+    nota = _nota(status=StatusNotaNfse.PRONTA)
+    monkeypatch.setattr(nfse_lote, 'aguardar_confirmacao',
+                        lambda _d: nfse_lote.EMITIDA)
+
+    nfse_lote._emitir_nota(nota.id, None, 'exec-1')
+    assert fila['preencher'].called
+
+
+# --- fim do lote fecha o navegador -----------------------------------------
+
+@pytest.mark.parametrize('status', ['stopped', 'completed', 'error'])
+def test_fim_do_lote_fecha_o_navegador(monkeypatch, status):
+    """Parar e um "chega por hoje" explicito: deixar o Chrome aberto obriga o
+    operador a fechar na mao e mantem a policy do certificado ativa."""
+    falsa = MagicMock()
+    monkeypatch.setattr(nfse_lote, 'SESSAO', falsa)
+    NFSE_BATCH_STATE['status'] = status
+
+    nfse_lote._encerrar_sessao(None)
+
+    assert falsa.encerrar.called
+    assert falsa.liberar.called
+
+
+def test_pausa_mantem_o_navegador_aberto(monkeypatch):
+    """Retomar depende da MESMA janela, ainda na tela de revisao."""
+    falsa = MagicMock()
+    monkeypatch.setattr(nfse_lote, 'SESSAO', falsa)
+    NFSE_BATCH_STATE['status'] = 'paused'
+
+    nfse_lote._encerrar_sessao(None)
+
+    assert not falsa.encerrar.called, 'fechar aqui perderia a nota da revisao'
+    assert falsa.liberar.called, 'o lock precisa voltar mesmo na pausa'

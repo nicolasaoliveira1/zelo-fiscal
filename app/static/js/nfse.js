@@ -314,9 +314,14 @@ async function iniciarEmissao({ notaId = null, ignorarAliquota = false } = {}) {
   }
 }
 
+// Enquanto a fila anda a pagina espelha o servidor: cada volta traz o status E
+// a lista. A alternativa (recarregar so no fim) deixava o operador emitindo no
+// portal sem ver nada mudar na tela por minutos.
+const INTERVALO_POLL = 1000;
+
 function acompanharLote() {
   if (timerLote) return;
-  timerLote = setInterval(consultarLote, 2000);
+  timerLote = setInterval(consultarLote, INTERVALO_POLL);
   consultarLote();
 }
 
@@ -330,11 +335,18 @@ async function consultarLote() {
   try {
     lote = (await chamar('/nfse/lote/status', { method: 'GET' })).lote;
   } catch {
-    return;   // erro de rede num poll nao merece toast a cada 2s
+    return;   // erro de rede num poll nao merece um toast por segundo
   }
+
+  const ativo = ['running', 'paused'].includes(lote.status);
+  // a lista vem junto enquanto ha fila: as transicoes que mais interessam
+  // (preenchendo -> aguardando -> emitida) nao mexem em contador nenhum, entao
+  // observar so o status do lote nao as revelaria
+  if (ativo) await recarregarNotas();
+
   pintarLote(lote);
 
-  if (['completed', 'stopped', 'error', 'idle'].includes(lote.status)) {
+  if (!ativo) {
     pararAcompanhamento();
     await recarregarNotas();
     if (lote.status === 'completed') {
@@ -401,10 +413,17 @@ function destacarNotaAtual(notaId, rodando) {
 }
 
 async function recarregarNotas() {
+  // Redesenhar a tabela apaga o que estiver sendo digitado nela, e este poll
+  // roda a cada segundo. Dois guardas: nao redesenha se nada mudou (o caso
+  // comum), e nao redesenha enquanto o operador tem uma linha aberta para
+  // corrigir o vinculo.
+  if (editando.size > 0) return;
   try {
     const resposta = await fetch('/nfse/notas');
     if (!resposta.ok) return;
     const dados = await resposta.json();
+    const novo = JSON.stringify(dados.notas);
+    if (novo === JSON.stringify(notas)) return;
     notas = dados.notas;
     renderizar();
   } catch { /* a pagina continua util com o que ja tem na tela */ }

@@ -157,6 +157,17 @@ def _emitir_nota(nota_id, driver_do_motor, execution_id):
     """
     opcoes = nfse_batch_opcoes()
 
+    if _ja_esta_na_revisao(nota_id):
+        # Retomada: esta nota ja foi preenchida antes da pausa e continua na
+        # tela de revisao do portal. Preencher de novo abriria uma SEGUNDA DPS
+        # para o mesmo tomador; e `preencher_nota` recusaria o status
+        # `aguardando_confirmacao`, o motor contaria pendente e passaria para a
+        # proxima — deixando sem vigia justamente a nota que o operador vai
+        # emitir. O certo e voltar a esperar.
+        log_event('nfse_lote_retomada_na_revisao', nota_id=nota_id,
+                  execution_id=execution_id)
+        return _esperar_e_registrar(nota_id, opcoes, execution_id)
+
     try:
         resultado = nfse_service.preencher_nota(
             nota_id, execution_id=execution_id,
@@ -179,6 +190,16 @@ def _emitir_nota(nota_id, driver_do_motor, execution_id):
         # `preencher_nota` ja gravou o status FALHA e a mensagem curta na nota
         return False, None, resultado.get('message')
 
+    return _esperar_e_registrar(nota_id, opcoes, execution_id)
+
+
+def _ja_esta_na_revisao(nota_id):
+    nota = db.session.get(NotaNfse, nota_id)
+    return nota is not None and nota.status == StatusNotaNfse.AGUARDANDO_CONFIRMACAO
+
+
+def _esperar_e_registrar(nota_id, opcoes, execution_id):
+    """Espera o operador emitir e grava o desfecho na nota."""
     nota = db.session.get(NotaNfse, nota_id)
     desfecho = aguardar_confirmacao(SESSAO.driver)
     log_event('nfse_lote_desfecho', nota_id=nota_id, desfecho=desfecho,
@@ -257,13 +278,25 @@ def calcular_alvos(nota_id=None, lote_id=None):
 
 # --- worker ----------------------------------------------------------------
 
-def _liberar_sessao(_ctx):
-    """Solta a sessao tomada pela rota que iniciou o lote.
+# Desfechos em que o trabalho acabou: o navegador nao tem mais razao de ficar
+# aberto (e segurando a chave do certificado no registro). `paused` fica de
+# fora — retomar depende da MESMA janela, ainda na tela de revisao.
+STATUS_QUE_FECHAM_O_NAVEGADOR = ('stopped', 'completed', 'error')
 
-    O lock e adquirido na thread da requisicao e liberado aqui, na thread do
-    worker: `threading.Lock` nao tem dono, entao isso e valido — e e o unico
-    jeito de a checagem "ja tem lote rodando" ser atomica com o inicio dele.
+
+def _encerrar_sessao(_ctx):
+    """`on_teardown` do motor: fecha o navegador (quando cabe) e solta o lock.
+
+    Fechar ANTES de liberar, e nao em `on_finish`, importa: o motor roda o
+    teardown primeiro, entao soltar o lock ali deixaria uma nova emissao entrar
+    e chamar `garantir()` enquanto o `quit()` da anterior ainda esta em curso.
+
+    O lock e adquirido na thread da requisicao e liberado aqui, na do worker:
+    `threading.Lock` nao tem dono, entao isso e valido — e e o unico jeito de a
+    checagem "ja tem lote rodando" ser atomica com o inicio dele.
     """
+    if NFSE_BATCH_STATE.get('status') in STATUS_QUE_FECHAM_O_NAVEGADOR:
+        SESSAO.encerrar()
     SESSAO.liberar()
 
 
@@ -300,7 +333,7 @@ def _rodar_lote(app):
         # sem create_driver: o navegador e da NfseSession, e o motor fecharia
         # a sessao compartilhada no finally
         create_driver=None,
-        on_teardown=_liberar_sessao,
+        on_teardown=_encerrar_sessao,
     )
 
 
