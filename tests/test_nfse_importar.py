@@ -276,3 +276,33 @@ def test_linha_normal_nao_ganha_vinculo_de_duplicata(banco):
     notas = _notas(imp.importar(_linha()))
     assert notas[0].status == StatusNotaNfse.PRONTA
     assert notas[0].duplicata_de_id is None
+
+
+def test_nota_preenchida_esperando_confirmacao_tambem_bloqueia(banco):
+    """Reimportar o extrato nao pode devolver como Pronta uma linha que ja tem
+    DPS aberta no portal: preencher de novo abriria uma segunda para o mesmo
+    tomador e a mesma competencia."""
+    _empresa()
+    primeira = _notas(imp.importar(_linha()))[0]
+    primeira.status = StatusNotaNfse.AGUARDANDO_CONFIRMACAO
+    db.session.commit()
+    id_esperando = primeira.id
+
+    notas = _notas(imp.importar(_linha()))
+    assert notas[0].status == StatusNotaNfse.DUPLICATA
+    assert notas[0].duplicata_de_id == id_esperando
+
+
+@pytest.mark.parametrize('status', [
+    StatusNotaNfse.PRONTA,
+    StatusNotaNfse.FALHA,
+    StatusNotaNfse.PULADA,
+])
+def test_status_que_nao_ocupam_a_competencia_nao_bloqueiam(banco, status):
+    """Uma tentativa que nao vingou nao pode impedir a proxima importacao."""
+    _empresa()
+    primeira = _notas(imp.importar(_linha()))[0]
+    primeira.status = status
+    db.session.commit()
+
+    assert _notas(imp.importar(_linha()))[0].status == StatusNotaNfse.PRONTA

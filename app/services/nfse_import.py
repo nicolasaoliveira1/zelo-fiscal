@@ -332,16 +332,25 @@ def _divergiu(linha):
     return abs(esperado - linha.valor_final) > TOLERANCIA_VALOR
 
 
-def _competencias_ja_emitidas():
-    """(documento, competencia) das notas ja EMITIDAS — base da trava (ND-004).
+# Status que ja "ocupam" um par (documento, competencia) e por isso bloqueiam
+# uma segunda nota igual. `aguardando_confirmacao` entra junto com `emitida`:
+# ela e uma DPS que ja existe no portal esperando o operador clicar. Sem ela na
+# lista, reimportar o extrato devolvia a linha como Pronta e o operador
+# preencheria de novo, abrindo uma SEGUNDA DPS para o mesmo tomador.
+STATUS_QUE_OCUPAM_COMPETENCIA = ('emitida', 'aguardando_confirmacao')
 
-    A chave e o DOCUMENTO, nao o `empresa_id`: parte dos tomadores e pessoa
-    fisica ou empresa nao cadastrada, e nesses casos `empresa_id` e nulo — com
-    a chave antiga a duplicata nunca seria detectada justamente para eles.
+
+def _competencias_ja_emitidas():
+    """(documento, competencia) -> id das notas que ja ocupam a competencia.
+
+    Base da trava (ND-004). A chave e o DOCUMENTO, nao o `empresa_id`: parte
+    dos tomadores e pessoa fisica ou empresa nao cadastrada, e nesses casos
+    `empresa_id` e nulo — com a chave antiga a duplicata nunca seria detectada
+    justamente para eles.
     """
-    from app.models import NotaNfse, StatusNotaNfse
+    from app.models import NotaNfse
     consulta = (NotaNfse.query
-                .filter(NotaNfse.status == StatusNotaNfse.EMITIDA)
+                .filter(NotaNfse.status.in_(STATUS_QUE_OCUPAM_COMPETENCIA))
                 .with_entities(NotaNfse.id, NotaNfse.documento,
                                NotaNfse.competencia))
     # Devolve o id junto para a duplicata poder apontar para a nota que ja foi

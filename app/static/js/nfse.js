@@ -296,7 +296,12 @@ async function iniciarEmissao({ notaId = null, ignorarAliquota = false } = {}) {
   const modo = notaId ? 'individual' : modoAtual();
   try {
     const dados = await chamar('/nfse/lote/iniciar', {
-      body: JSON.stringify({ modo, nota_id: notaId, ignorar_aliquota: ignorarAliquota }),
+      body: JSON.stringify({
+        modo,
+        nota_id: notaId,
+        ignorar_aliquota: ignorarAliquota,
+        competencia: escopoAtual(),
+      }),
     });
     showToast(modo === 'individual'
       ? 'Preenchendo. Confira no navegador e clique em Emitir NFS-e.'
@@ -412,6 +417,13 @@ function destacarNotaAtual(notaId, rodando) {
   });
 }
 
+// Escopo que a pagina esta mostrando. O poll TEM de respeita-lo: sem isso ele
+// devolveria as notas da ultima importacao e sobrescreveria o mes escolhido a
+// cada segundo.
+function escopoAtual() {
+  return document.getElementById('filtroCompetencia')?.value || 'ultima';
+}
+
 async function recarregarNotas() {
   // Redesenhar a tabela apaga o que estiver sendo digitado nela, e este poll
   // roda a cada segundo. Dois guardas: nao redesenha se nada mudou (o caso
@@ -419,7 +431,8 @@ async function recarregarNotas() {
   // corrigir o vinculo.
   if (editando.size > 0) return;
   try {
-    const resposta = await fetch('/nfse/notas');
+    const resposta = await fetch(
+      `/nfse/notas?competencia=${encodeURIComponent(escopoAtual())}`);
     if (!resposta.ok) return;
     const dados = await resposta.json();
     const novo = JSON.stringify(dados.notas);
@@ -582,6 +595,12 @@ document.addEventListener('DOMContentLoaded', () => {
     radio.addEventListener('change', pintarModo);
   });
   pintarModo();
+
+  document.getElementById('filtroCompetencia')?.addEventListener('change', (ev) => {
+    // recarrega pelo servidor: o escopo decide contadores, lista e o proprio
+    // rotulo da ultima importacao
+    window.location.href = `/nfse?competencia=${encodeURIComponent(ev.target.value)}`;
+  });
 
   document.getElementById('btnIniciarLote')?.addEventListener('click', () => {
     iniciarEmissao();

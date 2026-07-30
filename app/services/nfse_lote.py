@@ -249,11 +249,14 @@ def _emitivel(nota):
     return nota.status in nfse_service.STATUS_EMITIVEIS
 
 
-def calcular_alvos(nota_id=None, lote_id=None):
+def calcular_alvos(nota_id=None, lote_id=None, competencia=None):
     """Fila do lote, no formato que o `batch_engine` espera.
 
-    `nota_id` monta a fila de uma nota so (modo individual). Sem ele, entram
-    todas as notas emitiveis do lote importado, na ordem da planilha.
+    `nota_id` monta a fila de uma nota so (modo individual). Sem ele, a fila
+    tem de ser EXATAMENTE o que a pagina mostra: por competencia quando o
+    operador filtrou um mes, pelo lote importado quando nao filtrou. Enfileirar
+    o ultimo lote enquanto a tela mostra outro mes emitiria notas que o operador
+    nao esta olhando.
 
     Os contadores `vencidas`/`a_vencer` existem so porque o payload de status e
     compartilhado com os lotes de certidao; aqui nao ha vencimento a apurar.
@@ -262,9 +265,10 @@ def calcular_alvos(nota_id=None, lote_id=None):
         nota = db.session.get(NotaNfse, nota_id)
         ids = [nota.id] if nota is not None and _emitivel(nota) else []
     else:
-        notas = (NotaNfse.query.filter_by(lote_id=lote_id)
-                 .order_by(NotaNfse.id).all())
-        ids = [n.id for n in notas if _emitivel(n)]
+        consulta = NotaNfse.query
+        consulta = (consulta.filter_by(competencia=competencia) if competencia
+                    else consulta.filter_by(lote_id=lote_id))
+        ids = [n.id for n in consulta.order_by(NotaNfse.id).all() if _emitivel(n)]
 
     return {
         'ids': ids,

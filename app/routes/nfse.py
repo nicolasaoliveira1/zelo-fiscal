@@ -83,21 +83,69 @@ def _resumo(notas):
 
 # --- pagina ----------------------------------------------------------------
 
+ESCOPO_ULTIMA = 'ultima'
+
+
+def _competencias_disponiveis():
+    """Competencias com notas, da mais recente para a mais antiga.
+
+    Ordena por (ano, mes) e nao pela string: 'MM/AAAA' ordenado como texto poe
+    01/2027 antes de 12/2026."""
+    valores = {c for (c,) in NotaNfse.query
+               .with_entities(NotaNfse.competencia).distinct() if c}
+
+    def _chave(competencia):
+        mes, _, ano = competencia.partition('/')
+        return (int(ano or 0), int(mes or 0))
+
+    return sorted(valores, key=_chave, reverse=True)
+
+
+def _notas_do_escopo(competencia=None):
+    """Notas a mostrar, e o lote a que elas pertencem.
+
+    Sem competencia, mostra a ULTIMA importacao — o que o operador acabou de
+    trazer do banco. Com competencia, mostra o mes inteiro atravessando lotes:
+    quem emite antes do fim do mes importa o extrato duas ou tres vezes, e as
+    notas do mesmo mes ficam espalhadas por varias importacoes.
+    """
+    if competencia:
+        notas = (NotaNfse.query.filter_by(competencia=competencia)
+                 .order_by(NotaNfse.id).all())
+        return notas, None
+
+    lote = LoteNfse.query.order_by(LoteNfse.id.desc()).first()
+    if lote is None:
+        return [], None
+    return (NotaNfse.query.filter_by(lote_id=lote.id)
+            .order_by(NotaNfse.id).all()), lote
+
+
+def _competencia_pedida(bruto):
+    """Valida contra as competencias existentes: so aceita o que ha no banco,
+    entao nao ha o que injetar pela querystring."""
+    bruto = (bruto or '').strip()
+    if not bruto or bruto == ESCOPO_ULTIMA:
+        return None
+    return bruto if bruto in _competencias_disponiveis() else None
+
+
 @bp.route('/nfse')
 @requer_papel('operador')
 def nfse_painel():
-    lote = LoteNfse.query.order_by(LoteNfse.id.desc()).first()
-    notas = (NotaNfse.query.filter_by(lote_id=lote.id).order_by(NotaNfse.id).all()
-             if lote else [])
+    competencia = _competencia_pedida(request.args.get('competencia'))
+    notas, lote = _notas_do_escopo(competencia)
     # o operador pode ter acabado de usar o atalho "Cadastrar": liga as linhas
     # cuja Empresa passou a existir, para a volta a pagina refletir o cadastro
     if nfse_import.reconciliar_com_cadastro(notas):
-        notas = NotaNfse.query.filter_by(lote_id=lote.id).order_by(NotaNfse.id).all()
+        notas, lote = _notas_do_escopo(competencia)
     return render_template(
         'nfse.html',
         lote=lote,
         notas=[_nota_para_json(n) for n in notas],
         resumo=_resumo(notas),
+        competencia_atual=competencia or ESCOPO_ULTIMA,
+        competencias=_competencias_disponiveis(),
         config=nfse_config.get_config_nfse(),
         empresas=[{'id': e.id, 'nome': e.nome, 'cnpj': e.cnpj}
                   for e in Empresa.query.order_by(Empresa.nome).all()],
@@ -111,9 +159,8 @@ def nfse_listar_notas():
 
     A fila roda no servidor, entao o que a tabela mostra envelhece enquanto a
     emissao anda; e por aqui que ela volta a bater com o banco."""
-    lote = LoteNfse.query.order_by(LoteNfse.id.desc()).first()
-    notas = (NotaNfse.query.filter_by(lote_id=lote.id).order_by(NotaNfse.id).all()
-             if lote else [])
+    notas, _lote = _notas_do_escopo(
+        _competencia_pedida(request.args.get('competencia')))
     return {
         'status': 'ok',
         'notas': [_nota_para_json(n) for n in notas],
@@ -439,13 +486,18 @@ def nfse_lote_iniciar():
 
     definir_nfse_batch_opcoes(modo, ignorar_aliquota)
     nfse_lote.preparar_nova_fila()
-    lote = LoteNfse.query.order_by(LoteNfse.id.desc()).first()
+
+    # a fila e o que a pagina mostra, nao "o ultimo lote": com um mes filtrado
+    # na tela, enfileirar o ultimo lote emitiria notas que nao estao a vista
+    competencia = _competencia_pedida(dados.get('competencia'))
+    lote = None if competencia else LoteNfse.query.order_by(LoteNfse.id.desc()).first()
 
     try:
         dados_lote = batch_engine.init_batch_run(
             NFSE_BATCH_LOCK, NFSE_BATCH_STATE, nota_id,
             lambda inicio: nfse_lote.calcular_alvos(
-                inicio, lote_id=lote.id if lote else None),
+                inicio, lote_id=lote.id if lote else None,
+                competencia=competencia),
             nfse_lote.worker, app_factory=_current_app_object,
         )
     except Exception as exc:

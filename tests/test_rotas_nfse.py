@@ -250,3 +250,66 @@ def test_nenhum_arquivo_selecionado_devolve_400(client):
     resposta = client.post('/nfse/importar', data={'arquivo': []},
                            content_type='multipart/form-data')
     assert resposta.status_code == 400
+
+
+# --- escopo do que a pagina mostra (competencia x ultima importacao) --------
+#
+# A competencia sai do VENCIMENTO menos um mes: vencimento 05/07 -> 06/2026.
+
+LINHA_COM_VENC = ('"13/07/2026";"{nome}";"0001443038";"062623";"{venc}";'
+                  '"811,00";"16,22";"1,13";"{valor}";"COBRANCA SIMPLES"')
+
+
+def _importar_venc(client, nome, venc, valor='826,09'):
+    corpo = LINHA_COM_VENC.format(nome=nome, venc=venc, valor=valor)
+    return client.post(
+        '/nfse/importar',
+        data={'arquivo': (io.BytesIO(corpo.encode('utf-8')), 'extrato.csv')},
+        content_type='multipart/form-data')
+
+
+def test_sem_filtro_mostra_so_a_ultima_importacao(client, app):
+    _importar_venc(client, 'EMPRESA TESTE LTDA', '05/06/2026')
+    _importar_venc(client, 'OUTRA COISA LTDA', '05/07/2026')
+
+    dados = client.get('/nfse/notas').get_json()
+    assert [n['competencia'] for n in dados['notas']] == ['06/2026']
+
+
+def test_filtro_por_competencia_atravessa_importacoes(client, app):
+    """Quem emite antes do fim do mes importa o extrato duas ou tres vezes, e
+    as notas do mesmo mes ficam espalhadas por varios lotes."""
+    _importar_venc(client, 'EMPRESA TESTE LTDA', '05/07/2026')
+    _importar_venc(client, 'OUTRA COISA LTDA', '05/07/2026', valor='500,00')
+    _importar_venc(client, 'MAIS UMA LTDA', '05/08/2026')
+
+    dados = client.get('/nfse/notas?competencia=06/2026').get_json()
+    assert len(dados['notas']) == 2
+    assert {n['competencia'] for n in dados['notas']} == {'06/2026'}
+    assert dados['resumo']['total'] == 2
+
+
+def test_pagina_lista_as_competencias_da_mais_recente_para_a_mais_antiga(client, app):
+    """Ordenar 'MM/AAAA' como texto poe 12/2026 na frente de 01/2027, porque
+    compara o MES primeiro. Estes dois vencimentos existem justamente para
+    separar a ordem cronologica da alfabetica — com meses do mesmo ano as duas
+    coincidem e o teste passaria sem provar nada."""
+    _importar_venc(client, 'EMPRESA TESTE LTDA', '05/02/2027')   # -> 01/2027
+    _importar_venc(client, 'OUTRA COISA LTDA', '05/01/2027')     # -> 12/2026
+
+    corpo = client.get('/nfse').get_data(as_text=True)
+    assert corpo.index('Competência 01/2027') < corpo.index('Competência 12/2026')
+
+
+def test_competencia_inexistente_cai_na_ultima_importacao(client, app):
+    """Querystring so aceita o que existe no banco — nada a injetar por ali."""
+    _importar_venc(client, 'EMPRESA TESTE LTDA', '05/07/2026')
+
+    dados = client.get('/nfse/notas?competencia=13/9999').get_json()
+    assert len(dados['notas']) == 1
+    assert dados['notas'][0]['competencia'] == '06/2026'
+
+
+def test_notas_sem_lote_algum_nao_quebram_a_pagina(client, app):
+    assert client.get('/nfse').status_code == 200
+    assert client.get('/nfse/notas').get_json()['notas'] == []

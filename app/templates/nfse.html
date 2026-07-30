@@ -332,7 +332,23 @@
 
 <!-- Tabela de conferencia -->
 <div class="nfse-card">
-    <h2 class="h6 nfse-title mb-3">4. Conferir e preencher</h2>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h2 class="h6 nfse-title mb-0">4. Conferir e preencher</h2>
+        <div class="d-flex align-items-center gap-2">
+            <label class="nfse-hint mb-0" for="filtroCompetencia">Mostrar</label>
+            <select class="form-select form-select-sm" id="filtroCompetencia"
+                    style="width: auto;" data-atual="{{ competencia_atual }}">
+                <option value="ultima"{% if competencia_atual == 'ultima' %} selected{% endif %}>
+                    Última importação{% if lote %} — {{ lote.criado_em.strftime('%d/%m às %H:%M') }}{% endif %}
+                </option>
+                {% for competencia in competencias %}
+                <option value="{{ competencia }}"{% if competencia_atual == competencia %} selected{% endif %}>
+                    Competência {{ competencia }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
     <div class="nfse-tabela-wrap">
         <table class="table table-sm align-middle nfse-tabela mb-0" id="tabelaNotas">
             <thead>

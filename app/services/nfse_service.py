@@ -34,8 +34,9 @@ MOTIVO_POR_STATUS = {
     StatusNotaNfse.INVALIDA:
         'Esta linha veio incompleta do extrato do banco e nao pode ser emitida.',
     StatusNotaNfse.DUPLICATA:
-        'Ja existe nota emitida para esta empresa nesta competencia. Libere a '
-        'duplicata se quiser emitir mesmo assim.',
+        'Ja existe nota deste tomador nesta competencia — emitida ou preenchida '
+        'no portal esperando confirmacao. Libere a duplicata se quiser emitir '
+        'mesmo assim.',
     StatusNotaNfse.EMITIDA:
         'Esta nota ja foi emitida.',
     StatusNotaNfse.AGUARDANDO_CONFIRMACAO:

@@ -529,3 +529,26 @@ def test_pausa_mantem_o_navegador_aberto(monkeypatch):
 
     assert not falsa.encerrar.called, 'fechar aqui perderia a nota da revisao'
     assert falsa.liberar.called, 'o lock precisa voltar mesmo na pausa'
+
+
+# --- a fila e o que a pagina mostra ----------------------------------------
+
+def test_fila_por_competencia_atravessa_lotes(banco):
+    """Com um mes filtrado na tela, a fila tem de ser esse mes — nao o ultimo
+    lote importado, ou o operador emitiria notas que nao esta olhando."""
+    do_mes = _nota(competencia='06/2026')
+    outro_lote = LoteNfse(nome_arquivo='segundo.csv', total=1)
+    db.session.add(outro_lote)
+    db.session.commit()
+    tambem_do_mes = _nota(competencia='06/2026', lote_id=outro_lote.id)
+    _nota(competencia='07/2026', lote_id=outro_lote.id)
+
+    ids = nfse_lote.calcular_alvos(competencia='06/2026')['ids']
+    assert ids == [do_mes.id, tambem_do_mes.id]
+
+
+def test_competencia_tem_precedencia_sobre_o_lote(banco):
+    nota = _nota(competencia='06/2026')
+    ids = nfse_lote.calcular_alvos(lote_id=nota.lote_id,
+                                   competencia='07/2026')['ids']
+    assert ids == [], 'o filtro visivel manda, nao o lote'
