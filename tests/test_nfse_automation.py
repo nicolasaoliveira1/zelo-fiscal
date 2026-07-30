@@ -121,8 +121,7 @@ def test_marcar_radio_levanta_quando_a_opcao_nao_existe():
 
 def test_preencher_limpa_escreve_e_sai_do_campo():
     """Sair do campo faz parte do preenchimento, nao e um extra: o portal so
-    processa o valor no blur, e o datepicker aberto cobre o campo seguinte."""
-    from selenium.webdriver.common.keys import Keys
+    processa o valor quando o campo perde o foco."""
     elemento = MagicMock()
     driver = _driver(elemento=elemento)
     elemento.parent = driver
@@ -130,13 +129,14 @@ def test_preencher_limpa_escreve_e_sai_do_campo():
 
     assert elemento.clear.called
     enviados = [chamada.args[0] for chamada in elemento.send_keys.call_args_list]
-    assert enviados == ['33.684.001/0001-51', Keys.ESCAPE]
+    assert enviados == ['33.684.001/0001-51']
 
 
-def test_sair_do_campo_nao_usa_tab():
-    """Ao lado do campo de data existe o botao "Abrir calendario": o TAB leva o
-    foco para ele em vez de sair do campo, e o portal nao processa o valor.
-    O blur e feito por JS justamente para nao mexer no foco."""
+def test_sair_do_campo_nao_usa_teclado():
+    """Duas tentativas por teclado falharam por motivos opostos: o TAB leva o
+    foco ao botao "Abrir calendario" ao lado da data (o campo nunca sai de
+    foco), e o ESC ABRE o datepicker em vez de fechar. O que funciona na mao e
+    clicar fora — e o datepicker fecha no mousedown do documento."""
     from selenium.webdriver.common.keys import Keys
     elemento = MagicMock()
     driver = _driver(elemento=elemento)
@@ -145,8 +145,11 @@ def test_sair_do_campo_nao_usa_tab():
 
     enviados = [chamada.args[0] for chamada in elemento.send_keys.call_args_list]
     assert Keys.TAB not in enviados
+    assert Keys.ESCAPE not in enviados
+
     script = driver.execute_script.call_args[0][0]
     assert 'blur' in script and 'change' in script
+    assert 'mousedown' in script, 'sem o mousedown no documento o calendario nao fecha'
 
 
 def test_preencher_sem_sair_nao_manda_teclas():

@@ -35,16 +35,6 @@ NOTA = SimpleNamespace(
 )
 
 
-def _e_tecla(texto):
-    """True para teclas especiais do Selenium (TAB, ESC...).
-
-    Elas vivem no bloco unicode de uso privado a partir de U+E000. Comparado
-    por codigo, e nao por caractere literal, para nao depender do encoding com
-    que este arquivo for lido.
-    """
-    return isinstance(texto, str) and len(texto) == 1 and ord(texto) >= 0xE000
-
-
 class DriverEspiao:
     """Driver falso que registra tudo que foi tocado, por id/seletor.
 
@@ -74,11 +64,8 @@ class DriverEspiao:
         elemento._by = by
         elemento._valor = valor
         elemento.parent = self
-        # o modulo manda ESC/TAB depois de digitar (fecha datepicker e tira o
-        # foco). Teclas especiais nao sao "o valor do campo": registra-las
-        # sobrescreveria o texto digitado e mascararia o que foi preenchido.
         elemento.send_keys.side_effect = lambda texto: (
-            None if _e_tecla(texto) else self.preenchidos.__setitem__(valor, texto))
+            self.preenchidos.__setitem__(valor, texto))
         elemento.get_attribute.side_effect = lambda attr: (
             self.preenchidos.get(valor, self.autopreenchidos.get(valor, ''))
             if attr == 'value' else None)
@@ -92,8 +79,8 @@ class DriverEspiao:
         return elemento
 
     def find_elements(self, by, valor):
-        """O modulo procura todos os que casam e usa o primeiro VISIVEL: o
-        portal repete id entre as etapas do assistente."""
+        """O modulo procura todos os que casam e prefere o visivel — mas aceita
+        o oculto para radio, que no portal e sempre CSS-hidden."""
         return [self.find_element(by, valor)]
 
     def execute_script(self, script, *args):
@@ -258,10 +245,10 @@ def test_nenhuma_etapa_toca_os_campos_intocaveis(driver):
 # --- saida do campo e espera pelo portal (bug real) ------------------------
 
 def test_sai_do_campo_depois_de_digitar(driver):
-    """Bug relatado no uso real: sem sair do campo da data, o portal nao
-    processa o valor e os campos seguintes ficam nao-interagiveis
-    ("element not interactable"). ESC fecha o datepicker; o blur e por JS
-    porque o TAB levaria o foco para o botao "Abrir calendario" ao lado."""
+    """Sem sair do campo da data, o portal nao processa o valor e os campos
+    seguintes nunca sao liberados. O teclado nao serve: TAB cai no botao
+    "Abrir calendario" ao lado, e ESC ABRE o datepicker. A saida e simular o
+    clique fora, cujo mousedown no documento fecha o calendario."""
     from selenium.webdriver.common.keys import Keys
     enviados = []
     scripts = []
@@ -280,10 +267,20 @@ def test_sai_do_campo_depois_de_digitar(driver):
 
     nfse.preencher_etapa_pessoas(Espiao(), NOTA, CONFIG, date(2026, 7, 28))
 
-    teclas_da_data = [t for campo, t in enviados if campo == 'DataCompetencia']
-    assert Keys.ESCAPE in teclas_da_data, 'datepicker aberto cobre o proximo campo'
-    assert Keys.TAB not in teclas_da_data, 'TAB cai no botao de abrir calendario'
+    teclas = [t for _, t in enviados]
+    assert Keys.TAB not in teclas and Keys.ESCAPE not in teclas
+    assert any('mousedown' in s for s in scripts), 'o calendario fecha no mousedown'
     assert any('blur' in s for s in scripts), 'o portal so processa no blur'
+
+
+def test_radio_e_localizado_mesmo_sendo_invisivel(driver):
+    """No portal NENHUM radio e visivel para o Selenium — sao inputs escondidos
+    por CSS atras de labels estilizados, inclusive os ja marcados. Exigir
+    visibilidade neles nao acha nada e quebra a etapa inteira."""
+    driver.ocultos.add('input[name="Tomador.LocalDomicilio"][value="1"]')
+    nfse.preencher_etapa_pessoas(driver, NOTA, CONFIG, date(2026, 7, 28))
+    assert driver.radios['Tomador.LocalDomicilio'] == '1'
+    assert 'btnAvancar' in driver.clicados
 
 
 def test_espera_o_campo_ficar_interagivel_antes_de_digitar(driver):

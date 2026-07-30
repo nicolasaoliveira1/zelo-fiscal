@@ -92,7 +92,8 @@ def _marcar_radio(driver, name, valor):
 
     NUNCA por id: no portal os tres radios do mesmo grupo compartilham o id."""
     seletor = f'input[name="{name}"][value="{valor}"]'
-    elemento = _localizar(driver, By.CSS_SELECTOR, seletor)
+    # radios sao CSS-hidden por desenho: nao exigir visibilidade (ver _localizar)
+    elemento = _localizar(driver, By.CSS_SELECTOR, seletor, exigir_visivel=False)
     if elemento is None:
         raise InteracaoPortalError(
             f'Opcao "{valor}" do grupo "{name}" nao esta disponivel nesta tela.')
@@ -129,27 +130,30 @@ def _preencher(driver, elemento_id, valor, sair=True):
     return elemento
 
 
+# Simula "clicar fora do campo", que e o que o operador faz na mao: confirma o
+# valor digitado, fecha o datepicker e libera os campos seguintes. O mousedown
+# no documento e a peca essencial — e nele que o datepicker fecha.
 _JS_SAIR = (
-    "arguments[0].dispatchEvent(new Event('input', {bubbles: true}));"
-    "arguments[0].dispatchEvent(new Event('change', {bubbles: true}));"
-    "arguments[0].blur();"
-    "arguments[0].dispatchEvent(new Event('focusout', {bubbles: true}));"
+    "var el = arguments[0];"
+    "el.dispatchEvent(new Event('input', {bubbles: true}));"
+    "el.dispatchEvent(new Event('change', {bubbles: true}));"
+    "el.blur();"
+    "el.dispatchEvent(new Event('focusout', {bubbles: true}));"
+    "document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));"
+    "document.body.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));"
+    "document.body.click();"
 )
 
 
 def _sair_do_campo(elemento):
-    """Fecha overlay e tira o foco, para o portal processar o valor.
+    """Sai do campo como um clique fora faria, para o portal processar o valor.
 
-    ESC pelo teclado (fecha o datepicker, que so responde a tecla real) e o
-    blur por JS. Deliberadamente NAO usa TAB: ao lado do campo de data existe o
-    botao "Abrir calendario", e o TAB leva o foco justamente para ele — o campo
-    nunca chega a sair de foco de verdade e o portal nao processa o valor.
+    NAO usa teclado. Duas tentativas anteriores falharam por motivos opostos:
+    o TAB leva o foco para o botao "Abrir calendario" que fica ao lado da data
+    (o campo nunca sai de foco), e o ESC **abre** o datepicker em vez de fechar.
+    O que funciona na mao e clicar fora — daqui sai o mousedown no documento,
+    que e o evento em que o datepicker se fecha.
     """
-    from selenium.webdriver.common.keys import Keys
-    try:
-        elemento.send_keys(Keys.ESCAPE)
-    except WebDriverException:
-        pass
     try:
         elemento.parent.execute_script(_JS_SAIR, elemento)
     except WebDriverException:
@@ -163,22 +167,29 @@ def _visivel(elemento):
         return False
 
 
-def _localizar(driver, by, alvo):
-    """Primeiro elemento VISIVEL que casa, e nao o primeiro do DOM.
+def _localizar(driver, by, alvo, exigir_visivel=True):
+    """Elemento visivel que casa; com `exigir_visivel=False`, o primeiro que casar.
 
-    O portal repete `id` entre secoes do assistente (ja confirmado nos radios,
-    onde as tres opcoes do grupo compartilham o mesmo id). Pegar o primeiro do
-    DOM entrega um elemento de uma etapa oculta: o clique falha, ou pior,
-    acontece num campo que ninguem esta vendo.
+    Preferir o visivel importa porque o portal repete identificadores entre
+    secoes do assistente, e o primeiro do DOM pode estar numa parte oculta.
+
+    Mas `exigir_visivel` NAO serve para radio: no portal os `<input type=radio>`
+    sao escondidos por CSS e o que aparece na tela e um label estilizado por
+    cima. **Nenhum** radio do assistente e visivel para o Selenium — nem os que
+    ja estao marcados — entao exigir visibilidade neles nao acha nada. Eles sao
+    clicados por JS, que funciona em elemento de tamanho zero.
     """
     try:
         candidatos = driver.find_elements(by, alvo)
     except WebDriverException:
         return None
+
     for elemento in candidatos:
         if _visivel(elemento):
             return elemento
-    return None
+    if exigir_visivel:
+        return None
+    return candidatos[0] if candidatos else None
 
 
 def _esperar_interagivel(driver, elemento_id, timeout=None, intervalo=0.2):
