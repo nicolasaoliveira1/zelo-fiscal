@@ -233,6 +233,135 @@ def _esperar_preenchido(driver, elemento_id, timeout=None, intervalo=0.3):
     return esperar(tem_valor, timeout=timeout, intervalo=intervalo)
 
 
+# --- select2 com busca no servidor ----------------------------------------
+# Municipio e codigo de tributacao nascem SEM opcoes: o portal so as busca
+# depois que o operador digita. Definir o valor por jQuery nunca funciona
+# nesses dois — nao ha <option> para selecionar. Ha que dirigir o widget como
+# gente: clicar, digitar, esperar a busca, escolher.
+
+SEL_SELECT2_BUSCA = 'input.select2-search__field'
+SEL_SELECT2_OPCAO = 'li.select2-results__option'
+
+
+def _sem_acento(texto):
+    import unicodedata
+    return (unicodedata.normalize('NFKD', str(texto or ''))
+            .encode('ascii', 'ignore').decode())
+
+
+def _chave(texto):
+    return ' '.join(_sem_acento(texto).upper().split())
+
+
+def _tentativas_de_busca(termo):
+    """Prefixos a tentar, do mais especifico ao mais curto.
+
+    Comeca pelo termo inteiro sem acento e vai encurtando: o portal pode nao
+    casar acento ('Imbe' x 'Imbe'), e um prefixo curto ('Imb') filtra igual —
+    e e o que o operador digita na mao. Encurtar evita ter que adivinhar como o
+    servidor normaliza a busca."""
+    base = _sem_acento(termo).split('/')[0].strip()
+    vistos = []
+    for tamanho in (len(base), 4, 3):
+        pedaco = base[:tamanho].strip()
+        if len(pedaco) >= 2 and pedaco not in vistos:
+            vistos.append(pedaco)
+    return vistos
+
+
+def _valor_atual(driver, elemento_id):
+    try:
+        return driver.execute_script(
+            "var el = document.getElementById(arguments[0]);"
+            "return el ? el.value : null;", elemento_id)
+    except WebDriverException:
+        return None
+
+
+def _selecionar_com_busca(driver, elemento_id, valor, rotulo_esperado):
+    """Escolhe num Select2 que busca as opcoes no servidor.
+
+    `rotulo_esperado` e o texto da opcao (ex.: 'Imbe/RS'); dele sai o termo
+    digitado e por ele a opcao e reconhecida na lista."""
+    if _valor_atual(driver, elemento_id) == str(valor):
+        return valor  # ja escolhido; nao reabre o widget a toa
+
+    seletor_caixa = f'span.select2-selection[aria-labelledby="select2-{elemento_id}-container"]'
+    if not esperar(lambda: _localizar(driver, By.CSS_SELECTOR, seletor_caixa) is not None,
+                   timeout=TIMEOUT_AUTOPREENCHIMENTO, intervalo=0.2):
+        raise InteracaoPortalError(
+            f'O campo "{rotulo_esperado}" nao apareceu nesta tela. A etapa pode '
+            'nao ter terminado de carregar ou o portal mudou o formulario.')
+
+    for termo in _tentativas_de_busca(rotulo_esperado):
+        if _buscar_e_escolher(driver, seletor_caixa, termo, rotulo_esperado):
+            break
+
+    atual = _valor_atual(driver, elemento_id)
+    if str(atual) != str(valor):
+        raise InteracaoPortalError(
+            f'Nao consegui escolher "{rotulo_esperado}" no campo '
+            f'"{elemento_id}" (ficou "{atual}"). O portal busca as opcoes ao '
+            'digitar; confira se o nome esta como aparece na lista dele.')
+    return atual
+
+
+def _buscar_e_escolher(driver, seletor_caixa, termo, rotulo_esperado):
+    """Uma tentativa: abre, digita, espera a busca e clica na opcao."""
+    caixa = _localizar(driver, By.CSS_SELECTOR, seletor_caixa)
+    if caixa is None:
+        return False
+    try:
+        caixa.click()
+    except WebDriverException:
+        driver.execute_script('arguments[0].click();', caixa)
+
+    campo = _localizar(driver, By.CSS_SELECTOR, SEL_SELECT2_BUSCA)
+    if campo is None:
+        return False
+    try:
+        campo.clear()
+        campo.send_keys(termo)
+    except WebDriverException:
+        return False
+
+    alvo = _chave(rotulo_esperado)
+
+    def achou():
+        return _opcao_correspondente(driver, alvo) is not None
+
+    if not esperar(achou, timeout=TIMEOUT_AUTOPREENCHIMENTO, intervalo=0.3):
+        return False
+
+    opcao = _opcao_correspondente(driver, alvo)
+    try:
+        opcao.click()
+    except WebDriverException:
+        driver.execute_script('arguments[0].click();', opcao)
+    return True
+
+
+def _opcao_correspondente(driver, alvo):
+    """Opcao da lista cujo texto casa com o rotulo esperado.
+
+    Compara sem acento e sem caixa; `startswith` cobre o caso do codigo de
+    tributacao, cuja opcao traz a descricao inteira depois do codigo."""
+    try:
+        opcoes = driver.find_elements(By.CSS_SELECTOR, SEL_SELECT2_OPCAO)
+    except WebDriverException:
+        return None
+    for opcao in opcoes:
+        try:
+            texto = _chave(opcao.text)
+        except WebDriverException:
+            continue
+        if not texto or 'CARREGANDO' in texto or 'SEARCHING' in texto:
+            continue
+        if texto == alvo or texto.startswith(alvo):
+            return opcao
+    return None
+
+
 # --- deteccao de etapa ----------------------------------------------------
 
 def _tem_elemento(driver, elemento_id):
@@ -462,10 +591,13 @@ def preencher_etapa_servico(driver, nota, config, descricao, pausa=None):
     Municipio e codigo de tributacao sao selects VISIVEIS (nao usam Chosen);
     o item da NBS e Chosen com 919 opcoes.
     """
-    _selecionar(driver, 'LocalPrestacao_CodigoMunicipioPrestacao',
-                config.municipio_servico_codigo)
-    _selecionar(driver, 'ServicoPrestado_CodigoTributacaoNacional',
-                config.codigo_tributacao)
+    # Estes dois buscam as opcoes no servidor conforme se digita; o item da NBS
+    # abaixo ja vem com a lista inteira carregada e usa a via direta.
+    _selecionar_com_busca(driver, 'LocalPrestacao_CodigoMunicipioPrestacao',
+                          config.municipio_servico_codigo,
+                          config.municipio_servico_nome)
+    _selecionar_com_busca(driver, 'ServicoPrestado_CodigoTributacaoNacional',
+                          config.codigo_tributacao, config.codigo_tributacao)
     # "Nao" para imunidade/exportacao: ja e o default, mas marcar explicitamente
     # evita depender de o portal manter esse default.
     _marcar_radio(driver, 'ServicoPrestado.HaExportacaoImunidadeNaoIncidencia', '0')

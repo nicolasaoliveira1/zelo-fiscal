@@ -38,9 +38,15 @@ NOTA = SimpleNamespace(
 class DriverEspiao:
     """Driver falso que registra tudo que foi tocado, por id/seletor.
 
-    `autopreenchidos` simula os campos que o PORTAL preenche sozinho (emitente
-    apos a data, tomador apos o documento) — sem eles a automacao espera para
-    sempre, que e exatamente o que deve acontecer quando o portal nao responde.
+    Simula tres comportamentos reais do portal, sem os quais os testes nao
+    provariam nada:
+
+    - `autopreenchidos`: campos que o PORTAL preenche sozinho (emitente apos a
+      data, tomador apos o documento);
+    - `ocultos` / `desabilitados`: partes do formulario ainda nao liberadas;
+    - `catalogo`: os dois Select2 que buscam as opcoes NO SERVIDOR — nascem sem
+      nenhuma `<option>`, e so passam a ter a escolhida depois de digitar,
+      esperar e clicar.
     """
 
     def __init__(self):
@@ -48,7 +54,12 @@ class DriverEspiao:
             'Prestador_Inscricao': '94.645.405/0001-20',
             'Tomador_Nome': 'L. LUIS PETRY',
         }
-        # campos que o portal ainda nao revelou / mantem travados
+        # rotulo -> valor, por campo de busca (como o portal devolve)
+        self.catalogo = {
+            'LocalPrestacao_CodigoMunicipioPrestacao': [('Imbé/RS', '4310330')],
+            'ServicoPrestado_CodigoTributacaoNacional': [
+                ('17.19.01 - Contabilidade, inclusive serviços', '17.19.01')],
+        }
         self.ocultos = set()
         self.desabilitados = set()
         self.preenchidos = {}
@@ -56,9 +67,12 @@ class DriverEspiao:
         self.selects = {}
         self.radios = {}
         self.clicados = []
+        self.valores = {}          # valor atual de cada <select>
+        self.busca_aberta = None   # id do Select2 com a lista aberta
+        self.termos = []           # o que foi digitado em cada busca
         self.current_url = ''
 
-    # --- API que o modulo usa ---
+    # --- elementos simples ---
     def find_element(self, by, valor):
         elemento = MagicMock()
         elemento._by = by
@@ -79,24 +93,70 @@ class DriverEspiao:
         return elemento
 
     def find_elements(self, by, valor):
-        """O modulo procura todos os que casam e prefere o visivel — mas aceita
-        o oculto para radio, que no portal e sempre CSS-hidden."""
+        if valor.startswith('span.select2-selection'):
+            return [self._caixa_select2(valor)]
+        if valor == nfse.SEL_SELECT2_BUSCA:
+            return [self._campo_busca()] if self.busca_aberta else []
+        if valor == nfse.SEL_SELECT2_OPCAO:
+            return self._opcoes_visiveis()
         return [self.find_element(by, valor)]
 
+    # --- simulacao do Select2 com busca ---
+    def _caixa_select2(self, seletor):
+        # o seletor traz "select2-" duas vezes (span.select2-selection[...
+        # aria-labelledby="select2-<ID>-container"]); extrai o ID pelo rotulo
+        import re
+        achado = re.search(r'select2-([^"]+)-container', seletor)
+        alvo = achado.group(1) if achado else seletor
+        caixa = MagicMock()
+        caixa.is_displayed.return_value = True
+        caixa.is_enabled.return_value = True
+        caixa.click.side_effect = lambda: setattr(self, 'busca_aberta', alvo)
+        return caixa
+
+    def _campo_busca(self):
+        campo = MagicMock()
+        campo.is_displayed.return_value = True
+        campo.is_enabled.return_value = True
+        campo.send_keys.side_effect = lambda t: self.termos.append((self.busca_aberta, t))
+        return campo
+
+    def _opcoes_visiveis(self):
+        """So aparece o que casa com o termo digitado — como a busca do portal."""
+        if not self.busca_aberta or not self.termos:
+            return []
+        campo, termo = self.termos[-1]
+        chave = nfse._chave(termo)
+        achadas = []
+        for rotulo, valor in self.catalogo.get(campo, []):
+            if not nfse._chave(rotulo).startswith(chave):
+                continue
+            opcao = MagicMock()
+            opcao.text = rotulo
+            opcao.is_displayed.return_value = True
+            opcao.is_enabled.return_value = True
+            opcao.click.side_effect = (
+                lambda c=campo, v=valor: (self.valores.__setitem__(c, v),
+                                          setattr(self, 'busca_aberta', None)))
+            achadas.append(opcao)
+        return achadas
+
     def execute_script(self, script, *args):
+        if 'return el ? el.value : null' in script:
+            return self.valores.get(args[0])
         if 'scrollIntoView' in script:
             return None
         if 'chosen:updated' in script:
             self.chosen[args[0]] = args[1]
+            self.valores[args[0]] = args[1]
             return args[1]
         if args:
             self.clicados.append(getattr(args[0], '_valor', '?'))
         return None
 
-    # --- tudo que foi tocado, em qualquer via ---
     def tocados(self):
         return (set(self.preenchidos) | set(self.chosen) | set(self.selects)
-                | set(self.radios) | set(self.clicados))
+                | set(self.radios) | set(self.clicados) | set(self.valores))
 
 
 def _select_falso(espiao):
@@ -172,21 +232,57 @@ def test_etapa_pessoas_marca_brasil_e_nao_a_primeira_opcao(driver):
 # --- etapa 2: servico ------------------------------------------------------
 
 def test_etapa_servico_seleciona_municipio_tributacao_e_nbs(driver):
-    """Os tres passam pela MESMA via. Nenhum e manipulavel por Select() do
-    Selenium: municipio e codigo de tributacao sao Select2 (escondidos por
-    classe) e o item da NBS e Chosen (display:none inline)."""
+    """Duas vias distintas, porque o portal tem dois tipos de select.
+
+    Municipio e codigo de tributacao nascem SEM opcoes e as buscam no servidor
+    conforme se digita — precisam ser dirigidos como o operador faz. O item da
+    NBS ja vem com as 919 opcoes carregadas (Chosen) e aceita a via direta."""
     nfse.preencher_etapa_servico(driver, NOTA, CONFIG, 'HONORARIOS DE 06/2026')
 
-    assert driver.chosen['LocalPrestacao_CodigoMunicipioPrestacao'] == '4310330'
-    assert driver.chosen['ServicoPrestado_CodigoTributacaoNacional'] == '17.19.01'
+    assert driver.valores['LocalPrestacao_CodigoMunicipioPrestacao'] == '4310330'
+    assert driver.valores['ServicoPrestado_CodigoTributacaoNacional'] == '17.19.01'
     assert driver.chosen['ServicoPrestado_CodigoNBS'] == '113022100'
 
 
-def test_municipio_do_servico_e_sempre_o_configurado(driver):
-    """O select do portal so oferece uma opcao (o municipio do emitente), e ela
-    nao vem marcada como selected — setar explicitamente importa."""
+def test_municipio_e_escolhido_digitando_e_clicando_na_sugestao(driver):
+    """Definir o valor por jQuery nunca funcionaria: o <select> nasce vazio e a
+    <option> so passa a existir depois da busca."""
     nfse.preencher_etapa_servico(driver, NOTA, CONFIG, 'x')
-    assert driver.chosen['LocalPrestacao_CodigoMunicipioPrestacao'] ==         CONFIG.municipio_servico_codigo
+
+    digitados = [t for campo, t in driver.termos
+                 if campo == 'LocalPrestacao_CodigoMunicipioPrestacao']
+    assert digitados, 'nada foi digitado na busca do municipio'
+    assert digitados[0].lower().startswith('imb')
+    assert driver.valores['LocalPrestacao_CodigoMunicipioPrestacao'] ==         CONFIG.municipio_servico_codigo
+
+
+def test_busca_encurta_o_termo_ate_achar(driver):
+    """O portal pode nao casar acento. Comeca por 'Imbe' e, se nao achar,
+    encurta para 'Imb' — que e o que o operador digita na mao."""
+    driver.catalogo['LocalPrestacao_CodigoMunicipioPrestacao'] = [('Imbé/RS', '4310330')]
+    # so casa com 3 letras: simula servidor que nao normaliza acento
+    original = driver._opcoes_visiveis
+
+    def so_prefixo_curto():
+        if driver.termos and len(driver.termos[-1][1]) > 3:
+            return []
+        return original()
+    driver._opcoes_visiveis = so_prefixo_curto
+
+    nfse.preencher_etapa_servico(driver, NOTA, CONFIG, 'x')
+    digitados = [t for campo, t in driver.termos
+                 if campo == 'LocalPrestacao_CodigoMunicipioPrestacao']
+    assert len(digitados) > 1, 'nao tentou encurtar o termo'
+    assert driver.valores['LocalPrestacao_CodigoMunicipioPrestacao'] == '4310330'
+
+
+def test_municipio_ausente_na_busca_da_erro_acionavel(driver):
+    """Sem o municipio, a nota sairia sem local de prestacao."""
+    driver.catalogo['LocalPrestacao_CodigoMunicipioPrestacao'] = []
+    with pytest.raises(nfse.InteracaoPortalError) as exc:
+        nfse.preencher_etapa_servico(driver, NOTA, CONFIG, 'x')
+    assert CONFIG.municipio_servico_nome in str(exc.value)
+    assert 'btnAvancar' not in driver.clicados
 
 
 def test_nenhum_select_usa_o_Select_do_selenium(driver):
