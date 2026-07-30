@@ -14,7 +14,7 @@ Testar "nao levantou excecao" nao pegaria nenhum dos dois.
 from unittest.mock import MagicMock
 
 import pytest
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, WebDriverException
 from selenium.webdriver.common.by import By
 
 from app.automation import nfse
@@ -30,9 +30,9 @@ def _espera_curta(monkeypatch):
 def _driver(url='', valor_chosen=None, elemento=None, falha_find=False):
     """Driver falso.
 
-    Implementa `find_elements` (plural) alem do singular: o modulo passou a
-    procurar TODOS os elementos que casam e escolher o visivel, porque o portal
-    repete `id` entre as etapas do assistente.
+    Implementa `find_elements` (plural) alem do singular: o modulo procura
+    TODOS os elementos que casam e escolhe entre eles (o visivel, quando ha
+    mais de um — os radios de um grupo compartilham o mesmo id).
     """
     driver = MagicMock()
     driver.current_url = url
@@ -220,7 +220,6 @@ def test_tela_de_revisao_NAO_conta_como_emitida():
 
 
 def test_deteccao_nao_levanta_com_driver_morto():
-    from selenium.common.exceptions import WebDriverException
     driver = MagicMock()
     type(driver).current_url = property(
         lambda self: (_ for _ in ()).throw(WebDriverException('sessao morta')))
@@ -461,3 +460,69 @@ def test_avancar_sem_nenhum_localizador_da_erro_acionavel():
     with pytest.raises(nfse.InteracaoPortalError) as exc:
         nfse._avancar(driver)
     assert 'Avancar' in str(exc.value)
+
+
+# --- emissao confirmada: dois sinais independentes -------------------------
+
+def _driver_confirmacao(url=URL_CONFIRMACAO, tem_danfse=False, alerta=None):
+    """Driver da tela de confirmacao, com controle fino de cada sinal.
+
+    `alerta` e o texto do <div class="alert-success">, ou None para nenhum.
+    """
+    driver = MagicMock()
+    driver.current_url = url
+
+    if tem_danfse:
+        driver.find_element.return_value = MagicMock()
+    else:
+        driver.find_element.side_effect = NoSuchElementException('nao achou')
+
+    caixas = []
+    if alerta is not None:
+        caixa = MagicMock()
+        caixa.text = alerta
+        caixas.append(caixa)
+    driver.find_elements.return_value = caixas
+    return driver
+
+
+def test_emitida_pelo_alerta_de_sucesso_sem_o_botao_do_danfse():
+    """O alerta sozinho confirma a emissao: se o portal mudar o botao de
+    download, a espera do lote nao pode ficar presa ate o timeout."""
+    driver = _driver_confirmacao(alerta='A NFS-e foi gerada com sucesso')
+    assert nfse.detectar_emitida(driver)
+
+
+def test_emitida_pelo_botao_mesmo_sem_alerta():
+    assert nfse.detectar_emitida(_driver_confirmacao(tem_danfse=True))
+
+
+def test_alerta_verde_de_outro_assunto_nao_conta_como_emissao():
+    """`alert-success` e generico no portal. So a classe marcaria como emitida
+    qualquer confirmacao verde — e o lote pularia uma nota nao emitida."""
+    driver = _driver_confirmacao(alerta='Rascunho salvo com sucesso')
+    assert not nfse.detectar_emitida(driver)
+
+
+def test_alerta_de_sucesso_fora_da_tela_de_confirmacao_nao_conta():
+    """O path e ancora obrigatoria: alerta verde na tela de revisao nao emite."""
+    driver = _driver_confirmacao(url=URL_REVISAO,
+                                 alerta='A NFS-e foi gerada com sucesso')
+    assert not nfse.detectar_emitida(driver)
+
+
+def test_nenhum_dos_dois_sinais_nao_e_emissao():
+    assert not nfse.detectar_emitida(_driver_confirmacao())
+
+
+def test_alerta_ilegivel_nao_derruba_a_deteccao():
+    """Elemento que sumiu do DOM entre o find e o .text (stale) e comum na
+    tela recem-carregada; nao pode virar excecao no meio da espera."""
+    caixa = MagicMock()
+    type(caixa).text = property(
+        lambda self: (_ for _ in ()).throw(WebDriverException('stale')))
+    driver = MagicMock()
+    driver.current_url = URL_CONFIRMACAO
+    driver.find_element.side_effect = NoSuchElementException('nao achou')
+    driver.find_elements.return_value = [caixa]
+    assert not nfse.detectar_emitida(driver)

@@ -37,10 +37,20 @@ PATH_CONFIRMACAO = '/DPS/NFSe'
 SEL_LINK_CERTIFICADO = 'a.img-certificado'
 ID_ALIQUOTA_SN = 'AliquotaSimplesNacional'
 ID_BTN_AVANCAR = 'btnAvancar'
-# Botao que EMITE de fato. So o P3 (opt-in) clica nele; P1 e P2 param antes.
+# Elemento que EMITE de fato. So o P3 (opt-in) clica nele; P1 e P2 param antes.
+# Nao e <button>: e uma <a href="/EmissorNacional/DPS/NFSe?idr=...">, ou seja,
+# navega em vez de submeter — quem for automatizar o P3 nao deve esperar spinner
+# de submit, e sim a troca de path.
 ID_BTN_EMITIR = 'btnProsseguir'
-# Presente so na tela de confirmacao: e o sinal de "nota emitida" do lote (P2).
+
+# --- sinais de "ja emitiu" -------------------------------------------------
+# A tela de confirmacao traz DOIS sinais independentes: o botao de baixar o
+# DANFSe e o alerta verde. Aceitar qualquer um dos dois e deliberado — o lote
+# assistido fica parado esperando este sinal, e se o portal mexer no layout de
+# um deles a espera trava ate o timeout em vez de reconhecer a nota emitida.
 ID_BTN_DANFSE = 'btnDownloadDANFSE'
+SEL_ALERTA_SUCESSO = 'div.alert-success'
+TEXTO_EMISSAO_OK = 'gerada com sucesso'
 
 # Quanto esperar o portal preencher sozinho emitente e tomador.
 # Modulo-level para os testes reduzirem sem esperar o tempo real.
@@ -387,12 +397,33 @@ def esperar_revisao(driver):
     return PATH_REVISAO in _url(driver) and _tem_elemento(driver, ID_BTN_EMITIR)
 
 
+def _tem_alerta_sucesso(driver):
+    """True se a pagina mostra o alerta verde de nota gerada.
+
+    Confere o TEXTO, nao so a classe: `alert-success` e generico e aparece em
+    outras confirmacoes do portal."""
+    try:
+        alertas = driver.find_elements(By.CSS_SELECTOR, SEL_ALERTA_SUCESSO)
+    except WebDriverException:
+        return False
+    for alerta in alertas:
+        try:
+            if TEXTO_EMISSAO_OK in (alerta.text or '').lower():
+                return True
+        except WebDriverException:
+            continue
+    return False
+
+
 def detectar_emitida(driver):
     """True quando a nota foi emitida (tela de confirmacao).
 
-    E o sinal que faz o lote assistido avancar para a proxima nota (P2). Exige
-    o botao de download do DANFSe, que so existe depois da emissao."""
-    return PATH_CONFIRMACAO in _url(driver) and _tem_elemento(driver, ID_BTN_DANFSE)
+    E o sinal que faz o lote assistido avancar para a proxima nota e o modo
+    individual fechar o navegador. O path e obrigatorio (ancora), e basta um
+    dos dois sinais de emissao acontecer dentro dele."""
+    if PATH_CONFIRMACAO not in _url(driver):
+        return False
+    return _tem_elemento(driver, ID_BTN_DANFSE) or _tem_alerta_sucesso(driver)
 
 
 # --- espera generica -------------------------------------------------------
