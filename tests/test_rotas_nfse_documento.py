@@ -365,3 +365,24 @@ def test_sem_empresa_cadastrada_a_linha_continua_pendente(client, app):
 
     with app.app_context():
         assert db.session.get(NotaNfse, nota_id).status == StatusNotaNfse.CADASTRO_PENDENTE
+
+
+def test_marcar_como_emitida_limpa_o_erro_da_tentativa_anterior(client, app):
+    """A falha de uma tentativa que nao vingou nao vale mais depois de a nota
+    ser emitida na mao: mantida, a linha aparece como "Emitida" com um erro
+    embaixo, que nao quer dizer nada."""
+    from app import db
+    _importar(client, 'EMPRESA TESTE LTDA')
+    nota_id = _ultima_nota(app)
+    with app.app_context():
+        nota = db.session.get(NotaNfse, nota_id)
+        nota.status = StatusNotaNfse.FALHA
+        nota.erro = 'O portal nao chegou a tela de revisao apos as tres etapas.'
+        db.session.commit()
+
+    resposta = client.post(f'/nfse/nota/{nota_id}/emitida-manual',
+                           json={'marcar': True})
+    assert resposta.status_code == 200
+    assert resposta.get_json()['nota']['erro'] is None
+    with app.app_context():
+        assert db.session.get(NotaNfse, nota_id).erro is None

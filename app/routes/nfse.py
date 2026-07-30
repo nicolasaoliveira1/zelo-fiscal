@@ -291,6 +291,9 @@ def nfse_marcar_emitida_manual(nota_id):
         nota.status = StatusNotaNfse.EMITIDA
         nota.origem_emissao = ORIGEM_MANUAL
         nota.emitida_em = datetime.now()
+        # a falha da tentativa anterior nao vale mais: deixa-la ali mostra a
+        # linha como "Emitida" com um erro embaixo, que nao quer dizer nada
+        nota.erro = None
     else:
         if nota.origem_emissao != ORIGEM_MANUAL:
             return json_error(

@@ -310,5 +310,7 @@ def status():
         dados = batch_engine.build_batch_status_payload(NFSE_BATCH_STATE)
         dados['nota_id'] = NFSE_BATCH_STATE.get('current_id')
     dados['modo'] = nfse_batch_opcoes()['modo']
-    dados['sessao_ativa'] = SESSAO.driver_vivo()
+    # `tem_driver`, nao `driver_vivo()`: este payload e consultado de 2 em 2
+    # segundos e nao pode custar uma ida ao chromedriver (ver `tem_driver`).
+    dados['sessao_ativa'] = SESSAO.tem_driver
     return dados

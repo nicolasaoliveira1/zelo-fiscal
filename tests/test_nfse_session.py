@@ -340,3 +340,16 @@ def test_relogin_devolve_a_policy_antiga(sessao):
 
     assert sessao_mod.ativar.call_count == sessao_mod.desativar.call_count, (
         'ativacoes e desativacoes desbalanceadas deixam policy presa no registro')
+
+
+def test_tem_driver_nao_fala_com_o_navegador(sessao):
+    """Checagem barata para o polling: le atributo, nao consulta o Selenium."""
+    assert sessao.tem_driver is False
+
+    driver = sessao.garantir()
+    driver.current_url = MagicMock(
+        side_effect=AssertionError('tem_driver nao pode consultar a URL'))
+    assert sessao.tem_driver is True
+
+    sessao.encerrar()
+    assert sessao.tem_driver is False

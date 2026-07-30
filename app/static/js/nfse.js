@@ -105,10 +105,14 @@ function acoesDaLinha(nota) {
   const partes = [];
 
   if (nota.status === 'emitida') {
-    // so o que o operador marcou na mao pode ser desmarcado; o que a automacao
-    // emitiu de fato nao volta atras por um clique
+    // So o que o operador marcou na mao pode ser desmarcado: o que a automacao
+    // emitiu ela VIU acontecer na tela de confirmacao do portal, e desfazer por
+    // um clique afirmaria que uma nota fiscal existente nao existe.
+    // A celula nao pode ficar vazia, ou a linha parece quebrada — diz o porque.
     if (nota.origem_emissao === 'manual') {
       partes.push(`<button class="btn btn-ghost btn-sm" data-desmarcar="${nota.id}">Desmarcar</button>`);
+    } else {
+      partes.push('<span class="nfse-hint">emitida pelo sistema</span>');
     }
     return partes.join('');
   }
@@ -137,8 +141,10 @@ function acoesDaLinha(nota) {
 }
 
 function linha(nota) {
+  // as duas origens ficam esmaecidas: uma linha ja resolvida nao disputa
+  // atencao com as que ainda faltam
   const alerta = (nota.divergencia_valor ? ' nfse-linha-alerta' : '')
-    + (nota.origem_emissao === 'manual' ? ' nfse-emitida-manual' : '');
+    + (nota.status === 'emitida' ? ' nfse-linha-resolvida' : '');
   const aviso = nota.divergencia_valor
     ? ' <i class="bi bi-exclamation-triangle" title="Soma das parcelas não bate com o valor final"></i>' : '';
   return `

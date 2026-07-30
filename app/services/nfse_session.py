@@ -80,6 +80,18 @@ class NfseSession:
         unico sinal de que ele saiu do fluxo."""
         return self._driver
 
+    @property
+    def tem_driver(self):
+        """Se ha um navegador aberto, SEM falar com o Selenium.
+
+        Existe para o polling de status: `driver_vivo()` faz um round-trip HTTP
+        ao chromedriver, e a cada 2 segundos, a partir da thread da requisicao,
+        enquanto o worker dirige o MESMO navegador. Isso enche o pool de
+        conexoes (tamanho 1) e, quando o navegador acabou de fechar, prende a
+        resposta em retries do urllib3 por varios segundos — foi o que impediu a
+        pagina de perceber sozinha que o lote terminou."""
+        return self._driver is not None
+
     def driver_vivo(self):
         """False quando nao ha driver ou a janela foi fechada na mao."""
         if self._driver is None:

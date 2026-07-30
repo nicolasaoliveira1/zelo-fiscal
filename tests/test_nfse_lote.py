@@ -434,3 +434,29 @@ def test_worker_que_explode_termina_em_erro_e_nao_em_running(monkeypatch, banco)
     assert NFSE_BATCH_STATE['status'] == 'error'
     assert NFSE_BATCH_STATE['message']
     assert liberou.liberar.called, 'a sessao ficaria presa se o teardown nao rodou'
+
+
+# --- o polling de status nao pode falar com o Selenium ---------------------
+
+def test_status_nao_consulta_o_navegador(monkeypatch):
+    """O payload e pedido de 2 em 2 segundos, da thread da requisicao, enquanto
+    o worker dirige o MESMO navegador (pool de conexoes de tamanho 1). Uma ida
+    ao chromedriver aqui enche o pool durante o preenchimento e, quando o
+    navegador acaba de fechar, prende a resposta em retries do urllib3 — foi o
+    que impediu a pagina de perceber sozinha que o lote terminou."""
+    falsa = MagicMock()
+    falsa.tem_driver = True
+    monkeypatch.setattr(nfse_lote, 'SESSAO', falsa)
+
+    dados = nfse_lote.status()
+
+    assert dados['sessao_ativa'] is True
+    assert not falsa.driver_vivo.called, (
+        'driver_vivo() faz round-trip HTTP ao chromedriver a cada poll')
+
+
+def test_status_reporta_sessao_fechada(monkeypatch):
+    falsa = MagicMock()
+    falsa.tem_driver = False
+    monkeypatch.setattr(nfse_lote, 'SESSAO', falsa)
+    assert nfse_lote.status()['sessao_ativa'] is False

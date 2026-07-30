@@ -99,7 +99,9 @@
         background: var(--zelo-muted-soft); color: var(--zelo-muted);
         border-color: var(--zelo-muted);
     }
-    .nfse-emitida-manual { opacity: 0.62; }
+    /* Linha ja resolvida (emitida por qualquer origem): esmaecida para nao
+       disputar atencao com as que ainda faltam. */
+    .nfse-linha-resolvida { opacity: 0.62; }
     /* Mensagem de falha nao pode esticar a linha: 2 linhas e reticencias, com
        o texto completo no title. O detalhe tecnico vive no log. */
     .nfse-erro {
