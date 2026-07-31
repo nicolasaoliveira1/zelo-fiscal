@@ -552,3 +552,112 @@ def test_competencia_tem_precedencia_sobre_o_lote(banco):
     ids = nfse_lote.calcular_alvos(lote_id=nota.lote_id,
                                    competencia='07/2026')['ids']
     assert ids == [], 'o filtro visivel manda, nao o lote'
+
+
+# --- modo automatico: emite so depois de conferir (NFSE-24) ----------------
+
+@pytest.fixture()
+def automatico(fila, monkeypatch):
+    """Modo automatico com a auto-revisao e o clique de emitir dublados."""
+    definir_nfse_batch_opcoes(nfse_lote.MODO_AUTOMATICO, False)
+    automacao = MagicMock()
+    automacao.conferir_revisao.return_value = []
+    automacao.emitir.return_value = True
+    monkeypatch.setattr(nfse_lote, 'automacao', automacao)
+    return {**fila, 'automacao': automacao}
+
+
+def test_confere_antes_de_emitir(automatico):
+    nota = _nota()
+    nfse_lote._emitir_nota(nota.id, None, 'exec-1')
+
+    assert automatico['automacao'].conferir_revisao.called, (
+        'emitir sem reler a tela e emitir as cegas')
+    ordem = automatico['automacao'].mock_calls
+    nomes = [c[0] for c in ordem]
+    assert nomes.index('conferir_revisao') < nomes.index('emitir')
+
+
+def test_confere_contra_os_dados_da_nota(automatico):
+    nota = _nota()
+    nfse_lote._emitir_nota(nota.id, None, 'exec-1')
+
+    _driver, documento, valor, descricao = \
+        automatico['automacao'].conferir_revisao.call_args[0]
+    assert documento == nota.documento
+    assert valor == nota.valor_final
+    assert nota.competencia in descricao, (
+        'a descricao conferida precisa ser a da competencia desta nota')
+
+
+def test_conferindo_emite_e_marca(automatico):
+    nota = _nota()
+    sucesso, grave, _ = nfse_lote._emitir_nota(nota.id, None, 'exec-1')
+    db.session.refresh(nota)
+
+    assert (sucesso, grave) == (True, None)
+    assert nota.status == StatusNotaNfse.EMITIDA
+    assert nota.origem_emissao == 'automacao'
+
+
+def test_divergencia_nao_emite_e_pausa_o_lote(automatico):
+    """O teste independente da spec: qualquer diferenca barra a emissao."""
+    automatico['automacao'].conferir_revisao.return_value = [
+        'O valor na tela e R$ 999,00, e a nota e de 826,09.']
+    nota = _nota()
+
+    sucesso, _grave, mensagem = nfse_lote._emitir_nota(nota.id, None, 'exec-1')
+    db.session.refresh(nota)
+
+    assert not automatico['automacao'].emitir.called, 'emitiu apesar da divergencia'
+    assert sucesso is False
+    assert nota.status == StatusNotaNfse.AGUARDANDO_CONFIRMACAO
+    assert nota.origem_emissao is None
+    assert '999,00' in nota.erro, 'o motivo precisa ficar na linha'
+    assert NFSE_BATCH_STATE['stop_action'] == 'pause', (
+        'seguir para a proxima abriria outra DPS e deixaria esta como rascunho '
+        'orfao no portal')
+    assert 'pausad' in mensagem.lower()
+
+
+def test_confirmacao_que_nao_chega_nao_e_dada_como_emitida(automatico):
+    """O clique saiu e a confirmacao nao apareceu: pode ter emitido ou nao.
+    Marcar emitida perderia o rastro; marcar pendente reemitiria mes que vem."""
+    automatico['automacao'].emitir.return_value = False
+    nota = _nota()
+
+    sucesso, _grave, _ = nfse_lote._emitir_nota(nota.id, None, 'exec-1')
+    db.session.refresh(nota)
+
+    assert sucesso is False
+    assert nota.status == StatusNotaNfse.AGUARDANDO_CONFIRMACAO
+    assert nota.origem_emissao is None
+    assert 'portal' in nota.erro.lower()
+    assert NFSE_BATCH_STATE['stop_action'] == 'pause'
+
+
+def test_automatico_nao_espera_confirmacao_humana(automatico, monkeypatch):
+    esperou = MagicMock()
+    monkeypatch.setattr(nfse_lote, 'aguardar_confirmacao', esperou)
+    nfse_lote._emitir_nota(_nota().id, None, 'exec-1')
+    assert not esperou.called
+
+
+def test_automatico_nao_fecha_o_navegador_entre_notas(automatico):
+    nfse_lote._emitir_nota(_nota().id, None, 'exec-1')
+    assert not automatico['sessao'].encerrar.called
+
+
+@pytest.mark.parametrize('modo', [nfse_lote.MODO_INDIVIDUAL, nfse_lote.MODO_LOTE])
+def test_modos_assistidos_nunca_emitem_sozinhos(fila, monkeypatch, modo):
+    """A garantia do P1/P2 (ND-005) continua valendo com o P3 no codigo."""
+    automacao = MagicMock()
+    monkeypatch.setattr(nfse_lote, 'automacao', automacao)
+    monkeypatch.setattr(nfse_lote, 'aguardar_confirmacao',
+                        lambda _d: nfse_lote.EMITIDA)
+    definir_nfse_batch_opcoes(modo, False)
+
+    nfse_lote._emitir_nota(_nota().id, None, 'exec-1')
+
+    assert not automacao.emitir.called
+    assert not automacao.conferir_revisao.called

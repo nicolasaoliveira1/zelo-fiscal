@@ -749,3 +749,119 @@ def preencher_etapa_tributacao(driver, nota, config, pausa=None):
     _avancar(driver)
 
 
+
+
+# --- auto-revisao antes de emitir (NFSE-24) --------------------------------
+#
+# A tela de revisao mostra pares <dt>rotulo</dt><dd>valor</dd> agrupados por
+# <h4 class="emissao-titulo">. Duas armadilhas ditam os seletores abaixo:
+#
+# 1. Ha DOIS "CNPJ:" na pagina — o do emitente (o escritorio) vem antes do
+#    tomador. Ler sem ancorar na secao compara o CNPJ do escritorio com o do
+#    cliente e nunca bate.
+# 2. Ha DOIS rotulos de descricao dentro de "Servico Prestado", diferentes
+#    apenas pela caixa de uma letra: "Descricao do servico:" e o codigo de
+#    tributacao, "Descricao do Servico:" e o nosso texto livre. Depender dessa
+#    diferenca seria fragil, entao a descricao e conferida contra TODOS os <dd>
+#    da secao: o texto que pretendemos emitir precisa estar la.
+
+# Titulos das secoes, EXATOS e com acento. Exatos porque "Servico Prestado" e
+# substring de "Valores do Servico Prestado" — um `contains` casaria as duas e
+# leria o campo da secao errada. Com acento porque e o texto real do DOM; o
+# XPath vai como unicode e casa direto.
+SECAO_TOMADOR = 'Tomador do Serviço'
+SECAO_SERVICO = 'Serviço Prestado'
+SECAO_VALORES = 'Valores do Serviço Prestado'
+
+# Dentro da secao do tomador so existe um destes; qual depende de o tomador ser
+# pessoa juridica ou fisica.
+ROTULO_DOCUMENTO = "contains(.,'CNPJ') or contains(.,'CPF')"
+ROTULO_VALOR = "contains(.,'Valor do servi')"
+
+_XP_SECAO = ("//h4[contains(@class,'emissao-titulo')][normalize-space()='{secao}']"
+             "/following-sibling::div[contains(@class,'emissao-conteudo')][1]")
+
+
+def _dd_da_secao(driver, secao, condicao_rotulo):
+    """Valor do campo cujo <dt> satisfaz `condicao_rotulo`, dentro de `secao`."""
+    xpath = (_XP_SECAO.format(secao=secao)
+             + f"//dt[{condicao_rotulo}]/following-sibling::dd[1]")
+    elemento = _localizar(driver, By.XPATH, xpath, exigir_visivel=False)
+    return None if elemento is None else (elemento.text or '').strip()
+
+
+def _dds_da_secao(driver, secao):
+    xpath = _XP_SECAO.format(secao=secao) + '//dd'
+    try:
+        return [(e.text or '').strip() for e in driver.find_elements(By.XPATH, xpath)]
+    except WebDriverException:
+        return []
+
+
+def _so_digitos(texto):
+    return ''.join(c for c in str(texto or '') if c.isdigit())
+
+
+def _decimal_do_portal(texto):
+    """'R$ 826,09' -> Decimal('826.09'). None se nao der para ler."""
+    from decimal import Decimal, InvalidOperation
+    limpo = ''.join(c for c in str(texto or '') if c.isdigit() or c in ',.')
+    limpo = limpo.replace('.', '').replace(',', '.')
+    try:
+        return Decimal(limpo)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _comparavel(texto):
+    """Texto sem acento, sem caixa e com espacos colapsados."""
+    return ' '.join(_sem_acento(texto).casefold().split())
+
+
+def conferir_revisao(driver, documento, valor, descricao):
+    """Rele a tela de revisao e devolve as divergencias encontradas.
+
+    Lista vazia significa "confere". Qualquer item na lista significa NAO
+    EMITIR: o texto ja vem escrito para o operador.
+
+    Campo ilegivel conta como divergencia, nunca como aprovacao. E a diferenca
+    entre "conferi e esta certo" e "nao consegui conferir" — tratar as duas
+    igual transformaria uma mudanca de layout do portal em emissao as cegas.
+    """
+    divergencias = []
+
+    lido = _dd_da_secao(driver, SECAO_TOMADOR, ROTULO_DOCUMENTO)
+    if lido is None:
+        divergencias.append('Nao consegui ler o CPF/CNPJ do tomador na revisao.')
+    elif _so_digitos(lido) != _so_digitos(documento):
+        divergencias.append(
+            f'O tomador na tela e {lido}, e a nota e de {documento}.')
+
+    lido = _dd_da_secao(driver, SECAO_VALORES, ROTULO_VALOR)
+    na_tela = _decimal_do_portal(lido)
+    if lido is None or na_tela is None:
+        divergencias.append('Nao consegui ler o valor do servico na revisao.')
+    elif na_tela != valor:
+        divergencias.append(
+            f'O valor na tela e {lido}, e a nota e de {formatar_valor(valor)}.')
+
+    # A descricao e conferida contra todos os <dd> da secao (ver o comentario do
+    # bloco): o texto que pretendemos emitir precisa estar na tela.
+    esperada = _comparavel(descricao)
+    if not any(_comparavel(dd) == esperada for dd in _dds_da_secao(driver, SECAO_SERVICO)):
+        divergencias.append(
+            f'A descricao na tela nao e a esperada ("{descricao}"). '
+            'Confira principalmente a competencia.')
+
+    return divergencias
+
+
+def emitir(driver, timeout=None):
+    """Clica em emitir e espera a confirmacao. True se a nota saiu.
+
+    So o modo automatico (P3) chama isto. Devolver False NAO significa "nao
+    emitiu": o clique pode ter dado certo e a confirmacao ter demorado, e quem
+    chama precisa tratar isso como "nao sei", nunca como fracasso."""
+    timeout = TIMEOUT_REVISAO if timeout is None else timeout
+    _clicar(driver, ((By.ID, ID_BTN_EMITIR),), 'O botao "Emitir NFS-e"')
+    return esperar(lambda: detectar_emitida(driver), timeout=timeout)

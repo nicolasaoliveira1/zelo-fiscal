@@ -303,9 +303,12 @@ async function iniciarEmissao({ notaId = null, ignorarAliquota = false } = {}) {
         competencia: escopoAtual(),
       }),
     });
-    showToast(modo === 'individual'
-      ? 'Preenchendo. Confira no navegador e clique em Emitir NFS-e.'
-      : `Fila iniciada: ${dados.total} nota(s). Confira e emita uma a uma.`, 'info');
+    const AVISO_INICIO = {
+      individual: 'Preenchendo. Confira no navegador e clique em Emitir NFS-e.',
+      lote: `Fila iniciada: ${dados.total} nota(s). Confira e emita uma a uma.`,
+      automatico: `Emitindo ${dados.total} nota(s) sozinho. Acompanhe o progresso aqui.`,
+    };
+    showToast(AVISO_INICIO[modo] || AVISO_INICIO.lote, 'info');
     acompanharLote();
   } catch (erro) {
     // Alíquota não conferida é aviso, não erro: pergunta em vez de recusar, e
@@ -364,11 +367,14 @@ function pintarLote(lote) {
   const rodando = lote.status === 'running';
   const pausado = lote.status === 'paused';
   const painel = document.getElementById('nfseProgresso');
-  const emLote = modoAtual() === 'lote';
+  const percorreLista = modoAtual() !== 'individual';
 
   document.getElementById('btnIniciarLote')?.classList.toggle(
-    'd-none', !emLote || rodando || pausado);
-  document.getElementById('btnPularNota')?.classList.toggle('d-none', !rodando);
+    'd-none', !percorreLista || rodando || pausado);
+  // "Pular" existe para abandonar uma nota que ESPERA voce; no automatico nao
+  // ha espera, entao o botao nao teria efeito nenhum
+  document.getElementById('btnPularNota')?.classList.toggle(
+    'd-none', !rodando || modoAtual() === 'automatico');
   document.getElementById('btnPausarLote')?.classList.toggle(
     'd-none', !rodando || lote.total <= 1);
   document.getElementById('btnRetomarLote')?.classList.toggle('d-none', !pausado);
@@ -582,13 +588,22 @@ document.addEventListener('DOMContentLoaded', () => {
     lote: 'Percorre a lista inteira sem fechar o navegador: a mesma janela já '
       + 'autenticada volta para a emissão e preenche a próxima assim que você '
       + 'emitir a atual. O certificado é pedido uma vez só.',
+    automatico: 'Percorre a lista e emite sozinha. Antes de cada emissão relê a '
+      + 'tela de revisão e compara CPF/CNPJ, valor e descrição com a linha; '
+      + 'qualquer diferença para o lote naquela nota, sem emitir.',
   };
 
   function pintarModo() {
+    const modo = modoAtual();
     const desc = document.getElementById('nfseModoDesc');
-    if (desc) desc.textContent = DESCRICAO_MODO[modoAtual()] || '';
-    document.getElementById('btnIniciarLote')?.classList.toggle(
-      'd-none', modoAtual() !== 'lote');
+    if (desc) desc.textContent = DESCRICAO_MODO[modo] || '';
+
+    const iniciar = document.getElementById('btnIniciarLote');
+    if (iniciar) {
+      iniciar.classList.toggle('d-none', modo === 'individual');
+      iniciar.textContent = modo === 'automatico'
+        ? 'Emitir a lista inteira sozinho' : 'Emitir a lista inteira';
+    }
   }
 
   document.querySelectorAll('input[name="nfseModo"]').forEach((radio) => {
@@ -603,6 +618,18 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btnIniciarLote')?.addEventListener('click', () => {
+    // o modo automatico emite documento fiscal sem olho humano em cada nota:
+    // pede confirmacao explicita, uma vez, antes de comecar
+    if (modoAtual() === 'automatico') {
+      const el = document.getElementById('modalAutomatico');
+      if (el) { bootstrap.Modal.getOrCreateInstance(el).show(); return; }
+    }
+    iniciarEmissao();
+  });
+
+  document.getElementById('btnConfirmarAutomatico')?.addEventListener('click', () => {
+    const el = document.getElementById('modalAutomatico');
+    if (el) bootstrap.Modal.getOrCreateInstance(el).hide();
     iniciarEmissao();
   });
   document.getElementById('btnPularNota')?.addEventListener('click', () => {

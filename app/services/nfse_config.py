@@ -78,8 +78,6 @@ def salvar(valores):
     for campo in CAMPOS_OBRIGATORIOS:
         if campo in valores:
             setattr(config, campo, str(valores[campo]).strip())
-    if 'emissao_automatica' in valores:
-        config.emissao_automatica = bool(valores['emissao_automatica'])
     db.session.commit()
     return config
 

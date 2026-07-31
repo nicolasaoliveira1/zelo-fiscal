@@ -30,13 +30,20 @@ from app.automation.batch_state import (
     nfse_batch_opcoes,
 )
 from app.models import NotaNfse, StatusNotaNfse
-from app.services import batch_engine, nfse_service
+from app.services import batch_engine, nfse_config, nfse_service
 from app.services.execution_logger import log_event
 from app.services.nfse_session import SESSAO
 
 MODO_INDIVIDUAL = 'individual'
 MODO_LOTE = 'lote'
-MODOS = (MODO_INDIVIDUAL, MODO_LOTE)
+# P3 (NFSE-24): a automacao tambem clica em emitir, depois de reler a tela de
+# revisao e conferir tomador, valor e descricao. Qualquer divergencia — inclusive
+# "nao consegui ler" — para o lote sem emitir.
+MODO_AUTOMATICO = 'automatico'
+MODOS = (MODO_INDIVIDUAL, MODO_LOTE, MODO_AUTOMATICO)
+
+# Modos que percorrem a lista inteira; individual e o unico que emite uma so.
+MODOS_DE_FILA = (MODO_LOTE, MODO_AUTOMATICO)
 
 ORIGEM_AUTOMACAO = 'automacao'
 
@@ -193,6 +200,49 @@ def _emitir_nota(nota_id, driver_do_motor, execution_id):
     return _esperar_e_registrar(nota_id, opcoes, execution_id)
 
 
+def _emitir_sozinho(nota, execution_id):
+    """Confere a tela de revisao e, so entao, emite (NFSE-24).
+
+    A conferencia e a unica coisa entre a automacao e uma nota fiscal errada,
+    entao ela falha para o lado seguro: divergencia OU campo ilegivel param o
+    lote naquela nota, sem emitir. Parar em vez de pular e proposital — a tela
+    de revisao fica na frente do operador, que decide ali mesmo. Seguir para a
+    proxima abriria outra DPS e deixaria esta como rascunho orfao no portal.
+    """
+    driver = SESSAO.driver
+    config = nfse_config.get_config_nfse()
+    descricao = nfse_config.renderizar_descricao(config, nota.competencia)
+
+    divergencias = automacao.conferir_revisao(
+        driver, nota.documento, nota.valor_final, descricao)
+    if divergencias:
+        motivo = ' '.join(divergencias)
+        log_event('nfse_autorrevisao_recusou', level='WARNING', nota_id=nota.id,
+                  divergencias=motivo, execution_id=execution_id)
+        nota.erro = motivo[:300]
+        db.session.commit()
+        batch_engine.request_pause(NFSE_BATCH_LOCK, NFSE_BATCH_STATE)
+        batch_engine.marcar_resultado_pendente(NFSE_BATCH_STATE, NFSE_BATCH_LOCK)
+        return False, None, (
+            f'Nota {nota.id} NAO emitida — a revisao no portal nao bate com a '
+            f'nota. {motivo} Lote pausado nesta nota.')
+
+    log_event('nfse_autorrevisao_ok', nota_id=nota.id, execution_id=execution_id)
+
+    if not automacao.emitir(driver):
+        # O clique saiu; a confirmacao nao apareceu a tempo. Pode ter emitido ou
+        # nao — os dois chutes erram feio, entao quem decide e o operador.
+        nota.erro = ('Cliquei em emitir e a confirmacao nao apareceu a tempo. '
+                     'Confira no portal se a nota saiu.')
+        db.session.commit()
+        batch_engine.request_pause(NFSE_BATCH_LOCK, NFSE_BATCH_STATE)
+        batch_engine.marcar_resultado_pendente(NFSE_BATCH_STATE, NFSE_BATCH_LOCK)
+        return False, None, f'Nota {nota.id}: {nota.erro} Lote pausado.'
+
+    _marcar_emitida(nota)
+    return True, None, f'Nota {nota.id} conferida e emitida.'
+
+
 def _ja_esta_na_revisao(nota_id):
     nota = db.session.get(NotaNfse, nota_id)
     return nota is not None and nota.status == StatusNotaNfse.AGUARDANDO_CONFIRMACAO
@@ -201,6 +251,10 @@ def _ja_esta_na_revisao(nota_id):
 def _esperar_e_registrar(nota_id, opcoes, execution_id):
     """Espera o operador emitir e grava o desfecho na nota."""
     nota = db.session.get(NotaNfse, nota_id)
+
+    if opcoes['modo'] == MODO_AUTOMATICO:
+        return _emitir_sozinho(nota, execution_id)
+
     desfecho = aguardar_confirmacao(SESSAO.driver)
     log_event('nfse_lote_desfecho', nota_id=nota_id, desfecho=desfecho,
               modo=opcoes['modo'], execution_id=execution_id)

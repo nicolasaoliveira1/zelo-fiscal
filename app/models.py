@@ -440,8 +440,6 @@ class ConfiguracaoNfse(db.Model):
         default='HONORÁRIOS PROFISSIONAIS REFERENTES AO MÊS DE {competencia}')
     piscofins_situacao = db.Column(db.String(4), nullable=False, default='0')
     piscofins_tipo_retencao = db.Column(db.String(4), nullable=False, default='0')
-    # P3 opt-in, desligado por default (ND-005): a automacao nao emite sozinha
-    emissao_automatica = db.Column(db.Boolean, nullable=False, default=False)
 
     def __repr__(self):
         return f'<ConfiguracaoNfse {self.id}>'

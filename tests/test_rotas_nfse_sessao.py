@@ -354,3 +354,25 @@ def test_inicio_recusado_nao_troca_o_modo_de_um_lote_pausado(
     assert nfse_batch_opcoes()['modo'] == 'lote', (
         'o modo do lote pausado foi trocado por um inicio que falhou')
     assert sessao_falsa.livre, 'a recusa precisa devolver a sessao'
+
+
+def test_modo_automatico_e_aceito_e_enfileira_a_lista(
+        client, app, sessao_falsa, worker_falso):
+    sessao_falsa.aliquota_confirmada = True
+    _nota_pronta(client, app)
+
+    resposta = _iniciar(client, modo='automatico')
+    assert resposta.status_code == 200
+    assert nfse_batch_opcoes()['modo'] == 'automatico'
+    assert resposta.get_json()['total'] >= 1
+
+
+def test_automatico_nao_escapa_da_guarda_da_aliquota(
+        client, app, sessao_falsa, worker_falso):
+    """O modo que emite sozinho e o que MENOS pode pular a conferencia: a
+    aliquota sai na nota e nao ha revisao humana para pegar o erro."""
+    _nota_pronta(client, app)
+    resposta = _iniciar(client, modo='automatico')
+    assert resposta.status_code == 409
+    assert resposta.get_json()['motivo'] == 'aliquota_nao_confirmada'
+    assert worker_falso == []

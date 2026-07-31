@@ -286,8 +286,9 @@
 <div class="nfse-card mb-3">
     <h2 class="h6 nfse-title mb-2">3. Como emitir</h2>
     <p class="nfse-hint mb-2">
-        Nos dois modos a automação preenche as três etapas e <strong>para na tela de
-        revisão</strong>. Quem confere e clica em "Emitir NFS-e" é você.
+        Nos dois primeiros modos a automação preenche as três etapas e
+        <strong>para na tela de revisão</strong>: quem confere e clica em
+        "Emitir NFS-e" é você. No automático ela também emite.
     </p>
 
     <div class="btn-group nfse-modo" role="group" aria-label="Modo de emissão">
@@ -298,6 +299,10 @@
         <input type="radio" class="btn-check" name="nfseModo" id="modoLote"
                value="lote" autocomplete="off">
         <label class="btn btn-soft-primary btn-sm" for="modoLote">Lista inteira</label>
+
+        <input type="radio" class="btn-check" name="nfseModo" id="modoAutomatico"
+               value="automatico" autocomplete="off">
+        <label class="btn btn-soft-primary btn-sm" for="modoAutomatico">Automático</label>
     </div>
 
     <div class="nfse-modo-desc" id="nfseModoDesc"></div>
@@ -371,6 +376,43 @@
 </div>
 
 <!-- Aviso confirmavel: aliquota nao conferida nesta sessao (modal de decisao) -->
+<div class="modal fade" id="modalAutomatico" tabindex="-1" aria-hidden="true"
+     data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="h6 nfse-title mb-0">Emitir sem conferir cada nota</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">
+                    A automação vai <strong>emitir sozinha</strong> as notas desta
+                    lista. Você não verá cada uma antes de sair.
+                </p>
+                <p class="mb-2">
+                    Antes de cada emissão ela relê a tela de revisão e compara
+                    <strong>CPF/CNPJ do tomador, valor e descrição</strong> com a
+                    linha. Qualquer diferença — ou um campo que ela não consiga
+                    ler — para o lote naquela nota, sem emitir.
+                </p>
+                <p class="nfse-hint mb-0">
+                    Nota fiscal emitida errada precisa ser cancelada. Confira a
+                    alíquota do Simples antes de seguir.
+                </p>
+            </div>
+            <div class="modal-footer batch-modal-footer">
+                <button type="button" class="btn btn-ghost btn-sm" data-bs-dismiss="modal">
+                    Cancelar
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" id="btnConfirmarAutomatico">
+                    Entendi, pode emitir
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="modalAliquota" tabindex="-1" aria-hidden="true"
      data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">

@@ -51,9 +51,11 @@ def test_defaults_sao_os_valores_lidos_do_portal_na_recon(banco):
         'HONORÁRIOS PROFISSIONAIS REFERENTES AO MÊS DE {competencia}')
 
 
-def test_emissao_automatica_nasce_desligada(banco):
-    """ND-005: a automacao nao emite documento fiscal sozinha por padrao."""
-    assert cfg.get_config_nfse().emissao_automatica is False
+def test_configuracao_nao_guarda_modo_de_emissao(banco):
+    """O modo (assistido individual, assistido em lote, automatico) e escolhido
+    ao iniciar a fila, na pagina. Persistir tambem um flag daria dois controles
+    para a mesma coisa — e o operador nao saberia qual venceu."""
+    assert not hasattr(cfg.get_config_nfse(), 'emissao_automatica')
 
 
 # --- validacao do template (NFSE-09) ---------------------------------------
