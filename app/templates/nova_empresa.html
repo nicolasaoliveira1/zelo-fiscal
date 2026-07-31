@@ -104,13 +104,28 @@
 
 {% block scripts %}
 <script>
+// Espelha `utils.normalizar_cidade` do backend (remove acento + upper): o valor
+// da option vem de `municipio.nome`, que a COV-05 padronizou para a grafia
+// acentuada ('Imbé'). Comparar a string crua quebraria de novo na proxima
+// mudanca de grafia.
+function normalizarCidade(valor) {
+    return (valor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase();
+}
+
 function atualizarCidadeSelecionada() {
     const select = document.getElementById('cidade');
     const wrapper = document.getElementById('inscricao_mobiliaria_wrapper');
     const input = document.getElementById('inscricao_mobiliaria');
-    const ehImbe = select.value === 'Imbe';
+    const ehImbe = normalizarCidade(select.value) === 'IMBE';
     wrapper.style.display = ehImbe ? '' : 'none';
     if (!ehImbe) input.value = '';
 }
+
+// O onchange nao dispara quando o navegador restaura a selecao (voltar/reload),
+// entao o estado inicial precisa ser calculado tambem no load.
+document.addEventListener('DOMContentLoaded', atualizarCidadeSelecionada);
 </script>
 {% endblock %}
