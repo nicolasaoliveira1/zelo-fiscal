@@ -1,0 +1,728 @@
+{% extends "base.html" %}
+{% block titulo %}NFSe{% endblock %}
+
+{% block content %}
+<style>
+    .nfse-title {
+        font-family: var(--zelo-font-display);
+        font-weight: 600;
+        letter-spacing: -0.01em;
+    }
+    .nfse-card {
+        background: var(--zelo-paper);
+        border: 1px solid var(--zelo-line);
+        border-radius: 10px;
+        padding: 1rem 1.15rem;
+    }
+    .nfse-hint {
+        color: var(--zelo-slate);
+        font-size: 0.86rem;
+    }
+    /* Toggle de modo: monocromatico como todo o chrome — a unica cor da tela
+       continua sendo o status da nota. */
+    .nfse-modo .btn-check:checked + .btn {
+        background: var(--zelo-ink);
+        border-color: var(--zelo-ink);
+        color: var(--zelo-paper);
+    }
+    .nfse-modo-desc {
+        color: var(--zelo-slate);
+        font-size: 0.82rem;
+        margin-top: 0.4rem;
+    }
+    .nfse-progresso {
+        border-top: 1px solid var(--zelo-line);
+        margin-top: 0.9rem;
+        padding-top: 0.75rem;
+    }
+    .nfse-progresso-barra {
+        height: 6px;
+        border-radius: 999px;
+        background: var(--zelo-mist);
+        overflow: hidden;
+    }
+    .nfse-progresso-barra > span {
+        display: block;
+        height: 100%;
+        background: var(--zelo-ink);
+        transition: width 0.3s ease;
+    }
+    .nfse-tabela { font-size: 0.9rem; }
+    .nfse-tabela th {
+        font-weight: 600;
+        color: var(--zelo-slate);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-size: 0.72rem;
+        border-bottom: 1px solid var(--zelo-line);
+        white-space: nowrap;
+    }
+    .nfse-tabela td {
+        border-bottom: 1px solid var(--zelo-line);
+        vertical-align: middle;
+    }
+    .nfse-mono {
+        font-family: var(--zelo-font-mono);
+        font-size: 0.84rem;
+        white-space: nowrap;
+    }
+    /* A unica cor da tela e o status da nota. */
+    .nfse-status {
+        display: inline-block;
+        padding: 0.12rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.74rem;
+        font-weight: 600;
+        white-space: nowrap;
+        border: 1px solid transparent;
+    }
+    .st-pronta, .st-emitida {
+        background: var(--zelo-ok-soft); color: var(--zelo-ok);
+        border-color: var(--zelo-ok);
+    }
+    /* `pend` nao tem variante `-soft` no style.css; usa o mesmo color-mix que o
+       CSS ja aplica nas bandas de pendente (style.css:802). */
+    .st-empresa_pendente, .st-cadastro_pendente {
+        background: color-mix(in srgb, var(--zelo-pend) 12%, transparent);
+        color: var(--zelo-pend);
+        border-color: color-mix(in srgb, var(--zelo-pend) 40%, transparent);
+    }
+    .st-duplicata, .st-aguardando_confirmacao, .st-preenchendo {
+        background: var(--zelo-warn-soft); color: var(--zelo-warn);
+        border-color: var(--zelo-warn);
+    }
+    .st-invalida, .st-falha {
+        background: var(--zelo-danger-soft); color: var(--zelo-danger);
+        border-color: var(--zelo-danger);
+    }
+    .st-pulada, .st-pessoa_fisica, .st-cancelada, .st-agrupada {
+        background: var(--zelo-muted-soft); color: var(--zelo-muted);
+        border-color: var(--zelo-muted);
+    }
+    /* Descricao pendente e do mesmo tipo que empresa pendente — falta uma
+       decisao do operador para a nota poder existir —, entao usa a mesma cor. */
+    .st-descricao_pendente {
+        background: color-mix(in srgb, var(--zelo-pend) 12%, transparent);
+        color: var(--zelo-pend);
+        border-color: color-mix(in srgb, var(--zelo-pend) 40%, transparent);
+    }
+    /* Categoria: chrome, nao status. Monocromatica de proposito — honorarios x
+       servico e classificacao, nao validade, e cor aqui competiria com o
+       status pela atencao (a unica cor e o status). */
+    .nfse-categoria {
+        display: inline-block;
+        padding: 0.1rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 500;
+        white-space: nowrap;
+        background: var(--zelo-mist);
+        color: var(--zelo-slate);
+        border: 1px solid var(--zelo-line);
+    }
+    .cat-indefinida {
+        border-style: dashed;
+        border-color: color-mix(in srgb, var(--zelo-pend) 40%, transparent);
+        color: var(--zelo-pend);
+    }
+    /* Faixa da proposta de agrupamento: ocupa a largura da tabela acima das
+       linhas do grupo, para a conta (684,00 + 2.000,00 - 1.784,00) ficar junto
+       das parcelas que ela soma. */
+    .nfse-grupo-linha > td {
+        background: var(--zelo-mist);
+        border-bottom: none;
+        padding-top: 0.6rem;
+    }
+    .nfse-grupo {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.6rem;
+        font-size: 0.84rem;
+    }
+    /* O texto cede espaco; as acoes ficam juntas e a direita, com o CTA por
+       ultimo. Sem isto o "Juntar" quebrava sozinho para a linha de baixo,
+       separado do "Manter separadas" com que ele forma o par de escolha. */
+    .nfse-grupo-texto { flex: 1 1 18rem; min-width: 0; }
+    .nfse-grupo-acoes {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        margin-left: auto;
+        white-space: nowrap;
+    }
+    .nfse-grupo-conta {
+        font-family: var(--zelo-font-mono);
+        font-weight: 500;
+        /* a conta e uma unidade: quebrar entre '2.000,00' e '- 1.784,00'
+           faz o operador reler para saber o que soma e o que subtrai */
+        white-space: nowrap;
+    }
+    .nfse-grupo-valor {
+        max-width: 7rem;
+        font-family: var(--zelo-font-mono);
+    }
+    /* Linhas do grupo: precisam ler como UM bloco, senao o operador nao sabe
+       sobre o que a faixa esta falando. Fundo proprio + barra lateral solida
+       ligando a faixa as suas linhas, fechada por uma borda embaixo da ultima.
+       Monocromatico: agrupamento e estrutura, nao status. */
+    .nfse-linha-grupo > td {
+        background: var(--zelo-mist);
+        border-bottom-color: transparent;
+    }
+    .nfse-linha-grupo > td:first-child {
+        box-shadow: inset 3px 0 0 var(--zelo-ink);
+    }
+    .nfse-grupo-linha > td:first-child {
+        box-shadow: inset 3px 0 0 var(--zelo-ink);
+    }
+    /* Fecha o bloco: so a ULTIMA linha do grupo tem borda inferior. */
+    .nfse-linha-grupo-fim > td {
+        border-bottom: 1px solid var(--zelo-ink);
+    }
+    .nfse-grupo-selo {
+        display: inline-block;
+        font-size: 0.68rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--zelo-slate);
+        margin-right: 0.35rem;
+    }
+    .nfse-grupo-descricao { min-width: 13rem; }
+    /* Barra de acao em massa: aparece so quando ha selecao. */
+    .nfse-selecao {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        background: var(--zelo-mist);
+        border: 1px solid var(--zelo-line);
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        margin-bottom: 0.75rem;
+        font-size: 0.86rem;
+    }
+    .nfse-selecao-acoes { margin-left: auto; display: flex; gap: 0.4rem; }
+    .nfse-check { width: 1rem; height: 1rem; cursor: pointer; }
+    .nfse-tabela td:first-child, .nfse-tabela th:first-child { width: 1.6rem; }
+    /* Uma linha com reticencias, texto completo no title. A descricao de
+       honorarios e a MESMA em toda linha do mes: repetida em tres linhas por
+       nota, ela dominava a tabela sem acrescentar informacao. O que precisa
+       saltar aos olhos e a diferenca — o servico avulso, o "a definir". */
+    .nfse-descricao-prevista {
+        font-size: 0.78rem;
+        color: var(--zelo-slate);
+        margin-top: 0.15rem;
+        max-width: 17rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    /* Linha ja resolvida (emitida por qualquer origem): esmaecida para nao
+       disputar atencao com as que ainda faltam. */
+    .nfse-linha-resolvida { opacity: 0.62; }
+    /* Mensagem de falha nao pode esticar a linha: 2 linhas e reticencias, com
+       o texto completo no title. O detalhe tecnico vive no log. */
+    .nfse-erro {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        max-width: 22rem;
+        font-size: 0.78rem;
+        line-height: 1.25;
+        margin-top: 0.15rem;
+    }
+    .nfse-linha-alerta { background: var(--zelo-mist); }
+    .nfse-contadores { display: flex; flex-wrap: wrap; gap: 1.25rem; }
+    .nfse-contador .valor {
+        font-family: var(--zelo-font-mono);
+        font-size: 1.35rem;
+        font-weight: 600;
+        line-height: 1.1;
+    }
+    .nfse-contador .rotulo {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--zelo-slate);
+    }
+    /* Esta tabela tem 8 colunas, duas com editor embutido (empresa e
+       descricao), e ganha com espaco: no limite global de 1394px as celulas
+       quebram texto sem necessidade em telas largas. Alargar so aqui — o
+       `<style>` vive no bloco de conteudo e nao existe nas outras paginas.
+
+       O que isto NAO resolve, medido: a rolagem horizontal. Com os editores
+       fechados a tabela ocupa ~1300px e ja cabia; a rolagem que sobrava vinha
+       do editor de descricao com os campos lado a lado (regra abaixo), e
+       reaparece abaixo de ~1400px de viewport, onde a tela e o limite e nenhum
+       max-width ajuda. */
+    .app-main { max-width: 1680px; }
+
+    /* Editor da descricao empilhado: e ESTA regra que tira a rolagem
+       horizontal. Com os dois campos e os dois botoes lado a lado, a coluna
+       esticava e empurrava a de Acao para fora da tela — justamente a que o
+       operador precisava alcancar. */
+    .nfse-editor-descricao {
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        min-width: 13rem;
+        max-width: 17rem;
+    }
+    .nfse-editor-competencia {
+        max-width: 9rem;
+        font-family: var(--zelo-font-mono);
+    }
+    .nfse-editor-acoes { display: flex; gap: 0.3rem; }
+    .nfse-editor-ajuda { font-size: 0.74rem; line-height: 1.2; }
+    /* Total emitido no mes: e O numero que motiva a feature inteira, entao tem
+       o peso tipografico de um numero e nao de um paragrafo. */
+    .nfse-total {
+        display: flex;
+        align-items: baseline;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        padding: 0.85rem 1rem;
+        background: var(--zelo-mist);
+        border: 1px solid var(--zelo-line);
+        border-radius: 8px;
+        margin-bottom: 0.9rem;
+    }
+    .nfse-total .valor {
+        font-family: var(--zelo-font-mono);
+        font-size: 1.7rem;
+        font-weight: 600;
+        line-height: 1;
+    }
+    .nfse-total .rotulo {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--zelo-slate);
+    }
+    .nfse-diverg { margin-top: 0.9rem; }
+    .nfse-diverg h3 {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--zelo-slate);
+        margin-bottom: 0.35rem;
+    }
+    .nfse-diverg ul { margin: 0; padding-left: 1.1rem; font-size: 0.86rem; }
+    .nfse-diverg li { margin-bottom: 0.15rem; }
+    .nfse-acoes-linha { display: flex; gap: 0.35rem; justify-content: flex-end; }
+    /* Rotulo de acao nao quebra: "Já emiti" virando "Já / emiti" em duas linhas
+       le como botao quebrado, e a coluna ganhou mais um botao (Cancelar). */
+    .nfse-acoes-linha .btn { white-space: nowrap; }
+    .nfse-tabela-wrap { overflow-x: auto; }
+    #nfseAliquota { font-family: var(--zelo-font-mono); font-weight: 600; }
+</style>
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <h1 class="h4 mb-0 nfse-title">Emissão de NFSe</h1>
+    <button class="btn btn-ghost btn-sm" type="button" id="btnConfigNfse"
+            data-bs-toggle="collapse" data-bs-target="#painelConfig">
+        <i class="bi bi-sliders"></i> Configurações da nota
+    </button>
+</div>
+
+<!-- Configuracao dos campos fixos -->
+<div class="collapse mb-3" id="painelConfig">
+    <div class="nfse-card">
+        <p class="nfse-hint mb-3">
+            Valores fixos usados em toda nota. Só mexa aqui se o portal mudar.
+        </p>
+        <form id="formConfig" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_codigo_tributacao">Código de tributação</label>
+                <input class="form-control" id="cfg_codigo_tributacao"
+                       name="codigo_tributacao" value="{{ config.codigo_tributacao }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_item_nbs">Item da NBS</label>
+                <input class="form-control" id="cfg_item_nbs"
+                       name="item_nbs" value="{{ config.item_nbs }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_municipio_servico_codigo">Município (código)</label>
+                <input class="form-control" id="cfg_municipio_servico_codigo"
+                       name="municipio_servico_codigo" value="{{ config.municipio_servico_codigo }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_municipio_servico_nome">Município (nome)</label>
+                <input class="form-control" id="cfg_municipio_servico_nome"
+                       name="municipio_servico_nome" value="{{ config.municipio_servico_nome }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_regime_apuracao_sn">Regime de apuração</label>
+                <input class="form-control" id="cfg_regime_apuracao_sn"
+                       name="regime_apuracao_sn" value="{{ config.regime_apuracao_sn }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_piscofins_situacao">Situação PIS/COFINS</label>
+                <input class="form-control" id="cfg_piscofins_situacao"
+                       name="piscofins_situacao" value="{{ config.piscofins_situacao }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="cfg_piscofins_tipo_retencao">Retenção PIS/COFINS/CSLL</label>
+                <input class="form-control" id="cfg_piscofins_tipo_retencao"
+                       name="piscofins_tipo_retencao" value="{{ config.piscofins_tipo_retencao }}">
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="cfg_descricao_template">Descrição do serviço</label>
+                <input class="form-control" id="cfg_descricao_template"
+                       name="descricao_template" value="{{ config.descricao_template }}">
+                <div class="nfse-hint mt-1">
+                    Use <code>{competencia}</code> onde entra o mês de referência de cada nota.
+                    Vale para honorários; nota de serviço avulso usa a descrição do próprio serviço.
+                </div>
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="cfg_categoria_extrato">Categoria dos recebimentos no extrato</label>
+                <input class="form-control" id="cfg_categoria_extrato"
+                       name="categoria_extrato" value="{{ config.categoria_extrato }}">
+                <div class="nfse-hint mt-1">
+                    Só para o extrato do Banco Inter: é a categoria que você deu aos
+                    recebimentos de clientes no app do banco. Linhas com outra categoria
+                    são ignoradas na importação — se você renomeá-la no banco, mude aqui também.
+                </div>
+            </div>
+            <div class="col-12 d-flex justify-content-end">
+                <button class="btn btn-primary btn-sm" type="submit">Salvar configurações</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <!-- Importacao do extrato -->
+    <div class="col-lg-6">
+        <div class="nfse-card h-100">
+            <h2 class="h6 nfse-title mb-2">1. Importar o extrato do banco</h2>
+            <p class="nfse-hint mb-3">
+                O <strong>CSV de cobranças do Banrisul</strong> ou o
+                <strong>PDF do extrato do Banco Inter</strong>, como saem do banco —
+                pode escolher vários de uma vez, misturando os dois. Linhas repetidas
+                entre arquivos entram uma só vez. O documento de cada tomador é
+                resolvido aqui, antes de abrir o navegador.
+            </p>
+            <form id="formImportar" class="d-flex gap-2 align-items-center flex-wrap">
+                <input class="form-control form-control-sm" type="file" id="arquivoCsv"
+                       name="arquivo" accept=".csv,text/csv,.pdf,application/pdf"
+                       multiple style="max-width: 22rem;">
+                <button class="btn btn-primary btn-sm" type="submit">Importar</button>
+            </form>
+            {% if lote %}
+            <div class="nfse-hint mt-2">
+                Último import: <strong>{{ lote.nome_arquivo }}</strong>
+                — {{ lote.criado_em.strftime('%d/%m/%Y %H:%M') }}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Sessao do navegador -->
+    <div class="col-lg-6">
+        <div class="nfse-card h-100">
+            <h2 class="h6 nfse-title mb-2">2. Abrir o portal e conferir a alíquota</h2>
+            <p class="nfse-hint mb-3">
+                Abre o Emissor Nacional com o certificado. A alíquota do Simples muda
+                mês a mês e sai na nota — nada é preenchido antes de você conferir.
+            </p>
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+                <button class="btn btn-soft-primary btn-sm" type="button" id="btnPrepararSessao">
+                    Abrir portal
+                </button>
+                <span class="nfse-hint">Alíquota:</span>
+                <span id="nfseAliquota">—</span>
+                <button class="btn btn-primary btn-sm d-none" type="button" id="btnConfirmarAliquota">
+                    Está correta
+                </button>
+                <button class="btn btn-ghost btn-sm" type="button" id="btnEncerrarSessao">
+                    Encerrar sessão
+                </button>
+            </div>
+            <div class="nfse-hint mt-2" id="nfseSessaoEstado"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Contadores -->
+<div class="nfse-card mb-3">
+    <div class="nfse-contadores" id="nfseContadores">
+        <div class="nfse-contador">
+            <div class="valor" data-contador="total">{{ resumo.total }}</div>
+            <div class="rotulo">Notas</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="pronta">{{ resumo.por_status.get('pronta', 0) }}</div>
+            <div class="rotulo">Prontas</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="empresa_pendente">{{ resumo.por_status.get('empresa_pendente', 0) }}</div>
+            <div class="rotulo">Sem documento</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="pessoa_fisica">{{ resumo.por_status.get('pessoa_fisica', 0) }}</div>
+            <div class="rotulo">Pessoa física</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="duplicata">{{ resumo.por_status.get('duplicata', 0) }}</div>
+            <div class="rotulo">Duplicatas</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="emitida">{{ resumo.por_status.get('emitida', 0) }}</div>
+            <div class="rotulo">Emitidas</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="descricao_pendente">{{ resumo.por_status.get('descricao_pendente', 0) }}</div>
+            <div class="rotulo">Sem descrição</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="grupos_pendentes">{{ resumo.grupos_pendentes }}</div>
+            <div class="rotulo">A agrupar</div>
+        </div>
+        <div class="nfse-contador">
+            <div class="valor" data-contador="divergencias">{{ resumo.divergencias }}</div>
+            <div class="rotulo">Divergências</div>
+        </div>
+    </div>
+</div>
+
+<!-- Modo de emissao -->
+<div class="nfse-card mb-3">
+    <h2 class="h6 nfse-title mb-2">3. Como emitir</h2>
+    <p class="nfse-hint mb-2">
+        Nos dois primeiros modos a automação preenche as três etapas e
+        <strong>para na tela de revisão</strong>: quem confere e clica em
+        "Emitir NFS-e" é você. No automático ela também emite.
+    </p>
+
+    <div class="btn-group nfse-modo" role="group" aria-label="Modo de emissão">
+        <input type="radio" class="btn-check" name="nfseModo" id="modoIndividual"
+               value="individual" autocomplete="off" checked>
+        <label class="btn btn-soft-primary btn-sm" for="modoIndividual">Uma por vez</label>
+
+        <input type="radio" class="btn-check" name="nfseModo" id="modoLote"
+               value="lote" autocomplete="off">
+        <label class="btn btn-soft-primary btn-sm" for="modoLote">Lista inteira</label>
+
+        <input type="radio" class="btn-check" name="nfseModo" id="modoAutomatico"
+               value="automatico" autocomplete="off">
+        <label class="btn btn-soft-primary btn-sm" for="modoAutomatico">Automático</label>
+    </div>
+
+    <div class="nfse-modo-desc" id="nfseModoDesc"></div>
+
+    <div class="d-flex gap-2 align-items-center flex-wrap mt-3" id="nfseAcoesLote">
+        <button class="btn btn-primary btn-sm d-none" type="button" id="btnIniciarLote">
+            Emitir a lista inteira
+        </button>
+        <button class="btn btn-soft-primary btn-sm d-none" type="button" id="btnPularNota">
+            Pular esta nota
+        </button>
+        <button class="btn btn-ghost btn-sm d-none" type="button" id="btnPausarLote">
+            Pausar
+        </button>
+        <button class="btn btn-soft-primary btn-sm d-none" type="button" id="btnRetomarLote">
+            Retomar
+        </button>
+        <button class="btn btn-outline-danger btn-sm d-none" type="button" id="btnPararLote">
+            Parar
+        </button>
+    </div>
+
+    <div class="nfse-progresso d-none" id="nfseProgresso">
+        <div class="d-flex justify-content-between align-items-baseline mb-1">
+            <span class="nfse-hint" id="nfseProgressoRotulo"></span>
+            <span class="nfse-mono" id="nfseProgressoContagem"></span>
+        </div>
+        <div class="nfse-progresso-barra"><span id="nfseProgressoBarra" style="width: 0%"></span></div>
+        <div class="nfse-hint mt-2" id="nfseProgressoMensagem"></div>
+    </div>
+</div>
+
+<!-- Tabela de conferencia -->
+<div class="nfse-card">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h2 class="h6 nfse-title mb-0">4. Conferir e preencher</h2>
+        <div class="d-flex align-items-center gap-2">
+            <label class="nfse-hint mb-0" for="filtroCompetencia">Mostrar</label>
+            <select class="form-select form-select-sm" id="filtroCompetencia"
+                    style="width: auto;" data-atual="{{ competencia_atual }}">
+                <option value="ultima"{% if competencia_atual == 'ultima' %} selected{% endif %}>
+                    Última importação{% if lote %} — {{ lote.criado_em.strftime('%d/%m às %H:%M') }}{% endif %}
+                </option>
+                {% for competencia in competencias %}
+                <option value="{{ competencia }}"{% if competencia_atual == competencia %} selected{% endif %}>
+                    Competência {{ competencia }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+    <!-- Acao em massa: so aparece com alguma linha marcada -->
+    <div class="nfse-selecao d-none" id="nfseSelecao">
+        <span id="nfseSelecaoTotal"></span>
+        <div class="nfse-selecao-acoes">
+            <button class="btn btn-ghost btn-sm" type="button" id="btnLimparSelecao">
+                Limpar seleção
+            </button>
+            <button class="btn btn-ghost btn-sm" type="button" id="btnDesmarcarSelecao"
+                    title="Desfazer a marcação de emitida à mão">
+                Desmarcar
+            </button>
+            <button class="btn btn-soft-primary btn-sm" type="button" id="btnRestaurarSelecao">
+                Restaurar
+            </button>
+            <button class="btn btn-soft-primary btn-sm" type="button" id="btnJaEmitiSelecao"
+                    title="Registrar que você já emitiu estas notas no portal, por fora">
+                Já emiti
+            </button>
+            <button class="btn btn-outline-danger btn-sm" type="button" id="btnCancelarSelecao">
+                Cancelar selecionadas
+            </button>
+        </div>
+    </div>
+
+    <div class="nfse-tabela-wrap">
+        <table class="table table-sm align-middle nfse-tabela mb-0" id="tabelaNotas">
+            <thead>
+                <tr>
+                    <th><input type="checkbox" class="nfse-check" id="checkTodas"
+                               aria-label="Selecionar todas as linhas"></th>
+                    <th>Nome no banco</th>
+                    <th>Empresa</th>
+                    <th>CNPJ/CPF</th>
+                    <th>O que a nota diz</th>
+                    <th>Competência</th>
+                    <th class="text-end">Valor</th>
+                    <th>Status</th>
+                    <th class="text-end">Ação</th>
+                </tr>
+            </thead>
+            <tbody id="corpoNotas"></tbody>
+        </table>
+    </div>
+    <p class="nfse-hint mt-3 mb-0" id="nfseVazio">
+        Nenhuma nota importada ainda. Comece pelo passo 1.
+    </p>
+</div>
+
+<!-- Conferencia contra o portal (NFSE-28) -->
+<div class="nfse-card mt-3">
+    <h2 class="h6 nfse-title mb-2">5. Conferir com o que saiu no portal</h2>
+    <p class="nfse-hint mb-3">
+        Lê a lista de NFS-e emitidas no Emissor Nacional e soma o mês — o número que
+        você fazia à mão. Só leitura: nada é emitido, cancelado ou substituído aqui.
+        Períodos maiores que um mês são consultados mês a mês e somados.
+    </p>
+
+    <form id="formEmitidas" class="d-flex gap-2 align-items-end flex-wrap mb-3">
+        <div>
+            <label class="form-label nfse-hint mb-1" for="emitidasInicio">De</label>
+            <input class="form-control form-control-sm nfse-mono" type="date"
+                   id="emitidasInicio" style="width: 10rem;">
+        </div>
+        <div>
+            <label class="form-label nfse-hint mb-1" for="emitidasFim">Até</label>
+            <input class="form-control form-control-sm nfse-mono" type="date"
+                   id="emitidasFim" style="width: 10rem;">
+        </div>
+        <button class="btn btn-primary btn-sm" type="submit" id="btnConsultarEmitidas">
+            Consultar o portal
+        </button>
+        <span class="nfse-hint" id="emitidasEstado"></span>
+    </form>
+
+    <div class="d-flex gap-2 align-items-center flex-wrap mb-3">
+        <label class="nfse-hint mb-0" for="emitidasCompetencia">Conferir a competência</label>
+        <input class="form-control form-control-sm nfse-mono" id="emitidasCompetencia"
+               style="width: 7.5rem;" placeholder="MM/AAAA" maxlength="7">
+        <span class="nfse-hint">
+            o mês de <strong>referência</strong> dos honorários — diferente do mês em que
+            a nota sai. Padrão: o mês anterior ao período consultado.
+        </span>
+    </div>
+
+    <div id="emitidasPainel"></div>
+</div>
+
+<!-- Aviso confirmavel: aliquota nao conferida nesta sessao (modal de decisao) -->
+<div class="modal fade" id="modalAutomatico" tabindex="-1" aria-hidden="true"
+     data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="h6 nfse-title mb-0">Emitir sem conferir cada nota</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">
+                    A automação vai <strong>emitir sozinha</strong> as notas desta
+                    lista. Você não verá cada uma antes de sair.
+                </p>
+                <p class="mb-2">
+                    Antes de cada emissão ela relê a tela de revisão e compara
+                    <strong>CPF/CNPJ do tomador, valor e descrição</strong> com a
+                    linha. Qualquer diferença — ou um campo que ela não consiga
+                    ler — para o lote naquela nota, sem emitir.
+                </p>
+                <p class="nfse-hint mb-0">
+                    Nota fiscal emitida errada precisa ser cancelada. Confira a
+                    alíquota do Simples antes de seguir.
+                </p>
+            </div>
+            <div class="modal-footer batch-modal-footer">
+                <button type="button" class="btn btn-ghost btn-sm" data-bs-dismiss="modal">
+                    Cancelar
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" id="btnConfirmarAutomatico">
+                    Entendi, pode emitir
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalAliquota" tabindex="-1" aria-hidden="true"
+     data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="h6 nfse-title mb-0">Alíquota não conferida</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">
+                    Você ainda não conferiu a alíquota do Simples Nacional nesta sessão.
+                </p>
+                <p class="nfse-hint mb-0">
+                    Ela muda mês a mês e sai na nota. Se já sabe que está correta,
+                    pode preencher mesmo assim.
+                </p>
+            </div>
+            <div class="modal-footer batch-modal-footer">
+                <button type="button" class="btn btn-ghost btn-sm" data-bs-dismiss="modal">
+                    Cancelar
+                </button>
+                <button type="button" class="btn btn-soft-primary btn-sm" id="btnConferirAliquota">
+                    Conferir alíquota
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" id="btnPreencherMesmoAssim">
+                    Preencher mesmo assim
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="application/json" id="dadosNotas">{{ notas | tojson }}</script>
+<script type="application/json" id="dadosEmpresas">{{ empresas | tojson }}</script>
+<script type="application/json" id="dadosEmitidas">{{ emitidas | tojson }}</script>
+<script type="module" src="{{ static_versionado('js/nfse.js') }}"></script>
+{% endblock %}

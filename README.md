@@ -1,12 +1,12 @@
-# Zelo — Controle de Certidões Fiscais
+# Zelo — Rotinas Fiscais do Escritório Contábil
 
 > Regularidade sob controle.
 
-Aplicação web em Python/Flask para centralizar, gerenciar e apoiar a emissão de certidões fiscais (Federal, FGTS, Estadual, Municipal e Trabalhista). **Zelo** é o nome do sistema de uso interno do escritório; a identidade é monocromática (grafite sobre papel), reservando cor apenas para o status das certidões.
+Aplicação web em Python/Flask que automatiza as rotinas recorrentes de um escritório contábil: o controle e a emissão das **certidões fiscais dos clientes** (Federal, FGTS, Estadual, Municipal e Trabalhista) e a emissão das **NFS-e de honorários do próprio escritório**. **Zelo** é o nome do sistema de uso interno; a identidade é monocromática (grafite sobre papel), reservando cor apenas para o status das certidões.
 
 ![Dashboard](docs/image.png)
 
-O foco do projeto é reduzir trabalho manual no escritório contábil, manter controle visual de vencimentos, organizar automaticamente os PDFs emitidos e apoiar o controle de débitos das empresas, já que uma certidão pendente normalmente sinaliza pendência ou débito na respectiva esfera fiscal/trabalhista.
+O foco do projeto é reduzir trabalho manual naquilo que **se repete todo mês e tem prazo**. Do lado dos clientes: manter controle visual de vencimentos, organizar automaticamente os PDFs emitidos e apoiar o controle de débitos, já que uma certidão pendente normalmente sinaliza pendência ou débito na respectiva esfera fiscal/trabalhista. Do lado do escritório: transformar o extrato de cobranças do banco nas notas de honorários do mês, sem redigitar cliente por cliente.
 
 ## Visão geral
 
@@ -15,7 +15,8 @@ O sistema combina:
 - Dashboard único com status das certidões por empresa.
 - Automação via Selenium para acelerar a emissão.
 - Controle de arquivos (download, movimentação e visualização).
-- Fluxos em lote para cenários de alto volume (FGTS, Estadual RS e Municipal — Imbé/Tramandaí).
+- Fluxos em lote para cenários de alto volume (FGTS, Estadual RS, Municipal — Imbé/Tramandaí — e Trabalhista).
+- Emissão assistida das NFS-e de honorários a partir do extrato de cobranças do banco.
 
 ## Tecnologias
 
@@ -30,14 +31,16 @@ O sistema combina:
 - APScheduler (agendador in-process da emissão proativa)
 - smtplib (envio de e-mail de notificações; biblioteca padrão)
 - openpyxl / pypdf / fpdf2 (exportação: planilha XLSX e dossiê PDF)
+- thefuzz (casamento aproximado de nomes na importação do extrato de cobranças)
 
 ### Automação
 
 - Selenium WebDriver
 - webdriver-manager
 - undetected-chromedriver (anti-bloqueio dos portais municipais IPM Atende.Net)
-- 2captcha-python (ALTCHA no lote Estadual RS)
+- 2captcha-python (ALTCHA no lote Estadual RS e captcha de imagem no Imbé/Trabalhista)
 - pdfplumber (leitura de PDF quando aplicável)
+- Certificado digital A1/A3 via política de auto-seleção do Chrome (Estadual RS e Emissor Nacional de NFS-e)
 
 ### Frontend
 
@@ -59,6 +62,8 @@ O sistema combina:
 - Segurança aplicada ao uso diário: login obrigatório com papéis (leitura/operador/admin) e negação por padrão, proteção CSRF, trilha de auditoria, visualização de PDF por token assinado e credenciais sensíveis só via ambiente.
 - Proatividade: agendador diário que emite o que está vencendo e avisa por e-mail (digest de vencimentos e alertas de falha/saldo), sem depender de serviço externo.
 - Fluxos críticos robustos no RS/FGTS: lote com pausa/retomada/parada, polling de progresso, resumo final e fail-fast para erro de chave do solver.
+- Manutenção preventiva das automações: **dry-run** que valida os seletores de cada município sem emitir nada, rodando também sozinho todo dia — a quebra de portal aparece antes de o operador esbarrar nela.
+- Automação com freio onde o erro é caro: na emissão de NFS-e o sistema preenche tudo mas **nunca clica em emitir**; quem emite é o operador, porque o artefato é documento fiscal e o desfazer não é um rollback, é o cancelamento de uma nota.
 
 ## Principais funcionalidades
 
@@ -109,6 +114,28 @@ O sistema combina:
   - Classificação do PDF: positiva vira PENDENTE (arquivo removido); negativa/positiva-com-efeitos-de-negativa grava validade de 180 dias.
   - Portais IPM Atende.Net (Gravataí, Osório, Novo Hamburgo): a emissão individual usa **undetected-chromedriver** com um perfil persistente dedicado para não ser bloqueada pelo score anti-bot do portal (tela "validação automática de segurança / baixa pontuação"). A detecção é automática pela URL (`*.atende.net`) — qualquer novo município com esse domínio entra no fluxo sem mudança de código. O captcha em si continua resolvido manualmente pelo operador. Falhas de pré-condição (driver indisponível ou perfil em uso) retornam mensagem acionável (HTTP 409) sem cair para o navegador comum.
 
+### Emissão de NFS-e de honorários
+
+Emite no **Emissor Nacional** (`nfse.gov.br`) as notas de honorários do próprio escritório, partindo do CSV de cobranças exportado do banco. É o único fluxo do sistema que produz documento fiscal — e por isso o desenho é deliberadamente conservador.
+
+- **Importação do extrato**: arrasta um ou vários CSVs de uma vez. O sistema lê as colunas, converte valores e datas do padrão brasileiro e calcula a **competência** de cada nota (o mês anterior ao vencimento, tratando a virada de ano).
+- **Cada nome vira um cliente**: o banco manda a razão social truncada em 35 caracteres, o cadastro guarda o apelido curto. O casamento é por similaridade, mas só vincula sozinho quando o match é bom **e** folgado em relação ao segundo colocado — na dúvida, manda para conferência manual em vez de arriscar. Errar aqui emitiria uma nota com o CNPJ de outro cliente. A escolha manual vira **apelido salvo**: no mês seguinte aquele nome já entra resolvido.
+- **Tomador pessoa física**: nem todo cliente é empresa. CPF é aceito e memorizado, sem virar cadastro de empresa.
+- **Trava de duplicidade** por documento + competência, contando inclusive notas que o operador emitiu fora do sistema. Avisa e pede liberação explícita, em vez de bloquear — o mesmo cliente aparece legitimamente em meses diferentes.
+- **Conferência de valor**: se a soma das parcelas do extrato não bate com o valor final, a linha é marcada com divergência (e mantém o valor final do banco).
+- **Uma sessão de navegador para o dia todo**: o login por certificado digital e a conferência da alíquota do Simples acontecem uma vez, não a cada nota.
+- **A automação preenche, o operador emite.** O sistema percorre as três etapas do assistente, para na tela de revisão e espera. Dois modos, escolhidos na página: **uma por vez** (fecha o navegador quando a nota sai) ou **lista inteira** (mantém a janela autenticada de ponta a ponta). Pausar, retomar, pular e parar funcionam durante a espera.
+- **Ninguém chuta se a nota saiu**: a confirmação é lida do portal, não da interface. Se o navegador for fechado no meio da revisão, a nota fica aguardando confirmação e o operador marca à mão — marcar errado perderia uma nota ou faria emitir a mesma nota duas vezes.
+- Filtro por competência na tela: mostra o mês inteiro mesmo quando as notas vieram de importações diferentes.
+
+### Verificação preventiva dos municípios
+
+- **Dry-run por município**: percorre o fluxo real do portal até a fronteira da emissão e reporta qual passo/seletor deixou de resolver. O passo que gera o PDF é apenas localizado, **nunca clicado** — nenhuma certidão é emitida e nenhum download acontece.
+- Honesto sobre o que não deu para ver: passos que dependeriam do clique de emissão são reportados como não verificados, em vez de contados como aprovados. Portal com captcha vira "parcial" (não gasta crédito de solver).
+- **Roda sozinho todo dia**, em horário deslocado do lote de emissão, e dispara alerta quando um município passa a falhar.
+- **Painel em `/diagnostico/municipios`** com o estado de cada município e botão para rodar o dry-run sob demanda.
+- Grafia das cidades padronizada (acento e caixa) com fonte única de canonicalização — o casamento no backend segue normalizado, então acento não quebra nada.
+
 ### Gestão de arquivos
 
 - Detecta PDF novo/alterado na pasta Downloads.
@@ -136,6 +163,7 @@ O sistema combina:
 - **Exportar carteira (Excel):** botão no dashboard baixa uma planilha `.xlsx` **respeitando os filtros ativos** (status, tipo, estado, cidade) — sai exatamente o que está na tela.
 - **Dossiê (PDF) por empresa:** um único PDF com capa + as certidões **válidas** concatenadas, pronto para licitação/cliente (papel operador). PDF ausente/corrompido é pulado com aviso.
 - **Produtividade:** página `/produtividade` com emissões/dia, taxa de sucesso por tipo e tempo médio de lote (30/90 dias), com exportação em Excel.
+- **Relatórios:** página `/relatorios` com indicadores e distribuição por status/tipo, pendências detalhadas com rankings por tipo e município, as últimas 100 certidões emitidas, o último lote por tipo × escopo (com modal de rendimento) e o gráfico de evolução por status.
 
 ### Observabilidade e diagnóstico
 
@@ -145,6 +173,7 @@ O sistema combina:
 - **Pré-checagens (preflight)** antes de emitir/lote: valida rede, perfil do Chrome e solver, falhando cedo com mensagem clara em vez de quebrar no meio do Selenium.
 - **Detector de padrões recorrentes**: o mesmo erro repetido no mesmo alvo abre um alerta com hipótese (provável seletor quebrado/portal fora).
 - **Painel de diagnóstico** em `GET /diagnostico`: lista os últimos erros/avisos (histórico persistido em banco, sobrevive a restart) e os alertas de recorrência.
+- **Painel de municípios** em `GET /diagnostico/municipios`: estado da automação de cada município, com dry-run sob demanda (ver "Verificação preventiva dos municípios").
 - Retry com limite e backoff em pontos recuperáveis (ex.: timeout de carregamento e leitura de caminho de rede).
 - Endpoint de health check em `GET /health`.
 
@@ -206,6 +235,16 @@ SECRET_KEY=uma_chave_segura
 # RS_CERT_AUTOSELECT_POLICY_INDEX=1
 # RS_CERT_AUTOSELECT_ISSUER_CN=AC emissora
 # RS_CERT_AUTOSELECT_SUBJECT_CN=Titular CPF
+
+# Certificado da NFSe — Emissor Nacional (opcional; sem isso o Chrome abre o
+# diálogo de certificado e o operador escolhe à mão).
+# Use um POLICY_INDEX diferente do RS: são certificados distintos e as duas
+# políticas precisam conviver. ISSUER e SUBJECT são ambos obrigatórios.
+# NFSE_CERT_AUTOSELECT_ENABLED=true
+# NFSE_CERT_AUTOSELECT_PATTERN=https://certificado.nfse.gov.br
+# NFSE_CERT_AUTOSELECT_POLICY_INDEX=2
+# NFSE_CERT_AUTOSELECT_ISSUER_CN=AC emissora
+# NFSE_CERT_AUTOSELECT_SUBJECT_CN=Titular CNPJ
 
 # ALTCHA RS em lote (opcional)
 # RS_ALTCHA_AUTOSOLVE_ENABLED=true
@@ -288,6 +327,8 @@ docker compose --env-file .env.docker up
    - Estadual RS: lote com controles de pausar, retomar e parar.
    - Municipal (Imbé e Tramandaí): lote com as mesmas ações; resolve captcha de imagem via 2captcha no Imbé.
    - Trabalhista: lote quando houver mais de 1 item elegível; resolve captcha de imagem via 2captcha.
+7. Para emitir as NFS-e de honorários, acesse `/nfse` e siga os quatro passos da página: importar o extrato do banco → abrir o portal e conferir a alíquota → escolher o modo de emissão → conferir a tabela e preencher. O sistema para na tela de revisão de cada nota; **o clique em emitir é sempre seu**.
+8. Em `/diagnostico/municipios`, rode o dry-run quando desconfiar que um portal municipal mudou — ele valida os seletores sem emitir nada.
 
 ## Configurações importantes
 
@@ -298,6 +339,15 @@ O caminho base onde os PDFs das empresas são organizados pode ser definido de d
 ### Captura de contexto na falha Selenium
 
 Quando uma automação Selenium quebra (tipicamente porque um portal mudou de estrutura), o sistema salva automaticamente um screenshot e o HTML da página em `logs/selenium/` para acelerar o diagnóstico. Controlado por `SELENIUM_CAPTURE_ENABLED` (padrão ligado), com limpeza por retenção (`SELENIUM_CAPTURE_RETENCAO_DIAS`, padrão 14 dias).
+
+### Certificado digital (Estadual RS e NFSe)
+
+Os dois fluxos que exigem certificado usam a política `AutoSelectCertificateForUrls` do Chrome para escolher o certificado sem exibir o diálogo. Cada um declara o seu conjunto completo — padrão de URL, índice no registro, issuer e subject — e **nada é herdado do outro**: o RS usa um e-CPF e a NFSe um e-CNPJ.
+
+- Use um `POLICY_INDEX` **diferente** para cada fluxo. Eles convivem, e reutilizar o mesmo índice faria um sobrescrever a política do outro.
+- Informe **issuer e subject juntos**. É comum haver mais de um certificado com o mesmo titular e emissores diferentes (um deles vencido); filtrar só pelo titular é ambíguo e pode selecionar o certificado errado.
+- Sem essas variáveis o fluxo continua funcionando — o Chrome só passa a pedir o certificado na tela, e o operador escolhe.
+- Certificado vencido é uma causa comum de "parou de funcionar do nada": a auto-seleção deixa de casar e o diálogo volta a aparecer.
 
 ### Estadual RS e 2captcha
 
@@ -356,20 +406,27 @@ app/
     certidoes.py           #   rotas /certidao/* (baixar fina delega a emissao_service)
     lotes.py               #   factory _register_batch_routes + fluxos do agendador
     relatorios.py          #   /relatorios, /configuracoes, exportação (carteira/dossiê/produtividade)
+    nfse.py                #   /nfse/* (importação, resolução, sessão e lote assistido)
   auth.py                  # Login/papéis (deny-by-default, requer_papel) + painéis admin
   cli.py                   # Comandos CLI (criar-admin / criar-usuario)
   models.py                # Modelos do banco
   captcha_solver.py        # Integração 2captcha (ALTCHA e captcha de imagem)
   file_manager.py          # Detecção/movimentação de PDFs
   errors.py                # Taxonomia de erros + descrever_erro (mensagens acionáveis)
-  utils.py                 # Utilitários compartilhados (to_bool, get_config_value, normalizar_cidade, json_error)
+  utils.py                 # Utilitários compartilhados (to_bool, get_config_value, normalizar_cidade,
+                           #   json_error, validação/formatação de CPF-CNPJ)
   automation/              # Pacote de automação (antes automation.py)
     __init__.py            #   reexporta SITES_CERTIDOES, VALIDADES_CERTIDOES
     sites.py               #   URLs, seletores e validades padrão
-    driver.py              #   WebDriver Chrome + auto-seleção de certificado RS
+    driver.py              #   WebDriver Chrome/undetected-chromedriver
+    cert_policy.py         #   Núcleo da auto-seleção de certificado (RS e NFSe)
     steps.py               #   Steps municipais data-driven + mapa de localizadores
     pdf.py                 #   Leitura/classificação de PDF
-    emissao.py             #   Emissão por tipo (FGTS/Estadual RS/Municipal)
+    emissao.py             #   Emissão por tipo (FGTS/Estadual RS/Municipal/Trabalhista)
+    captcha_img.py         #   Núcleo de captcha de imagem (Imbé e CNDT)
+    trabalhista.py         #   Fluxo CNDT/TST
+    nfse.py                #   Emissor Nacional de NFS-e (login, etapas do DPS, detectores)
+    capture.py             #   Screenshot + HTML na falha Selenium
     batch_state.py         #   Estado e locks compartilhados dos lotes
   # stop_federal_monitor.txt é criado/removido em runtime (não versionado)
   services/
@@ -395,12 +452,20 @@ app/
     dossie_service.py      # Dossiê PDF por empresa (capa fpdf2 + merge pypdf) (spec 04)
     emissao_service.py     # Orquestração da emissão individual "baixar" (spec 05)
     visualizar_token.py    # Tokens assinados de visualização de certidão (spec 05)
+    dryrun_municipio.py    # Dry-run que valida seletores municipais sem emitir
+    cidade_canonica.py     # Grafia canônica das cidades (fonte única)
+    nfse_import.py         # Parser do extrato do banco + resolução empresa→CNPJ
+    nfse_config.py         # Campos fixos da NFSe (defaults vindos da recon do portal)
+    nfse_session.py        # Sessão de navegador persistente autenticada por certificado
+    nfse_service.py        # Preenchimento de uma nota até a tela de revisão
+    nfse_lote.py           # Emissão assistida em fila (uma por vez / lista inteira)
   static/
     css/
     images/
     js/                    # JS do dashboard extraído do HTML (spec 05)
       dashboard.js         #   entry ES module (<script type=module>, versionado)
       toasts.js            #   sistema de toasts (importado por dashboard.js)
+      nfse.js              #   entry ES module da página de NFSe
   templates/
     base.html
     dashboard.html
@@ -416,6 +481,7 @@ app/
     usuarios.html            # Gestão de usuários, admin (spec 01)
     auditoria.html           # Painel de auditoria, admin (spec 01)
     403.html                 # Acesso negado (spec 01)
+    nfse.html                # Emissão de NFS-e de honorários
 ```
 
 ## Testes e CI
@@ -432,6 +498,8 @@ app/
 - Mudanças de HTML nos sites podem exigir ajuste de seletores.
 - Captchas fora do lote RS e Municipal (Imbé) continuam majoritariamente manuais.
 - Ainda não existe cobertura completa de testes automatizados para fluxos Selenium.
+- NFSe: a emissão é **assistida por desenho** — o clique final é sempre do operador. O modo totalmente automático (que releria a tela de revisão e recusaria emitir em qualquer divergência) está previsto, mas ainda não foi implementado.
+- NFSe: o vínculo automático nome→CNPJ cobre a maior parte do extrato, mas não tudo; o restante exige uma escolha do operador, que fica memorizada para os meses seguintes.
 
 ## Licença
 

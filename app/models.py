@@ -389,6 +389,341 @@ class ConfiguracaoSistema(db.Model):
         return f'<ConfiguracaoSistema {self.id}>'
 
 
+class StatusNotaNfse:
+    """Status da NotaNfse em String, nao db.Enum nativo (AD-016/AD-020: o enum
+    nativo diverge entre SQLite e MySQL e a suite roda nos dois).
+
+    Fluxo feliz: EMPRESA_PENDENTE -> PRONTA -> PREENCHENDO ->
+    AGUARDANDO_CONFIRMACAO -> EMITIDA. Ramos: DUPLICATA (exige liberacao),
+    CADASTRO_PENDENTE (CNPJ digitado, empresa a cadastrar), INVALIDA (linha
+    malformada), PULADA, FALHA, CANCELADA, DESCRICAO_PENDENTE, AGRUPADA."""
+    EMPRESA_PENDENTE = 'empresa_pendente'
+    # CNPJ informado a mao, empresa ainda nao cadastrada: emite e mantem o
+    # convite para cadastrar nos meses seguintes
+    CADASTRO_PENDENTE = 'cadastro_pendente'
+    # tomador pessoa fisica: estado FINAL, nunca vira cadastro de Empresa
+    PESSOA_FISICA = 'pessoa_fisica'
+    # so no extrato do Inter: a descricao do Pix nao disse nem a competencia nem
+    # o servico, entao nao ha texto para a nota. Fica FORA da fila ate o
+    # operador decidir — chutar aqui escreve a coisa errada no documento fiscal
+    DESCRICAO_PENDENTE = 'descricao_pendente'
+    # linha absorvida por outra nota num agrupamento confirmado pelo operador
+    # (entradas + estorno viram uma nota so). Estado FINAL, aponta a sobrevivente
+    AGRUPADA = 'agrupada'
+    PRONTA = 'pronta'
+    PREENCHENDO = 'preenchendo'
+    AGUARDANDO_CONFIRMACAO = 'aguardando_confirmacao'
+    EMITIDA = 'emitida'
+    DUPLICATA = 'duplicata'
+    INVALIDA = 'invalida'
+    PULADA = 'pulada'
+    FALHA = 'falha'
+    # o contador decidiu que esta linha nao vira nota. Reversivel pela mesma
+    # rota (o operador desfaz e a linha volta ao estado que teria).
+    #
+    # Diferente de PULADA, que e "nao agora": PULADA continua em
+    # STATUS_EMITIVEIS e volta na proxima rodada do lote. CANCELADA e uma
+    # decisao, e por isso OCUPA a competencia — reimportar o mesmo extrato traz
+    # a linha de volta como DUPLICATA (liberavel), nunca como PRONTA. Sem isso a
+    # decisao do operador se perderia no proximo import e a nota que ele
+    # dispensou seria emitida.
+    CANCELADA = 'cancelada'
+
+
+class OrigemVinculoNfse:
+    """Como o CNPJ da nota foi resolvido — trilha de auditoria do match (NFSE-03)."""
+    EXATO = 'exato'
+    APELIDO = 'apelido'
+    FUZZY = 'fuzzy'
+    MANUAL = 'manual'
+
+
+class ConfiguracaoNfse(db.Model):
+    """Campos fixos da NFSe (registro unico, id=1) — NFSE-08/09.
+
+    Todos os defaults vieram da recon do Emissor Nacional (T0), nao de suposicao.
+    O template da descricao precisa conter o placeholder `{competencia}`; a
+    validacao vive em `app/services/nfse_config.py`."""
+    __tablename__ = 'configuracao_nfse'
+
+    id = db.Column(db.Integer, primary_key=True)
+    regime_apuracao_sn = db.Column(db.String(4), nullable=False, default='1')
+    municipio_servico_codigo = db.Column(db.String(10), nullable=False, default='4310330')
+    municipio_servico_nome = db.Column(db.String(60), nullable=False, default='Imbé/RS')
+    codigo_tributacao = db.Column(db.String(20), nullable=False, default='17.19.01')
+    item_nbs = db.Column(db.String(20), nullable=False, default='113022100')
+    descricao_template = db.Column(
+        db.String(300), nullable=False,
+        default='HONORÁRIOS PROFISSIONAIS REFERENTES AO MÊS DE {competencia}')
+    piscofins_situacao = db.Column(db.String(4), nullable=False, default='0')
+    piscofins_tipo_retencao = db.Column(db.String(4), nullable=False, default='0')
+    # Categoria do extrato do Inter que marca um recebimento de cliente. E o
+    # UNICO filtro que separa honorarios de qualquer outro credito na conta, e o
+    # nome e digitado pelo operador no app do banco — se ele renomear la, o
+    # import para de achar as linhas. Por isso e campo editavel, nao constante.
+    categoria_extrato = db.Column(
+        db.String(60), nullable=False, default='HONORÁRIOS - CLIENTES')
+
+    def __repr__(self):
+        return f'<ConfiguracaoNfse {self.id}>'
+
+
+class LoteNfse(db.Model):
+    """Uma importacao do CSV de cobrancas do banco (NFSE-06).
+
+    Carimbo em hora local naive (AD-004), como Certidao.atualizado_em."""
+    __tablename__ = 'lote_nfse'
+
+    id = db.Column(db.Integer, primary_key=True)
+    nome_arquivo = db.Column(db.String(200), nullable=True)
+    criado_em = db.Column(db.DateTime, nullable=False, default=datetime.now, index=True)
+    total = db.Column(db.Integer, nullable=False, default=0)
+    execution_id = db.Column(db.String(40), nullable=True)
+
+    notas = db.relationship(
+        'NotaNfse', backref='lote', lazy='selectin', cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<LoteNfse {self.id} {self.nome_arquivo} ({self.total})>'
+
+
+class NotaNfse(db.Model):
+    """Uma linha do CSV do banco = uma NFSe a emitir (NFSE-01..07).
+
+    Valores monetarios em Numeric(12,2), nunca Float: o numero vai para um
+    documento fiscal e Float acumula erro de arredondamento. `valor_final`
+    (coluna I do CSV) e o valor a emitir; `divergencia_valor` sinaliza quando
+    F+G-H nao bate com I (rede de seguranca contra CSV corrompido)."""
+    __tablename__ = 'nota_nfse'
+
+    id = db.Column(db.Integer, primary_key=True)
+    lote_id = db.Column(
+        db.Integer, db.ForeignKey('lote_nfse.id'), nullable=False, index=True)
+    # nulo = pendente de resolucao (empresa nao vinculada)
+    empresa_id = db.Column(
+        db.Integer, db.ForeignKey('empresa.id'), nullable=True, index=True)
+
+    nome_csv = db.Column(db.String(140), nullable=True)
+    # normalizado (caixa alta, sem acento, espacos colapsados): chave do apelido
+    nome_csv_norm = db.Column(db.String(140), nullable=True, index=True)
+    # CPF ou CNPJ do tomador: nem todo cliente e pessoa juridica
+    documento = db.Column(db.String(18), nullable=True, index=True)
+    tipo_documento = db.Column(db.String(4), nullable=True)
+
+    data_pagamento = db.Column(db.Date, nullable=True)
+    vencimento = db.Column(db.Date, nullable=True)
+
+    valor_titulo = db.Column(db.Numeric(12, 2), nullable=True)
+    acrescimos = db.Column(db.Numeric(12, 2), nullable=True)
+    deducoes = db.Column(db.Numeric(12, 2), nullable=True)
+    valor_final = db.Column(db.Numeric(12, 2), nullable=True)
+
+    # 'MM/AAAA'. Duas origens, deliberadamente diferentes: no CSV de cobrancas e
+    # DERIVADA (mes anterior ao vencimento do titulo); no extrato do Inter e
+    # LITERAL, lida da descricao do Pix. Nota de servico avulso nao tem
+    # competencia escrita, entao grava-se o mes do pagamento — serve para
+    # agrupar e filtrar, mas NAO entra no texto da nota (ver descricao_servico).
+    competencia = db.Column(db.String(7), nullable=True, index=True)
+
+    # Descricao pronta do servico, quando o Pix nao foi de honorarios
+    # ('ALTERAÇÃO CONTRATUAL', 'BAIXA DE EMPRESA'). NULL = honorarios, e a
+    # descricao sai do template da ConfiguracaoNfse com a competencia. Manter
+    # NULL como "honorarios" e o que preserva o comportamento do CSV sem
+    # backfill: toda nota que ja existe continua usando o template.
+    descricao_servico = db.Column(db.String(300), nullable=True)
+    # Flag PROPRIA, e nao derivada de `descricao_servico is None`: nota de
+    # servico tambem grava competencia (mes do pagamento, para agrupar e
+    # filtrar), entao nao ha combinacao de campos que distinga "e honorarios"
+    # de "o sistema nao soube dizer o que e". Sem esta coluna, a pendencia se
+    # perderia assim que o operador resolvesse a empresa.
+    descricao_pendente = db.Column(db.Boolean, nullable=False, default=False)
+    # 'csv' (cobrancas do Banrisul) | 'inter' (extrato PDF do Banco Inter)
+    origem_extrato = db.Column(db.String(10), nullable=True)
+    # descricao crua do lancamento, como veio do banco. Fica na tela ao lado da
+    # descricao resolvida: quando o operador confere uma nota de servico, o que
+    # ele precisa ver e o texto original do Pix, nao a interpretacao do sistema.
+    descricao_extrato = db.Column(db.String(300), nullable=True)
+
+    # Valor como veio do extrato, sempre. `valor_final` e o valor A EMITIR e
+    # pode ser reescrito por um agrupamento; este nao muda nunca. E o que
+    # permite desfazer o agrupamento e responder "de quanto era a linha no
+    # banco?" sem reimportar o arquivo.
+    valor_extrato = db.Column(db.Numeric(12, 2), nullable=True)
+
+    # --- proposta de agrupamento (entradas + estorno viram uma nota so) ------
+    # Token compartilhado pelas notas do mesmo grupo proposto. Enquanto existe e
+    # nao foi confirmado nem descartado, as notas ficam FORA da fila: emitir uma
+    # entrada bruta cujo estorno o operador ainda nao avaliou e emitir a maior.
+    grupo_sugerido = db.Column(db.String(40), nullable=True, index=True)
+    # valor liquido do grupo (entradas - saidas), so na nota lider da proposta
+    grupo_valor_liquido = db.Column(db.Numeric(12, 2), nullable=True)
+    # a conta por extenso, para o operador conferir antes de aceitar
+    # ('684,00 + 2.000,00 - 1.784,00 (estorno 08/07)')
+    grupo_detalhe = db.Column(db.String(300), nullable=True)
+    grupo_descartado = db.Column(db.Boolean, nullable=False, default=False)
+    # Agrupamento JA aplicado. O token NAO e apagado ao confirmar, e e isso que
+    # torna o desfazer possivel: sem ele nao haveria como reencontrar as irmas.
+    grupo_confirmado = db.Column(db.Boolean, nullable=False, default=False)
+    # Descricao que a nota juntada vai levar. Editavel pelo operador na propria
+    # faixa da proposta; o default vem do servico escrito em alguma das linhas
+    # do grupo ("ALT. CONTRATO" veio na de 684,00, nao na de 2.000,00).
+    grupo_descricao = db.Column(db.String(300), nullable=True)
+    # Retrato da lider ANTES do agrupamento, para o desfazer devolver o que era.
+    # O valor anterior nao entra aqui: ele vive em `valor_extrato`, que nunca
+    # muda. Descricao e pendencia precisam de retrato porque o operador pode
+    # te-las definido a mao antes de juntar, e re-deduzi-las do extrato
+    # descartaria em silencio o que ele digitou.
+    grupo_descricao_anterior = db.Column(db.String(300), nullable=True)
+    grupo_pendente_anterior = db.Column(db.Boolean, nullable=True)
+    # nota que absorveu esta linha depois do agrupamento confirmado
+    agrupada_em_id = db.Column(
+        db.Integer, db.ForeignKey('nota_nfse.id'), nullable=True)
+    # valor ajustado a mao (so em nota agrupada): deixa rastro de que o numero
+    # nao veio direto do extrato
+    valor_ajustado = db.Column(db.Boolean, nullable=False, default=False)
+
+    status = db.Column(
+        db.String(24), nullable=False,
+        default=StatusNotaNfse.EMPRESA_PENDENTE, index=True)
+    origem_vinculo = db.Column(db.String(10), nullable=True)
+    score_match = db.Column(db.Integer, nullable=True)
+    divergencia_valor = db.Column(db.Boolean, nullable=False, default=False)
+
+    duplicata_de_id = db.Column(
+        db.Integer, db.ForeignKey('nota_nfse.id'), nullable=True)
+    # Relacionamento (nao muda o schema) para o import poder apontar a duplicata
+    # para a nota original ANTES de ela existir no banco: no laco do import
+    # nenhuma das duas tem id ainda, e so o objeto esta disponivel.
+    duplicata_de = db.relationship(
+        'NotaNfse', remote_side=[id], foreign_keys=[duplicata_de_id])
+    duplicata_liberada = db.Column(db.Boolean, nullable=False, default=False)
+
+    emitida_em = db.Column(db.DateTime, nullable=True)
+    # 'automacao' | 'manual': o operador pode marcar nota que ja emitiu fora do
+    # sistema, e ela passa a contar na trava de duplicidade
+    origem_emissao = db.Column(db.String(12), nullable=True)
+    erro = db.Column(db.String(500), nullable=True)
+
+    def __repr__(self):
+        return f'<NotaNfse {self.nome_csv} {self.competencia} {self.status}>'
+
+
+class ApelidoNfse(db.Model):
+    """Memoria do que fazer com um nome vindo do banco (NFSE-03).
+
+    Guarda DOIS tipos de vinculo, por isso `empresa_id` e opcional:
+
+    - nome -> Empresa cadastrada (o caso comum);
+    - nome -> documento avulso (CPF, ou CNPJ de empresa ainda nao cadastrada).
+
+    O segundo existe porque parte dos tomadores e pessoa fisica e nunca vai
+    virar cadastro: sem essa memoria o operador redigitaria o CPF todo mes.
+
+    N:1 de proposito: o banco escreve o mesmo cliente de varias formas ao longo
+    do tempo (truncamento em 35 chars, abreviacoes), e uma coluna unica em
+    Empresa so guardaria uma. Carimbo em hora local naive (AD-004)."""
+    __tablename__ = 'apelido_nfse'
+
+    id = db.Column(db.Integer, primary_key=True)
+    nome_norm = db.Column(db.String(140), unique=True, nullable=False)
+    empresa_id = db.Column(
+        db.Integer, db.ForeignKey('empresa.id'), nullable=True, index=True)
+    documento = db.Column(db.String(18), nullable=True)
+    tipo_documento = db.Column(db.String(4), nullable=True)
+    criado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+    def __repr__(self):
+        return f'<ApelidoNfse {self.nome_norm} -> {self.empresa_id or self.documento}>'
+
+
+class SituacaoNotaEmitida:
+    """Codigos de situacao do Emissor Nacional, como o portal os escreve.
+
+    So `GERADA` foi observado na recon (185 linhas, todas iguais) — os codigos
+    de cancelada e substituida sao DESCONHECIDOS. Por isso o total do mes soma
+    apenas o que e comprovadamente `GERADA`, e qualquer outro codigo e contado
+    a parte e mostrado; adivinhar aqui erraria o total de um documento fiscal
+    nos dois sentidos possiveis."""
+    GERADA = 'P100_GERADA'
+
+
+class NotaEmitidaNfse(db.Model):
+    """Uma NFS-e como o portal a registra — a contraparte da `NotaNfse`.
+
+    As duas nao se confundem e por isso sao tabelas separadas: `NotaNfse` e a
+    fila de trabalho montada a partir do extrato do banco ("o que eu preciso
+    emitir"), esta e o espelho do que a Receita registra ("o que eu de fato
+    emiti"). E o confronto entre elas que responde quem pagou e ficou sem nota,
+    e que nota saiu sem pagamento correspondente.
+
+    Chave natural: a chave de acesso de 50 digitos. Ela vem do href do
+    "Visualizar" e NAO do `data-chave` da linha, que e um token opaco de uso
+    interno do portal (ver recon)."""
+    __tablename__ = 'nota_emitida_nfse'
+
+    id = db.Column(db.Integer, primary_key=True)
+    # 50 digitos; unica, e o que torna a consulta idempotente — reconsultar o
+    # mesmo mes atualiza em vez de duplicar
+    chave = db.Column(db.String(60), unique=True, nullable=False)
+
+    # Data em que a nota foi GERADA no portal. E o fato que define "emitido no
+    # mes X" — o total do mes sai daqui.
+    data_geracao = db.Column(db.Date, nullable=True, index=True)
+
+    # A "Competencia" que o portal mostra e a data de competencia do DPS, que a
+    # nossa propria automacao preenche com HOJE (`preencher_etapa_pessoas`).
+    # Ou seja: e o mes da EMISSAO, nao o mes de referencia do honorario.
+    #
+    # O nome carrega o `_dps` de proposito. Enquanto se chamava `competencia`
+    # ela foi casada com `NotaNfse.competencia` — que e o mes de REFERENCIA — e
+    # a conciliacao acusou como "sem nota" toda linha paga num mes e emitida no
+    # seguinte, que e o caso normal (o cliente paga em julho o honorario de
+    # junho). Ver ND-027.
+    competencia_dps = db.Column(db.String(7), nullable=True, index=True)
+
+    documento = db.Column(db.String(18), nullable=True, index=True)
+    nome_tomador = db.Column(db.String(140), nullable=True)
+    municipio = db.Column(db.String(60), nullable=True)
+    valor = db.Column(db.Numeric(12, 2), nullable=True)
+
+    # codigo cru do portal ('P100_GERADA'), nunca o rotulo traduzido: o rotulo e
+    # o title de uma imagem e muda com tema/idioma, o codigo nao
+    situacao = db.Column(db.String(30), nullable=True, index=True)
+
+    # quando esta linha foi vista no portal pela ultima vez
+    consultado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+    # conciliacao com a fila de trabalho, quando o par foi encontrado
+    nota_id = db.Column(
+        db.Integer, db.ForeignKey('nota_nfse.id'), nullable=True, index=True)
+
+    def __repr__(self):
+        return f'<NotaEmitidaNfse {self.chave} {self.competencia} {self.valor}>'
+
+
+class ServicoNfse(db.Model):
+    """Memoria do que um termo do extrato significa como servico.
+
+    Mesmo desenho da `ApelidoNfse`, para o outro eixo do problema: la o sistema
+    aprende que nome do banco e qual cliente, aqui aprende que abreviacao e qual
+    servico ('ALT. CONTRATO' -> 'ALTERAÇÃO CONTRATUAL'). Sem essa memoria o
+    operador redigitaria a mesma descricao todo mes, e o Pix do banco vem cheio
+    de abreviacao improvisada.
+
+    A chave e o termo normalizado (sem acento, caixa alta) e nao a descricao
+    inteira do Pix: a descricao carrega o nome do cliente e a competencia, que
+    mudam a cada linha — o que se repete e o pedaco que nomeia o servico."""
+    __tablename__ = 'servico_nfse'
+
+    id = db.Column(db.Integer, primary_key=True)
+    termo_norm = db.Column(db.String(140), unique=True, nullable=False)
+    descricao = db.Column(db.String(300), nullable=False)
+    criado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+    def __repr__(self):
+        return f'<ServicoNfse {self.termo_norm} -> {self.descricao}>'
+
+
 _COLUNA_POR_TIPO = {
     'Federal': 'a_vencer_dias_federal',
     'FGTS': 'a_vencer_dias_fgts',

@@ -90,3 +90,76 @@ def mtime_para_datetime_local(caminho):
         return datetime.fromtimestamp(os.path.getmtime(caminho))
     except OSError:
         return None
+
+
+# --- documentos do tomador (CPF/CNPJ) --------------------------------------
+# Vive aqui, e nao nas rotas da NFSe, porque a resolucao do import, a rota de
+# vinculo manual e a automacao precisam da MESMA regra. Duas implementacoes
+# divergindo emitiriam nota fiscal no documento errado.
+
+TIPO_CPF = 'cpf'
+TIPO_CNPJ = 'cnpj'
+
+
+def so_digitos(valor):
+    return ''.join(c for c in str(valor or '') if c.isdigit())
+
+
+def detectar_tipo_documento(valor):
+    """'cpf' (11 digitos), 'cnpj' (14) ou None. Detecta pelo tamanho."""
+    n = so_digitos(valor)
+    if len(n) == 11:
+        return TIPO_CPF
+    if len(n) == 14:
+        return TIPO_CNPJ
+    return None
+
+
+def _digitos_verificadores_ok(numeros, tamanhos, pesos_iniciais):
+    for tamanho, peso_inicial in zip(tamanhos, pesos_iniciais):
+        soma = sum(int(d) * (peso_inicial - i) for i, d in enumerate(numeros[:tamanho]))
+        resto = (soma * 10) % 11 % 10
+        if int(numeros[tamanho]) != resto:
+            return False
+    return True
+
+
+def cpf_valido(valor):
+    n = so_digitos(valor)
+    if len(n) != 11 or n == n[0] * 11:
+        return False
+    return _digitos_verificadores_ok(n, (9, 10), (10, 11))
+
+
+def cnpj_valido(valor):
+    n = so_digitos(valor)
+    if len(n) != 14 or n == n[0] * 14:
+        return False
+    for tamanho in (12, 13):
+        pesos = list(range(tamanho - 7, 1, -1)) + list(range(9, 1, -1))
+        soma = sum(int(d) * p for d, p in zip(n[:tamanho], pesos))
+        resto = soma % 11
+        digito = 0 if resto < 2 else 11 - resto
+        if int(n[tamanho]) != digito:
+            return False
+    return True
+
+
+def documento_valido(valor):
+    tipo = detectar_tipo_documento(valor)
+    if tipo == TIPO_CPF:
+        return cpf_valido(valor)
+    if tipo == TIPO_CNPJ:
+        return cnpj_valido(valor)
+    return False
+
+
+def formatar_documento(valor):
+    """Mascara conforme o tipo. Devolve o valor cru se nao for CPF nem CNPJ."""
+    n = so_digitos(valor)
+    tipo = detectar_tipo_documento(n)
+    if tipo == TIPO_CPF:
+        return f'{n[:3]}.{n[3:6]}.{n[6:9]}-{n[9:]}'
+    if tipo == TIPO_CNPJ:
+        return f'{n[:2]}.{n[2:5]}.{n[5:8]}/{n[8:12]}-{n[12:]}'
+    return str(valor or '').strip()

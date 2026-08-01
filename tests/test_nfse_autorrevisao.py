@@ -1,0 +1,165 @@
+"""Auto-revisao antes de emitir sozinho (NFSE-24, P3).
+
+Este e o unico ponto do sistema em que a automacao produz um documento fiscal
+sem olho humano na frente. Os testes aqui existem para provar o lado NEGATIVO:
+que ela se recusa a emitir quando a tela nao bate com a nota — inclusive quando
+nao consegue ler a tela.
+
+A tela de revisao e dublada como um mapa de (secao, rotulo) -> texto, no formato
+que a pagina real usa (`R$ 826,09`, CNPJ formatado). O XPath de verdade e
+exercitado em test_nfse_automation.py.
+"""
+from decimal import Decimal
+from unittest.mock import MagicMock
+
+from app.automation import nfse
+
+DOCUMENTO = '33.684.001/0001-51'
+VALOR = Decimal('826.09')
+DESCRICAO = 'HONORÁRIOS PROFISSIONAIS REFERENTES AO MÊS DE 06/2026'
+
+
+def _driver_revisao(documento=DOCUMENTO, valor='R$ 826,09', descricoes=None):
+    """Driver falso da tela de revisao.
+
+    `descricoes` sao os <dd> da secao "Serviço Prestado" — plural porque a
+    secao real tem varios, e a conferencia procura o texto esperado entre eles.
+    """
+    if descricoes is None:
+        descricoes = ['17.19.01 - Contabilidade', 'IMBÉ/RS', DESCRICAO]
+
+    def _find_element(_by, xpath):
+        if nfse.SECAO_TOMADOR in xpath:
+            if documento is None:
+                raise nfse.WebDriverException('sem tomador')
+            return _elemento(documento)
+        if nfse.SECAO_VALORES in xpath:
+            if valor is None:
+                raise nfse.WebDriverException('sem valor')
+            return _elemento(valor)
+        raise nfse.WebDriverException('nao achou')
+
+    def _find_elements(_by, xpath):
+        if nfse.SECAO_SERVICO in xpath and xpath.endswith('//dd'):
+            return [_elemento(t) for t in descricoes]
+        try:
+            return [_find_element(_by, xpath)]
+        except nfse.WebDriverException:
+            return []
+
+    driver = MagicMock()
+    driver.find_element.side_effect = _find_element
+    driver.find_elements.side_effect = _find_elements
+    return driver
+
+
+def _elemento(texto):
+    el = MagicMock()
+    el.text = texto
+    el.is_displayed.return_value = True
+    return el
+
+
+def _conferir(driver, documento=DOCUMENTO, valor=VALOR, descricao=DESCRICAO):
+    return nfse.conferir_revisao(driver, documento, valor, descricao)
+
+
+# --- o caminho que autoriza emitir ------------------------------------------
+
+def test_tudo_conferindo_nao_acusa_divergencia():
+    assert _conferir(_driver_revisao()) == []
+
+
+def test_documento_e_comparado_por_digitos():
+    """A tela mostra formatado e a nota guarda formatado, mas um dos dois pode
+    mudar de formato sem que nada esteja errado."""
+    assert _conferir(_driver_revisao(documento='33684001000151')) == []
+
+
+def test_valor_com_milhar_e_lido_corretamente():
+    divergencias = _conferir(_driver_revisao(valor='R$ 3.238,87'),
+                             valor=Decimal('3238.87'))
+    assert divergencias == []
+
+
+def test_descricao_com_acento_ou_caixa_diferente_ainda_confere():
+    driver = _driver_revisao(
+        descricoes=['honorarios profissionais referentes ao mes de 06/2026'])
+    assert _conferir(driver) == []
+
+
+# --- o que precisa BARRAR a emissao -----------------------------------------
+
+def test_valor_adulterado_impede_a_emissao():
+    """O teste independente que a spec exige (NFSE-24): adulterar o valor
+    esperado e confirmar que a automacao se recusa."""
+    divergencias = _conferir(_driver_revisao(), valor=Decimal('999.00'))
+    assert divergencias
+    assert '826,09' in divergencias[0]
+    assert '999,00' in divergencias[0]
+
+
+def test_tomador_diferente_impede_a_emissao():
+    """O erro mais caro possivel: nota no CNPJ de outro cliente."""
+    divergencias = _conferir(_driver_revisao(documento='11.111.111/0001-11'))
+    assert divergencias
+    assert '11.111.111/0001-11' in divergencias[0]
+
+
+def test_competencia_errada_na_descricao_impede_a_emissao():
+    """Descricao do mes passado sai como nota do mes errado."""
+    driver = _driver_revisao(
+        descricoes=['HONORÁRIOS PROFISSIONAIS REFERENTES AO MÊS DE 05/2026'])
+    divergencias = _conferir(driver)
+    assert divergencias
+    assert 'competencia' in divergencias[0].lower()
+
+
+def test_tomador_ilegivel_conta_como_divergencia():
+    """Nao conseguir conferir NAO e o mesmo que conferir e estar certo: se o
+    portal mudar o layout, a alternativa seria emitir as cegas."""
+    divergencias = _conferir(_driver_revisao(documento=None))
+    assert divergencias
+    assert 'ler' in divergencias[0].lower()
+
+
+def test_valor_ilegivel_conta_como_divergencia():
+    divergencias = _conferir(_driver_revisao(valor=None))
+    assert any('ler' in d.lower() for d in divergencias)
+
+
+def test_valor_nao_numerico_conta_como_divergencia():
+    divergencias = _conferir(_driver_revisao(valor='R$ ---'))
+    assert any('ler' in d.lower() for d in divergencias)
+
+
+def test_secao_de_servico_vazia_impede_a_emissao():
+    assert _conferir(_driver_revisao(descricoes=[]))
+
+
+def test_varias_divergencias_sao_todas_relatadas():
+    """O operador precisa ver tudo que nao bate, nao so a primeira coisa."""
+    driver = _driver_revisao(documento='11.111.111/0001-11', valor='R$ 1,00',
+                             descricoes=['outra coisa'])
+    assert len(_conferir(driver)) == 3
+
+
+# --- o CNPJ do emitente nao pode ser confundido com o do tomador ------------
+
+def test_documento_e_lido_da_secao_do_tomador():
+    """A revisao mostra DOIS "CNPJ:": o do escritorio (emitente) vem primeiro.
+    Ler sem ancorar na secao compararia o CNPJ do escritorio com o do cliente."""
+    driver = _driver_revisao()
+    _conferir(driver)
+
+    # `_localizar` busca pelo plural, para poder escolher entre varios
+    xpaths = [c[0][1] for c in driver.find_elements.call_args_list
+              if nfse.SECAO_TOMADOR in c[0][1]]
+    assert xpaths, 'o documento precisa ser buscado dentro da secao do tomador'
+    assert 'emissao-titulo' in xpaths[0]
+
+
+def test_secoes_sao_ancoradas_por_titulo_exato():
+    """"Serviço Prestado" e substring de "Valores do Serviço Prestado": um
+    `contains` casaria as duas e leria o campo da secao errada."""
+    assert "normalize-space()='{secao}'" in nfse._XP_SECAO

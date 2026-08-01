@@ -77,6 +77,20 @@ class Config:
     RS_CERT_AUTOSELECT_ISSUER_CN = os.environ.get('RS_CERT_AUTOSELECT_ISSUER_CN') or ''
     RS_CERT_AUTOSELECT_SUBJECT_CN = os.environ.get('RS_CERT_AUTOSELECT_SUBJECT_CN') or ''
 
+    # Auto-selecao do certificado no Emissor Nacional (NFSe). Precisa estar
+    # DECLARADO aqui: get_config_value le de current_app.config dentro de um
+    # request e devolve o default quando a chave nao existe — nunca cai para
+    # os.environ. Sem estas linhas a policy nunca e aplicada e o dialogo de
+    # certificado do Chrome aparece.
+    # Indice proprio (o RS usa o 1) e certificado proprio: o RS aponta para um
+    # e-CPF e a NFSe para o e-CNPJ do escritorio (ND-006).
+    NFSE_CERT_AUTOSELECT_ENABLED = _env_bool('NFSE_CERT_AUTOSELECT_ENABLED', False)
+    NFSE_CERT_AUTOSELECT_PATTERN = os.environ.get('NFSE_CERT_AUTOSELECT_PATTERN') or \
+        'https://certificado.nfse.gov.br'
+    NFSE_CERT_AUTOSELECT_POLICY_INDEX = _env_int('NFSE_CERT_AUTOSELECT_POLICY_INDEX', 2)
+    NFSE_CERT_AUTOSELECT_ISSUER_CN = os.environ.get('NFSE_CERT_AUTOSELECT_ISSUER_CN') or ''
+    NFSE_CERT_AUTOSELECT_SUBJECT_CN = os.environ.get('NFSE_CERT_AUTOSELECT_SUBJECT_CN') or ''
+
     RS_ALTCHA_AUTOSOLVE_ENABLED = _env_bool('RS_ALTCHA_AUTOSOLVE_ENABLED', False)
     RS_ALTCHA_MANUAL_FALLBACK = _env_bool('RS_ALTCHA_MANUAL_FALLBACK', True)
 
