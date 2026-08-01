@@ -211,7 +211,7 @@ def _emitir_sozinho(nota, execution_id):
     """
     driver = SESSAO.driver
     config = nfse_config.get_config_nfse()
-    descricao = nfse_config.renderizar_descricao(config, nota.competencia)
+    descricao = nfse_config.descricao_da_nota(config, nota)
 
     divergencias = automacao.conferir_revisao(
         driver, nota.documento, nota.valor_final, descricao)
@@ -298,9 +298,10 @@ def _esperar_e_registrar(nota_id, opcoes, execution_id):
 # --- montagem da fila ------------------------------------------------------
 
 def _emitivel(nota):
-    if nota.status == StatusNotaNfse.DUPLICATA:
-        return bool(nota.duplicata_liberada)
-    return nota.status in nfse_service.STATUS_EMITIVEIS
+    # Regra unica, no `nfse_service`: a fila do lote e a emissao individual
+    # precisam concordar sobre o que entra, senao o lote enfileira nota que o
+    # preenchimento recusa e o operador ve a fila travar sem explicacao.
+    return nfse_service.emitivel(nota)
 
 
 def calcular_alvos(nota_id=None, lote_id=None, competencia=None):

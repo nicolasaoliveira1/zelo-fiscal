@@ -23,6 +23,7 @@ CAMPOS_OBRIGATORIOS = {
     'descricao_template': 'Descrição do serviço',
     'piscofins_situacao': 'Situação tributária do PIS/COFINS',
     'piscofins_tipo_retencao': 'Tipo de retenção do PIS/COFINS/CSLL',
+    'categoria_extrato': 'Categoria dos recebimentos no extrato',
 }
 
 
@@ -83,7 +84,24 @@ def salvar(valores):
 
 
 def renderizar_descricao(config, competencia):
-    """Descricao final da nota, com a competencia daquela nota (MM/AAAA)."""
+    """Descricao de HONORARIOS, com a competencia daquela nota (MM/AAAA)."""
     if not competencia:
         raise ValueError('competencia obrigatoria para renderizar a descricao')
     return config.descricao_template.replace(PLACEHOLDER_COMPETENCIA, competencia)
+
+
+def descricao_da_nota(config, nota):
+    """Descricao que vai para o portal — as duas origens, num lugar so.
+
+    Nota de servico avulso ('ALTERAÇÃO CONTRATUAL', 'BAIXA DE EMPRESA') traz o
+    texto pronto em `descricao_servico` e NAO recebe competencia: a competencia
+    gravada nela existe para agrupar e filtrar a lista, nao para descrever o
+    servico — dizer "alteração contratual referente ao mês de 07/2026" seria
+    falso, a alteracao nao e mensal.
+
+    Honorarios (`descricao_servico` nulo, o caso comum e o unico que existia
+    antes do extrato do Inter) segue vindo do template com a competencia.
+    """
+    if nota.descricao_servico:
+        return nota.descricao_servico
+    return renderizar_descricao(config, nota.competencia)

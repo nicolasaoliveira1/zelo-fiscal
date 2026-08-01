@@ -1,7 +1,20 @@
-"""Import do CSV de cobrancas do banco -> notas de NFSe (NFSE-01..07).
+"""Import do extrato do banco -> notas de NFSe (NFSE-01..07, NFSE-25..27).
 
 Zero Selenium: e a camada conferivel, que roda antes de abrir qualquer
-navegador. O CSV do banco vem sem cabecalho, com delimitador ';', todos os
+navegador.
+
+DOIS formatos entram pela mesma porta (`importar()`), escolhidos pelo conteudo
+do arquivo e nao pela extensao:
+
+- **CSV de cobrancas (Banrisul)**, descrito abaixo — o formato original;
+- **PDF do extrato (Banco Inter)**, lido pelo `nfse_extrato_inter`, onde os
+  honorarios chegam por Pix.
+
+Os dois viram `LinhaExtrato` e dali para baixo o codigo e o mesmo. A unica
+diferenca que atravessa a fronteira e a COMPETENCIA: no CSV ela e derivada (mes
+anterior ao vencimento do titulo), no Inter ela vem escrita na descricao do Pix.
+
+O CSV do banco vem sem cabecalho, com delimitador ';', todos os
 campos entre aspas duplas, datas dd/mm/aaaa e valores no padrao brasileiro
 ('1.784,00'). Dez colunas, nesta ordem:
 
@@ -22,8 +35,14 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from app.file_manager import remover_acentos
+from app.services import nfse_extrato_inter as inter
 from app.utils import TIPO_CPF, detectar_tipo_documento
 from app.models import OrigemVinculoNfse
+
+# De qual arquivo a linha veio. Fica gravado na nota: quando uma nota sai
+# errada, a primeira pergunta e "de que extrato isso veio".
+ORIGEM_CSV = 'csv'
+ORIGEM_INTER = 'inter'
 
 DELIMITADOR = ';'
 COLUNAS_ESPERADAS = 10
@@ -57,8 +76,14 @@ class ArquivoInvalidoError(ValueError):
 
 
 @dataclass
-class LinhaCsv:
+class LinhaExtrato:
     """Uma linha crua do extrato, ja convertida para os tipos do dominio.
+
+    Forma NORMALIZADA: os dois formatos de arquivo (CSV de cobrancas do
+    Banrisul e PDF do Banco Inter) desembocam aqui, e do `_montar_nota()` para
+    baixo nada mais sabe de qual banco a linha veio. Por isso ha campos que so
+    um dos dois preenche — `vencimento` e as parcelas F/G/H sao do CSV;
+    `competencia`, `descricao_*` e `saida` sao do Inter.
 
     `invalida` marca a linha que nao da para emitir (valor final ou vencimento
     ilegivel) sem abortar o resto do arquivo — edge case da spec."""
@@ -76,6 +101,24 @@ class LinhaCsv:
     # identidade da linha crua, usada para deduplicar quando varios arquivos
     # do banco se sobrepoem (o operador baixa periodos que se cruzam)
     assinatura: str | None = None
+
+    # --- so do extrato do Inter ------------------------------------------
+    origem: str = ORIGEM_CSV
+    # competencia LITERAL, lida da descricao do Pix. Quando None, o
+    # `_montar_nota` cai na regra do CSV (mes anterior ao vencimento).
+    competencia: str | None = None
+    descricao_extrato: str | None = None
+    descricao_servico: str | None = None
+    descricao_pendente: bool = False
+    # valor da coluna Saida. Nao vira nota: alimenta a proposta de agrupamento,
+    # que e como o estorno abate as entradas do mesmo tomador.
+    saida: Decimal | None = None
+
+
+# Nome antigo: o CSV foi o unico formato ate o extrato do Inter entrar, e a
+# suite referencia `LinhaCsv`. Alias em vez de rename cego para o diff da
+# feature nao virar churn de teste.
+LinhaCsv = LinhaExtrato
 
 
 def normalizar_nome(valor):
@@ -168,6 +211,74 @@ def parse_csv(conteudo):
     if com_formato == 0:
         raise ArquivoInvalidoError(MSG_FORMATO)
     return linhas
+
+
+def parse_inter(conteudo, categoria, servicos=None):
+    """Le o extrato em PDF do Inter e devolve as linhas que viram nota.
+
+    Duas condicoes para a linha entrar, e as duas importam:
+
+    - **a categoria** (`HONORÁRIOS - CLIENTES`, configuravel) — e o unico sinal
+      que separa recebimento de cliente de qualquer outro credito na conta;
+    - **ter valor na coluna Entrada** — saida nao vira nota. As saidas nao sao
+      jogadas fora: voltam junto, marcadas, porque o estorno de um cliente
+      precisa ser proposto como abatimento das entradas dele.
+
+    Devolve `(linhas, saidas)`.
+    """
+    lancamentos = inter.ler_pdf(conteudo)
+    alvo = inter.normalizar_termo(categoria)
+
+    linhas = []
+    saidas = []
+    for lancamento in lancamentos:
+        if lancamento.saida is not None:
+            saidas.append(lancamento)
+            continue
+        if lancamento.entrada is None:
+            continue
+        if inter.normalizar_termo(lancamento.nome) != alvo:
+            continue
+        linhas.append(_linha_do_inter(lancamento, servicos))
+
+    return linhas, saidas
+
+
+def _linha_do_inter(lancamento, servicos):
+    lido = inter.interpretar_descricao(lancamento.descricao, servicos)
+    return LinhaExtrato(
+        numero=lancamento.numero,
+        origem=ORIGEM_INTER,
+        assinatura=_assinatura_inter(lancamento),
+        nome=lido.nome,
+        nome_norm=normalizar_nome(lido.nome),
+        data_pagamento=lancamento.data,
+        # Sem vencimento no extrato do Inter: la a data e do PAGAMENTO, e e por
+        # isso que a competencia nao pode ser derivada dela. Ficar None aqui NAO
+        # invalida a linha (ao contrario do CSV, onde o vencimento e a origem da
+        # competencia e sem ele nao ha o que emitir).
+        vencimento=None,
+        valor_final=lancamento.entrada,
+        competencia=lido.competencia,
+        descricao_extrato=lancamento.descricao or None,
+        descricao_servico=lido.servico,
+        descricao_pendente=lido.pendente,
+    )
+
+
+def _assinatura_inter(lancamento):
+    """Identidade da linha do extrato do Inter, para deduplicar entre arquivos.
+
+    Mesma ideia do `_assinatura` do CSV — a linha INTEIRA, nunca um campo
+    isolado —, mas montada sobre os campos crus do lancamento em vez da
+    descricao ja interpretada: a interpretacao muda quando o operador ensina um
+    servico novo, e a identidade da linha do banco nao pode mudar junto."""
+    return '|'.join((
+        lancamento.data.isoformat() if lancamento.data else '',
+        (lancamento.nome or '').strip(),
+        (lancamento.descricao or '').strip(),
+        str(lancamento.entrada if lancamento.entrada is not None else ''),
+    ))
 
 
 def _assinatura(campos):
@@ -332,52 +443,82 @@ def _divergiu(linha):
     return abs(esperado - linha.valor_final) > TOLERANCIA_VALOR
 
 
-# Status que ja "ocupam" um par (documento, competencia) e por isso bloqueiam
-# uma segunda nota igual. `aguardando_confirmacao` entra junto com `emitida`:
-# ela e uma DPS que ja existe no portal esperando o operador clicar. Sem ela na
-# lista, reimportar o extrato devolvia a linha como Pronta e o operador
-# preencheria de novo, abrindo uma SEGUNDA DPS para o mesmo tomador.
-STATUS_QUE_OCUPAM_COMPETENCIA = ('emitida', 'aguardando_confirmacao')
+# Status que ja "ocupam" uma competencia e por isso bloqueiam uma segunda nota
+# igual. `aguardando_confirmacao` entra junto com `emitida`: ela e uma DPS que
+# ja existe no portal esperando o operador clicar. Sem ela na lista, reimportar
+# o extrato devolvia a linha como Pronta e o operador preencheria de novo,
+# abrindo uma SEGUNDA DPS para o mesmo tomador.
+#
+# `cancelada` entra pelo motivo oposto, e nao por ser nota: e uma DECISAO do
+# operador de que aquilo nao vira nota. Fora da lista, reimportar o extrato
+# ressuscitaria a linha como Pronta e ela seria emitida — a decisao dele se
+# perderia calada. Dentro, a linha volta como duplicata, que e liberavel: ele ve
+# que ja decidiu e escolhe de novo.
+STATUS_QUE_OCUPAM_COMPETENCIA = ('emitida', 'aguardando_confirmacao', 'cancelada')
+
+
+def chave_duplicidade(documento, competencia, descricao_servico=None):
+    """Identidade de uma nota para efeito de duplicidade (ND-004).
+
+    O DOCUMENTO, e nao o `empresa_id`: parte dos tomadores e pessoa fisica ou
+    empresa nao cadastrada, e nesses casos `empresa_id` e nulo — com a chave por
+    empresa a duplicata nunca seria detectada justamente para eles.
+
+    O SERVICO entra na chave porque a competencia sozinha deixou de identificar
+    a nota quando o extrato do Inter passou a trazer servicos avulsos: uma
+    alteracao contratual e uma baixa da mesma empresa caem no mesmo mes e sao
+    duas notas legitimas. Sem o servico na chave, a segunda viraria duplicata da
+    primeira e o operador teria de liberar uma duplicata que nao existe.
+    Honorarios tem `descricao_servico` nulo e a chave volta a ser a de sempre.
+    """
+    return (documento, competencia, descricao_servico or None)
 
 
 def _competencias_ja_emitidas():
-    """(documento, competencia) -> id das notas que ja ocupam a competencia.
-
-    Base da trava (ND-004). A chave e o DOCUMENTO, nao o `empresa_id`: parte
-    dos tomadores e pessoa fisica ou empresa nao cadastrada, e nesses casos
-    `empresa_id` e nulo — com a chave antiga a duplicata nunca seria detectada
-    justamente para eles.
-    """
+    """chave de duplicidade -> id da nota que ja a ocupa."""
     from app.models import NotaNfse
     consulta = (NotaNfse.query
                 .filter(NotaNfse.status.in_(STATUS_QUE_OCUPAM_COMPETENCIA))
                 .with_entities(NotaNfse.id, NotaNfse.documento,
-                               NotaNfse.competencia))
+                               NotaNfse.competencia, NotaNfse.descricao_servico))
     # Devolve o id junto para a duplicata poder apontar para a nota que ja foi
     # emitida — sem ele o operador ve "duplicata" sem saber de qual.
-    return {(documento, competencia): nota_id
-            for nota_id, documento, competencia in consulta if documento}
+    return {chave_duplicidade(documento, competencia, servico): nota_id
+            for nota_id, documento, competencia, servico in consulta if documento}
 
 
-def _ler_arquivos(arquivos):
+def _ler_arquivos(arquivos, categoria=None, servicos=None):
     """Le e concatena varios extratos numa lista unica de linhas.
 
-    `arquivos` e uma sequencia de (nome, conteudo). Linhas identicas entre
-    arquivos sao descartadas uma unica vez — o operador costuma baixar periodos
-    que se sobrepoem, e a mesma cobranca aparece nos dois.
+    `arquivos` e uma sequencia de (nome, conteudo), e cada um pode ser o CSV de
+    cobrancas OU o PDF do Inter — o formato sai do CONTEUDO (`inter.e_pdf`), nao
+    da extensao, e uma selecao pode misturar os dois.
 
-    Se QUALQUER arquivo nao for o extrato do banco, a importacao inteira e
+    Linhas identicas entre arquivos sao descartadas uma unica vez — o operador
+    costuma baixar periodos que se sobrepoem, e a mesma cobranca aparece nos
+    dois.
+
+    Se QUALQUER arquivo nao for um extrato reconhecido, a importacao inteira e
     recusada citando o nome dele: aceitar os demais deixaria o operador achando
     que importou tudo.
+
+    Devolve `(linhas, ignoradas, saidas)`. As `saidas` sao os debitos do extrato
+    do Inter; nao viram nota, mas alimentam a proposta de agrupamento.
     """
     linhas = []
+    saidas = []
     vistas = set()
     ignoradas = 0
 
     for nome, conteudo in arquivos:
         try:
-            do_arquivo = parse_csv(conteudo)
-        except ArquivoInvalidoError as exc:
+            if inter.e_pdf(conteudo):
+                do_arquivo, do_arquivo_saidas = parse_inter(
+                    conteudo, categoria, servicos)
+                saidas.extend(do_arquivo_saidas)
+            else:
+                do_arquivo = parse_csv(conteudo)
+        except (ArquivoInvalidoError, inter.ExtratoInterInvalidoError) as exc:
             rotulo = f' "{nome}"' if nome else ''
             raise ArquivoInvalidoError(f'Arquivo{rotulo}: {exc}') from exc
 
@@ -389,7 +530,7 @@ def _ler_arquivos(arquivos):
                 vistas.add(linha.assinatura)
             linhas.append(linha)
 
-    return linhas, ignoradas
+    return linhas, ignoradas, saidas
 
 
 def importar(conteudo, nome_arquivo=None, execution_id=None):
@@ -400,15 +541,24 @@ def importar(conteudo, nome_arquivo=None, execution_id=None):
     (NFSE-07). Devolve o `LoteNfse` criado, com `ignoradas_duplicadas` anotado.
     """
     from app import db
-    from app.models import ApelidoNfse, Empresa, LoteNfse, NotaNfse, StatusNotaNfse
+    from app.models import (
+        ApelidoNfse, Empresa, LoteNfse, NotaNfse, ServicoNfse, StatusNotaNfse)
+    # Import tardio: o `nfse_grupos` chama de volta o `recalcular_status` daqui,
+    # e no topo do modulo os dois se importariam em circulo.
+    from app.services import nfse_config, nfse_grupos
 
     if isinstance(conteudo, (bytes, bytearray, str)):
         arquivos = [(nome_arquivo, conteudo)]
     else:
         arquivos = list(conteudo)
 
+    # Uma consulta por importacao, nao uma por linha — mesmo contrato de
+    # `empresas`/`apelidos` no `resolver_empresa`.
+    servicos = ServicoNfse.query.all()
+    categoria = nfse_config.get_config_nfse().categoria_extrato
+
     # parse primeiro: se algum arquivo nao presta, nada e persistido
-    linhas, ignoradas = _ler_arquivos(arquivos)
+    linhas, ignoradas, saidas = _ler_arquivos(arquivos, categoria, servicos)
 
     empresas = Empresa.query.all()
     apelidos = ApelidoNfse.query.all()
@@ -421,11 +571,14 @@ def importar(conteudo, nome_arquivo=None, execution_id=None):
     db.session.add(lote)
 
     try:
+        notas = []
         for linha in linhas:
             nota = _montar_nota(linha, empresas, apelidos, NotaNfse, StatusNotaNfse)
             nota.lote = lote
+            notas.append(nota)
 
-            chave = (nota.documento, nota.competencia)
+            chave = chave_duplicidade(nota.documento, nota.competencia,
+                                      nota.descricao_servico)
             if nota.documento and nota.status in (StatusNotaNfse.PRONTA,
                                                   StatusNotaNfse.PESSOA_FISICA,
                                                   StatusNotaNfse.CADASTRO_PENDENTE):
@@ -442,6 +595,10 @@ def importar(conteudo, nome_arquivo=None, execution_id=None):
                     vistas_no_lote[chave] = nota
             db.session.add(nota)
 
+        # Depois de montadas todas: a proposta olha as notas do lote inteiro
+        # contra as saidas do periodo, e nao uma linha isolada.
+        nfse_grupos.propor(notas, saidas)
+
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -449,6 +606,27 @@ def importar(conteudo, nome_arquivo=None, execution_id=None):
 
     lote.ignoradas_duplicadas = ignoradas
     return lote
+
+
+def _competencia_da_linha(linha):
+    """Competencia da nota — as duas regras, lado a lado.
+
+    No CSV a data disponivel e o VENCIMENTO do titulo, e a competencia e o mes
+    anterior a ele. No Inter a competencia vem escrita na descricao do Pix e e
+    ela que vale; quando o Pix nao a traz (servico avulso, ou descricao que o
+    sistema nao entendeu), grava-se o mes do PAGAMENTO — que serve para agrupar
+    e filtrar a lista, mas NAO entra no texto da nota.
+
+    Confundir as duas erra o mes em toda nota: o vencimento e do mes seguinte ao
+    servico, a data do Pix e do mesmo mes em que ele foi feito.
+    """
+    if linha.origem == ORIGEM_INTER:
+        if linha.competencia:
+            return linha.competencia
+        if linha.data_pagamento:
+            return f'{linha.data_pagamento.month:02d}/{linha.data_pagamento.year}'
+        return None
+    return competencia_da_descricao(linha.vencimento)
 
 
 def _montar_nota(linha, empresas, apelidos, NotaNfse, StatusNotaNfse):
@@ -461,7 +639,15 @@ def _montar_nota(linha, empresas, apelidos, NotaNfse, StatusNotaNfse):
         acrescimos=linha.acrescimos,
         deducoes=linha.deducoes,
         valor_final=linha.valor_final,
+        # o mesmo numero, em duas colunas com papeis diferentes: `valor_final` e
+        # o valor A EMITIR (um agrupamento pode reescreve-lo), `valor_extrato` e
+        # o que o banco imprimiu e nao muda nunca
+        valor_extrato=linha.valor_final,
         divergencia_valor=_divergiu(linha),
+        origem_extrato=linha.origem,
+        descricao_extrato=linha.descricao_extrato,
+        descricao_servico=linha.descricao_servico,
+        descricao_pendente=linha.descricao_pendente,
     )
 
     if linha.invalida:
@@ -469,30 +655,59 @@ def _montar_nota(linha, empresas, apelidos, NotaNfse, StatusNotaNfse):
         nota.erro = linha.motivo
         return nota
 
-    nota.competencia = competencia_da_descricao(linha.vencimento)
+    nota.competencia = _competencia_da_linha(linha)
 
     vinculo = resolver_empresa(linha.nome, empresas, apelidos)
-    if not vinculo.resolvido:
-        nota.status = StatusNotaNfse.EMPRESA_PENDENTE
-        return nota
+    if vinculo.resolvido:
+        nota.origem_vinculo = vinculo.origem
+        nota.score_match = vinculo.score
+        if vinculo.empresa is not None:
+            nota.empresa_id = vinculo.empresa.id
+            nota.documento = vinculo.empresa.cnpj
+            nota.tipo_documento = detectar_tipo_documento(vinculo.empresa.cnpj)
+        else:
+            # documento avulso lembrado de um mes anterior
+            nota.documento = vinculo.documento
+            nota.tipo_documento = (vinculo.tipo_documento
+                                   or detectar_tipo_documento(vinculo.documento))
 
-    nota.origem_vinculo = vinculo.origem
-    nota.score_match = vinculo.score
-
-    if vinculo.empresa is not None:
-        nota.empresa_id = vinculo.empresa.id
-        nota.documento = vinculo.empresa.cnpj
-        nota.tipo_documento = detectar_tipo_documento(vinculo.empresa.cnpj)
-        nota.status = StatusNotaNfse.PRONTA
-        return nota
-
-    # documento avulso lembrado de um mes anterior
-    nota.documento = vinculo.documento
-    nota.tipo_documento = vinculo.tipo_documento or detectar_tipo_documento(vinculo.documento)
-    nota.status = (StatusNotaNfse.PESSOA_FISICA
-                   if nota.tipo_documento == TIPO_CPF
-                   else StatusNotaNfse.CADASTRO_PENDENTE)
+    nota.status = recalcular_status(nota)
     return nota
+
+
+def recalcular_status(nota):
+    """Status que a nota tem, dadas as pendencias que restam.
+
+    Nucleo compartilhado: usado no import, ao resolver a empresa, ao resolver a
+    descricao, ao desmarcar "emitida na mao" e ao descancelar. Antes cada um
+    desses pontos remontava a cadeia por conta propria, e bastava um esquecer a
+    pendencia nova para a nota entrar na fila sem descricao.
+
+    A ordem e a das consequencias, nao a do fluxo: **documento primeiro**.
+    Emitir com o CNPJ de outro cliente exige cancelamento da nota junto a
+    prefeitura; descricao errada tambem, mas o documento e o que identifica o
+    tomador e e o erro mais caro de desfazer.
+
+    E uma funcao PURA sobre as pendencias: ela responde "que status esta nota
+    teria, olhando so o que falta nela" e ignora o status atual — de proposito,
+    porque quem desmarca uma nota emitida precisa justamente sair do estado
+    atual. Cabe a quem chama nao a aplicar sobre estado que deve ser preservado
+    (duplicata, emitida, cancelada, agrupada).
+    """
+    from app.models import StatusNotaNfse
+
+    if not nota.documento:
+        return StatusNotaNfse.EMPRESA_PENDENTE
+    if nota.descricao_pendente:
+        return StatusNotaNfse.DESCRICAO_PENDENTE
+    # `empresa_id` antes do CPF, como no `_status_apos_desmarcar` original: ha
+    # Empresa cadastrada cujo "cnpj" e um CPF (firma individual), e para essa a
+    # nota e PRONTA — ela tem cadastro. PESSOA_FISICA e o tomador SEM cadastro.
+    if nota.empresa_id:
+        return StatusNotaNfse.PRONTA
+    if nota.tipo_documento == TIPO_CPF:
+        return StatusNotaNfse.PESSOA_FISICA
+    return StatusNotaNfse.CADASTRO_PENDENTE
 
 
 def reconciliar_com_cadastro(notas=None):

@@ -41,7 +41,19 @@ MOTIVO_POR_STATUS = {
         'Esta nota ja foi emitida.',
     StatusNotaNfse.AGUARDANDO_CONFIRMACAO:
         'Esta nota ja esta preenchida no portal, aguardando sua confirmacao.',
+    StatusNotaNfse.DESCRICAO_PENDENTE:
+        'A descricao do Pix nao disse a competencia nem o servico, entao nao ha '
+        'texto para a nota. Informe a descricao antes de emitir.',
+    StatusNotaNfse.CANCELADA:
+        'Esta linha foi cancelada. Desfaca o cancelamento se quiser emiti-la.',
+    StatusNotaNfse.AGRUPADA:
+        'Esta linha foi agrupada em outra nota, que e a que deve ser emitida.',
 }
+
+MSG_GRUPO_PENDENTE = (
+    'Ha uma proposta de agrupamento em aberto para esta linha (varios '
+    'lancamentos do mesmo tomador, ou um estorno). Confirme ou descarte a '
+    'proposta antes de emitir — o valor da nota depende dela.')
 
 
 class NotaNaoEmitivelError(RuntimeError):
@@ -74,11 +86,33 @@ def checar_aliquota(ignorar=False):
         raise AliquotaNaoConfirmadaError(MSG_ALIQUOTA_NAO_CONFERIDA)
 
 
+def emitivel(nota):
+    """A nota esta em estado de ser preenchida?
+
+    Fonte unica da regra, consultada pela emissao individual (`_pode_emitir`) e
+    pela montagem da fila do lote (`nfse_lote._emitivel`). Antes as duas
+    listavam os status por conta propria, e uma condicao nova precisava ser
+    lembrada nos dois lugares.
+
+    A proposta de agrupamento em aberto barra ANTES do status: a linha pode
+    estar perfeitamente Pronta e ainda assim ter o valor errado, porque o
+    estorno que a abate ainda nao foi respondido."""
+    from app.services import nfse_grupos
+
+    if nfse_grupos.tem_proposta_pendente(nota):
+        return False
+    if nota.status == StatusNotaNfse.DUPLICATA:
+        return bool(nota.duplicata_liberada)
+    return nota.status in STATUS_EMITIVEIS
+
+
 def _pode_emitir(nota):
-    if nota.status == StatusNotaNfse.DUPLICATA and nota.duplicata_liberada:
+    from app.services import nfse_grupos
+
+    if emitivel(nota):
         return
-    if nota.status in STATUS_EMITIVEIS:
-        return
+    if nfse_grupos.tem_proposta_pendente(nota):
+        raise NotaNaoEmitivelError(MSG_GRUPO_PENDENTE)
     raise NotaNaoEmitivelError(
         MOTIVO_POR_STATUS.get(nota.status, 'Esta linha nao pode ser emitida.'))
 
@@ -114,7 +148,7 @@ def preencher_nota(nota_id, hoje=None, execution_id=None, ignorar_aliquota=False
     checar_aliquota(ignorar_aliquota)
 
     config = nfse_config.get_config_nfse()
-    descricao = nfse_config.renderizar_descricao(config, nota.competencia)
+    descricao = nfse_config.descricao_da_nota(config, nota)
     hoje = hoje or date.today()
 
     nota.status = StatusNotaNfse.PREENCHENDO
