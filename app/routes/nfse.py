@@ -4,7 +4,9 @@ Registra no blueprint "main" compartilhado (AD-013). Rotas finas: toda a
 logica vive em `app/services/nfse_*`; aqui so entra validacao de entrada,
 autorizacao e montagem da resposta.
 """
+import re
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from flask import render_template, request
 
@@ -16,6 +18,7 @@ from app.models import (
     LoteNfse,
     NotaNfse,
     OrigemVinculoNfse,
+    ServicoNfse,
     StatusNotaNfse,
 )
 from app.automation.batch_state import (
@@ -24,13 +27,17 @@ from app.automation.batch_state import (
     definir_nfse_batch_opcoes,
 )
 from app.routes import _current_app_object, bp
+from app.automation import nfse_emitidas as automacao_emitidas
 from app.services import (
     batch_engine,
     nfse_config,
+    nfse_emitidas,
+    nfse_grupos,
     nfse_import,
     nfse_lote,
     nfse_service,
 )
+from app.services.nfse_extrato_inter import chave_descricao, normalizar_termo
 from app.services.execution_logger import log_event
 from app.services.nfse_session import SESSAO
 from app.utils import (
@@ -42,10 +49,45 @@ from app.utils import (
     json_error,
 )
 
-TAMANHO_MAXIMO_CSV = 5 * 1024 * 1024  # 5 MB: o extrato mensal tem ~7 KB
+# 5 MB cobre com folga os dois formatos: o CSV mensal tem ~7 KB e o PDF do
+# Inter ~160 KB. O limite existe para recusar cedo o arquivo que obviamente nao
+# e um extrato mensal, nao para apertar o caso normal.
+TAMANHO_MAXIMO_CSV = 5 * 1024 * 1024
 
 ORIGEM_AUTOMACAO = 'automacao'
 ORIGEM_MANUAL = 'manual'
+
+
+CATEGORIA_HONORARIOS = 'honorarios'
+CATEGORIA_SERVICO = 'servico'
+CATEGORIA_INDEFINIDA = 'indefinida'
+
+
+def _categoria(nota):
+    """Como a linha aparece agrupada na tela: honorarios, servico ou indefinida.
+
+    Sai de `descricao_servico` + `descricao_pendente`, e nao de um campo
+    proprio, porque sao esses dois que decidem o texto da nota — uma terceira
+    fonte poderia divergir do que sera efetivamente emitido."""
+    if nota.descricao_pendente:
+        return CATEGORIA_INDEFINIDA
+    return CATEGORIA_SERVICO if nota.descricao_servico else CATEGORIA_HONORARIOS
+
+
+def _descricao_prevista(nota):
+    """O texto que a nota levara ao portal, para a tela mostrar antes de emitir.
+
+    Vale a pena repetir aqui a decisao do `nfse_config.descricao_da_nota` em vez
+    de chamar direto? Nao: chama-se direto. O que muda e so o desfecho quando
+    ainda nao ha texto — na tela isso e um traco, no portal seria um erro."""
+    if nota.descricao_pendente:
+        return None
+    from app.services import nfse_config
+    try:
+        return nfse_config.descricao_da_nota(nfse_config.get_config_nfse(), nota)
+    except ValueError:
+        # honorarios sem competencia: a nota nao tem o que descrever ainda
+        return None
 
 
 def _nota_para_json(nota):
@@ -67,18 +109,72 @@ def _nota_para_json(nota):
         'duplicata_liberada': nota.duplicata_liberada,
         'erro': nota.erro,
         'origem_emissao': nota.origem_emissao,
+        # extrato do Inter
+        'origem_extrato': nota.origem_extrato,
+        'categoria': _categoria(nota),
+        'descricao_servico': nota.descricao_servico,
+        'descricao_extrato': nota.descricao_extrato,
+        'descricao_prevista': _descricao_prevista(nota),
+        'valor_ajustado': nota.valor_ajustado,
+        'grupo': _grupo_para_json(nota),
+    }
+
+
+def _grupo_para_json(nota):
+    """O agrupamento desta linha, em qualquer um dos dois estados vivos.
+
+    `pendente` = proposta esperando resposta; `confirmado` = ja aplicado e
+    ainda desfazivel. As irmas carregam o token para a tela poder destaca-las
+    junto, mas so a lider carrega a conta — repetida em cada linha, ela
+    pareceria varias propostas."""
+    pendente = nfse_grupos.tem_proposta_pendente(nota)
+    if not pendente and not nfse_grupos.foi_agrupada(nota):
+        return None
+    return {
+        'token': nota.grupo_sugerido,
+        'pendente': pendente,
+        'confirmado': bool(nota.grupo_confirmado),
+        'lider': nota.grupo_valor_liquido is not None,
+        'valor_liquido': (f'{nota.grupo_valor_liquido:.2f}'.replace('.', ',')
+                          if nota.grupo_valor_liquido is not None else None),
+        'detalhe': nota.grupo_detalhe,
+        'descricao': nota.grupo_descricao,
     }
 
 
 def _resumo(notas):
     conta = {}
+    categorias = {}
     for nota in notas:
         conta[nota.status] = conta.get(nota.status, 0) + 1
+        chave = _categoria(nota)
+        categorias[chave] = categorias.get(chave, 0) + 1
     return {
         'total': len(notas),
         'por_status': conta,
+        'por_categoria': categorias,
         'divergencias': sum(1 for n in notas if n.divergencia_valor),
+        # conta PROPOSTAS, nao notas: as tres linhas do grupo do estorno sao uma
+        # decisao so para o operador
+        'grupos_pendentes': len({n.grupo_sugerido for n in notas
+                                 if nfse_grupos.tem_proposta_pendente(n)}),
     }
+
+
+def _valor_json(valor):
+    return f'{valor:.2f}'.replace('.', ',') if valor is not None else None
+
+
+def _valor_extenso(valor):
+    """29869.19 -> '29.869,19'. Com separador de milhar.
+
+    So para os numeros que o operador CONFERE de cabeca — o total do mes, a
+    conta do agrupamento. Na coluna da tabela o formato curto continua, porque
+    la os valores estao alinhados e a comparacao e visual."""
+    if valor is None:
+        return None
+    return (f'{valor:,.2f}'.replace(',', '\x00').replace('.', ',')
+            .replace('\x00', '.'))
 
 
 # --- pagina ----------------------------------------------------------------
@@ -149,6 +245,14 @@ def nfse_painel():
         config=nfse_config.get_config_nfse(),
         empresas=[{'id': e.id, 'nome': e.nome, 'cnpj': e.cnpj}
                   for e in Empresa.query.order_by(Empresa.nome).all()],
+        # Sem filtro de competencia o painel usa o MES CORRENTE — o mesmo que
+        # o JS poe nos campos de data. Painel e campos sempre concordam: o que
+        # esta na tela e o que uma consulta traria.
+        # O total segue o MESMO mes que os campos de data do bloco 5 mostram
+        # (o filtro da pagina, ou o mes corrente). Antes o total abria sempre no
+        # mes corrente enquanto os campos mostravam outro — dois numeros na
+        # mesma tela discordando sobre de que mes estavam falando.
+        emitidas=_painel_emitidas(competencia or _competencia_corrente()),
     )
 
 
@@ -176,7 +280,9 @@ def nfse_importar():
     enviados = [a for a in request.files.getlist('arquivo')
                 if a is not None and (a.filename or '').strip()]
     if not enviados:
-        return json_error('Selecione ao menos um arquivo CSV exportado do banco.', 400)
+        return json_error(
+            'Selecione ao menos um extrato: o CSV de cobrancas do Banrisul ou '
+            'o PDF do extrato do Banco Inter.', 400)
 
     arquivos = []
     total = 0
@@ -296,6 +402,330 @@ def _lembrar(nome_norm, empresa_id=None, documento=None, tipo=None):
     apelido.tipo_documento = tipo
 
 
+# --- resolucao manual da descricao (NFSE-26) -------------------------------
+
+@bp.route('/nfse/nota/<int:nota_id>/descricao', methods=['POST'])
+@requer_papel('operador')
+def nfse_resolver_descricao(nota_id):
+    """Diz o que a nota descreve, quando o Pix nao disse.
+
+    Os dois campos sao INDEPENDENTES e combinaveis — ao contrario da resolucao
+    de empresa, onde empresa e documento sao respostas concorrentes a mesma
+    pergunta e uma tem de vencer. Aqui o servico e o TEXTO da nota e a
+    competencia e o MES; travar um contra o outro obrigava o operador a salvar
+    duas vezes (uma so para o mes, outra so para o texto) e, no meio do
+    caminho, a nota exibia uma descricao que ele nao queria.
+
+    Combinacoes, todas validas:
+
+    - **so servico** — o texto muda, a competencia fica como estava;
+    - **so competencia** — volta a ser honorarios (o campo de servico vazio
+      significa "nao e servico avulso") com o mes informado;
+    - **os dois** — o texto e o servico, e a competencia informada e a que
+      passa a valer na coluna. O texto do servico NAO recebe o mes: quem
+      descreve uma alteracao contratual nao diz "referente ao mes de".
+
+    Em qualquer caso com servico o sistema MEMORIZA a decisao — o termo que veio
+    no extrato passa a significar aquele servico, e o mesmo Pix abreviado se
+    resolve sozinho no mes seguinte.
+    """
+    nota = db.session.get(NotaNfse, nota_id)
+    if nota is None:
+        return json_error('Nota nao encontrada.', 404)
+    if nota.status in (StatusNotaNfse.EMITIDA, StatusNotaNfse.AGUARDANDO_CONFIRMACAO):
+        return json_error(
+            'Esta nota ja foi para o portal; a descricao nao pode mais mudar.', 409)
+
+    dados = request.get_json(silent=True) or {}
+    servico = (dados.get('descricao_servico') or '').strip()
+    competencia = (dados.get('competencia') or '').strip()
+
+    if not servico and not competencia:
+        return json_error('Informe a competencia dos honorarios ou o servico.', 400)
+
+    if competencia:
+        if not _COMPETENCIA_VALIDA.match(competencia):
+            return json_error(
+                'Competencia invalida: use MM/AAAA (ex.: 06/2026).', 400)
+        nota.competencia = competencia
+
+    if servico:
+        nota.descricao_servico = servico[:300]
+        _lembrar_servico(nota, servico, (dados.get('termo') or '').strip() or None)
+        if not nota.competencia and nota.data_pagamento:
+            # a competencia do servico nao vai para o texto da nota; serve para
+            # a linha aparecer no filtro de mes
+            nota.competencia = (f'{nota.data_pagamento.month:02d}/'
+                                f'{nota.data_pagamento.year}')
+    else:
+        # campo de servico vazio = a nota volta a ser honorarios, e a descricao
+        # sai do template com a competencia
+        nota.descricao_servico = None
+
+    nota.descricao_pendente = False
+    nota.status = nfse_import.recalcular_status(nota)
+    db.session.commit()
+    return {'status': 'ok', 'nota': _nota_para_json(nota)}
+
+
+_COMPETENCIA_VALIDA = re.compile(r'^(0[1-9]|1[0-2])/20\d{2}$')
+
+
+def _lembrar_servico(nota, descricao, termo=None):
+    """Memoriza que este texto do extrato significa este servico.
+
+    A chave e o que se repete no extrato do mes seguinte — o jeito como o
+    cliente escreve —, nao a descricao oficial que o operador digitou. Duas
+    formas, e a diferenca importa:
+
+    - sem `termo`: a descricao INTEIRA do Pix (sem o prefixo 'Pix'). Serve para
+      o Pix que so traz o nome do cliente e cujo significado o operador conhece.
+      Casa por igualdade e nao consome o nome do tomador;
+    - com `termo`: um fragmento ('ALT. CONTRATO'), que passa a ser reconhecido
+      dentro de qualquer descricao e sai do nome do tomador.
+
+    Em ambos os casos a chave passa pelo `chave_descricao`/`normalizar_termo` do
+    leitor — a mesma funcao que a busca usa, senao o que se grava nunca e achado.
+    """
+    chave = (normalizar_termo(termo) if termo
+             else chave_descricao(nota.descricao_extrato or nota.nome_csv or ''))
+    if not chave:
+        return
+    servico = ServicoNfse.query.filter_by(termo_norm=chave[:140]).first()
+    if servico is None:
+        servico = ServicoNfse(termo_norm=chave[:140])
+        db.session.add(servico)
+    servico.descricao = descricao[:300]
+
+
+# --- proposta de agrupamento (NFSE-27) -------------------------------------
+
+@bp.route('/nfse/grupo/<token>/confirmar', methods=['POST'])
+@requer_papel('operador')
+def nfse_confirmar_grupo(token):
+    """Junta os lancamentos propostos numa nota so, com o valor liquido."""
+    dados = request.get_json(silent=True) or {}
+    valor = dados.get('valor')
+
+    if valor is not None:
+        valor = str(valor).strip().replace('.', '').replace(',', '.')
+        try:
+            valor = Decimal(valor)
+        except (InvalidOperation, ValueError):
+            return json_error('Valor invalido: use o formato 900,00.', 400)
+
+    try:
+        nota = nfse_grupos.confirmar(token, valor,
+                                     (dados.get('descricao') or '').strip() or None)
+    except ValueError as exc:
+        return json_error(str(exc), 400)
+    if nota is None:
+        return json_error('Proposta de agrupamento nao encontrada.', 404)
+
+    log_event('nfse_grupo_confirmado', nota_id=nota.id,
+              valor=str(nota.valor_final), ajustado=nota.valor_ajustado)
+    return {'status': 'ok', 'nota': _nota_para_json(nota)}
+
+
+@bp.route('/nfse/grupo/<token>/descartar', methods=['POST'])
+@requer_papel('operador')
+def nfse_descartar_grupo(token):
+    """Recusa a proposta: cada lancamento segue como nota propria."""
+    notas = nfse_grupos.descartar(token)
+    if not notas:
+        return json_error('Proposta de agrupamento nao encontrada.', 404)
+    log_event('nfse_grupo_descartado', total=len(notas))
+    return {'status': 'ok', 'notas': [_nota_para_json(n) for n in notas]}
+
+
+@bp.route('/nfse/grupo/<token>/desfazer', methods=['POST'])
+@requer_papel('operador')
+def nfse_desfazer_grupo(token):
+    """Volta atras num agrupamento aplicado.
+
+    Devolve a proposta ao estado de espera, e nao ao de descartada: desfazer
+    nao e recusar — o operador pode querer juntar de novo com outro valor."""
+    try:
+        nota = nfse_grupos.desfazer(token)
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+    if nota is None:
+        return json_error('Agrupamento nao encontrado.', 404)
+
+    log_event('nfse_grupo_desfeito', nota_id=nota.id, valor=str(nota.valor_final))
+    return {'status': 'ok', 'nota': _nota_para_json(nota)}
+
+
+# --- acao em massa sobre linhas selecionadas -------------------------------
+
+# So o que e reversivel por um clique entra aqui. Preencher e EMITIR ficam de
+# fora de proposito: emitir em massa e exatamente o que a ND-005 impede.
+#
+# `emitida_manual` nao contradiz isso — ela nao emite nada, registra o que o
+# operador ja emitiu no portal por fora. E escrituracao do passado, nao acao
+# sobre o portal, e desfaz-se pela mesma barra.
+ACOES_EM_MASSA = {
+    'cancelar': (lambda nota: _cancelar(nota), 'canceladas'),
+    'restaurar': (lambda nota: _restaurar(nota), 'restauradas'),
+    'emitida_manual': (lambda nota: _marcar_emitida(nota), 'marcadas como emitidas'),
+    'desmarcar_emitida': (lambda nota: _desmarcar_emitida(nota), 'desmarcadas'),
+}
+
+
+@bp.route('/nfse/notas/acao', methods=['POST'])
+@requer_papel('operador')
+def nfse_acao_em_massa():
+    """Aplica uma acao a varias linhas de uma vez.
+
+    Parcial por desenho: o que der certo e aplicado e o que nao der volta
+    nomeado em `recusadas`. Abortar tudo porque uma linha ja estava emitida
+    obrigaria o operador a desmarcar a mao e repetir a selecao inteira.
+    """
+    dados = request.get_json(silent=True) or {}
+    acao = (dados.get('acao') or '').strip()
+    ids = dados.get('ids') or []
+
+    if acao not in ACOES_EM_MASSA:
+        return json_error(
+            f'Ação inválida. Disponíveis: {", ".join(ACOES_EM_MASSA)}.', 400)
+    if not isinstance(ids, list) or not ids:
+        return json_error('Selecione ao menos uma linha.', 400)
+
+    notas = NotaNfse.query.filter(NotaNfse.id.in_([int(i) for i in ids])).all()
+    if not notas:
+        return json_error('Nenhuma das linhas selecionadas foi encontrada.', 404)
+
+    aplicar, rotulo = ACOES_EM_MASSA[acao]
+    aplicadas, recusadas = [], []
+    for nota in notas:
+        erro = aplicar(nota)
+        if erro:
+            recusadas.append({'id': nota.id, 'nome': nota.nome_csv, 'motivo': erro})
+        else:
+            aplicadas.append(nota)
+
+    if aplicadas:
+        db.session.commit()
+    else:
+        db.session.rollback()
+
+    log_event('nfse_acao_em_massa', acao=acao,
+              aplicadas=len(aplicadas), recusadas=len(recusadas))
+    return {
+        'status': 'ok',
+        'acao': acao,
+        # o rotulo vem do servidor para a mensagem na tela nao repetir, no JS, a
+        # lista de acoes que ja vive aqui
+        'rotulo': rotulo,
+        'aplicadas': [_nota_para_json(n) for n in aplicadas],
+        'recusadas': recusadas,
+    }
+
+
+def _cancelar(nota):
+    """Cancela a linha. Devolve o motivo da recusa, ou None se aplicou.
+
+    Nucleo compartilhado pela rota de uma linha so e pela acao em massa: sem
+    ele, a acao em massa poderia cancelar uma nota emitida que a rota
+    individual recusa."""
+    if nota.status == StatusNotaNfse.CANCELADA:
+        return None                      # idempotente: ja esta como se pediu
+    if nota.status == StatusNotaNfse.EMITIDA:
+        return ('Já foi emitida; cancelar aqui não a cancela na prefeitura. '
+                'Use o portal para isso.')
+    if nota.status == StatusNotaNfse.AGUARDANDO_CONFIRMACAO:
+        return ('Está preenchida no portal esperando confirmação. Resolva-a no '
+                'navegador antes de cancelar a linha.')
+    if nota.status == StatusNotaNfse.AGRUPADA:
+        return 'Foi agrupada em outra nota; cancele a nota que a absorveu.'
+    nota.status = StatusNotaNfse.CANCELADA
+    # a falha da tentativa anterior nao vale mais: deixa-la ali mostraria a
+    # linha como "Cancelada" com um erro embaixo, que nao quer dizer nada
+    nota.erro = None
+    return None
+
+
+def _restaurar(nota):
+    if nota.status != StatusNotaNfse.CANCELADA:
+        return 'Não está cancelada.'
+    nota.status = nfse_import.recalcular_status(nota)
+    return None
+
+
+def _marcar_emitida(nota):
+    """Registra que o operador emitiu esta nota fora do sistema.
+
+    Nao e emitir: e escrituracao do que ja aconteceu no portal — por isso cabe
+    em acao em massa sem esbarrar na ND-005, que proibe a AUTOMACAO clicar em
+    emitir. Marcar conta na trava de duplicidade: o mesmo tomador e competencia
+    voltando no extrato do mes seguinte passam a ser avisados."""
+    if nota.origem_emissao == ORIGEM_AUTOMACAO:
+        return 'Foi emitida pela automação; não dá para marcar como manual.'
+    if nota.status == StatusNotaNfse.AGRUPADA:
+        return 'Virou parte de outra nota; marque a nota que a absorveu.'
+    if nota.status == StatusNotaNfse.INVALIDA:
+        return 'Veio incompleta do extrato e não chegou a ser emitível.'
+    if nota.status == StatusNotaNfse.EMITIDA:
+        return None                      # idempotente: ja esta como se pediu
+    nota.status = StatusNotaNfse.EMITIDA
+    nota.origem_emissao = ORIGEM_MANUAL
+    nota.emitida_em = datetime.now()
+    # a falha da tentativa anterior nao vale mais: deixa-la ali mostraria a
+    # linha como "Emitida" com um erro embaixo, que nao quer dizer nada
+    nota.erro = None
+    return None
+
+
+def _desmarcar_emitida(nota):
+    """Desfaz a marcacao manual.
+
+    So o que o operador marcou a mao: o que a automacao emitiu ela VIU
+    acontecer na tela de confirmacao do portal, e desfazer por um clique
+    afirmaria que uma nota fiscal existente nao existe."""
+    if nota.origem_emissao != ORIGEM_MANUAL:
+        return 'Só dá para desmarcar nota que você marcou como emitida à mão.'
+    nota.status = nfse_import.recalcular_status(nota)
+    nota.origem_emissao = None
+    nota.emitida_em = None
+    return None
+
+
+# --- cancelar a linha (o contador dispensou a nota) ------------------------
+
+@bp.route('/nfse/nota/<int:nota_id>/cancelar', methods=['POST'])
+@requer_papel('operador')
+def nfse_cancelar_nota(nota_id):
+    """Marca/desmarca a linha que nao vira nota.
+
+    Nao e "pular": pular e "nao agora" e a linha volta na proxima rodada do
+    lote. Cancelar e uma decisao, e por isso OCUPA a competencia — reimportar o
+    extrato traz a linha de volta como duplicata em vez de pronta, senao a
+    decisao se perderia calada e a nota dispensada seria emitida.
+
+    Reversivel pela mesma rota, como o "emitida na mao": o contador muda de
+    ideia, e desfazer nao pode exigir reimportar o extrato.
+    """
+    nota = db.session.get(NotaNfse, nota_id)
+    if nota is None:
+        return json_error('Nota nao encontrada.', 404)
+
+    dados = request.get_json(silent=True) or {}
+    cancelar = dados.get('cancelar', True)
+
+    # Mesma regra da acao em massa (`_cancelar`/`_restaurar`): duas copias
+    # divergiriam, e a divergencia apareceria como "em massa cancelou o que a
+    # linha sozinha recusa".
+    erro = _cancelar(nota) if cancelar else _restaurar(nota)
+    if erro:
+        db.session.rollback()
+        return json_error(erro, 409)
+
+    db.session.commit()
+    log_event('nfse_nota_cancelada' if cancelar else 'nfse_nota_descancelada',
+              nota_id=nota.id)
+    return {'status': 'ok', 'nota': _nota_para_json(nota)}
+
+
 # --- liberar duplicata (ND-004) --------------------------------------------
 
 @bp.route('/nfse/nota/<int:nota_id>/liberar-duplicata', methods=['POST'])
@@ -330,39 +760,203 @@ def nfse_marcar_emitida_manual(nota_id):
     dados = request.get_json(silent=True) or {}
     marcar = dados.get('marcar', True)
 
-    if marcar:
-        if nota.origem_emissao == ORIGEM_AUTOMACAO:
-            return json_error(
-                'Esta nota foi emitida pela automacao; nao da para marcar como '
-                'manual.', 409)
-        nota.status = StatusNotaNfse.EMITIDA
-        nota.origem_emissao = ORIGEM_MANUAL
-        nota.emitida_em = datetime.now()
-        # a falha da tentativa anterior nao vale mais: deixa-la ali mostra a
-        # linha como "Emitida" com um erro embaixo, que nao quer dizer nada
-        nota.erro = None
-    else:
-        if nota.origem_emissao != ORIGEM_MANUAL:
-            return json_error(
-                'So da para desmarcar nota que voce marcou como emitida na mao.',
-                409)
-        nota.status = _status_apos_desmarcar(nota)
-        nota.origem_emissao = None
-        nota.emitida_em = None
+    # Mesma regra da acao em massa (`_marcar_emitida`/`_desmarcar_emitida`):
+    # duas copias divergiriam, e a divergencia apareceria como "em massa marcou
+    # o que a linha sozinha recusa".
+    erro = _marcar_emitida(nota) if marcar else _desmarcar_emitida(nota)
+    if erro:
+        db.session.rollback()
+        return json_error(erro, 409)
 
     db.session.commit()
     return {'status': 'ok', 'nota': _nota_para_json(nota)}
 
 
-def _status_apos_desmarcar(nota):
-    """Volta ao estado que a linha teria sem a marcacao manual."""
-    if nota.empresa_id:
-        return StatusNotaNfse.PRONTA
-    if nota.tipo_documento == TIPO_CPF:
-        return StatusNotaNfse.PESSOA_FISICA
-    if nota.documento:
-        return StatusNotaNfse.CADASTRO_PENDENTE
-    return StatusNotaNfse.EMPRESA_PENDENTE
+# --- notas emitidas no portal (NFSE-28) ------------------------------------
+
+def _emitida_para_json(emitida):
+    return {
+        'id': emitida.id,
+        'chave': emitida.chave,
+        'data_geracao': (emitida.data_geracao.strftime('%d/%m/%Y')
+                         if emitida.data_geracao else None),
+        'documento': emitida.documento,
+        'nome_tomador': emitida.nome_tomador,
+        'competencia_dps': emitida.competencia_dps,
+        'municipio': emitida.municipio,
+        'valor': _valor_json(emitida.valor),
+        'situacao': emitida.situacao,
+        'nota_id': emitida.nota_id,
+    }
+
+
+def _competencia_corrente():
+    hoje = datetime.now()
+    return f'{hoje.month:02d}/{hoje.year}'
+
+
+def _competencia_anterior(mes):
+    """Mes anterior a 'MM/AAAA'. O honorario de junho e emitido em julho."""
+    numero, _, ano = (mes or '').partition('/')
+    try:
+        numero, ano = int(numero), int(ano)
+    except ValueError:
+        return mes
+    return f'12/{ano - 1}' if numero == 1 else f'{numero - 1:02d}/{ano}'
+
+
+def _competencia_conferida(bruto):
+    """Competencia escolhida no bloco de conferencia.
+
+    Aceita qualquer MM/AAAA valido, e nao so as que ja tem nota importada
+    (`_competencia_pedida`): conferir um mes SEM linha nenhuma e uma pergunta
+    legitima — a resposta e "nao importei o extrato desse mes"."""
+    bruto = (bruto or '').strip()
+    return bruto if _COMPETENCIA_VALIDA.match(bruto) else None
+
+
+def _painel_emitidas(mes_geracao, competencia=None):
+    """Total do mes + o que nao fecha, no formato que a tela desenha.
+
+    DOIS meses, e eles quase nunca sao o mesmo (ND-027):
+
+    - `mes_geracao` responde "quanto emiti em julho" — as notas GERADAS no mes;
+    - `competencia` responde "das linhas de junho, quais ficaram sem nota" — o
+      mes de REFERENCIA do honorario.
+
+    O cliente paga em julho o honorario de junho, entao o default da
+    competencia e o mes anterior ao da geracao. A conciliacao atravessa lotes e
+    meses de emissao: a nota de junho pode ter saido em julho, e foi exatamente
+    isso que a versao anterior nao enxergava.
+    """
+    if not mes_geracao:
+        return None
+    # Default explicito e mostrado na tela: o honorario de junho e emitido em
+    # julho, entao a conferencia natural do mes emitido e a competencia
+    # anterior. O operador troca no proprio bloco — antes isto vinha, calado,
+    # do seletor "Mostrar" do passo 4, e mudar o periodo aqui nao mexia na
+    # conferencia, sem nada explicando por que.
+    competencia = competencia or _competencia_anterior(mes_geracao)
+
+    resumo = nfse_emitidas.resumo(mes_geracao)
+
+    # Nunca consultado != consultado e nao achou nada. Sem esta distincao, uma
+    # pagina recem-aberta acusaria "Pagou e ficou sem nota" para o mes inteiro
+    # so porque ninguem leu o portal ainda — alarme falso, e do tipo que ensina
+    # o operador a ignorar o painel.
+    if resumo['consultado_em'] is None:
+        return {
+            'mes_geracao': mes_geracao,
+            'competencia': competencia,
+            'nunca_consultado': True,
+            'quantidade': 0,
+            'total': None,
+            'outras_situacoes': {},
+            'consultado_em': None,
+            'sem_nota': [],
+            'sem_extrato': [],
+            'nao_conferiveis': 0,
+            'valor_diferente': [],
+        }
+
+    divergentes = nfse_emitidas.divergencias(competencia)
+    return {
+        'mes_geracao': mes_geracao,
+        'competencia': competencia,
+        'nunca_consultado': False,
+        'quantidade': resumo['quantidade'],
+        'total': _valor_extenso(resumo['total']),
+        'outras_situacoes': resumo['outras_situacoes'],
+        'consultado_em': resumo['consultado_em'].strftime('%d/%m/%Y %H:%M'),
+        'sem_nota': [_nota_para_json(n) for n in divergentes['sem_nota']],
+        'sem_extrato': [_emitida_para_json(e) for e in divergentes['sem_extrato']],
+        # notas fora do periodo com extrato importado: nao da para afirmar nada
+        # sobre elas, e some-las na lista acima seria acusar sem base
+        'nao_conferiveis': divergentes['nao_conferiveis'],
+        'valor_diferente': [
+            {'nota': _nota_para_json(n), 'emitida': _emitida_para_json(e)}
+            for n, e in divergentes['valor_diferente']],
+    }
+
+
+@bp.route('/nfse/emitidas/consultar', methods=['POST'])
+@requer_papel('operador')
+def nfse_consultar_emitidas():
+    """Le a listagem do portal no periodo pedido e grava o espelho.
+
+    Sincrona, ao contrario do preenchimento (ND-009): aqui nao ha espera por
+    confirmacao humana — sao poucas navegacoes (6 paginas para 80 notas) e o
+    operador fica olhando o resultado aparecer.
+    """
+    dados = request.get_json(silent=True) or {}
+    try:
+        inicio = _data_pedida(dados.get('inicio'))
+        fim = _data_pedida(dados.get('fim'))
+    except ValueError as exc:
+        return json_error(str(exc), 400)
+
+    if inicio > fim:
+        return json_error('A data inicial não pode ser depois da final.', 400)
+
+    # Toma a sessao como todo fluxo que dirige o navegador. Sem isto, consultar
+    # durante um lote levaria o MESMO Chrome para /Notas/Emitidas no meio do
+    # preenchimento de uma DPS — o assistente perderia o que ja estava digitado
+    # e a nota falharia, sem nada na tela explicando por que.
+    if not SESSAO.adquirir():
+        return json_error(
+            'A sessão do navegador está ocupada com uma emissão. Aguarde '
+            'terminar e consulte depois.', 409)
+
+    try:
+        resultado = nfse_emitidas.consultar(inicio, fim)
+    except automacao_emitidas.TotalDivergenteError as exc:
+        # o portal anunciou N e a leitura terminou com outro numero: recusar e
+        # mais seguro que devolver um total fiscal a menos
+        return json_error(str(exc), 502)
+    except Exception as exc:
+        return json_error(exc=exc, code=500)
+    finally:
+        # O navegador FICA ABERTO de proposito: e a mesma sessao autenticada que
+        # o preenchimento usa, e fecha-la aqui faria o certificado ser pedido de
+        # novo na proxima nota. Quem fecha e o "Encerrar sessão".
+        SESSAO.liberar()
+
+    # O mes do total e o do PERIODO CONSULTADO (onde as notas foram geradas).
+    mes_geracao = nfse_emitidas.competencia_do_bloco(inicio)
+    return {
+        'status': 'ok',
+        'blocos': resultado['blocos'],
+        'lidas': resultado['lidas'],
+        'novas': resultado['novas'],
+        'atualizadas': resultado['atualizadas'],
+        'painel': _painel_emitidas(mes_geracao, _competencia_conferida(
+            dados.get('competencia'))),
+        'mes_geracao': mes_geracao,
+    }
+
+
+@bp.route('/nfse/emitidas')
+@requer_papel('operador')
+def nfse_painel_emitidas():
+    """Estado atual do espelho, para a tela atualizar sem reconsultar o portal."""
+    mes = (request.args.get('mes') or '').strip()
+    if not _COMPETENCIA_VALIDA.match(mes):
+        return json_error('Informe o mês no formato MM/AAAA.', 400)
+    return {'status': 'ok',
+            'painel': _painel_emitidas(
+                mes, _competencia_conferida(request.args.get('competencia')))}
+
+
+def _data_pedida(bruto):
+    texto = (bruto or '').strip()
+    if not texto:
+        raise ValueError('Informe as datas inicial e final do período.')
+    for formato in ('%Y-%m-%d', '%d/%m/%Y'):
+        try:
+            return datetime.strptime(texto, formato).date()
+        except ValueError:
+            continue
+    raise ValueError(f'Data inválida: "{texto}". Use dd/mm/aaaa.')
 
 
 # --- configuracao (NFSE-08/09) ---------------------------------------------

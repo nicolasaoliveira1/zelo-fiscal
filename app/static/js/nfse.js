@@ -18,6 +18,15 @@ const ROTULO_STATUS = {
   invalida: 'Linha inválida',
   pulada: 'Pulada',
   falha: 'Falha',
+  descricao_pendente: 'Sem descrição',
+  cancelada: 'Cancelada',
+  agrupada: 'Agrupada em outra',
+};
+
+const ROTULO_CATEGORIA = {
+  honorarios: 'Honorários',
+  servico: 'Serviço',
+  indefinida: 'A definir',
 };
 
 const lerJson = (id) => {
@@ -25,11 +34,22 @@ const lerJson = (id) => {
   try { return JSON.parse(el?.textContent || '[]'); } catch { return []; }
 };
 
+// Para payloads que sao objeto (ou null), nao lista.
+const lerJsonObjeto = (id) => {
+  const el = document.getElementById(id);
+  try { return JSON.parse(el?.textContent || 'null'); } catch { return null; }
+};
+
 let notas = lerJson('dadosNotas');
 const empresas = lerJson('dadosEmpresas');
 let aliquotaConfirmada = false;
 // linhas cujo vinculo o operador reabriu para corrigir
 const editando = new Set();
+// linhas cuja descricao o operador reabriu para corrigir (eixo independente do
+// vinculo: uma nota pode ter empresa certa e descricao a definir)
+const editandoDescricao = new Set();
+// linhas marcadas para uma acao em massa
+const selecionadas = new Set();
 
 // `textContent` -> `innerHTML` escapa &, < e >, mas NAO aspas: como o resultado
 // tambem entra em atributos (title="${esc(...)}"), faltavam justamente as duas
@@ -104,6 +124,23 @@ function celulaEmpresa(nota) {
 function acoesDaLinha(nota) {
   const partes = [];
 
+  // Linha absorvida por um agrupamento: nao ha o que fazer com ela, e a celula
+  // vazia pareceria quebrada — diz para onde ela foi.
+  if (nota.status === 'agrupada') {
+    return '<span class="nfse-hint">virou parte de outra nota</span>';
+  }
+
+  if (nota.status === 'cancelada') {
+    return `<button class="btn btn-ghost btn-sm" data-restaurar="${nota.id}"
+             title="Voltar a considerar esta linha">Restaurar</button>`;
+  }
+
+  if (nota.status === 'descricao_pendente') {
+    partes.push(`<button class="btn btn-primary btn-sm" data-editar-descricao="${nota.id}">Definir descrição</button>`);
+    partes.push(botaoCancelar(nota));
+    return partes.join('');
+  }
+
   if (nota.status === 'emitida') {
     // So o que o operador marcou na mao pode ser desmarcado: o que a automacao
     // emitiu ela VIU acontecer na tela de confirmacao do portal, e desfazer por
@@ -131,29 +168,153 @@ function acoesDaLinha(nota) {
   const podePreencher = ['pronta', 'cadastro_pendente', 'pessoa_fisica', 'falha', 'pulada']
     .includes(nota.status) || (nota.status === 'duplicata' && nota.duplicata_liberada);
   if (podePreencher) {
+    partes.push(botaoCancelar(nota));
     partes.push(`<button class="btn btn-ghost btn-sm" data-jaemitida="${nota.id}" title="Marcar como já emitida por fora">Já emiti</button>`);
     partes.push(`<button class="btn btn-primary btn-sm" data-preencher="${nota.id}">Preencher</button>`);
   }
   if (nota.status === 'aguardando_confirmacao') {
     partes.push(`<button class="btn btn-primary btn-sm" data-jaemitida="${nota.id}">Emiti no portal</button>`);
   }
+  if (!partes.length && nota.status === 'empresa_pendente') {
+    partes.push(botaoCancelar(nota));
+  }
   return partes.join('');
 }
 
-function linha(nota) {
+function botaoCancelar(nota) {
+  // Ghost e nao `btn-danger`: cancelar aqui nao destroi nada nem cancela nota
+  // na prefeitura — so tira a linha da lista, e e reversivel pelo "Restaurar".
+  return `<button class="btn btn-ghost btn-sm" data-cancelar-nota="${nota.id}"
+           title="O contador dispensou esta nota: tirar da lista">Cancelar</button>`;
+}
+
+function celulaDescricao(nota) {
+  // Editor aberto: o operador pediu para dizer o que a nota descreve.
+  if (editandoDescricao.has(nota.id)) return editorDescricao(nota);
+
+  const rotulo = ROTULO_CATEGORIA[nota.categoria] || nota.categoria || '—';
+  const chip = `<span class="nfse-categoria cat-${nota.categoria}">${esc(rotulo)}</span>`;
+
+  if (nota.categoria === 'indefinida') {
+    // Sem descricao nao ha nota: o texto cru do Pix e o unico dado que ajuda o
+    // operador a decidir, entao ele fica visivel em vez de escondido num title.
+    return `${chip}
+      <div class="nfse-descricao-prevista">${esc(nota.descricao_extrato || '')}</div>`;
+  }
+
+  const editar = nota.status === 'emitida' || nota.status === 'aguardando_confirmacao'
+    ? ''
+    : ` <button class="btn btn-ghost btn-sm py-0 px-1" data-editar-descricao="${nota.id}"
+               title="Mudar o que esta nota descreve">Editar</button>`;
+  const prevista = nota.descricao_prevista
+    ? `<div class="nfse-descricao-prevista" title="${esc(nota.descricao_prevista)}">${esc(nota.descricao_prevista)}</div>`
+    : '';
+  return `${chip}${editar}${prevista}`;
+}
+
+function editorDescricao(nota) {
+  // Os dois campos sao INDEPENDENTES, nao alternativas: o serviço e o texto da
+  // nota, a competencia e o mes. Deixar em branco tem significado em cada um —
+  // serviço vazio = honorarios; competencia vazia = mantem o mes atual.
+  return `
+    <div class="nfse-editor-descricao">
+      <input class="form-control form-control-sm" data-servico-de="${nota.id}"
+             placeholder="Serviço (ex.: BAIXA DE EMPRESA)"
+             value="${esc(nota.descricao_servico || '')}">
+      <input class="form-control form-control-sm nfse-editor-competencia"
+             data-competencia-de="${nota.id}" placeholder="Competência MM/AAAA"
+             value="${esc(nota.competencia || '')}">
+      <div class="nfse-editor-acoes">
+        <button class="btn btn-ghost btn-sm" data-cancelar-descricao="${nota.id}">Cancelar</button>
+        <button class="btn btn-soft-primary btn-sm" data-salvar-descricao="${nota.id}">Salvar</button>
+      </div>
+      <div class="nfse-hint nfse-editor-ajuda">
+        Serviço em branco = honorários do mês.
+      </div>
+    </div>`;
+}
+
+function faixaDoGrupo(nota, colunas) {
+  // So a lider carrega a conta; as irmas ficam sob a mesma faixa.
+  if (!nota.grupo || !nota.grupo.lider) return '';
+  const grupo = nota.grupo;
+  const token = esc(grupo.token);
+
+  // Ja aplicado: a faixa vira o recibo do que foi feito, com o desfazer.
+  if (grupo.confirmado) {
+    return `
+    <tr class="nfse-grupo-linha">
+      <td colspan="${colunas}">
+        <div class="nfse-grupo">
+          <span class="nfse-grupo-texto">
+            <span class="nfse-grupo-selo">Agrupada</span>
+            As linhas abaixo viraram uma nota só.
+            <span class="nfse-grupo-conta">${esc(grupo.detalhe || '')}</span>
+          </span>
+          <span class="nfse-grupo-acoes">
+            <button class="btn btn-soft-primary btn-sm" data-desfazer-grupo="${token}">
+              Desfazer agrupamento
+            </button>
+          </span>
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  return `
+    <tr class="nfse-grupo-linha">
+      <td colspan="${colunas}">
+        <div class="nfse-grupo">
+          <span class="nfse-grupo-texto">
+            <span class="nfse-grupo-selo">A agrupar</span>
+            <strong>Juntar numa nota só?</strong> Vários lançamentos deste tomador
+            — ou um estorno — no período.
+            <span class="nfse-grupo-conta">${esc(grupo.detalhe || '')}</span>
+          </span>
+          <span class="nfse-grupo-acoes">
+            <input class="form-control form-control-sm nfse-grupo-descricao"
+                   data-descricao-grupo="${token}"
+                   value="${esc(grupo.descricao || '')}"
+                   placeholder="Descrição da nota"
+                   aria-label="Descrição da nota agrupada">
+            <input class="form-control form-control-sm nfse-grupo-valor"
+                   data-valor-grupo="${token}"
+                   value="${esc(grupo.valor_liquido || '')}"
+                   aria-label="Valor da nota agrupada">
+            <button class="btn btn-ghost btn-sm" data-descartar-grupo="${token}">
+              Manter separadas
+            </button>
+            <button class="btn btn-primary btn-sm" data-confirmar-grupo="${token}">
+              Juntar
+            </button>
+          </span>
+        </div>
+      </td>
+    </tr>`;
+}
+
+function linha(nota, ultimaDoGrupo) {
   // as duas origens ficam esmaecidas: uma linha ja resolvida nao disputa
   // atencao com as que ainda faltam
   const alerta = (nota.divergencia_valor ? ' nfse-linha-alerta' : '')
-    + (nota.status === 'emitida' ? ' nfse-linha-resolvida' : '');
+    + (['emitida', 'cancelada', 'agrupada'].includes(nota.status) ? ' nfse-linha-resolvida' : '')
+    + (nota.grupo ? ' nfse-linha-grupo' : '')
+    + (ultimaDoGrupo ? ' nfse-linha-grupo-fim' : '');
   const aviso = nota.divergencia_valor
     ? ' <i class="bi bi-exclamation-triangle" title="Soma das parcelas não bate com o valor final"></i>' : '';
+  const ajustado = nota.valor_ajustado
+    ? ' <i class="bi bi-pencil" title="Valor ajustado à mão ao agrupar"></i>' : '';
+  const marcada = selecionadas.has(nota.id) ? ' checked' : '';
   return `
     <tr class="${alerta}" data-linha="${nota.id}">
+      <td><input type="checkbox" class="nfse-check" data-selecionar="${nota.id}"${marcada}
+                 aria-label="Selecionar ${esc(nota.nome_csv || 'linha')}"></td>
       <td>${esc(nota.nome_csv)}</td>
       <td>${celulaEmpresa(nota)}</td>
       <td class="nfse-mono">${esc(nota.documento || '—')}</td>
+      <td>${celulaDescricao(nota)}</td>
       <td class="nfse-mono">${esc(nota.competencia || '—')}</td>
-      <td class="nfse-mono text-end">${esc(nota.valor || '—')}${aviso}</td>
+      <td class="nfse-mono text-end">${esc(nota.valor || '—')}${aviso}${ajustado}</td>
       <td><span class="nfse-status st-${nota.status}">${esc(ROTULO_STATUS[nota.status] || nota.status)}</span>
           ${nota.erro ? `<div class="nfse-hint nfse-erro" title="${esc(nota.erro)}">${esc(nota.erro)}</div>` : ''}</td>
       <td><div class="nfse-acoes-linha">${acoesDaLinha(nota)}</div></td>
@@ -164,9 +325,19 @@ function renderizar() {
   const corpo = document.getElementById('corpoNotas');
   const vazio = document.getElementById('nfseVazio');
   if (!corpo) return;
-  corpo.innerHTML = notas.map(linha).join('');
+  const colunas = document.querySelectorAll('#tabelaNotas thead th').length;
+  corpo.innerHTML = notas.map((nota, i) => {
+    // A ultima linha de um grupo fecha o bloco com a borda inferior; sem isso
+    // o fundo do grupo vaza para a linha seguinte e o operador nao ve onde ele
+    // termina. "Ultima" = a proxima nota nao esta no mesmo grupo.
+    const proxima = notas[i + 1];
+    const ultimaDoGrupo = !!nota.grupo
+      && (!proxima || !proxima.grupo || proxima.grupo.token !== nota.grupo.token);
+    return faixaDoGrupo(nota, colunas) + linha(nota, ultimaDoGrupo);
+  }).join('');
   if (vazio) vazio.classList.toggle('d-none', notas.length > 0);
   atualizarContadores();
+  pintarSelecao();
 }
 
 function atualizarContadores() {
@@ -175,6 +346,10 @@ function atualizarContadores() {
   const valores = {
     total: notas.length,
     divergencias: notas.filter((n) => n.divergencia_valor).length,
+    // conta PROPOSTAS EM ABERTO, nao notas: as linhas de um grupo sao uma
+    // decisao so, e o grupo ja confirmado nao e mais uma pendencia
+    grupos_pendentes: new Set(
+      notas.filter((n) => n.grupo && n.grupo.pendente).map((n) => n.grupo.token)).size,
     ...conta,
   };
   document.querySelectorAll('[data-contador]').forEach((el) => {
@@ -272,6 +447,300 @@ async function marcarEmitidaManual(id, marcar) {
       { body: JSON.stringify({ marcar }) });
     substituir(dados.nota);
     showToast(marcar ? 'Marcada como emitida.' : 'Marcação desfeita.', 'info');
+  } catch (erro) {
+    showToast(erro.message, 'error');
+  }
+}
+
+async function cancelarNota(id, cancelar) {
+  try {
+    const dados = await chamar(`/nfse/nota/${id}/cancelar`,
+      { body: JSON.stringify({ cancelar }) });
+    substituir(dados.nota);
+    showToast(cancelar ? 'Linha cancelada.' : 'Linha restaurada.', 'info');
+  } catch (erro) {
+    showToast(erro.message, 'error');
+  }
+}
+
+// --- descricao da nota ----------------------------------------------------
+
+async function resolverDescricao(id) {
+  const servico = document.querySelector(`[data-servico-de="${id}"]`)?.value.trim() || '';
+  const competencia = document.querySelector(`[data-competencia-de="${id}"]`)?.value.trim() || '';
+  if (!servico && !competencia) {
+    showToast('Informe o serviço ou a competência dos honorários.', 'error');
+    return;
+  }
+  try {
+    const dados = await chamar(`/nfse/nota/${id}/descricao`,
+      { body: JSON.stringify({ descricao_servico: servico, competencia }) });
+    editandoDescricao.delete(id);
+    substituir(dados.nota);
+    showToast(servico
+      ? 'Serviço definido — o sistema vai lembrar dele no próximo extrato.'
+      : 'Competência definida.', 'success');
+  } catch (erro) {
+    showToast(erro.message, 'error');
+  }
+}
+
+// --- proposta de agrupamento ----------------------------------------------
+
+async function confirmarGrupo(token) {
+  const campo = document.querySelector(`[data-valor-grupo="${token}"]`);
+  const valor = campo?.value.trim() || null;
+  const descricao = document.querySelector(`[data-descricao-grupo="${token}"]`)?.value.trim() || null;
+  try {
+    const dados = await chamar(`/nfse/grupo/${encodeURIComponent(token)}/confirmar`,
+      { body: JSON.stringify({ valor, descricao }) });
+    // O agrupamento muda o status das irmas tambem; recarrega a lista inteira
+    // em vez de remendar linha a linha.
+    await recarregarNotas({ forcar: true });
+    showToast(`Lançamentos juntados numa nota de ${dados.nota.valor}.`, 'success');
+  } catch (erro) {
+    showToast(erro.message, 'error');
+  }
+}
+
+async function descartarGrupo(token) {
+  try {
+    await chamar(`/nfse/grupo/${encodeURIComponent(token)}/descartar`);
+    await recarregarNotas({ forcar: true });
+    showToast('Proposta descartada: cada lançamento segue como nota própria.', 'info');
+  } catch (erro) {
+    showToast(erro.message, 'error');
+  }
+}
+
+async function desfazerGrupo(token) {
+  try {
+    await chamar(`/nfse/grupo/${encodeURIComponent(token)}/desfazer`);
+    await recarregarNotas({ forcar: true });
+    showToast('Agrupamento desfeito: os valores voltaram aos do extrato.', 'info');
+  } catch (erro) {
+    showToast(erro.message, 'error');
+  }
+}
+
+// --- conferencia com o portal (notas emitidas) ----------------------------
+
+function pintarEmitidas(painel) {
+  const alvo = document.getElementById('emitidasPainel');
+  if (!alvo) return;
+  if (!painel) {
+    alvo.innerHTML = '<p class="nfse-hint mb-0">Escolha o período e consulte o portal '
+      + 'para ver o total emitido e o que não bate com a lista acima.</p>';
+    return;
+  }
+
+  // Nunca consultado não é o mesmo que consultado e sem resultado: mostrar as
+  // divergências aqui acusaria "pagou e ficou sem nota" para o mês inteiro só
+  // porque ninguém leu o portal ainda.
+  alvo.dataset.mes = painel.mes_geracao || '';
+  sincronizarCompetencia(painel.competencia);
+  if (painel.nunca_consultado) {
+    alvo.innerHTML = `<p class="nfse-hint mb-0">Nada lido do portal para `
+      + `${esc(painel.mes_geracao)} ainda. Consulte para ver o total emitido e `
+      + `a conferência contra a lista acima.</p>`;
+    return;
+  }
+
+  const quando = painel.consultado_em
+    ? ` <span class="nfse-hint">· lido do portal em ${esc(painel.consultado_em)}</span>` : '';
+  const outras = Object.entries(painel.outras_situacoes || {});
+  // Situacao desconhecida NAO entra no total e NAO some: os codigos de
+  // cancelada/substituida nunca foram observados, e tanto somar quanto
+  // descartar por conta propria erraria um total fiscal.
+  const aviso = outras.length
+    ? `<div class="nfse-hint mt-1">Fora do total, por não estarem como emitidas: `
+      + outras.map(([s, n]) => `${n} em ${esc(s)}`).join(' · ') + '</div>'
+    : '';
+
+  const blocos = [
+    `<div class="nfse-total">
+       <span class="valor">R$ ${esc(painel.total || '0,00')}</span>
+       <span class="rotulo">emitido em ${esc(painel.mes_geracao)}</span>
+       <span class="nfse-hint">${painel.quantidade} nota(s)</span>${quando}
+     </div>${aviso}`,
+  ];
+
+  // As divergencias sao de OUTRO mes (o de referencia). Dizer qual, senao o
+  // operador le tudo como se fosse do mes do total logo acima.
+  blocos.push(`<p class="nfse-hint mt-3 mb-1">Conferência da competência `
+    + `<strong>${esc(painel.competencia)}</strong> — o honorário de um mês é `
+    + `pago e emitido no seguinte, então este mês é diferente do total acima.</p>`);
+
+  blocos.push(listaDivergencia(
+    'Pagou e ficou sem nota', painel.sem_nota,
+    (n) => `${esc(n.empresa || n.nome_csv || '—')} — R$ ${esc(n.valor || '—')}`,
+    'Nada pendente: toda linha do extrato tem nota no portal.'));
+
+  const foraDoAlcance = painel.nao_conferiveis
+    ? ` <span class="nfse-hint">(${painel.nao_conferiveis} nota(s) fora do `
+      + `período com extrato importado não entram nesta conta)</span>` : '';
+  blocos.push(listaDivergencia(
+    'Nota no portal sem linha no extrato', painel.sem_extrato,
+    (e) => `${esc(e.nome_tomador || e.documento || '—')} — R$ ${esc(e.valor || '—')}`,
+    'Nada sobrando: toda nota do portal tem linha correspondente.', foraDoAlcance));
+
+  blocos.push(listaDivergencia(
+    'Valor diferente do extrato', painel.valor_diferente,
+    (d) => `${esc(d.emitida.nome_tomador || d.nota.nome_csv || '—')}: extrato `
+      + `R$ ${esc(d.nota.valor || '—')} · portal R$ ${esc(d.emitida.valor || '—')}`,
+    'Todos os valores batem.'));
+
+  alvo.innerHTML = blocos.join('');
+}
+
+function listaDivergencia(titulo, itens, formatar, vazio, nota = '') {
+  const lista = itens || [];
+  const corpo = lista.length
+    ? `<ul>${lista.map((i) => `<li>${formatar(i)}</li>`).join('')}</ul>`
+    : `<p class="nfse-hint mb-0">${vazio}</p>`;
+  return `<div class="nfse-diverg"><h3>${titulo} (${lista.length})${nota}</h3>${corpo}</div>`;
+}
+
+// Reflete no campo a competencia que o painel de fato conferiu — mas so quando
+// difere, para nao apagar o que o operador esta digitando.
+function sincronizarCompetencia(competencia) {
+  const campo = document.getElementById('emitidasCompetencia');
+  if (campo && competencia && campo.value.trim() !== competencia) {
+    campo.value = competencia;
+  }
+}
+
+function competenciaConferida() {
+  const valor = document.getElementById('emitidasCompetencia')?.value.trim() || '';
+  return /^\d{2}\/\d{4}$/.test(valor) ? valor : null;
+}
+
+// Trocar a competencia nao precisa reconsultar o portal: o espelho ja esta no
+// banco, e so a comparacao muda.
+async function recarregarPainelEmitidas() {
+  const mes = document.getElementById('emitidasPainel')?.dataset.mes;
+  if (!mes) return;
+  const competencia = competenciaConferida();
+  const url = `/nfse/emitidas?mes=${encodeURIComponent(mes)}`
+    + (competencia ? `&competencia=${encodeURIComponent(competencia)}` : '');
+  try {
+    const resposta = await fetch(url);
+    if (!resposta.ok) return;
+    pintarEmitidas((await resposta.json()).painel);
+  } catch { /* a tela continua util com o que ja tem */ }
+}
+
+function preencherPeriodoPadrao() {
+  const campoInicio = document.getElementById('emitidasInicio');
+  const campoFim = document.getElementById('emitidasFim');
+  if (!campoInicio || !campoFim || campoInicio.value) return;
+
+  // Mês da competência que a página está mostrando; sem filtro, o mês corrente.
+  // É quase sempre "o mês que estou fechando", e digitar as duas datas toda vez
+  // seria trabalho repetido.
+  const escopo = escopoAtual();
+  let ano;
+  let mes;
+  const casa = /^(\d{2})\/(\d{4})$/.exec(escopo || '');
+  if (casa) {
+    mes = Number(casa[1]);
+    ano = Number(casa[2]);
+  } else {
+    const hoje = new Date();
+    mes = hoje.getMonth() + 1;
+    ano = hoje.getFullYear();
+  }
+  // dia 0 do mês seguinte = último dia deste mês, sem tabela de dias por mês
+  const ultimo = new Date(ano, mes, 0).getDate();
+  const dois = (n) => String(n).padStart(2, '0');
+  campoInicio.value = `${ano}-${dois(mes)}-01`;
+  campoFim.value = `${ano}-${dois(mes)}-${dois(ultimo)}`;
+}
+
+async function consultarEmitidas(botao) {
+  const inicio = document.getElementById('emitidasInicio')?.value;
+  const fim = document.getElementById('emitidasFim')?.value;
+  const estado = document.getElementById('emitidasEstado');
+  if (!inicio || !fim) {
+    showToast('Informe as datas inicial e final do período.', 'error');
+    return;
+  }
+
+  botao.disabled = true;
+  const rotulo = botao.textContent;
+  botao.textContent = 'Consultando…';
+  if (estado) estado.textContent = 'Abrindo o portal e lendo as páginas…';
+  try {
+    const dados = await chamar('/nfse/emitidas/consultar',
+      { body: JSON.stringify({ inicio, fim, competencia: competenciaConferida() }) });
+    pintarEmitidas(dados.painel);
+    if (estado) {
+      estado.textContent = `${dados.lidas} nota(s) lida(s) em `
+        + `${dados.blocos} consulta(s) · ${dados.novas} nova(s)`;
+    }
+    showToast(`${dados.lidas} nota(s) lida(s) do portal.`, 'success');
+  } catch (erro) {
+    if (estado) estado.textContent = '';
+    showToast(erro.message, 'error');
+  } finally {
+    botao.disabled = false;
+    botao.textContent = rotulo;
+  }
+}
+
+// --- selecao e acao em massa ----------------------------------------------
+
+function pintarSelecao() {
+  const barra = document.getElementById('nfseSelecao');
+  const total = document.getElementById('nfseSelecaoTotal');
+  const todas = document.getElementById('checkTodas');
+  if (!barra) return;
+
+  barra.classList.toggle('d-none', selecionadas.size === 0);
+  if (total) {
+    total.textContent = selecionadas.size === 1
+      ? '1 linha selecionada'
+      : `${selecionadas.size} linhas selecionadas`;
+  }
+  if (todas) {
+    todas.checked = notas.length > 0 && selecionadas.size === notas.length;
+    // estado intermediario: nem todas, nem nenhuma
+    todas.indeterminate = selecionadas.size > 0 && selecionadas.size < notas.length;
+  }
+}
+
+function alternarSelecao(id, marcada) {
+  if (marcada) selecionadas.add(id); else selecionadas.delete(id);
+  pintarSelecao();
+}
+
+function selecionarTodas(marcada) {
+  selecionadas.clear();
+  if (marcada) notas.forEach((n) => selecionadas.add(n.id));
+  renderizar();
+}
+
+async function acaoEmMassa(acao) {
+  const ids = [...selecionadas];
+  if (!ids.length) return;
+  try {
+    const dados = await chamar('/nfse/notas/acao',
+      { body: JSON.stringify({ acao, ids }) });
+    selecionadas.clear();
+    await recarregarNotas({ forcar: true });
+
+    // o rotulo vem do servidor, onde a lista de acoes ja vive
+    const rotulo = dados.rotulo || 'aplicadas';
+    const feitas = dados.aplicadas.length;
+    const recusadas = dados.recusadas || [];
+    if (!recusadas.length) {
+      showToast(`${feitas} ${feitas === 1 ? 'linha' : 'linhas'} ${rotulo}.`, 'success');
+      return;
+    }
+    // A acao e parcial de proposito: dizer so "pronto" esconderia o que ficou
+    // de fora, e o operador so descobriria na hora de emitir.
+    const motivos = recusadas.map((r) => `${r.nome || `#${r.id}`}: ${r.motivo}`).join(' · ');
+    showToast(`${feitas} ${rotulo}; ${recusadas.length} não: ${motivos}`, 'info');
   } catch (erro) {
     showToast(erro.message, 'error');
   }
@@ -430,12 +899,18 @@ function escopoAtual() {
   return document.getElementById('filtroCompetencia')?.value || 'ultima';
 }
 
-async function recarregarNotas() {
+async function recarregarNotas({ forcar = false } = {}) {
   // Redesenhar a tabela apaga o que estiver sendo digitado nela, e este poll
   // roda a cada segundo. Dois guardas: nao redesenha se nada mudou (o caso
   // comum), e nao redesenha enquanto o operador tem uma linha aberta para
-  // corrigir o vinculo.
-  if (editando.size > 0) return;
+  // corrigir o vinculo ou a descricao.
+  //
+  // `forcar` e para a acao EXPLICITA do operador (confirmar/descartar um
+  // agrupamento), que muda varias linhas de uma vez: ali o redesenho e o
+  // resultado que ele pediu, e pular calado deixaria a tela mentindo.
+  if (!forcar && (editando.size > 0 || editandoDescricao.size > 0)) return;
+  // digitar valor/descricao na faixa do grupo tambem precisa sobreviver ao poll
+  if (!forcar && document.activeElement?.closest?.('.nfse-grupo')) return;
   try {
     const resposta = await fetch(
       `/nfse/notas?competencia=${encodeURIComponent(escopoAtual())}`);
@@ -473,6 +948,21 @@ function fecharModalAliquota() {
 
 document.addEventListener('DOMContentLoaded', () => {
   renderizar();
+  pintarEmitidas(lerJsonObjeto('dadosEmitidas'));
+
+  // Default do periodo: o mes da competencia que a pagina esta mostrando, ou o
+  // mes corrente. Digitar as duas datas toda vez seria trabalho repetido para o
+  // caso que e quase sempre "o mes que estou fechando".
+  preencherPeriodoPadrao();
+
+  document.getElementById('emitidasCompetencia')?.addEventListener('change', () => {
+    recarregarPainelEmitidas();
+  });
+
+  document.getElementById('formEmitidas')?.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    consultarEmitidas(document.getElementById('btnConsultarEmitidas'));
+  });
 
   document.getElementById('formImportar')?.addEventListener('submit', async (ev) => {
     ev.preventDefault();
@@ -569,6 +1059,30 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Checkbox nao e button: precisa do proprio listener, antes do de clique.
+  document.getElementById('corpoNotas')?.addEventListener('change', (ev) => {
+    const alvo = ev.target.closest('[data-selecionar]');
+    if (alvo) alternarSelecao(Number(alvo.dataset.selecionar), alvo.checked);
+  });
+  document.getElementById('checkTodas')?.addEventListener('change', (ev) => {
+    selecionarTodas(ev.target.checked);
+  });
+  document.getElementById('btnLimparSelecao')?.addEventListener('click', () => {
+    selecionarTodas(false);
+  });
+  document.getElementById('btnCancelarSelecao')?.addEventListener('click', () => {
+    acaoEmMassa('cancelar');
+  });
+  document.getElementById('btnRestaurarSelecao')?.addEventListener('click', () => {
+    acaoEmMassa('restaurar');
+  });
+  document.getElementById('btnJaEmitiSelecao')?.addEventListener('click', () => {
+    acaoEmMassa('emitida_manual');
+  });
+  document.getElementById('btnDesmarcarSelecao')?.addEventListener('click', () => {
+    acaoEmMassa('desmarcar_emitida');
+  });
+
   document.getElementById('corpoNotas')?.addEventListener('click', (ev) => {
     const alvo = ev.target.closest('button');
     if (!alvo) return;
@@ -579,6 +1093,25 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (alvo.dataset.jaemitida) marcarEmitidaManual(Number(alvo.dataset.jaemitida), true);
     else if (alvo.dataset.desmarcar) marcarEmitidaManual(Number(alvo.dataset.desmarcar), false);
     else if (alvo.dataset.preencher) iniciarEmissao({ notaId: Number(alvo.dataset.preencher) });
+    else if (alvo.dataset.editarDescricao) {
+      editandoDescricao.add(Number(alvo.dataset.editarDescricao));
+      renderizar();
+    } else if (alvo.dataset.cancelarDescricao) {
+      editandoDescricao.delete(Number(alvo.dataset.cancelarDescricao));
+      renderizar();
+    } else if (alvo.dataset.salvarDescricao) {
+      resolverDescricao(Number(alvo.dataset.salvarDescricao));
+    } else if (alvo.dataset.cancelarNota) {
+      cancelarNota(Number(alvo.dataset.cancelarNota), true);
+    } else if (alvo.dataset.restaurar) {
+      cancelarNota(Number(alvo.dataset.restaurar), false);
+    } else if (alvo.dataset.confirmarGrupo) {
+      confirmarGrupo(alvo.dataset.confirmarGrupo);
+    } else if (alvo.dataset.descartarGrupo) {
+      descartarGrupo(alvo.dataset.descartarGrupo);
+    } else if (alvo.dataset.desfazerGrupo) {
+      desfazerGrupo(alvo.dataset.desfazerGrupo);
+    }
   });
 
   // --- modo de emissao ---
