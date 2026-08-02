@@ -1,4 +1,4 @@
-# Zelo — Rotinas Fiscais do Escritório Contábil
+# Zelo — Automação de Rotinas Fiscais Contábeis
 
 > Regularidade sob controle.
 
