@@ -117,7 +117,7 @@ function celulaEmpresa(nota) {
   const podeEditar = nota.status !== 'emitida';
   const editar = podeEditar
     ? ` <button class="btn btn-ghost btn-sm py-0 px-1" data-editar="${nota.id}"
-               title="Trocar a empresa ou o documento desta linha">Editar</button>` : '';
+               title="Trocar empresa ou documento">Editar</button>` : '';
   return `${rotulo}${editar}`;
 }
 
@@ -132,7 +132,7 @@ function acoesDaLinha(nota) {
 
   if (nota.status === 'cancelada') {
     return `<button class="btn btn-ghost btn-sm" data-restaurar="${nota.id}"
-             title="Voltar a considerar esta linha">Restaurar</button>`;
+             title="Voltar para a lista">Restaurar</button>`;
   }
 
   if (nota.status === 'descricao_pendente') {
@@ -169,7 +169,7 @@ function acoesDaLinha(nota) {
     .includes(nota.status) || (nota.status === 'duplicata' && nota.duplicata_liberada);
   if (podePreencher) {
     partes.push(botaoCancelar(nota));
-    partes.push(`<button class="btn btn-ghost btn-sm" data-jaemitida="${nota.id}" title="Marcar como já emitida por fora">Já emiti</button>`);
+    partes.push(`<button class="btn btn-ghost btn-sm" data-jaemitida="${nota.id}" title="Já emitida no portal, por fora">Já emiti</button>`);
     partes.push(`<button class="btn btn-primary btn-sm" data-preencher="${nota.id}">Preencher</button>`);
   }
   if (nota.status === 'aguardando_confirmacao') {
@@ -185,7 +185,7 @@ function botaoCancelar(nota) {
   // Ghost e nao `btn-danger`: cancelar aqui nao destroi nada nem cancela nota
   // na prefeitura — so tira a linha da lista, e e reversivel pelo "Restaurar".
   return `<button class="btn btn-ghost btn-sm" data-cancelar-nota="${nota.id}"
-           title="O contador dispensou esta nota: tirar da lista">Cancelar</button>`;
+           title="Tirar da lista">Cancelar</button>`;
 }
 
 function celulaDescricao(nota) {
@@ -205,7 +205,7 @@ function celulaDescricao(nota) {
   const editar = nota.status === 'emitida' || nota.status === 'aguardando_confirmacao'
     ? ''
     : ` <button class="btn btn-ghost btn-sm py-0 px-1" data-editar-descricao="${nota.id}"
-               title="Mudar o que esta nota descreve">Editar</button>`;
+               title="Mudar a descrição">Editar</button>`;
   const prevista = nota.descricao_prevista
     ? `<div class="nfse-descricao-prevista" title="${esc(nota.descricao_prevista)}">${esc(nota.descricao_prevista)}</div>`
     : '';
@@ -267,8 +267,8 @@ function faixaDoGrupo(nota, colunas) {
         <div class="nfse-grupo">
           <span class="nfse-grupo-texto">
             <span class="nfse-grupo-selo">A agrupar</span>
-            <strong>Juntar numa nota só?</strong> Vários lançamentos deste tomador
-            — ou um estorno — no período.
+            <strong>Juntar numa nota só?</strong> Vários lançamentos deste
+            tomador no período.
             <span class="nfse-grupo-conta">${esc(grupo.detalhe || '')}</span>
           </span>
           <span class="nfse-grupo-acoes">
@@ -376,11 +376,11 @@ function pintarSessao({ aliquota, aliquota_confirmada: confirmada, ativa }) {
 
   if (estado) {
     if (aliquotaConfirmada) {
-      estado.textContent = 'Alíquota confirmada. Já dá para preencher as notas.';
+      estado.textContent = 'Alíquota confirmada.';
     } else if (aliquota) {
-      estado.textContent = 'Confira se a alíquota bate com a do mês antes de preencher.';
+      estado.textContent = 'Confira a alíquota antes de preencher.';
     } else if (ativa) {
-      estado.textContent = 'Não consegui ler a alíquota do portal. Confira no navegador e confirme.';
+      estado.textContent = 'Não consegui ler a alíquota. Confira no navegador e confirme.';
     } else {
       estado.textContent = '';
     }
@@ -413,7 +413,7 @@ async function resolverEmpresa(id) {
   const documento = campo?.value.trim() || '';
 
   if (empresaId && documento) {
-    showToast('Escolha uma empresa OU informe um CPF/CNPJ. Limpe o que não quer usar.', 'error');
+    showToast('Escolha uma empresa ou informe um CPF/CNPJ, não os dois.', 'error');
     return;
   }
   const corpo = {};
@@ -477,9 +477,7 @@ async function resolverDescricao(id) {
       { body: JSON.stringify({ descricao_servico: servico, competencia }) });
     editandoDescricao.delete(id);
     substituir(dados.nota);
-    showToast(servico
-      ? 'Serviço definido — o sistema vai lembrar dele no próximo extrato.'
-      : 'Competência definida.', 'success');
+    showToast(servico ? 'Serviço definido.' : 'Competência definida.', 'success');
   } catch (erro) {
     showToast(erro.message, 'error');
   }
@@ -507,7 +505,7 @@ async function descartarGrupo(token) {
   try {
     await chamar(`/nfse/grupo/${encodeURIComponent(token)}/descartar`);
     await recarregarNotas({ forcar: true });
-    showToast('Proposta descartada: cada lançamento segue como nota própria.', 'info');
+    showToast('Cada lançamento segue como nota própria.', 'info');
   } catch (erro) {
     showToast(erro.message, 'error');
   }
@@ -517,7 +515,7 @@ async function desfazerGrupo(token) {
   try {
     await chamar(`/nfse/grupo/${encodeURIComponent(token)}/desfazer`);
     await recarregarNotas({ forcar: true });
-    showToast('Agrupamento desfeito: os valores voltaram aos do extrato.', 'info');
+    showToast('Agrupamento desfeito.', 'info');
   } catch (erro) {
     showToast(erro.message, 'error');
   }
@@ -529,8 +527,7 @@ function pintarEmitidas(painel) {
   const alvo = document.getElementById('emitidasPainel');
   if (!alvo) return;
   if (!painel) {
-    alvo.innerHTML = '<p class="nfse-hint mb-0">Escolha o período e consulte o portal '
-      + 'para ver o total emitido e o que não bate com a lista acima.</p>';
+    alvo.innerHTML = '<p class="nfse-hint mb-0">Escolha o período e consulte o portal.</p>';
     return;
   }
 
@@ -541,8 +538,7 @@ function pintarEmitidas(painel) {
   sincronizarCompetencia(painel.competencia);
   if (painel.nunca_consultado) {
     alvo.innerHTML = `<p class="nfse-hint mb-0">Nada lido do portal para `
-      + `${esc(painel.mes_geracao)} ainda. Consulte para ver o total emitido e `
-      + `a conferência contra a lista acima.</p>`;
+      + `${esc(painel.mes_geracao)} ainda.</p>`;
     return;
   }
 
@@ -568,21 +564,20 @@ function pintarEmitidas(painel) {
   // As divergencias sao de OUTRO mes (o de referencia). Dizer qual, senao o
   // operador le tudo como se fosse do mes do total logo acima.
   blocos.push(`<p class="nfse-hint mt-3 mb-1">Conferência da competência `
-    + `<strong>${esc(painel.competencia)}</strong> — o honorário de um mês é `
-    + `pago e emitido no seguinte, então este mês é diferente do total acima.</p>`);
+    + `<strong>${esc(painel.competencia)}</strong>, o mês de referência.</p>`);
 
   blocos.push(listaDivergencia(
     'Pagou e ficou sem nota', painel.sem_nota,
-    (n) => `${esc(n.empresa || n.nome_csv || '—')} — R$ ${esc(n.valor || '—')}`,
-    'Nada pendente: toda linha do extrato tem nota no portal.'));
+    (n) => `${esc(n.empresa || n.nome_csv || '—')} · R$ ${esc(n.valor || '—')}`,
+    'Nada pendente.'));
 
   const foraDoAlcance = painel.nao_conferiveis
     ? ` <span class="nfse-hint">(${painel.nao_conferiveis} nota(s) fora do `
       + `período com extrato importado não entram nesta conta)</span>` : '';
   blocos.push(listaDivergencia(
     'Nota no portal sem linha no extrato', painel.sem_extrato,
-    (e) => `${esc(e.nome_tomador || e.documento || '—')} — R$ ${esc(e.valor || '—')}`,
-    'Nada sobrando: toda nota do portal tem linha correspondente.', foraDoAlcance));
+    (e) => `${esc(e.nome_tomador || e.documento || '—')} · R$ ${esc(e.valor || '—')}`,
+    'Nada sobrando.', foraDoAlcance));
 
   blocos.push(listaDivergencia(
     'Valor diferente do extrato', painel.valor_diferente,
@@ -878,7 +873,7 @@ function pintarLote(lote) {
 }
 
 const ROTULO_LOTE = {
-  running: 'Emitindo — aguardando você conferir e emitir no navegador',
+  running: 'Aguardando você conferir e emitir no navegador',
   paused: 'Pausado nesta nota',
   stopped: 'Interrompido',
   completed: 'Concluído',
@@ -1116,14 +1111,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- modo de emissao ---
   const DESCRICAO_MODO = {
-    individual: 'Preenche a nota que você escolher na lista e fecha o navegador '
-      + 'assim que a emissão for detectada. Cada nota pede o certificado de novo.',
-    lote: 'Percorre a lista inteira sem fechar o navegador: a mesma janela já '
-      + 'autenticada volta para a emissão e preenche a próxima assim que você '
-      + 'emitir a atual. O certificado é pedido uma vez só.',
-    automatico: 'Percorre a lista e emite sozinha. Antes de cada emissão relê a '
-      + 'tela de revisão e compara CPF/CNPJ, valor e descrição com a linha; '
-      + 'qualquer diferença para o lote naquela nota, sem emitir.',
+    individual: 'Preenche a nota que você escolher e para na revisão. '
+      + 'Cada nota pede o certificado de novo.',
+    lote: 'Preenche a lista inteira na mesma janela, parando na revisão de cada '
+      + 'nota. Certificado uma vez só.',
+    automatico: 'Preenche e emite sozinha, conferindo CPF/CNPJ, valor e '
+      + 'descrição antes de cada emissão.',
   };
 
   function pintarModo() {
@@ -1169,7 +1162,7 @@ document.addEventListener('DOMContentLoaded', () => {
     comandoLote('/nfse/lote/pular', 'Pulando esta nota.');
   });
   document.getElementById('btnPausarLote')?.addEventListener('click', () => {
-    comandoLote('/nfse/lote/pausar', 'Pausa pedida — termina a nota atual.');
+    comandoLote('/nfse/lote/pausar', 'Pausa pedida; termina a nota atual.');
   });
   document.getElementById('btnRetomarLote')?.addEventListener('click', () => {
     comandoLote('/nfse/lote/retomar', 'Retomando de onde parou.');

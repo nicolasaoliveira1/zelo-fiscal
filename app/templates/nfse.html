@@ -331,9 +331,6 @@
 <!-- Configuracao dos campos fixos -->
 <div class="collapse mb-3" id="painelConfig">
     <div class="nfse-card">
-        <p class="nfse-hint mb-3">
-            Valores fixos usados em toda nota. Só mexa aqui se o portal mudar.
-        </p>
         <form id="formConfig" class="row g-3">
             <div class="col-md-3">
                 <label class="form-label" for="cfg_codigo_tributacao">Código de tributação</label>
@@ -375,8 +372,7 @@
                 <input class="form-control" id="cfg_descricao_template"
                        name="descricao_template" value="{{ config.descricao_template }}">
                 <div class="nfse-hint mt-1">
-                    Use <code>{competencia}</code> onde entra o mês de referência de cada nota.
-                    Vale para honorários; nota de serviço avulso usa a descrição do próprio serviço.
+                    <code>{competencia}</code> vira o mês de referência da nota.
                 </div>
             </div>
             <div class="col-12">
@@ -384,9 +380,7 @@
                 <input class="form-control" id="cfg_categoria_extrato"
                        name="categoria_extrato" value="{{ config.categoria_extrato }}">
                 <div class="nfse-hint mt-1">
-                    Só para o extrato do Banco Inter: é a categoria que você deu aos
-                    recebimentos de clientes no app do banco. Linhas com outra categoria
-                    são ignoradas na importação — se você renomeá-la no banco, mude aqui também.
+                    Extrato do Inter: outras categorias são ignoradas na importação.
                 </div>
             </div>
             <div class="col-12 d-flex justify-content-end">
@@ -402,11 +396,8 @@
         <div class="nfse-card h-100">
             <h2 class="h6 nfse-title mb-2">1. Importar o extrato do banco</h2>
             <p class="nfse-hint mb-3">
-                O <strong>CSV de cobranças do Banrisul</strong> ou o
-                <strong>PDF do extrato do Banco Inter</strong>, como saem do banco —
-                pode escolher vários de uma vez, misturando os dois. Linhas repetidas
-                entre arquivos entram uma só vez. O documento de cada tomador é
-                resolvido aqui, antes de abrir o navegador.
+                CSV de cobranças do Banrisul ou PDF do extrato do Inter.
+                Pode escolher vários de uma vez.
             </p>
             <form id="formImportar" class="d-flex gap-2 align-items-center flex-wrap">
                 <input class="form-control form-control-sm" type="file" id="arquivoCsv"
@@ -416,8 +407,8 @@
             </form>
             {% if lote %}
             <div class="nfse-hint mt-2">
-                Último import: <strong>{{ lote.nome_arquivo }}</strong>
-                — {{ lote.criado_em.strftime('%d/%m/%Y %H:%M') }}
+                Último import: <strong>{{ lote.nome_arquivo }}</strong>,
+                {{ lote.criado_em.strftime('%d/%m/%Y %H:%M') }}
             </div>
             {% endif %}
         </div>
@@ -428,8 +419,8 @@
         <div class="nfse-card h-100">
             <h2 class="h6 nfse-title mb-2">2. Abrir o portal e conferir a alíquota</h2>
             <p class="nfse-hint mb-3">
-                Abre o Emissor Nacional com o certificado. A alíquota do Simples muda
-                mês a mês e sai na nota — nada é preenchido antes de você conferir.
+                Abre o Emissor Nacional com o certificado. A alíquota do Simples
+                muda todo mês e sai na nota; confira antes de preencher.
             </p>
             <div class="d-flex gap-2 align-items-center flex-wrap">
                 <button class="btn btn-soft-primary btn-sm" type="button" id="btnPrepararSessao">
@@ -494,11 +485,6 @@
 <!-- Modo de emissao -->
 <div class="nfse-card mb-3">
     <h2 class="h6 nfse-title mb-2">3. Como emitir</h2>
-    <p class="nfse-hint mb-2">
-        Nos dois primeiros modos a automação preenche as três etapas e
-        <strong>para na tela de revisão</strong>: quem confere e clica em
-        "Emitir NFS-e" é você. No automático ela também emite.
-    </p>
 
     <div class="btn-group nfse-modo" role="group" aria-label="Modo de emissão">
         <input type="radio" class="btn-check" name="nfseModo" id="modoIndividual"
@@ -553,7 +539,7 @@
             <select class="form-select form-select-sm" id="filtroCompetencia"
                     style="width: auto;" data-atual="{{ competencia_atual }}">
                 <option value="ultima"{% if competencia_atual == 'ultima' %} selected{% endif %}>
-                    Última importação{% if lote %} — {{ lote.criado_em.strftime('%d/%m às %H:%M') }}{% endif %}
+                    Última importação{% if lote %} ({{ lote.criado_em.strftime('%d/%m às %H:%M') }}){% endif %}
                 </option>
                 {% for competencia in competencias %}
                 <option value="{{ competencia }}"{% if competencia_atual == competencia %} selected{% endif %}>
@@ -578,7 +564,7 @@
                 Restaurar
             </button>
             <button class="btn btn-soft-primary btn-sm" type="button" id="btnJaEmitiSelecao"
-                    title="Registrar que você já emitiu estas notas no portal, por fora">
+                    title="Marcar como já emitidas no portal, por fora">
                 Já emiti
             </button>
             <button class="btn btn-outline-danger btn-sm" type="button" id="btnCancelarSelecao">
@@ -607,7 +593,7 @@
         </table>
     </div>
     <p class="nfse-hint mt-3 mb-0" id="nfseVazio">
-        Nenhuma nota importada ainda. Comece pelo passo 1.
+        Nenhuma nota importada.
     </p>
 </div>
 
@@ -615,9 +601,7 @@
 <div class="nfse-card mt-3">
     <h2 class="h6 nfse-title mb-2">5. Conferir com o que saiu no portal</h2>
     <p class="nfse-hint mb-3">
-        Lê a lista de NFS-e emitidas no Emissor Nacional e soma o mês — o número que
-        você fazia à mão. Só leitura: nada é emitido, cancelado ou substituído aqui.
-        Períodos maiores que um mês são consultados mês a mês e somados.
+        Lê as NFS-e emitidas no Emissor Nacional e soma o período. Só leitura.
     </p>
 
     <form id="formEmitidas" class="d-flex gap-2 align-items-end flex-wrap mb-3">
@@ -642,8 +626,7 @@
         <input class="form-control form-control-sm nfse-mono" id="emitidasCompetencia"
                style="width: 7.5rem;" placeholder="MM/AAAA" maxlength="7">
         <span class="nfse-hint">
-            o mês de <strong>referência</strong> dos honorários — diferente do mês em que
-            a nota sai. Padrão: o mês anterior ao período consultado.
+            mês de <strong>referência</strong> dos honorários, não o da emissão.
         </span>
     </div>
 
@@ -663,17 +646,12 @@
             <div class="modal-body">
                 <p class="mb-2">
                     A automação vai <strong>emitir sozinha</strong> as notas desta
-                    lista. Você não verá cada uma antes de sair.
-                </p>
-                <p class="mb-2">
-                    Antes de cada emissão ela relê a tela de revisão e compara
-                    <strong>CPF/CNPJ do tomador, valor e descrição</strong> com a
-                    linha. Qualquer diferença — ou um campo que ela não consiga
-                    ler — para o lote naquela nota, sem emitir.
+                    lista, sem você ver cada uma. Antes de emitir ela confere
+                    CPF/CNPJ, valor e descrição na tela de revisão; qualquer
+                    diferença para o lote naquela nota.
                 </p>
                 <p class="nfse-hint mb-0">
-                    Nota fiscal emitida errada precisa ser cancelada. Confira a
-                    alíquota do Simples antes de seguir.
+                    Confira a alíquota do Simples antes de seguir.
                 </p>
             </div>
             <div class="modal-footer batch-modal-footer">
@@ -698,12 +676,8 @@
                         aria-label="Fechar"></button>
             </div>
             <div class="modal-body">
-                <p class="mb-2">
-                    Você ainda não conferiu a alíquota do Simples Nacional nesta sessão.
-                </p>
-                <p class="nfse-hint mb-0">
-                    Ela muda mês a mês e sai na nota. Se já sabe que está correta,
-                    pode preencher mesmo assim.
+                <p class="mb-0">
+                    Você ainda não conferiu a alíquota do Simples nesta sessão.
                 </p>
             </div>
             <div class="modal-footer batch-modal-footer">
