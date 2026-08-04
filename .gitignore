@@ -61,6 +61,9 @@ docs/IDENTIDADE_ZELO.md
 # Análise de arquitetura (uso local, não versionada)
 docs/ANALISE_ARQUITETURA.md
 
+# Guia de design language (uso local, não versionado)
+docs/DESIGN_LANGUAGE.md
+
 # Bancos locais
 *.sqlite3
 *.db
