@@ -235,6 +235,7 @@ def _resultado_baixar_vazio():
         'municipal_pdf_msg': None,
         'certidao_pdf_classificacao': None,
         'certidao_pdf_msg': None,
+        'pdf_invalida_msg': None,
     }
 
 
@@ -247,6 +248,7 @@ def _baixar_classificacao_vazia():
         'municipal_pdf_msg': None,
         'certidao_pdf_classificacao': None,
         'certidao_pdf_msg': None,
+        'pdf_invalida_msg': None,
     }
 
 
@@ -261,6 +263,17 @@ def _baixar_classificar_pdf(certidao, cfg, caminho_arquivo):
     usar_config_municipal = cfg['usar_config_municipal']
 
     classif = _baixar_classificacao_vazia()
+
+    # DATA-03.2: o gate vem PRIMEIRO e vale para todo tipo. Se o arquivo nao e
+    # certidao, classificar por tipo nao faz sentido — e varios caminhos daqui
+    # (municipal sem `classificar_pdf_status`) nem chegariam a classificar.
+    gate_ok, _motivo = pdf.avaliar_arquivo_certidao(
+        caminho_arquivo, origem_log=tipo_certidao_chave)
+    if not gate_ok:
+        classif['pdf_invalida_msg'] = pdf.descartar_pdf_invalido(
+            certidao, caminho_arquivo, validade_anterior=certidao.data_validade,
+            tipo_label=certidao.tipo.value)
+        return classif
 
     if tipo_certidao_chave == 'ESTADUAL' and estado_emp == 'RS':
         classif['rs_estadual_classificacao'], classif['rs_estadual_msg'] = pdf.classificar_e_tratar_positivo(
@@ -528,6 +541,7 @@ def _executar_automacao_baixar(certidao, cfg):
     municipal_pdf_msg = None
     certidao_pdf_classificacao = None
     certidao_pdf_msg = None
+    pdf_invalida_msg = None
 
     # contexto compartilhado com helpers de steps
     contexto = {
@@ -692,6 +706,7 @@ def _executar_automacao_baixar(certidao, cfg):
             municipal_pdf_msg = classif['municipal_pdf_msg']
             certidao_pdf_classificacao = classif['certidao_pdf_classificacao']
             certidao_pdf_msg = classif['certidao_pdf_msg']
+            pdf_invalida_msg = classif['pdf_invalida_msg']
         else:
             log_event('fgts_monitor_skipped', certidao_id=certidao.id)
             if driver:
@@ -742,6 +757,7 @@ def _executar_automacao_baixar(certidao, cfg):
     resultado['municipal_pdf_msg'] = municipal_pdf_msg
     resultado['certidao_pdf_classificacao'] = certidao_pdf_classificacao
     resultado['certidao_pdf_msg'] = certidao_pdf_msg
+    resultado['pdf_invalida_msg'] = pdf_invalida_msg
     return resultado
 
 
@@ -782,6 +798,12 @@ def _montar_resposta_baixar(certidao, cfg, resultado):
     data_encontrada = resultado['data_encontrada']
 
     response_data = {'status': 'unknown'}
+
+    # DATA-03.3/03.4: o arquivo nao passou no gate. Vem antes de tudo — as
+    # classificacoes por tipo nem chegam a rodar nesse caso.
+    if resultado.get('pdf_invalida_msg'):
+        return _json_error(resultado['pdf_invalida_msg'], 422,
+                           error_type='pdf_invalido')
 
     if rs_estadual_classificacao == 'positiva':
         response_data['status'] = 'estadual_rs_positiva'
