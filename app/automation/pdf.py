@@ -200,5 +200,39 @@ def classificar_e_tratar_positivo(certidao, caminho_pdf, origem_log='PDF', tipo_
     return 'positiva', msg
 
 
+def descartar_pdf_invalido(certidao, caminho_pdf, *, validade_anterior=None,
+                           tipo_label=None):
+    """PDF reprovado no gate: apaga o arquivo e desfaz a validade concedida.
+
+    Nucleo compartilhado dos fluxos (spec 08, DATA-03.3/03.4). Espelha
+    `classificar_e_tratar_positivo`, com uma diferenca deliberada: NAO marca
+    PENDENTE. Certidao positiva e um fato fiscal sobre a empresa; PDF reprovado
+    e falha da emissao, entao a certidao volta ao estado anterior e o item entra
+    no retry do lote. Retorna a mensagem acionavel.
+    """
+    erro_remocao = None
+    try:
+        if caminho_pdf and os.path.exists(caminho_pdf):
+            os.remove(caminho_pdf)
+    except Exception as exc_remove:
+        erro_remocao = str(exc_remove)
+
+    label = (tipo_label or (certidao.tipo.value if certidao else '') or 'certidão').strip()
+    try:
+        if certidao:
+            certidao.caminho_arquivo = None
+            certidao.data_validade = validade_anterior
+            db.session.commit()
+    except Exception as exc_db:
+        db.session.rollback()
+        log_event('pdf_gate_descarte_db_error', level='ERROR', error=str(exc_db))
+
+    msg = (f'O arquivo baixado não é uma certidão {label} válida '
+           '(possível página de erro do portal). Nada foi gravado.')
+    if erro_remocao:
+        msg += f' Não foi possível remover o arquivo automaticamente: {erro_remocao}'
+    return msg
+
+
 def classificar_estadual_rs(caminho_pdf):
     return classificar_status(caminho_pdf, origem_log='ESTADUAL-RS')
