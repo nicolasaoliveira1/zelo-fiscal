@@ -195,6 +195,67 @@ def test_aprovacao_nao_registra_reprovacao(tmp_path, monkeypatch):
     assert 'pdf_gate_reprovado' not in eventos
 
 
+# --- classificar_status: o funil unico ganha o gate (DATA-03.2/03.5) ---------
+
+@pytest.mark.parametrize('chave,texto', sorted(TEXTOS_PAGINA_DE_ERRO.items()))
+def test_classificar_status_invalida_para_pagina_de_erro(chave, texto, tmp_path,
+                                                        monkeypatch):
+    _pdf_com_texto(monkeypatch, texto)
+    assert pdf.classificar_status(_arquivo_grande(tmp_path)) == 'invalida'
+
+
+def test_classificar_status_invalida_para_arquivo_ausente(tmp_path):
+    assert pdf.classificar_status(str(tmp_path / 'sumiu.pdf')) == 'invalida'
+
+
+def test_classificar_status_invalida_para_arquivo_truncado(tmp_path):
+    arq = tmp_path / 'truncado.pdf'
+    arq.write_bytes(b'%PDF-1.4 truncado')
+    assert pdf.classificar_status(str(arq)) == 'invalida'
+
+
+@pytest.mark.parametrize('texto,esperado', [
+    ('CERTIDÃO NEGATIVA DE DÉBITOS', 'negativa'),
+    ('CERTIDÃO POSITIVA de debitos', 'positiva'),
+    ('Certidão Positiva com Efeitos de Negativa', 'efeito_negativa'),
+])
+def test_classificar_status_preserva_classificacao_de_certidao_real(
+        texto, esperado, tmp_path, monkeypatch):
+    """Regressao: o gate nao pode mudar a classificacao de certidao valida."""
+    _pdf_com_texto(monkeypatch, texto)
+    assert pdf.classificar_status(_arquivo_grande(tmp_path)) == esperado
+
+
+def test_classificar_status_mantem_desconhecida_com_marcador(tmp_path, monkeypatch):
+    """DATA-03.5: redacao nao reconhecida segue 'desconhecida', nao 'invalida' —
+    e o que mantem Trabalhista e Municipal emitindo."""
+    _pdf_com_texto(monkeypatch, 'CERTIDÃO de regularidade emitida pelo orgao')
+    assert pdf.classificar_status(_arquivo_grande(tmp_path)) == 'desconhecida'
+
+
+def test_classificar_estadual_rs_herda_o_gate(tmp_path, monkeypatch):
+    """DATA-03.2: o RS delega a classificar_status, entao ganha o gate junto."""
+    _pdf_com_texto(monkeypatch, TEXTOS_PAGINA_DE_ERRO['sessao'])
+    assert pdf.classificar_estadual_rs(_arquivo_grande(tmp_path)) == 'invalida'
+
+    _pdf_com_texto(monkeypatch, TEXTOS_CERTIDAO_REAL['estadual_rs'])
+    assert pdf.classificar_estadual_rs(_arquivo_grande(tmp_path)) != 'invalida'
+
+
+def test_classificar_status_le_o_pdf_uma_vez_so(tmp_path, monkeypatch):
+    """O gate roda dentro da emissao; ler o PDF duas vezes por certidao seria
+    custo puro num lote."""
+    leituras = []
+
+    def _abrir(caminho):
+        leituras.append(caminho)
+        return _FakePdf([_FakePage(TEXTOS_CERTIDAO_REAL['fgts'])])
+
+    monkeypatch.setattr(pdf.pdfplumber, 'open', _abrir)
+    pdf.classificar_status(_arquivo_grande(tmp_path))
+    assert len(leituras) == 1
+
+
 def test_pdf_corrompido_reprova_sem_levantar(tmp_path, monkeypatch):
     """O gate roda no meio da emissao: nunca pode levantar."""
     def _boom(_c):

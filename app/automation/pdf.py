@@ -146,7 +146,25 @@ def avaliar_arquivo_certidao(caminho_pdf, origem_log='PDF'):
 
 
 def classificar_status(caminho_pdf, origem_log='PDF'):
-    return classificar_texto(extrair_texto(caminho_pdf, origem_log=origem_log))
+    """Classifica o PDF, reprovando antes o que nao e certidao (DATA-03.2).
+
+    Este e o funil unico por onde os 5 fluxos passam, entao plugar o gate aqui
+    cobre todos de uma vez. Devolve 'invalida' quando o arquivo nao passa no
+    gate; nos demais casos, a classificacao de sempre.
+    """
+    motivo = _motivo_arquivo_invalido(caminho_pdf)
+    if motivo:
+        _reprovar(motivo, origem_log)
+        return 'invalida'
+
+    # Le o PDF uma vez so: o gate de conteudo e a classificacao usam o mesmo texto.
+    texto = extrair_texto(caminho_pdf, origem_log=origem_log)
+    motivo = _motivo_texto_invalido(texto)
+    if motivo:
+        _reprovar(motivo, origem_log)
+        return 'invalida'
+
+    return classificar_texto(texto)
 
 
 def classificar_e_tratar_positivo(certidao, caminho_pdf, origem_log='PDF', tipo_label=None):
