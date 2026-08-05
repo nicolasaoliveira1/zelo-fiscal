@@ -74,6 +74,77 @@ def classificar_texto(texto):
     return 'desconhecida'
 
 
+# Abaixo disso o arquivo esta truncado ou e um stub de erro — nenhuma certidao
+# real do sistema chega perto. Sinal fraco de proposito: o criterio forte e o
+# marcador de texto abaixo.
+TAMANHO_MINIMO_PDF_BYTES = 1024
+
+# Vocabulario AMPLO de certidao (spec 08, DATA-03.1). Amplo porque o gate so
+# reprova por EVIDENCIA NEGATIVA: certidao com redacao que `classificar_texto`
+# nao reconhece ('desconhecida') tem de continuar passando — Trabalhista e
+# Municipal dependem desse caminho. Siglas curtas exigem palavra inteira, senao
+# 'SEGUNDO' viraria CND.
+_MARCADORES_CERTIDAO = re.compile(
+    r'CERTIDAO'
+    r'|CERTIFICADO\s+DE\s+REGULARIDADE'
+    r'|CONSULTA\s+REGULARIDADE'
+    r'|REGULARIDADE\s+DO\s+EMPREGADOR'
+    r'|NADA\s+CONSTA'
+    r'|\bCND\b'
+    r'|\bCNDT\b'
+    r'|\bCRF\b'
+)
+
+
+def tem_marcador_certidao(texto):
+    """True se o texto tem alguma marca de que e uma certidao (logica pura)."""
+    return bool(_MARCADORES_CERTIDAO.search(_normalizar(texto)))
+
+
+def _motivo_arquivo_invalido(caminho_pdf):
+    """Motivo da reprovacao pelas checagens de arquivo, ou None. Nao le o PDF."""
+    if not caminho_pdf or not os.path.exists(caminho_pdf):
+        return 'arquivo ausente'
+    try:
+        tamanho = os.path.getsize(caminho_pdf)
+    except OSError as exc:
+        return f'arquivo ilegivel ({exc})'
+    if tamanho < TAMANHO_MINIMO_PDF_BYTES:
+        return f'arquivo pequeno demais para uma certidao ({tamanho} bytes)'
+    return None
+
+
+def _motivo_texto_invalido(texto):
+    """Motivo da reprovacao pelo conteudo, ou None."""
+    if not (texto or '').strip():
+        return 'sem texto extraivel (possivel pagina de erro ou PDF vazio)'
+    if not tem_marcador_certidao(texto):
+        return 'o texto nao parece de uma certidao'
+    return None
+
+
+def _reprovar(motivo, origem_log):
+    log_event('pdf_gate_reprovado', level='WARNING', origem=origem_log, motivo=motivo)
+    return False, motivo
+
+
+def avaliar_arquivo_certidao(caminho_pdf, origem_log='PDF'):
+    """Responde "isto e um PDF de certidao?" — (ok, motivo). Nunca levanta.
+
+    Nucleo compartilhado do gate (spec 08, DATA-03): reprova apenas por
+    evidencia negativa — arquivo ausente/truncado, sem texto extraivel, ou sem
+    nenhum marcador de certidao. NAO reprova por classificacao 'desconhecida'.
+    """
+    motivo = _motivo_arquivo_invalido(caminho_pdf)
+    if motivo:
+        return _reprovar(motivo, origem_log)
+
+    motivo = _motivo_texto_invalido(extrair_texto(caminho_pdf, origem_log=origem_log))
+    if motivo:
+        return _reprovar(motivo, origem_log)
+    return True, None
+
+
 def classificar_status(caminho_pdf, origem_log='PDF'):
     return classificar_texto(extrair_texto(caminho_pdf, origem_log=origem_log))
 
