@@ -29,6 +29,7 @@ from app.models import (
     get_a_vencer_dias,
 )
 from app.utils import (
+    cnpj_valido,
     json_error as _json_error,
 )
 from app.services import (
@@ -278,7 +279,14 @@ def adicionar_empresa():
 
     cnpj_limpo = _normalizar_cnpj(cnpj)
     if len(cnpj_limpo) != 14:
-        flash('CNPJ inválido, verifique os dígitos.', 'warning')
+        flash('CNPJ inválido: informe os 14 dígitos.', 'warning')
+        return _redirect_apos_cadastro()
+
+    # DATA-01.1: contar 14 digitos deixava passar erro de digitacao. O criterio
+    # e o digito verificador, pelo mesmo nucleo que a NFSe ja usa (app/utils.py).
+    if not cnpj_valido(cnpj_limpo):
+        flash('CNPJ inválido: o dígito verificador não confere. Confira a digitação.',
+              'warning')
         return _redirect_apos_cadastro()
 
     if not estado or not re.match(r'^[A-Z]{2}$', estado):

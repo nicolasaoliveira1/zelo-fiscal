@@ -154,7 +154,9 @@ def test_acao_que_falha_registra_erro(login_as, ids, app, monkeypatch):
 def test_empresa_criar_gera_evento(login_as, ids, app):
     c = login_as('operador')
     c.post('/empresa/adicionar', data={
-        'nome': 'Beta LTDA', 'cnpj': '33.333.333/3333-33',
+        # DV valido: desde a spec 08 (DATA-01.1) a rota recusa CNPJ com digito
+        # verificador errado, e este teste exige o caminho feliz do cadastro.
+        'nome': 'Beta LTDA', 'cnpj': '33.000.167/0001-01',
         'cidade': 'Tramandai', 'estado': 'RS',
     })
     with app.app_context():
