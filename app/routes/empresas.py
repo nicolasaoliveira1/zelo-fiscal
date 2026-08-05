@@ -229,17 +229,6 @@ def abrir_pasta_empresa(empresa_id):
     return jsonify({'status': 'ok', 'pasta': pasta})
 
 
-_NOMES_EXIBICAO_CIDADE = {
-    'Capao da Canoa': 'Capão da Canoa',
-    'Imbe': 'Imbé',
-    'Osorio': 'Osório',
-    'Ponta Pora': 'Ponta Porã',
-    'Sao Paulo': 'São Paulo',
-    'Tramandai': 'Tramandaí',
-    'Xangrila': 'Xangri-Lá',
-}
-
-
 @bp.route('/empresa/nova', endpoint='nova_empresa')
 @requer_papel('operador')
 def pagina_nova_empresa():
@@ -247,7 +236,9 @@ def pagina_nova_empresa():
     vistos = set()
     municipios = []
     for m in municipios_db:
-        exibicao = _NOMES_EXIBICAO_CIDADE.get(m.nome, m.nome)
+        # DATA-04.3: a grafia de exibicao vem do mapa canonico compartilhado
+        # (cidade_canonica), nao de uma segunda tabela local que divergiria dele.
+        exibicao = canonicalizar(m.nome)
         if exibicao not in vistos:
             vistos.add(exibicao)
             municipios.append((m.nome, exibicao))

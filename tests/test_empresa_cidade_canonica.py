@@ -83,6 +83,39 @@ def test_edicao_cidade_fora_do_mapa_fica_trimada(app, client, ids):
         assert Empresa.query.get(empresa_id).cidade == 'Curitiba'
 
 
+def test_pagina_nova_empresa_exibe_grafia_acentuada(app, login_as):
+    """DATA-04.3: a lista de municipios da tela vem do mapa canonico
+    compartilhado — municipio gravado sem acento aparece acentuado."""
+    with app.app_context():
+        db.session.add(Municipio(nome='Osorio', url_certidao='https://exemplo.test',
+                                 cnpj_field_id='cnpj', by='id'))
+        db.session.commit()
+
+    resp = login_as('operador').get('/empresa/nova')
+    assert resp.status_code == 200
+    assert 'Osório' in resp.get_data(as_text=True)
+
+
+def test_pagina_nova_empresa_deduplica_por_exibicao(app, login_as):
+    """DATA-04.3 / regressao: duas linhas de Municipio que convergem para a
+    mesma grafia canonica aparecem uma vez so na lista."""
+    with app.app_context():
+        db.session.add(Municipio(nome='Xangrila', url_certidao='https://a.test',
+                                 cnpj_field_id='cnpj', by='id'))
+        db.session.add(Municipio(nome='Xangri-Lá', url_certidao='https://b.test',
+                                 cnpj_field_id='cnpj', by='id'))
+        db.session.commit()
+
+    corpo = login_as('operador').get('/empresa/nova').get_data(as_text=True)
+    assert corpo.count('>Xangri-Lá<') == 1
+
+
+def test_mapa_de_exibicao_duplicado_nao_existe_mais():
+    """DATA-04.3: o dicionario local foi removido — a grafia tem uma fonte so."""
+    import app.routes.empresas as mod
+    assert not hasattr(mod, '_NOMES_EXIBICAO_CIDADE')
+
+
 def test_cidade_canonica_ainda_casa_com_municipio(app, client):
     """DATA-04.5: a automacao municipal casa a empresa com a linha de Municipio
     pela chave normalizada. Gravar a grafia acentuada nao pode quebrar isso —
