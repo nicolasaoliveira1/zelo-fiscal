@@ -35,6 +35,7 @@ from app.utils import (
 from app.services import (
     auditoria,
 )
+from app.services.cidade_canonica import canonicalizar
 from app.services.execution_logger import log_event
 from app.auth import requer_papel
 
@@ -138,6 +139,10 @@ def empresa_editar(empresa_id):
     if not cidade:
         flash('Cidade é obrigatória.', 'warning')
         return redirect(next_url)
+
+    # DATA-04.2: grava a grafia canonica (COV-05). O matching do backend ja
+    # normaliza, entao isto so evita recriar a variacao que a migration corrigiu.
+    cidade = canonicalizar(cidade)
 
     if inscricao and len(inscricao) > 6:
         flash('Inscrição municipal deve ter até 6 caracteres.', 'warning')
@@ -296,6 +301,10 @@ def adicionar_empresa():
     if not cidade:
         flash('Cidade é obrigatória.', 'warning')
         return _redirect_apos_cadastro()
+
+    # DATA-04.1: mesma canonicalizacao da edicao — a cidade entra no banco na
+    # grafia de exibicao correta desde o cadastro.
+    cidade = canonicalizar(cidade)
 
     if inscricao and len(inscricao) > 6:
         flash('Inscrição municipal deve ter até 6 caracteres.', 'warning')
