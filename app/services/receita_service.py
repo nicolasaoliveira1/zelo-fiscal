@@ -60,17 +60,26 @@ def _normalizar_situacao(valor):
     return remover_acentos((valor or '').strip()).upper()
 
 
-def empresa_ativa(empresa):
-    """A empresa esta viva na Receita?
+def situacao_ativa(situacao):
+    """A situacao cadastral conta como "empresa viva"? (regra unica, sobre a string)
 
-    Empresa **sem** `DadosReceita` conta como ATIVA: "ainda nao classificada" e
-    diferente de "morta". Sem isso, ligar a feature tiraria a carteira inteira
-    do lote automatico ate o recheck terminar de rodar.
+    `None`/'' contam como ATIVA: "ainda nao classificada" e diferente de "morta".
+    Sem isso, ligar a feature tiraria a carteira inteira do lote automatico ate o
+    recheck terminar de rodar.
+
+    E a MESMA funcao usada pelo filtro de lote (`batch_engine.calc_targets`), que
+    recebe a situacao como coluna do join. Uma regra em Python, nenhuma copia em
+    SQL que pudesse divergir dela.
     """
-    dados = getattr(empresa, 'dados_receita', None)
-    if dados is None or not dados.situacao:
+    if not situacao:
         return True
-    return _normalizar_situacao(dados.situacao) == SITUACAO_ATIVA
+    return _normalizar_situacao(situacao) == SITUACAO_ATIVA
+
+
+def empresa_ativa(empresa):
+    """A empresa esta viva na Receita? Le a situacao do espelho e delega a regra."""
+    dados = getattr(empresa, 'dados_receita', None)
+    return situacao_ativa(dados.situacao if dados is not None else None)
 
 
 def _aplicar_espelho(dados, dto):

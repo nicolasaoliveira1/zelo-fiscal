@@ -3,7 +3,13 @@ from threading import Thread
 
 from sqlalchemy import or_
 
-from app.models import Certidao, StatusEspecial, TipoCertidao, get_a_vencer_dias
+from app.models import (
+    Certidao,
+    DadosReceita,
+    StatusEspecial,
+    TipoCertidao,
+    get_a_vencer_dias,
+)
 from app.utils import utcnow_naive
 from app.services.correlation import CorrelationContext
 from app.services.execution_logger import log_event
@@ -404,7 +410,20 @@ def calc_targets(start_certidao_id, extra_filter=None, scope='default', tipo=Non
                      Certidao.status_especial != StatusEspecial.PENDENTE,
                  )))
 
-    certidoes = query.all()
+    # DATA-02.2: empresa baixada/inativa sai do lote. O join traz a situacao como
+    # COLUNA (uma query, sem N+1) e a decisao fica em `receita_service`, a mesma
+    # funcao que a UI usa — nao ha copia da regra em SQL para divergir dela.
+    # O join e direto em `empresa_id` de proposito: dois `extra_filter` ja fazem
+    # join com `Empresa`, e juntar de novo colidiria.
+    from app.services import receita_service
+
+    linhas = query.outerjoin(
+        DadosReceita, DadosReceita.empresa_id == Certidao.empresa_id
+    ).add_columns(DadosReceita.situacao).all()
+
+    certidoes = [certidao for certidao, situacao in linhas
+                 if receita_service.situacao_ativa(situacao)]
+    excluidas_situacao = len(linhas) - len(certidoes)
 
     ids = [c.id for c in certidoes if c.data_validade]
     if scope_norm == 'pendentes':
@@ -427,4 +446,7 @@ def calc_targets(start_certidao_id, extra_filter=None, scope='default', tipo=Non
         'vencidas': vencidas,
         'a_vencer': a_vencer,
         'pendentes': pendentes,
+        # quantas ficaram de fora por situacao cadastral — o modal informa, em
+        # vez de o operador ver um total menor sem explicacao
+        'excluidas_situacao': excluidas_situacao,
     }
