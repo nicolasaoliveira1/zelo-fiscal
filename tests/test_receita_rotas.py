@@ -323,6 +323,26 @@ def test_aceitar_exige_papel_operador(app, login_as, client, ids, monkeypatch):
         assert db.session.get(Empresa, empresa_id).cidade == 'Porto Alegre'
 
 
+# --- template da tela de nova empresa (o comportamento e UAT) ------------------
+
+def test_tela_nova_empresa_tem_botao_e_script(app, login_as, ids):
+    """Nao testa o JS (o projeto nao tem runner) — garante que a tela renderiza
+    e que a fiacao esta no HTML, para o UAT nao esbarrar em template quebrado."""
+    corpo = login_as('operador').get('/empresa/nova').get_data(as_text=True)
+
+    assert 'id="btn-buscar-receita"' in corpo
+    assert 'id="previa-receita"' in corpo
+    assert 'js/nova_empresa.js' in corpo
+    # AD-015: modulo ES externo, nao script inline novo
+    assert 'type="module"' in corpo
+
+
+def test_js_da_nova_empresa_e_servido(app, login_as, ids):
+    resp = login_as('operador').get('/static/js/nova_empresa.js')
+    assert resp.status_code == 200
+    assert 'btn-buscar-receita' in resp.get_data(as_text=True)
+
+
 def test_db_nao_e_tocado_quando_a_consulta_falha(app, client, ids, monkeypatch):
     _mock_consulta(monkeypatch, (None, receita_client.ERRO_INDISPONIVEL))
     with app.app_context():
