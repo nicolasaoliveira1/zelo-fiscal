@@ -133,6 +133,117 @@
     </div>
 </div>
 
+<div class="card shadow-sm border-0 mb-4" id="card-receita" data-empresa-id="{{ empresa.id }}">
+    <div class="card-header bg-body-tertiary d-flex flex-wrap align-items-center justify-content-between gap-2">
+        <h6 class="mb-0 fw-bold">Dados da Receita</h6>
+        <div class="d-flex align-items-center gap-2">
+            {% if dados_receita and dados_receita.verificado_em %}
+            <span class="text-muted small">
+                Verificado em {{ dados_receita.verificado_em.strftime('%d/%m/%Y %H:%M') }}
+            </span>
+            {% endif %}
+            {% if current_user.papel in ['operador', 'admin'] %}
+            <button type="button" class="btn btn-soft-primary btn-sm" id="btn-atualizar-receita"
+                    aria-label="Consultar dados desta empresa na Receita">
+                <i class="bi bi-arrow-clockwise me-1"></i>Atualizar
+            </button>
+            {% endif %}
+        </div>
+    </div>
+    <div class="card-body">
+        {% if not dados_receita %}
+        <p class="text-muted mb-0">
+            Esta empresa ainda nao foi consultada na Receita.
+            {% if current_user.papel in ['operador', 'admin'] %}
+            Use <strong>Atualizar</strong> para buscar agora — ou aguarde a verificacao automatica.
+            {% endif %}
+        </p>
+        {% else %}
+        {% if not receita_ativa %}
+        <div class="alert alert-warning py-2 px-3 small">
+            Situacao na Receita: <strong>{{ dados_receita.situacao or 'nao informada' }}</strong>
+            {%- if dados_receita.situacao_motivo %} ({{ dados_receita.situacao_motivo }}){% endif %}.
+            Esta empresa fica <strong>fora do lote automatico</strong>; a emissao individual continua liberada.
+        </div>
+        {% endif %}
+
+        {% if receita_divergencias %}
+        <div class="alert alert-warning py-2 px-3" id="divergencias-receita">
+            <p class="fw-semibold mb-2 small">A Receita informa valores diferentes do cadastro:</p>
+            <ul class="list-unstyled mb-0 small">
+                {% for divergencia in receita_divergencias %}
+                <li class="d-flex flex-wrap align-items-center gap-2 mb-1"
+                    data-divergencia="{{ divergencia.campo }}">
+                    <span class="text-capitalize fw-semibold">{{ divergencia.campo }}:</span>
+                    <span>cadastro <strong>{{ divergencia.atual }}</strong></span>
+                    <span class="text-muted">/</span>
+                    <span>Receita <strong>{{ divergencia.receita }}</strong></span>
+                    {% if current_user.papel in ['operador', 'admin'] %}
+                    <button type="button" class="btn btn-ghost btn-sm btn-aceitar-receita"
+                            data-campo="{{ divergencia.campo }}"
+                            aria-label="Usar o valor da Receita para {{ divergencia.campo }}">
+                        Usar o da Receita
+                    </button>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="row g-3 small">
+            <div class="col-12 col-lg-6">
+                <dl class="row mb-0">
+                    <dt class="col-5 text-muted fw-normal">Situacao</dt>
+                    <dd class="col-7 mb-1">{{ dados_receita.situacao or '-' }}</dd>
+                    <dt class="col-5 text-muted fw-normal">Razao social</dt>
+                    <dd class="col-7 mb-1">{{ dados_receita.razao_social or '-' }}</dd>
+                    <dt class="col-5 text-muted fw-normal">Nome fantasia</dt>
+                    <dd class="col-7 mb-1">{{ dados_receita.nome_fantasia or '-' }}</dd>
+                    <dt class="col-5 text-muted fw-normal">Abertura</dt>
+                    <dd class="col-7 mb-1">
+                        {{ dados_receita.data_inicio_atividade.strftime('%d/%m/%Y')
+                           if dados_receita.data_inicio_atividade else '-' }}
+                    </dd>
+                    <dt class="col-5 text-muted fw-normal">Porte</dt>
+                    <dd class="col-7 mb-1">{{ dados_receita.porte or '-' }}</dd>
+                    <dt class="col-5 text-muted fw-normal">Natureza juridica</dt>
+                    <dd class="col-7 mb-0">{{ dados_receita.natureza_juridica or '-' }}</dd>
+                </dl>
+            </div>
+            <div class="col-12 col-lg-6">
+                <dl class="row mb-0">
+                    <dt class="col-5 text-muted fw-normal">Endereco</dt>
+                    <dd class="col-7 mb-1">
+                        {{ dados_receita.logradouro or '-' }}{% if dados_receita.numero %}, {{ dados_receita.numero }}{% endif %}
+                    </dd>
+                    <dt class="col-5 text-muted fw-normal">Bairro</dt>
+                    <dd class="col-7 mb-1">{{ dados_receita.bairro or '-' }}</dd>
+                    <dt class="col-5 text-muted fw-normal">Municipio / UF</dt>
+                    <dd class="col-7 mb-1">
+                        {{ dados_receita.municipio or '-' }}{% if dados_receita.uf %} / {{ dados_receita.uf }}{% endif %}
+                    </dd>
+                    <dt class="col-5 text-muted fw-normal">CEP</dt>
+                    <dd class="col-7 mb-1">{{ dados_receita.cep or '-' }}</dd>
+                    <dt class="col-5 text-muted fw-normal">Atividade</dt>
+                    <dd class="col-7 mb-1">{{ dados_receita.cnae_descricao or '-' }}</dd>
+                    <dt class="col-5 text-muted fw-normal">Simples</dt>
+                    <dd class="col-7 mb-0">
+                        {%- if dados_receita.opcao_simples is none -%}
+                        nao informado
+                        {%- elif dados_receita.opcao_simples -%}
+                        optante
+                        {%- else -%}
+                        nao optante
+                        {%- endif -%}
+                    </dd>
+                </dl>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
 <div class="card shadow-sm border-0">
     <div class="card-header bg-body-tertiary">
         <h6 class="mb-0 fw-bold">Certidoes</h6>
@@ -167,4 +278,8 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ static_versionado('js/empresa_receita.js') }}"></script>
 {% endblock %}

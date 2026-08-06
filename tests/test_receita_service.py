@@ -198,6 +198,56 @@ def test_enriquecer_falha_de_commit_faz_rollback(app, ids, monkeypatch):
         assert 'banco fora' in res['erro']
 
 
+# --- divergencias_atuais: leitura pura para a tela ---------------------------
+
+def test_divergencias_atuais_sem_dados_receita_e_vazio(app, ids):
+    with app.app_context():
+        assert receita_service.divergencias_atuais(_empresa()) == []
+
+
+def test_divergencias_atuais_lista_o_que_difere(app, ids):
+    with app.app_context():
+        emp = _empresa(cidade='Porto Alegre')
+        receita_service.enriquecer(emp, _dto(municipio='RIO DE JANEIRO'))
+
+        divergencias = receita_service.divergencias_atuais(emp)
+
+        assert [d['campo'] for d in divergencias] == ['cidade']
+        assert divergencias[0]['atual'] == 'Porto Alegre'
+        assert divergencias[0]['receita'] == 'RIO DE JANEIRO'
+
+
+def test_divergencias_atuais_nao_escreve_nada(app, ids):
+    """A tela de detalhe chama isto a cada render: nao pode ter efeito colateral."""
+    with app.app_context():
+        emp = _empresa(cidade='Porto Alegre')
+        receita_service.enriquecer(emp, _dto(municipio='RIO DE JANEIRO'))
+
+        receita_service.divergencias_atuais(emp)
+        receita_service.divergencias_atuais(emp)
+        db.session.rollback()   # descarta qualquer escrita pendente
+
+        assert db.session.get(Empresa, emp.id).cidade == 'Porto Alegre'
+
+
+def test_divergencias_atuais_vazio_quando_tudo_concorda(app, ids):
+    with app.app_context():
+        emp = _empresa(cidade='Porto Alegre', estado='RS')
+        receita_service.enriquecer(emp, _dto(municipio='PORTO ALEGRE', uf='RS'))
+        assert receita_service.divergencias_atuais(emp) == []
+
+
+def test_divergencias_atuais_ignora_campo_vazio_no_cadastro(app, ids):
+    """Campo vazio nao e divergencia — `enriquecer` ja teria preenchido."""
+    with app.app_context():
+        emp = _empresa(cidade='Porto Alegre')
+        receita_service.enriquecer(emp, _dto(municipio='Tramandai'))
+        emp.cidade = ''
+        db.session.commit()
+
+        assert receita_service.divergencias_atuais(emp) == []
+
+
 # --- aceitar_divergencia ------------------------------------------------------
 
 def test_aceitar_divergencia_aplica_valor_da_receita(app, ids):

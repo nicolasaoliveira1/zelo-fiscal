@@ -79,6 +79,47 @@ def _aplicar_espelho(dados, dto):
     dados.verificado_em = datetime.now()   # hora local naive (AD-004)
 
 
+def _conciliar(empresa, dto, preencher_vazios):
+    """Compara cadastro x Receita campo a campo. Nucleo compartilhado por
+    `enriquecer` (que preenche vazio) e `divergencias_atuais` (que so le).
+
+    Retorna (preenchidos, divergencias). Com `preencher_vazios=False` nada e
+    escrito — e o modo que a tela usa para listar divergencias sem rechecar.
+    """
+    preenchidos, divergencias = [], []
+    for campo, extrair in _CAMPOS_CADASTRO.items():
+        valor_api = extrair(dto)
+        if not valor_api:
+            continue
+
+        atual = getattr(empresa, campo, None)
+        if not (atual or '').strip():
+            if preencher_vazios:
+                setattr(empresa, campo, valor_api)
+                preenchidos.append(campo)
+            continue
+
+        comparar = _COMPARADORES.get(campo, lambda valor: valor)
+        if comparar(atual) != comparar(valor_api):
+            divergencias.append(
+                {'campo': campo, 'atual': atual, 'receita': valor_api})
+    return preenchidos, divergencias
+
+
+def _dto_do_espelho(dados):
+    """DTO montado a partir do que ja esta gravado, para comparar sem rede."""
+    return receita_client.DadosReceitaDTO(municipio=dados.municipio, uf=dados.uf)
+
+
+def divergencias_atuais(empresa):
+    """Divergencias entre o cadastro e o espelho JA gravado. So le, nao escreve —
+    a tela de detalhe chama isto a cada render."""
+    dados = getattr(empresa, 'dados_receita', None)
+    if dados is None:
+        return []
+    return _conciliar(empresa, _dto_do_espelho(dados), preencher_vazios=False)[1]
+
+
 def enriquecer(empresa, dto):
     """Grava o espelho da Receita e concilia com o cadastro.
 
@@ -99,21 +140,9 @@ def enriquecer(empresa, dto):
     situacao_anterior = dados.situacao
     _aplicar_espelho(dados, dto)
 
-    for campo, extrair in _CAMPOS_CADASTRO.items():
-        valor_api = extrair(dto)
-        if not valor_api:
-            continue
-
-        atual = getattr(empresa, campo, None)
-        if not (atual or '').strip():
-            setattr(empresa, campo, valor_api)
-            resultado['preenchidos'].append(campo)
-            continue
-
-        comparar = _COMPARADORES.get(campo, lambda valor: valor)
-        if comparar(atual) != comparar(valor_api):
-            resultado['divergencias'].append(
-                {'campo': campo, 'atual': atual, 'receita': valor_api})
+    preenchidos, divergencias = _conciliar(empresa, dto, preencher_vazios=True)
+    resultado['preenchidos'] = preenchidos
+    resultado['divergencias'] = divergencias
 
     try:
         db.session.commit()
@@ -144,9 +173,7 @@ def aceitar_divergencia(empresa, campo):
     if dados is None:
         return False, 'Esta empresa ainda não tem dados da Receita.'
 
-    dto = receita_client.DadosReceitaDTO(
-        municipio=dados.municipio, uf=dados.uf)
-    valor = _CAMPOS_CADASTRO[campo](dto)
+    valor = _CAMPOS_CADASTRO[campo](_dto_do_espelho(dados))
     if not valor:
         return False, f'A Receita não informou {campo} para esta empresa.'
 

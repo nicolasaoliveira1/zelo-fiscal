@@ -343,6 +343,82 @@ def test_js_da_nova_empresa_e_servido(app, login_as, ids):
     assert 'btn-buscar-receita' in resp.get_data(as_text=True)
 
 
+# --- bloco "Dados da Receita" no detalhe (comportamento e UAT) -----------------
+
+def test_detalhe_sem_dados_receita_mostra_estado_vazio(app, client, ids):
+    """Empresa nunca consultada nao pode quebrar a tela nem parecer erro."""
+    empresa_id = _empresa_nova(app, nome='Sem Espelho')
+    corpo = client.get(f'/empresa/{empresa_id}').get_data(as_text=True)
+
+    assert 'Dados da Receita' in corpo
+    assert 'ainda nao foi consultada' in corpo
+    assert 'js/empresa_receita.js' in corpo
+
+
+def test_detalhe_mostra_os_quatro_grupos(app, client, ids, monkeypatch):
+    empresa_id = _empresa_nova(app)
+    _mock_client_direto(monkeypatch, (_dto(), None))
+    client.post(f'/empresa/{empresa_id}/receita/atualizar')
+
+    corpo = client.get(f'/empresa/{empresa_id}').get_data(as_text=True)
+
+    assert 'PETROLEO BRASILEIRO S A' in corpo      # identificacao
+    assert 'AVENIDA REPUBLICA DO CHILE' in corpo   # endereco
+    assert 'Verificado em' in corpo                # proveniencia
+    assert 'ATIVA' in corpo                        # situacao
+
+
+def test_detalhe_destaca_empresa_baixada(app, client, ids, monkeypatch):
+    empresa_id = _empresa_nova(app)
+    _mock_client_direto(monkeypatch, (_dto(situacao='BAIXADA'), None))
+    client.post(f'/empresa/{empresa_id}/receita/atualizar')
+
+    corpo = client.get(f'/empresa/{empresa_id}').get_data(as_text=True)
+
+    assert 'fora do lote automatico' in corpo
+    assert 'emissao individual continua liberada' in corpo
+
+
+def test_detalhe_lista_divergencia_com_botao_de_aceite(app, client, ids, monkeypatch):
+    empresa_id = _empresa_nova(app, cidade='Porto Alegre')
+    _mock_client_direto(monkeypatch, (_dto(municipio='RIO DE JANEIRO'), None))
+    client.post(f'/empresa/{empresa_id}/receita/atualizar')
+
+    corpo = client.get(f'/empresa/{empresa_id}').get_data(as_text=True)
+
+    assert 'data-divergencia="cidade"' in corpo
+    assert 'btn-aceitar-receita' in corpo
+    assert 'Porto Alegre' in corpo and 'RIO DE JANEIRO' in corpo
+
+
+def test_detalhe_sem_divergencia_nao_mostra_o_bloco(app, client, ids, monkeypatch):
+    empresa_id = _empresa_nova(app, cidade='Porto Alegre')
+    _mock_client_direto(monkeypatch, (_dto(municipio='Porto Alegre'), None))
+    client.post(f'/empresa/{empresa_id}/receita/atualizar')
+
+    corpo = client.get(f'/empresa/{empresa_id}').get_data(as_text=True)
+    assert 'id="divergencias-receita"' not in corpo
+
+
+def test_papel_leitura_nao_ve_botoes_de_acao(app, login_as, client, ids, monkeypatch):
+    """AD-005 tambem na UI: quem so le nao ve acao que nao pode executar."""
+    empresa_id = _empresa_nova(app, cidade='Porto Alegre')
+    _mock_client_direto(monkeypatch, (_dto(municipio='RIO DE JANEIRO'), None))
+    client.post(f'/empresa/{empresa_id}/receita/atualizar')
+
+    corpo = login_as('leitura').get(f'/empresa/{empresa_id}').get_data(as_text=True)
+
+    assert 'btn-atualizar-receita' not in corpo
+    assert 'btn-aceitar-receita' not in corpo
+    assert 'Dados da Receita' in corpo   # mas continua vendo os dados
+
+
+def test_js_do_detalhe_e_servido(app, client, ids):
+    resp = client.get('/static/js/empresa_receita.js')
+    assert resp.status_code == 200
+    assert 'btn-aceitar-receita' in resp.get_data(as_text=True)
+
+
 def test_db_nao_e_tocado_quando_a_consulta_falha(app, client, ids, monkeypatch):
     _mock_consulta(monkeypatch, (None, receita_client.ERRO_INDISPONIVEL))
     with app.app_context():

@@ -117,6 +117,9 @@ def empresa_detalhe(empresa_id):
         certidoes=certidoes,
         hoje=date.today(),
         a_vencer_dias=get_a_vencer_dias(),
+        dados_receita=empresa.dados_receita,
+        receita_ativa=receita_service.empresa_ativa(empresa),
+        receita_divergencias=receita_service.divergencias_atuais(empresa),
     )
 
 
