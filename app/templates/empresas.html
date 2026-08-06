@@ -78,7 +78,19 @@
                 <tbody>
                     {% for empresa in empresas %}
                     <tr>
-                        <td class="ps-4 fw-semibold">{{ empresa.nome }}</td>
+                        <td class="ps-4 fw-semibold">
+                            {{ empresa.nome }}
+                            {# Selo so para quem a Receita diz que NAO esta ativa.
+                               Empresa sem consulta nao ganha selo — senao a carteira
+                               inteira apareceria marcada antes do primeiro recheck. #}
+                            {% if empresa.dados_receita and empresa.dados_receita.situacao
+                                  and not empresa.dados_receita.situacao|situacao_ativa %}
+                            <span class="badge rounded-pill text-bg-danger fw-normal ms-1"
+                                  title="Situacao na Receita: {{ empresa.dados_receita.situacao }}. Fica fora do lote automatico.">
+                                {{ empresa.dados_receita.situacao }}
+                            </span>
+                            {% endif %}
+                        </td>
                         <td>{{ empresa.cnpj }}</td>
                         <td>{{ empresa.estado }}</td>
                         <td>{{ empresa.cidade }}</td>

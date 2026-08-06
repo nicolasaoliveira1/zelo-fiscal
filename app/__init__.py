@@ -100,6 +100,15 @@ def create_app(config_class=Config):
             return url_for('static', filename=filename, v=versao)
         return {'static_versionado': static_versionado}
 
+    # Situacao cadastral -> "empresa viva?" nos templates (spec 08). Delega a
+    # `receita_service`, a mesma funcao usada pelo filtro de lote — a UI nao pode
+    # ter uma segunda regra do que conta como empresa ativa. Import lazy para nao
+    # acoplar o tempo de import do pacote ao dos servicos.
+    @app.template_filter('situacao_ativa')
+    def _filtro_situacao_ativa(situacao):
+        from app.services.receita_service import situacao_ativa
+        return situacao_ativa(situacao)
+
     return app
 
 

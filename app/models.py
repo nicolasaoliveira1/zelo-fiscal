@@ -35,8 +35,10 @@ class Empresa(db.Model):
         'Certidao', backref='empresa', lazy='selectin', cascade="all, delete-orphan")
     # 1:1 com o espelho da Receita. delete-orphan porque remover a empresa tem
     # de levar o dado dela junto — senao fica linha orfa com FK pendurada.
+    # selectin como `certidoes`: a listagem de empresas le a situacao de cada
+    # linha, e com lazy='select' isso viraria uma query por empresa.
     dados_receita = db.relationship(
-        'DadosReceita', backref='empresa', uselist=False,
+        'DadosReceita', backref='empresa', uselist=False, lazy='selectin',
         cascade='all, delete-orphan')
 
     def __repr__(self):

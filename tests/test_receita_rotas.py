@@ -429,3 +429,73 @@ def test_db_nao_e_tocado_quando_a_consulta_falha(app, client, ids, monkeypatch):
     with app.app_context():
         assert DadosReceita.query.count() == antes
         db.session.rollback()
+
+
+# --- selo de situacao na listagem (spec 08, DATA-02.9) ------------------------
+
+def test_listagem_marca_empresa_nao_ativa(app, client, ids, monkeypatch):
+    empresa_id = _empresa_nova(app, nome='Empresa Morta')
+    _mock_client_direto(monkeypatch, (_dto(situacao='BAIXADA'), None))
+    client.post(f'/empresa/{empresa_id}/receita/atualizar')
+
+    corpo = client.get('/empresas').get_data(as_text=True)
+
+    assert 'BAIXADA' in corpo
+    assert 'fora do lote automatico' in corpo
+
+
+def test_listagem_nao_marca_empresa_ativa(app, client, ids, monkeypatch):
+    empresa_id = _empresa_nova(app, nome='Empresa Viva')
+    _mock_client_direto(monkeypatch, (_dto(situacao='ATIVA'), None))
+    client.post(f'/empresa/{empresa_id}/receita/atualizar')
+
+    corpo = client.get('/empresas').get_data(as_text=True)
+    assert 'fora do lote automatico' not in corpo
+
+
+def test_listagem_nao_marca_empresa_sem_consulta(app, client, ids):
+    """Sem isso a carteira inteira apareceria marcada antes do primeiro recheck."""
+    _empresa_nova(app, nome='Nunca Consultada')
+    corpo = client.get('/empresas').get_data(as_text=True)
+
+    assert 'Nunca Consultada' in corpo
+    assert 'fora do lote automatico' not in corpo
+
+
+def test_filtro_situacao_ativa_esta_registrado(app):
+    """A UI usa a MESMA regra do filtro de lote — nao uma segunda copia."""
+    filtro = app.jinja_env.filters.get('situacao_ativa')
+    assert filtro is not None
+    assert filtro('ATIVA') is True
+    assert filtro('BAIXADA') is False
+    assert filtro(None) is True
+
+
+def test_listagem_nao_faz_n_mais_1_por_empresa(app, client, ids, monkeypatch):
+    """dados_receita e selectin: sem isso, a listagem faria uma query por linha."""
+    from sqlalchemy import event
+
+    for indice, cnpj in enumerate(['33.000.167/0001-01', '11.222.333/0001-81',
+                                   '11.444.777/0001-61']):
+        with app.app_context():
+            emp = Empresa(nome=f'Empresa {indice}', cnpj=cnpj,
+                          estado='RS', cidade='Porto Alegre')
+            db.session.add(emp)
+            db.session.commit()
+
+    selects = []
+
+    def _contar(conn, cursor, statement, *a):
+        if 'dados_receita' in statement.lower():
+            selects.append(statement)
+
+    with app.app_context():
+        motor = db.engine
+    event.listen(motor, 'before_cursor_execute', _contar)
+    try:
+        client.get('/empresas')
+    finally:
+        event.remove(motor, 'before_cursor_execute', _contar)
+
+    # uma query de selectin para todas as empresas, nao uma por empresa
+    assert len(selects) <= 1, selects
