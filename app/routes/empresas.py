@@ -34,6 +34,8 @@ from app.utils import (
 )
 from app.services import (
     auditoria,
+    receita_client,
+    receita_service,
 )
 from app.services.cidade_canonica import canonicalizar
 from app.services.execution_logger import log_event
@@ -227,6 +229,52 @@ def abrir_pasta_empresa(empresa_id):
         return _json_error(f'Nao foi possivel abrir a pasta: {e}', 500)
     log_event('empresa_pasta_aberta', empresa_id=empresa_id, pasta=pasta)
     return jsonify({'status': 'ok', 'pasta': pasta})
+
+
+def _cnpj_do_pedido():
+    """CNPJ do corpo JSON ou do form — o JS manda JSON, mas a rota aceita os dois."""
+    corpo = request.get_json(silent=True) or {}
+    return (corpo.get('cnpj') or request.form.get('cnpj') or '').strip()
+
+
+# Motivo da falha de consulta -> (status HTTP, mensagem acionavel). "CNPJ nao
+# existe" e "nao consegui perguntar" sao coisas diferentes para quem cadastra.
+_ERROS_RECEITA = {
+    receita_client.ERRO_CNPJ_INVALIDO: (
+        400, 'CNPJ inválido: confira os 14 dígitos e o dígito verificador.'),
+    receita_client.ERRO_NAO_ENCONTRADO: (
+        404, 'CNPJ não encontrado na base da Receita. Confira a digitação.'),
+    receita_client.ERRO_INDISPONIVEL: (
+        503, 'Não foi possível consultar a Receita agora. '
+             'Cadastre a empresa normalmente — os dados são buscados depois.'),
+}
+
+
+@bp.route('/empresa/receita/consultar', methods=['POST'])
+@requer_papel('operador')
+def consultar_receita():
+    """Consulta o CNPJ na Receita e devolve os campos para o formulário.
+
+    NAO persiste nada (DATA-01.3): o operador confere e corrige antes de salvar.
+    Quem grava e o POST /empresa/adicionar, que por sua vez nunca toca a rede
+    (DATA-01.4) — cadastro nao pode ficar pendurado em API externa.
+    """
+    cnpj = _cnpj_do_pedido()
+
+    # Digito verificador antes da rede: nao faz sentido gastar a consulta (e a
+    # cota) com um CNPJ que ja sabemos estar errado.
+    if not cnpj_valido(cnpj):
+        codigo, mensagem = _ERROS_RECEITA[receita_client.ERRO_CNPJ_INVALIDO]
+        return _json_error(mensagem, codigo, error_type='cnpj_invalido')
+
+    dados, erro = receita_service.consultar_para_formulario(cnpj)
+    if dados is None:
+        codigo, mensagem = _ERROS_RECEITA.get(
+            erro, _ERROS_RECEITA[receita_client.ERRO_INDISPONIVEL])
+        return _json_error(mensagem, codigo, error_type=erro)
+
+    log_event('receita_consulta_formulario', fonte=dados.get('fonte'))
+    return jsonify({'status': 'ok', 'dados': dados})
 
 
 @bp.route('/empresa/nova', endpoint='nova_empresa')
