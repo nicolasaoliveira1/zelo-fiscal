@@ -23,9 +23,13 @@ from app.services.execution_logger import log_event
 _JOB_RENOVACAO = 'agendador_renovacao_diaria'
 _JOB_SNAPSHOT = 'agendador_snapshot_diario'
 _JOB_VERIF_MUNICIPIOS = 'agendador_verificacao_municipios'
+_JOB_RECHECK_RECEITA = 'agendador_recheck_receita'
 # Offset em horas para a verificacao de municipios nao concorrer com o lote da
 # renovacao (que roda na hora cheia e pode demorar): abre navegador, nao captcha.
 _OFFSET_VERIFICACAO_H = 3
+# Deslocado tambem da verificacao de municipios: os dois sao jobs longos e
+# nao ha por que disputarem a mesma janela.
+_OFFSET_RECHECK_RECEITA_H = 5
 # 6h: se o PC ligou depois do horário, o job ainda roda atrasado (catch-up).
 _MISFIRE_GRACE = 6 * 3600
 
@@ -135,6 +139,14 @@ def _agendar_jobs(app):
         args=[app], id=_JOB_VERIF_MUNICIPIOS, replace_existing=True,
         misfire_grace_time=_MISFIRE_GRACE, coalesce=True, max_instances=1)
 
+    # Recheck da situacao cadastral (spec 08, DATA-02.6): so consulta API
+    # publica — nao emite nem gasta captcha, entao roda independente de `ativo`.
+    _scheduler.add_job(
+        job_recheck_receita,
+        CronTrigger(hour=(hora + _OFFSET_RECHECK_RECEITA_H) % 24, minute=15),
+        args=[app], id=_JOB_RECHECK_RECEITA, replace_existing=True,
+        misfire_grace_time=_MISFIRE_GRACE, coalesce=True, max_instances=1)
+
     if ativo:
         _scheduler.add_job(
             job_renovacao_diaria, CronTrigger(hour=hora, minute=0),
@@ -180,6 +192,52 @@ def job_verificacao_municipios(app):
         except Exception as exc:
             log_event('municipios_verificacao_alerta_falhou', level='ERROR', error=str(exc))
         return relatorios
+
+
+def _ler_config_recheck():
+    """(ativo, idade_dias, limite) do recheck, com defaults seguros."""
+    from app import db
+    from app.models import ConfiguracaoSistema
+    cfg = db.session.get(ConfiguracaoSistema, 1)
+    if cfg is None:
+        return True, 30, 50
+    idade = cfg.receita_recheck_idade_dias
+    limite = cfg.receita_recheck_limite
+    return (
+        bool(cfg.receita_recheck_ativo),
+        idade if (idade or 0) > 0 else 30,
+        limite if (limite or 0) > 0 else 50,
+    )
+
+
+def job_recheck_receita(app):
+    """Recheck diario da situacao cadastral (spec 08, DATA-02.6).
+
+    Fatiado de proposito: so as empresas com verificacao mais velha que X dias,
+    as mais velhas primeiro, no maximo N por execucao e com pausa entre chamadas.
+    A ReceitaWS aceita ~3 req/min — a carteira gira em alguns dias em vez de
+    estourar cota num dia so.
+
+    Roda no scheduler que ja existe (AD-009): nenhuma thread nova.
+    """
+    from app.services import receita_service
+
+    with app.app_context():
+        ativo, idade_dias, limite = _ler_config_recheck()
+        if not ativo:
+            log_event('receita_recheck_desligado')
+            return None
+
+        log_event('receita_recheck_inicio', idade_dias=idade_dias, limite=limite)
+        resumo = receita_service.rechecar_lote(idade_dias=idade_dias, limite=limite)
+
+        # Alerta best-effort: falha aqui nao pode derrubar o job (AD-011).
+        try:
+            from app.services import notificacoes
+            notificacoes.alertar_empresas_baixadas(app, resumo.get('baixadas') or [])
+        except Exception as exc:
+            log_event('receita_recheck_alerta_falhou', level='ERROR', error=str(exc))
+        return resumo
 
 
 def _avisar_saldo_baixo(app):
