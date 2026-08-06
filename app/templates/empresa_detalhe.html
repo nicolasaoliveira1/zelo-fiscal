@@ -138,7 +138,7 @@
         <h6 class="mb-0 fw-bold">Dados da Receita</h6>
         <div class="d-flex align-items-center gap-2">
             {% if dados_receita and dados_receita.verificado_em %}
-            <span class="text-muted small">
+            <span class="text-muted small date-cell">
                 Verificado em {{ dados_receita.verificado_em.strftime('%d/%m/%Y %H:%M') }}
             </span>
             {% endif %}
@@ -168,7 +168,9 @@
         {% endif %}
 
         {% if receita_divergencias %}
-        <div class="alert alert-warning py-2 px-3" id="divergencias-receita">
+        {# Superficie neutra de proposito: divergencia e informacao, nao status.
+           A unica cor do bloco fica reservada a situacao cadastral acima. #}
+        <div class="border rounded bg-body-tertiary p-3 mb-3" id="divergencias-receita">
             <p class="fw-semibold mb-2 small">A Receita informa valores diferentes do cadastro:</p>
             <ul class="list-unstyled mb-0 small">
                 {% for divergencia in receita_divergencias %}
@@ -179,7 +181,9 @@
                     <span class="text-muted">/</span>
                     <span>Receita <strong>{{ divergencia.receita }}</strong></span>
                     {% if current_user.papel in ['operador', 'admin'] %}
-                    <button type="button" class="btn btn-ghost btn-sm btn-aceitar-receita"
+                    {# soft, nao ghost: solto na pagina o ghost parece texto e
+                       perde a afordancia de clicavel (DESIGN_LANGUAGE, Excecoes) #}
+                    <button type="button" class="btn btn-soft-primary btn-sm btn-aceitar-receita"
                             data-campo="{{ divergencia.campo }}"
                             aria-label="Usar o valor da Receita para {{ divergencia.campo }}">
                         Usar o da Receita
@@ -201,7 +205,7 @@
                     <dt class="col-5 text-muted fw-normal">Nome fantasia</dt>
                     <dd class="col-7 mb-1">{{ dados_receita.nome_fantasia or '-' }}</dd>
                     <dt class="col-5 text-muted fw-normal">Abertura</dt>
-                    <dd class="col-7 mb-1">
+                    <dd class="col-7 mb-1 date-cell">
                         {{ dados_receita.data_inicio_atividade.strftime('%d/%m/%Y')
                            if dados_receita.data_inicio_atividade else '-' }}
                     </dd>
@@ -224,7 +228,7 @@
                         {{ dados_receita.municipio or '-' }}{% if dados_receita.uf %} / {{ dados_receita.uf }}{% endif %}
                     </dd>
                     <dt class="col-5 text-muted fw-normal">CEP</dt>
-                    <dd class="col-7 mb-1">{{ dados_receita.cep or '-' }}</dd>
+                    <dd class="col-7 mb-1 date-cell">{{ dados_receita.cep or '-' }}</dd>
                     <dt class="col-5 text-muted fw-normal">Atividade</dt>
                     <dd class="col-7 mb-1">{{ dados_receita.cnae_descricao or '-' }}</dd>
                     <dt class="col-5 text-muted fw-normal">Simples</dt>
