@@ -216,6 +216,48 @@ def enviar_alertas(app):
     return enviados
 
 
+def alertar_empresas_baixadas(app, baixadas):
+    """Alerta as empresas que o recheck viu passar de ATIVA para nao-ativa.
+
+    Recebe so as TRANSICOES (`receita_service.rechecar_lote` ja filtra): empresa
+    que ja estava baixada nao realerta todo dia, e ligar a feature nao dispara um
+    alerta retroativo para a carteira inteira.
+
+    Um alerta POR EMPRESA (chave anti-spam propria), como o de municipio: resolver
+    uma nao pode silenciar as outras dentro da janela. Retorna quantos foram
+    enviados agora."""
+    cfg = _config()
+    destinatarios = _destinatarios(cfg)
+    if not email_sender.smtp_configurado(app.config) or not destinatarios:
+        log_event('notif_baixadas_sem_smtp', level='WARNING',
+                  destinatarios=len(destinatarios))
+        return 0
+
+    janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
+    enviados = 0
+
+    for empresa_id, nome, situacao in baixadas or []:
+        situacao_txt = situacao or 'nao ativa'
+        assunto = f'[Certidoes] {nome} consta como {situacao_txt} na Receita'
+        corpo = '\n'.join([
+            f'A verificacao diaria detectou que "{nome}" deixou de constar como',
+            f'ATIVA na Receita. Situacao atual: {situacao_txt}.',
+            '',
+            'A partir de agora ela fica FORA do lote automatico, para nao gastar',
+            'captcha tentando emitir certidao de CNPJ morto. A emissao individual',
+            'continua liberada, caso ainda seja necessaria (encerramento, baixa',
+            'recente).',
+            '',
+            'Confira a situacao na tela da empresa e decida se ela sai da carteira.',
+        ])
+        if _enviar_alerta(app, destinatarios, f'empresa_baixada:{empresa_id}',
+                          'alerta_empresa_baixada', assunto, corpo, janela,
+                          detalhe=situacao_txt):
+            enviados += 1
+
+    return enviados
+
+
 def alertar_municipios_quebrados(app, relatorios):
     """Alerta os municipios cujo dry-run acusou seletor quebrado (COV-05 A3).
 
