@@ -277,6 +277,58 @@ def consultar_receita():
     return jsonify({'status': 'ok', 'dados': dados})
 
 
+@bp.route('/empresa/<int:empresa_id>/receita/atualizar', methods=['POST'])
+@requer_papel('operador')
+def atualizar_receita(empresa_id):
+    """Recheca uma empresa sob demanda e persiste o espelho da Receita.
+
+    Campo vazio do cadastro e preenchido; campo preenchido que difere volta em
+    `divergencias` para o operador decidir (DATA-01.9) — nunca sobrescrito.
+    """
+    empresa = Empresa.query.get_or_404(empresa_id)
+
+    dto, erro = receita_client.consultar(empresa.cnpj)
+    if dto is None:
+        codigo, mensagem = _ERROS_RECEITA.get(
+            erro, _ERROS_RECEITA[receita_client.ERRO_INDISPONIVEL])
+        return _json_error(mensagem, codigo, error_type=erro)
+
+    resultado = receita_service.enriquecer(empresa, dto)
+    if not resultado['ok']:
+        return _json_error(resultado['erro'] or 'Falha ao aplicar os dados.', 500)
+
+    auditoria.registrar('empresa.receita_atualizar', alvo_tipo='empresa',
+                        alvo_id=empresa_id)
+    return jsonify({
+        'status': 'ok',
+        'situacao': resultado.get('situacao'),
+        'ativa': receita_service.empresa_ativa(empresa),
+        'preenchidos': resultado['preenchidos'],
+        'divergencias': resultado['divergencias'],
+    })
+
+
+@bp.route('/empresa/<int:empresa_id>/receita/aceitar', methods=['POST'])
+@requer_papel('operador')
+def aceitar_receita(empresa_id):
+    """Aplica no cadastro o valor que a Receita informa para UM campo.
+
+    A lista de campos aceitos vive em `receita_service._CAMPOS_CADASTRO` e nao
+    inclui `nome` — sem essa guarda a rota viraria um "escreva qualquer coluna
+    da Empresa", e o nome e a chave da pasta no drive de rede.
+    """
+    empresa = Empresa.query.get_or_404(empresa_id)
+    corpo = request.get_json(silent=True) or {}
+    campo = (corpo.get('campo') or request.form.get('campo') or '').strip()
+
+    ok, erro = receita_service.aceitar_divergencia(empresa, campo)
+    if not ok:
+        return _json_error(erro, 400, error_type='campo_invalido')
+
+    return jsonify({'status': 'ok', 'campo': campo,
+                    'valor': getattr(empresa, campo, None)})
+
+
 @bp.route('/empresa/nova', endpoint='nova_empresa')
 @requer_papel('operador')
 def pagina_nova_empresa():

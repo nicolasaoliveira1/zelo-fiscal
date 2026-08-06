@@ -177,6 +177,152 @@ def test_cadastro_nao_cria_dados_receita(app, client, ids, monkeypatch):
         assert receita_service.empresa_ativa(emp) is True
 
 
+# --- POST /empresa/<id>/receita/atualizar --------------------------------------
+
+def _empresa_nova(app, nome='Empresa Recheck', cidade='Porto Alegre', estado='RS'):
+    with app.app_context():
+        emp = Empresa(nome=nome, cnpj=CNPJ_VALIDO, estado=estado, cidade=cidade)
+        db.session.add(emp)
+        db.session.commit()
+        return emp.id
+
+
+def _mock_client_direto(monkeypatch, retorno):
+    """A rota de atualizar chama o client direto (nao via consultar_para_formulario)."""
+    import app.routes.empresas as mod
+    monkeypatch.setattr(mod.receita_client, 'consultar', lambda _cnpj: retorno)
+
+
+def test_atualizar_persiste_o_espelho(app, client, ids, monkeypatch):
+    empresa_id = _empresa_nova(app)
+    _mock_client_direto(monkeypatch, (_dto(situacao='ATIVA'), None))
+
+    resp = client.post(f'/empresa/{empresa_id}/receita/atualizar')
+
+    assert resp.status_code == 200
+    corpo = resp.get_json()
+    assert corpo['status'] == 'ok'
+    assert corpo['ativa'] is True
+    with app.app_context():
+        emp = db.session.get(Empresa, empresa_id)
+        assert emp.dados_receita is not None
+        assert emp.dados_receita.situacao == 'ATIVA'
+        assert emp.dados_receita.verificado_em is not None
+
+
+def test_atualizar_devolve_divergencia_sem_sobrescrever(app, client, ids, monkeypatch):
+    empresa_id = _empresa_nova(app, cidade='Porto Alegre')
+    _mock_client_direto(monkeypatch, (_dto(municipio='RIO DE JANEIRO'), None))
+
+    corpo = client.post(f'/empresa/{empresa_id}/receita/atualizar').get_json()
+
+    campos = {d['campo'] for d in corpo['divergencias']}
+    assert 'cidade' in campos
+    with app.app_context():
+        assert db.session.get(Empresa, empresa_id).cidade == 'Porto Alegre'
+
+
+def test_atualizar_marca_empresa_baixada(app, client, ids, monkeypatch):
+    empresa_id = _empresa_nova(app)
+    _mock_client_direto(monkeypatch, (_dto(situacao='BAIXADA'), None))
+
+    corpo = client.post(f'/empresa/{empresa_id}/receita/atualizar').get_json()
+
+    assert corpo['ativa'] is False
+    assert corpo['situacao'] == 'BAIXADA'
+
+
+def test_atualizar_empresa_inexistente_da_404(app, client, ids, monkeypatch):
+    _mock_client_direto(monkeypatch, (_dto(), None))
+    assert client.post('/empresa/999999/receita/atualizar').status_code == 404
+
+
+def test_atualizar_com_api_fora_devolve_503(app, client, ids, monkeypatch):
+    empresa_id = _empresa_nova(app)
+    _mock_client_direto(monkeypatch, (None, receita_client.ERRO_INDISPONIVEL))
+
+    resp = client.post(f'/empresa/{empresa_id}/receita/atualizar')
+
+    assert resp.status_code == 503
+    with app.app_context():
+        assert db.session.get(Empresa, empresa_id).dados_receita is None
+
+
+def test_atualizar_exige_papel_operador(app, login_as, ids, monkeypatch):
+    empresa_id = _empresa_nova(app)
+    _mock_client_direto(monkeypatch, (_dto(), None))
+    resp = login_as('leitura').post(f'/empresa/{empresa_id}/receita/atualizar')
+    assert resp.status_code == 403
+
+
+# --- POST /empresa/<id>/receita/aceitar ----------------------------------------
+
+def test_aceitar_aplica_o_valor_da_receita(app, client, ids, monkeypatch):
+    empresa_id = _empresa_nova(app, cidade='Porto Alegre')
+    _mock_client_direto(monkeypatch, (_dto(municipio='Tramandai'), None))
+    client.post(f'/empresa/{empresa_id}/receita/atualizar')
+
+    resp = client.post(f'/empresa/{empresa_id}/receita/aceitar',
+                       json={'campo': 'cidade'})
+
+    assert resp.status_code == 200
+    assert resp.get_json()['valor'] == 'Tramandaí'
+    with app.app_context():
+        assert db.session.get(Empresa, empresa_id).cidade == 'Tramandaí'
+
+
+def test_aceitar_recusa_o_campo_nome(app, client, ids, monkeypatch):
+    """DATA-01.8: nem por esta rota o nome pode ser trocado — ele e a chave da
+    pasta no drive de rede."""
+    empresa_id = _empresa_nova(app, nome='NOME DA PASTA')
+    _mock_client_direto(monkeypatch, (_dto(razao_social='OUTRA RAZAO'), None))
+    client.post(f'/empresa/{empresa_id}/receita/atualizar')
+
+    resp = client.post(f'/empresa/{empresa_id}/receita/aceitar',
+                       json={'campo': 'nome'})
+
+    assert resp.status_code == 400
+    with app.app_context():
+        assert db.session.get(Empresa, empresa_id).nome == 'NOME DA PASTA'
+
+
+def test_aceitar_recusa_campo_arbitrario(app, client, ids, monkeypatch):
+    """A rota nao pode virar um "escreva qualquer coluna da Empresa"."""
+    empresa_id = _empresa_nova(app)
+    _mock_client_direto(monkeypatch, (_dto(), None))
+    client.post(f'/empresa/{empresa_id}/receita/atualizar')
+
+    for campo in ('inscricao_mobiliaria', 'cnpj', 'id', 'certidoes'):
+        resp = client.post(f'/empresa/{empresa_id}/receita/aceitar',
+                           json={'campo': campo})
+        assert resp.status_code == 400, campo
+
+
+def test_aceitar_sem_dados_receita_da_400(app, client, ids):
+    empresa_id = _empresa_nova(app)
+    resp = client.post(f'/empresa/{empresa_id}/receita/aceitar',
+                       json={'campo': 'cidade'})
+    assert resp.status_code == 400
+
+
+def test_aceitar_empresa_inexistente_da_404(app, client, ids):
+    resp = client.post('/empresa/999999/receita/aceitar', json={'campo': 'cidade'})
+    assert resp.status_code == 404
+
+
+def test_aceitar_exige_papel_operador(app, login_as, client, ids, monkeypatch):
+    empresa_id = _empresa_nova(app, cidade='Porto Alegre')
+    _mock_client_direto(monkeypatch, (_dto(municipio='Tramandai'), None))
+    client.post(f'/empresa/{empresa_id}/receita/atualizar')
+
+    resp = login_as('leitura').post(f'/empresa/{empresa_id}/receita/aceitar',
+                                    json={'campo': 'cidade'})
+
+    assert resp.status_code == 403
+    with app.app_context():
+        assert db.session.get(Empresa, empresa_id).cidade == 'Porto Alegre'
+
+
 def test_db_nao_e_tocado_quando_a_consulta_falha(app, client, ids, monkeypatch):
     _mock_consulta(monkeypatch, (None, receita_client.ERRO_INDISPONIVEL))
     with app.app_context():
