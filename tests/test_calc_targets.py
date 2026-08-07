@@ -1,6 +1,7 @@
 """Testes do cálculo de alvos de lote (batch_engine.calc_targets) com banco."""
 import pytest
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from app import db
 from app.models import (
@@ -310,6 +311,18 @@ def test_emissao_individual_de_baixada_continua_permitida(app, ids):
         # ...mas a emissao individual segue liberada
         assert emissao_service._validar_baixar(cert) is None
 
+        # E no nivel OBSERVAVEL: `baixar_certidao` e quem a rota chama. Ancorar so
+        # no helper privado deixaria passar um bloqueio posto um nivel acima.
+        sentinela = RuntimeError('chegou na automacao')
+        with patch.object(emissao_service, '_montar_config_baixar',
+                          side_effect=sentinela):
+            try:
+                emissao_service.baixar_certidao(cert.id)
+                chegou = False
+            except RuntimeError as exc:
+                chegou = exc is sentinela
+        assert chegou, 'a emissao individual foi bloqueada antes da automacao'
+
 
 def test_emissao_individual_de_baixada_permitida_em_todos_os_tipos(app, ids):
     """A mesma garantia para os tipos dirigidos por Selenium (a Federal redireciona
@@ -324,23 +337,35 @@ def test_emissao_individual_de_baixada_permitida_em_todos_os_tipos(app, ids):
             assert emissao_service._validar_baixar(cert) is None, tipo
 
 
-def test_fluxo_do_agendador_nao_enfileira_empresa_baixada(app, ids):
+@pytest.mark.parametrize('fluxo,tipo', [
+    ('_fluxo_fgts_calc_ids', TipoCertidao.FGTS),
+    ('_fluxo_rs_calc_ids', TipoCertidao.ESTADUAL),
+    ('_fluxo_municipal_calc_ids', TipoCertidao.MUNICIPAL),
+    ('_fluxo_trabalhista_calc_ids', TipoCertidao.TRABALHISTA),
+])
+def test_fluxo_do_agendador_nao_enfileira_empresa_baixada(fluxo, tipo, app, ids,
+                                                          monkeypatch):
     """DATA-02.3: o AC nomeia a fila do agendador, entao a garantia precisa passar
-    pelo `calc_ids` de cada fluxo — e nao so pelo `calc_targets` la embaixo.
-    Sem isso, trocar a implementacao de um `_fluxo_*_calc_ids` por uma query
-    direta ao banco passaria despercebido."""
+    pelo `calc_ids` de CADA fluxo — nao so pelo `calc_targets` la embaixo. Sem
+    isso, trocar a implementacao de um `_fluxo_*_calc_ids` por uma query direta
+    passaria despercebido (foi o mutante M14 do Verifier)."""
     from app.routes import lotes
 
+    # o fluxo RS so enfileira com o solver ALTCHA ligado
+    monkeypatch.setattr(lotes, '_fluxo_rs_habilitado', lambda: True)
+
     with app.app_context():
-        viva = _empresa_com_situacao('Viva', '33.000.167/0001-01', 'ATIVA')
-        morta = _empresa_com_situacao('Morta', '11.222.333/0001-81', 'BAIXADA')
-        cert_viva = _certidao_a_vencer(viva, tipo=TipoCertidao.FGTS)
-        cert_morta = _certidao_a_vencer(morta, tipo=TipoCertidao.FGTS)
+        viva = _empresa_com_situacao('Viva', '33.000.167/0001-01', 'ATIVA',
+                                     cidade='Tramandaí')
+        morta = _empresa_com_situacao('Morta', '11.222.333/0001-81', 'BAIXADA',
+                                      cidade='Tramandaí')
+        cert_viva = _certidao_a_vencer(viva, tipo=tipo)
+        cert_morta = _certidao_a_vencer(morta, tipo=tipo)
 
-        ids_fgts = lotes._fluxo_fgts_calc_ids(app)
+        alvos = getattr(lotes, fluxo)(app)
 
-        assert cert_viva.id in ids_fgts
-        assert cert_morta.id not in ids_fgts
+        assert cert_viva.id in alvos, f'{fluxo} perdeu a empresa ativa'
+        assert cert_morta.id not in alvos, f'{fluxo} enfileirou empresa baixada'
 
 
 def test_fila_do_agendador_nao_recebe_empresa_baixada(app, ids):
