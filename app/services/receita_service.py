@@ -215,7 +215,10 @@ def consultar_para_formulario(cnpj):
         'cidade': canonicalizar(dto.municipio) if dto.municipio else None,
         'estado': (dto.uf or '').strip().upper() or None,
         'situacao': dto.situacao,
-        'ativa': _normalizar_situacao(dto.situacao) == SITUACAO_ATIVA,
+        # regra UNICA: `_normalizar_situacao(...) == ATIVA` diverge de
+        # `situacao_ativa` quando a situacao vem vazia (a tela avisaria que a
+        # empresa sai do lote, mas o calc_targets a inclui).
+        'ativa': situacao_ativa(dto.situacao),
         'logradouro': dto.logradouro,
         'numero': dto.numero,
         'bairro': dto.bairro,
@@ -241,6 +244,23 @@ def empresas_para_recheck(idade_dias, limite):
             .all())
 
 
+def _marcar_tentativa(empresa):
+    """Carimba `verificado_em` sem tocar na situacao — usado quando a consulta
+    falhou de forma definitiva. Manda a empresa para o fim da fila do recheck
+    sem afirmar nada sobre ela estar viva ou morta."""
+    dados = empresa.dados_receita
+    if dados is None:
+        dados = DadosReceita(empresa_id=empresa.id)
+        empresa.dados_receita = dados
+    dados.verificado_em = datetime.now()
+    try:
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        log_event('receita_recheck_carimbo_falhou', level='WARNING',
+                  empresa_id=getattr(empresa, 'id', None), error=str(exc))
+
+
 def rechecar_lote(idade_dias=30, limite=50, pausa_s=1.0):
     """Recheca a situação cadastral de uma fatia da carteira (DATA-02.6).
 
@@ -263,6 +283,13 @@ def rechecar_lote(idade_dias=30, limite=50, pausa_s=1.0):
                 resumo['falhas'] += 1
                 log_event('receita_recheck_sem_dados', level='WARNING',
                           empresa_id=empresa.id, motivo=erro)
+                # Falha DEFINITIVA (o CNPJ nao existe na base) carimba mesmo assim:
+                # `empresas_para_recheck` poe as nunca-verificadas na frente, entao
+                # sem o carimbo esses CNPJs reocupariam a cabeca da fila todo dia e
+                # o resto da carteira nunca seria rechecado. Falha TRANSITORIA
+                # (API fora) nao carimba — tem de ser retentada amanha.
+                if erro == receita_client.ERRO_NAO_ENCONTRADO:
+                    _marcar_tentativa(empresa)
                 continue
 
             resultado = enriquecer(empresa, dto)

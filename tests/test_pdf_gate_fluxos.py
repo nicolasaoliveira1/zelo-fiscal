@@ -340,3 +340,71 @@ def test_rs_negativa_continua_concedendo_validade(app, ids):
     assert (ok, grave) == (True, False)
     assert validade is not None
     assert caminho_db == '/rede/rs_final.pdf'
+
+
+# --- correcoes do code-review ------------------------------------------------
+
+def test_descartar_restaura_status_pendente(app, ids, tmp_path):
+    """CR2: no fluxo municipal a validade E o status sao gravados ANTES do gate.
+    Restaurar so a validade fazia a certidao PENDENTE perder a marca — ela sumia
+    da lista de pendencias e do escopo `pendentes` do lote, sem ninguem notar."""
+    with app.app_context():
+        cert = Certidao.query.filter_by(tipo=TipoCertidao.MUNICIPAL).first()
+        cert.status_especial = StatusEspecial.PENDENTE
+        db.session.commit()
+
+        status_anterior = cert.status_especial
+        cert.status_especial = None          # o que o fluxo municipal faz
+        pdf.descartar_pdf_invalido(cert, _arquivo(tmp_path),
+                                   status_anterior=status_anterior)
+
+        assert cert.status_especial == StatusEspecial.PENDENTE
+
+
+def test_descartar_sem_status_anterior_nao_inventa_pendencia(app, ids, tmp_path):
+    """Certidao que nao estava pendente nao pode virar pendente pelo descarte."""
+    with app.app_context():
+        cert = Certidao.query.filter_by(tipo=TipoCertidao.FGTS).first()
+        cert.status_especial = None
+        db.session.commit()
+
+        pdf.descartar_pdf_invalido(cert, _arquivo(tmp_path), status_anterior=None)
+        assert cert.status_especial is None
+
+
+def test_municipal_reprovado_preserva_pendencia(app, ids, tmp_path):
+    """CR2 na funcao real: o municipal e o unico fluxo que zera o status antes
+    de classificar, entao e onde a perda acontecia."""
+    _semear_municipio_tramandai(app)
+    caminho = _arquivo(tmp_path, 'muni_pend.pdf')
+
+    with app.app_context():
+        cert = db.session.get(Certidao, ids['municipal'])
+        cert.status_especial = StatusEspecial.PENDENTE
+        db.session.commit()
+
+    _run_emit_municipal(app, ids['municipal'], 'invalida', caminho)
+
+    with app.app_context():
+        assert db.session.get(Certidao, ids['municipal']).status_especial == \
+            StatusEspecial.PENDENTE
+
+
+def test_descartar_preserva_arquivo_anterior_se_ele_sobreviveu(app, ids, tmp_path):
+    """CR6: se o PDF ruim veio para um caminho novo e o antigo continua no disco,
+    a certidao volta a apontar para o antigo em vez de ficar sem arquivo."""
+    anterior = _arquivo(tmp_path, 'bom.pdf')
+    with app.app_context():
+        cert = Certidao.query.filter_by(tipo=TipoCertidao.FGTS).first()
+        pdf.descartar_pdf_invalido(cert, str(tmp_path / 'nao_existe.pdf'),
+                                   caminho_anterior=anterior)
+        assert cert.caminho_arquivo == anterior
+
+
+def test_descartar_limpa_caminho_quando_o_arquivo_foi_sobrescrito(app, ids, tmp_path):
+    """CR6: se o ruim sobrescreveu o bom (mesmo caminho), nao ha para onde voltar."""
+    caminho = _arquivo(tmp_path, 'sobrescrito.pdf')
+    with app.app_context():
+        cert = Certidao.query.filter_by(tipo=TipoCertidao.FGTS).first()
+        pdf.descartar_pdf_invalido(cert, caminho, caminho_anterior=caminho)
+        assert cert.caminho_arquivo is None

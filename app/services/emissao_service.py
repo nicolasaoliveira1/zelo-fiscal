@@ -264,20 +264,32 @@ def _baixar_classificar_pdf(certidao, cfg, caminho_arquivo):
 
     classif = _baixar_classificacao_vazia()
 
+    if tipo_certidao_chave == 'ESTADUAL' and estado_emp == 'RS':
+        origem_gate = 'ESTADUAL-RS'
+    elif tipo_certidao_chave == 'MUNICIPAL' and regra_municipio:
+        origem_gate = f'MUNICIPAL-{regra_municipio.nome}'
+    elif tipo_certidao_chave == 'ESTADUAL' and estado_emp:
+        origem_gate = f'ESTADUAL-{estado_emp}'
+    else:
+        origem_gate = tipo_certidao_chave
+
     # DATA-03.2: o gate vem PRIMEIRO e vale para todo tipo. Se o arquivo nao e
     # certidao, classificar por tipo nao faz sentido — e varios caminhos daqui
     # (municipal sem `classificar_pdf_status`) nem chegariam a classificar.
-    gate_ok, _motivo = pdf.avaliar_arquivo_certidao(
-        caminho_arquivo, origem_log=tipo_certidao_chave)
-    if not gate_ok:
+    #
+    # A classificacao e feita UMA vez e repassada aos blocos por tipo: o PDF vive
+    # no drive de rede, e abrir/extrair duas vezes por emissao e custo puro.
+    classificacao = pdf.classificar_status(caminho_arquivo, origem_log=origem_gate)
+    if classificacao == 'invalida':
         classif['pdf_invalida_msg'] = pdf.descartar_pdf_invalido(
             certidao, caminho_arquivo, validade_anterior=certidao.data_validade,
-            tipo_label=certidao.tipo.value)
+            status_anterior=certidao.status_especial, tipo_label=certidao.tipo.value)
         return classif
 
     if tipo_certidao_chave == 'ESTADUAL' and estado_emp == 'RS':
         classif['rs_estadual_classificacao'], classif['rs_estadual_msg'] = pdf.classificar_e_tratar_positivo(
-            certidao, caminho_arquivo, origem_log='ESTADUAL-RS', tipo_label='ESTADUAL RS'
+            certidao, caminho_arquivo, origem_log='ESTADUAL-RS', tipo_label='ESTADUAL RS',
+            classificacao=classificacao
         )
         log_event(
             'estadual_rs_pdf_classified', certidao_id=certidao.id,
@@ -293,7 +305,8 @@ def _baixar_classificar_pdf(certidao, cfg, caminho_arquivo):
         origem_pdf = f"MUNICIPAL-{regra_municipio.nome}"
         classif['municipal_pdf_classificacao'], classif['municipal_pdf_msg'] = pdf.classificar_e_tratar_positivo(
             certidao, caminho_arquivo, origem_log=origem_pdf,
-            tipo_label=f'MUNICIPAL ({regra_municipio.nome})'
+            tipo_label=f'MUNICIPAL ({regra_municipio.nome})',
+            classificacao=classificacao
         )
         log_event(
             'municipal_pdf_classified', certidao_id=certidao.id,
@@ -311,7 +324,8 @@ def _baixar_classificar_pdf(certidao, cfg, caminho_arquivo):
             else tipo_certidao_chave
         )
         classificacao_pdf, msg_pdf = pdf.classificar_e_tratar_positivo(
-            certidao, caminho_arquivo, origem_log=origem_pdf, tipo_label=certidao.tipo.value,
+            certidao, caminho_arquivo, origem_log=origem_pdf,
+            tipo_label=certidao.tipo.value, classificacao=classificacao,
         )
         if classificacao_pdf in {'positiva', 'erro'}:
             classif['certidao_pdf_classificacao'] = classificacao_pdf
@@ -683,6 +697,12 @@ def _executar_automacao_baixar(certidao, cfg):
             arquivo_salvo_msg = contexto['arquivo_salvo_msg']
         if contexto.get('data_encontrada'):
             data_encontrada = contexto['data_encontrada']
+        # DATA-03.4: o FGTS individual passa por `_automatizar_fgts`, que reprova
+        # o PDF no proprio contexto. Sem propagar aqui, o operador recebia
+        # 'window_closed_no_file' em vez da mensagem acionavel do gate.
+        if contexto.get('pdf_classificacao') == 'invalida':
+            pdf_invalida_msg = (contexto.get('pdf_msg')
+                                or 'O arquivo baixado não é uma certidão válida.')
 
         if info_site.get('inscricao_field_id'):
             field_by = _get_by(info_site.get('inscricao_field_by'))
@@ -781,6 +801,13 @@ def _montar_resposta_baixar(certidao, cfg, resultado):
     if resultado.get('erro_500'):
         return _json_error(resultado['erro_500'], 500)
 
+    # DATA-03.4: o gate vem antes de `window_closed`. Um arquivo CHEGOU e foi
+    # recusado — essa e a causa concreta; 'janela fechada sem arquivo' e um
+    # sinal generico que mascararia o motivo real para o operador.
+    if resultado.get('pdf_invalida_msg'):
+        return _json_error(resultado['pdf_invalida_msg'], 422,
+                           error_type='pdf_invalido')
+
     if resultado.get('window_closed'):
         return jsonify({
             'status': 'window_closed_no_file',
@@ -798,12 +825,6 @@ def _montar_resposta_baixar(certidao, cfg, resultado):
     data_encontrada = resultado['data_encontrada']
 
     response_data = {'status': 'unknown'}
-
-    # DATA-03.3/03.4: o arquivo nao passou no gate. Vem antes de tudo — as
-    # classificacoes por tipo nem chegam a rodar nesse caso.
-    if resultado.get('pdf_invalida_msg'):
-        return _json_error(resultado['pdf_invalida_msg'], 422,
-                           error_type='pdf_invalido')
 
     if rs_estadual_classificacao == 'positiva':
         response_data['status'] = 'estadual_rs_positiva'

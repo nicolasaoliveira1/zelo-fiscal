@@ -493,3 +493,82 @@ def test_consultar_para_formulario_propaga_erro(app, ids, monkeypatch):
         dados, erro = receita_service.consultar_para_formulario('33000167000101')
         assert dados is None
         assert erro == receita_client.ERRO_NAO_ENCONTRADO
+
+
+# --- correcoes do code-review ------------------------------------------------
+
+def test_cnpj_inexistente_nao_trava_a_fila_do_recheck(app, ids, monkeypatch):
+    """CR3: `empresas_para_recheck` poe as nunca-verificadas na FRENTE. Sem
+    carimbar `verificado_em`, um CNPJ que a Receita nao conhece (404) reocupava
+    a cabeca da fila todo dia — com `limite` empresas assim, o resto da carteira
+    nunca seria rechecado."""
+    _sem_pausa(monkeypatch)
+    monkeypatch.setattr(receita_service.receita_client, 'consultar',
+                        lambda _cnpj: (None, receita_client.ERRO_NAO_ENCONTRADO))
+    with app.app_context():
+        emp = _empresa('Fantasma', '33.000.167/0001-01')
+
+        receita_service.rechecar_lote(idade_dias=30, limite=10)
+
+        assert emp.dados_receita is not None
+        assert emp.dados_receita.verificado_em is not None
+        # e agora sai da fila da proxima execucao
+        alvos = receita_service.empresas_para_recheck(idade_dias=30, limite=10)
+        assert emp.id not in [e.id for e in alvos]
+
+
+def test_falha_transitoria_nao_carimba(app, ids, monkeypatch):
+    """CR3, o outro lado: API fora e transitorio. Carimbar aqui adiaria a
+    empresa por X dias por causa de uma indisponibilidade de minutos."""
+    _sem_pausa(monkeypatch)
+    monkeypatch.setattr(receita_service.receita_client, 'consultar',
+                        lambda _cnpj: (None, receita_client.ERRO_INDISPONIVEL))
+    with app.app_context():
+        emp = _empresa('Tenta Amanha', '33.000.167/0001-01')
+
+        receita_service.rechecar_lote(idade_dias=30, limite=10)
+
+        alvos = receita_service.empresas_para_recheck(idade_dias=30, limite=10)
+        assert emp.id in [e.id for e in alvos], 'deveria continuar na fila'
+
+
+def test_carimbo_de_falha_nao_afirma_situacao(app, ids, monkeypatch):
+    """O carimbo diz "tentei", nao "esta viva" ou "esta morta". A empresa segue
+    contando como ATIVA, que e o default de nao-classificada."""
+    _sem_pausa(monkeypatch)
+    monkeypatch.setattr(receita_service.receita_client, 'consultar',
+                        lambda _cnpj: (None, receita_client.ERRO_NAO_ENCONTRADO))
+    with app.app_context():
+        emp = _empresa('Fantasma', '33.000.167/0001-01')
+        receita_service.rechecar_lote(idade_dias=30, limite=10)
+
+        assert emp.dados_receita.situacao is None
+        assert receita_service.empresa_ativa(emp) is True
+
+
+def test_formulario_usa_a_regra_unica_de_empresa_viva(app, ids, monkeypatch):
+    """CR5: a tela recomputava "viva" inline. Para situacao vazia isso divergia
+    do `calc_targets`: a tela avisava que a empresa ficaria fora do lote, e o
+    lote a incluia."""
+    with app.app_context():
+        monkeypatch.setattr(receita_service.receita_client, 'consultar',
+                            lambda _cnpj: (_dto(situacao=''), None))
+        dados, _erro = receita_service.consultar_para_formulario('33000167000101')
+
+        assert dados['ativa'] is True
+        assert dados['ativa'] is receita_service.situacao_ativa('')
+
+
+@pytest.mark.parametrize('situacao,esperado', [
+    ('ATIVA', True), ('', True), (None, True),
+    ('BAIXADA', False), ('SUSPENSA', False),
+])
+def test_formulario_concorda_com_o_filtro_de_lote(situacao, esperado, app, ids,
+                                                  monkeypatch):
+    """A tela e o lote nao podem discordar sobre a mesma empresa."""
+    with app.app_context():
+        monkeypatch.setattr(receita_service.receita_client, 'consultar',
+                            lambda _cnpj: (_dto(situacao=situacao), None))
+        dados, _erro = receita_service.consultar_para_formulario('33000167000101')
+        assert dados['ativa'] is esperado
+        assert receita_service.situacao_ativa(situacao) is esperado

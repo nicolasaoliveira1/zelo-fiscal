@@ -116,8 +116,8 @@ def test_baixar_gate_reprova_antes_de_classificar_por_tipo(app, ids, tmp_path):
     quando o arquivo nao e certidao."""
     caminho = _arquivo(tmp_path, 'baixar.pdf')
     with app.app_context(), \
-            patch.object(emissao_service.pdf, 'avaliar_arquivo_certidao',
-                         return_value=(False, 'o texto nao parece de uma certidao')), \
+            patch.object(emissao_service.pdf, 'classificar_status',
+                         return_value='invalida'), \
             patch.object(emissao_service.pdf, 'classificar_e_tratar_positivo') as classificar:
         cert = Certidao.query.filter_by(tipo=TipoCertidao.ESTADUAL).first()
         classif = emissao_service._baixar_classificar_pdf(cert, _cfg('ESTADUAL'), caminho)
@@ -133,8 +133,8 @@ def test_baixar_gate_vale_para_municipal_sem_classificar_pdf_status(app, ids, tm
     depende disso."""
     caminho = _arquivo(tmp_path, 'muni.pdf')
     with app.app_context(), \
-            patch.object(emissao_service.pdf, 'avaliar_arquivo_certidao',
-                         return_value=(False, 'sem texto extraivel')):
+            patch.object(emissao_service.pdf, 'classificar_status',
+                         return_value='invalida'):
         cert = Certidao.query.filter_by(tipo=TipoCertidao.MUNICIPAL).first()
         classif = emissao_service._baixar_classificar_pdf(
             cert, _cfg('MUNICIPAL'), caminho)
@@ -193,3 +193,67 @@ def test_baixar_pdf_invalido_tem_prioridade_sobre_arquivo_salvo(app, ids):
             cert, _cfg_resposta(), resultado)
         corpo = resposta[0] if isinstance(resposta, tuple) else resposta
         assert corpo.get_json()['status'] == 'error'
+
+
+# --- correcoes do code-review ------------------------------------------------
+
+def test_fgts_individual_propaga_mensagem_do_gate(app, ids):
+    """CR4: o FGTS individual reprova o PDF dentro de `_automatizar_fgts`, que so
+    escreve no `contexto`. Sem propagar para o `resultado`, o operador recebia
+    'window_closed_no_file' em vez da mensagem acionavel do gate (DATA-03.4)."""
+    import inspect
+    fonte = inspect.getsource(emissao_service._executar_automacao_baixar)
+    assert "contexto.get('pdf_classificacao') == 'invalida'" in fonte
+    assert 'pdf_invalida_msg' in fonte
+
+
+def test_resposta_do_fgts_individual_reprovado_e_acionavel(app, ids):
+    """O efeito observavel do CR4: a resposta diz o que houve, em vez de um erro
+    generico de janela fechada."""
+    with app.app_context():
+        cert = Certidao.query.filter_by(tipo=TipoCertidao.FGTS).first()
+        resultado = emissao_service._resultado_baixar_vazio()
+        resultado['pdf_invalida_msg'] = ('O arquivo baixado não é uma certidão '
+                                         'FGTS válida.')
+        resultado['window_closed'] = True     # o que mascarava a causa antes
+
+        cfg = _cfg('FGTS')
+        cfg['nome_certidao_arquivo'] = 'FGTS'
+        resposta = emissao_service._montar_resposta_baixar(cert, cfg, resultado)
+        corpo = resposta[0] if isinstance(resposta, tuple) else resposta
+        dados = corpo.get_json()
+
+    assert dados['status'] == 'error'
+    assert 'não é uma certidão' in dados['message']
+
+
+def test_emissao_individual_le_o_pdf_uma_vez_so(app, ids, tmp_path, monkeypatch):
+    """CR7: o PDF vive no drive de rede. Antes, o gate e a classificacao por tipo
+    abriam e extraiam o arquivo duas vezes por emissao."""
+    caminho = _arquivo(tmp_path, 'uma_vez.pdf')
+    leituras = []
+
+    class _FakePage:
+        def extract_text(self):
+            return 'CERTIDÃO NEGATIVA DE DÉBITOS'
+
+    class _FakePdf:
+        pages = [_FakePage()]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _abrir(c):
+        leituras.append(c)
+        return _FakePdf()
+
+    monkeypatch.setattr(pdf.pdfplumber, 'open', _abrir)
+
+    with app.app_context():
+        cert = Certidao.query.filter_by(tipo=TipoCertidao.ESTADUAL).first()
+        emissao_service._baixar_classificar_pdf(cert, _cfg('ESTADUAL'), caminho)
+
+    assert len(leituras) == 1, f'PDF lido {len(leituras)} vezes'

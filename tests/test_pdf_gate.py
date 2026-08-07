@@ -256,11 +256,45 @@ def test_classificar_status_le_o_pdf_uma_vez_so(tmp_path, monkeypatch):
     assert len(leituras) == 1
 
 
-def test_pdf_corrompido_reprova_sem_levantar(tmp_path, monkeypatch):
-    """O gate roda no meio da emissao: nunca pode levantar."""
+def test_falha_de_leitura_nao_reprova(tmp_path, monkeypatch):
+    """CORRECAO pos-code-review: falha ao ABRIR o PDF e inconclusiva, nunca
+    reprovacao.
+
+    Um arquivo travado no drive de rede, antivirus segurando o handle ou I/O
+    lento produzem o mesmo texto vazio que uma pagina de erro — e o tratamento
+    de reprovado APAGA o arquivo. Antes desta correcao o gate destruia uma
+    certidao legitima por um erro transitorio de leitura."""
     def _boom(_c):
-        raise OSError('arquivo corrompido')
+        raise OSError('arquivo travado por outro processo')
     monkeypatch.setattr(pdf.pdfplumber, 'open', _boom)
+
+    ok, motivo = pdf.avaliar_arquivo_certidao(_arquivo_grande(tmp_path))
+    assert ok is True, 'falha de leitura nao pode reprovar — o arquivo seria apagado'
+    assert motivo is None
+
+
+def test_falha_de_leitura_classifica_como_desconhecida(tmp_path, monkeypatch):
+    """E o comportamento de ANTES do gate: sem texto para classificar, cai em
+    'desconhecida'. Perder a classificacao e aceitavel; apagar a certidao nao."""
+    def _boom(_c):
+        raise OSError('io error')
+    monkeypatch.setattr(pdf.pdfplumber, 'open', _boom)
+    assert pdf.classificar_status(_arquivo_grande(tmp_path)) == 'desconhecida'
+
+
+def test_pdf_vazio_mas_legivel_continua_reprovando(tmp_path, monkeypatch):
+    """A correcao acima nao afrouxa o caso que o gate existe para pegar: se o
+    PDF foi lido com sucesso e nao tem texto, segue reprovado."""
+    _pdf_com_texto(monkeypatch, '')
     ok, motivo = pdf.avaliar_arquivo_certidao(_arquivo_grande(tmp_path))
     assert ok is False
-    assert motivo
+    assert 'texto' in motivo
+
+
+def test_gate_nunca_levanta(tmp_path, monkeypatch):
+    """O gate roda no meio da emissao: excecao aqui derrubaria o lote."""
+    def _boom(_c):
+        raise RuntimeError('qualquer coisa')
+    monkeypatch.setattr(pdf.pdfplumber, 'open', _boom)
+    assert pdf.avaliar_arquivo_certidao(_arquivo_grande(tmp_path))[0] in (True, False)
+    assert pdf.classificar_status(_arquivo_grande(tmp_path))
