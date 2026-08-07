@@ -7,13 +7,14 @@ pelo retry do lote).
 
 Os testes dirigem as FUNCOES REAIS com o Selenium mockado, no padrao de
 `_run_emit_trabalhista` em test_emissao_puras.py — um teste que reimplementasse
-o ramo passaria mesmo com a producao revertida.
+o ramo passaria mesmo com a producao revertida. Isso vale para os 4 fluxos,
+inclusive o Estadual RS (`_run_emit_rs`), que exige mais mocks por causa do
+login com certificado e do ALTCHA.
 
-Excecao declarada: `_emitir_estadual_rs_certidao` faz login por certificado +
-ALTCHA antes de chegar ao PDF, e um harness completo seria maior que a mudanca
-que ele verifica. O ramo do RS e verificado estruturalmente sobre o codigo-fonte
-real (o teste fica vermelho se a producao for revertida), somado aos testes de
-comportamento do nucleo compartilhado, que e quem faz o trabalho.
+Unica excecao: o zeramento de `arquivo_salvo_msg` dentro de `_automatizar_fgts`
+e verificado no fonte (`test_fgts_zera_arquivo_salvo_ao_reprovar`), porque essa
+funcao exige o Selenium inteiro. O EFEITO que importa — validade nao concedida —
+e asserido no codigo real, via `_emitir_fgts_certidao`.
 """
 import inspect
 import os

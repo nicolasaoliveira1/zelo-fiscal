@@ -286,3 +286,91 @@ def test_uma_query_so_sem_n_mais_1(app, ids):
         # 1 query de alvos (+ eventual leitura de ConfiguracaoSistema pelo
         # get_a_vencer_dias). Nunca uma por certidao.
         assert len(selects) <= 2, selects
+
+
+# --- guardas dos ACs que o Verifier achou descobertos ------------------------
+
+def test_emissao_individual_de_baixada_continua_permitida(app, ids):
+    """DATA-02.4: a empresa sai do LOTE, nao do sistema. O operador ainda precisa
+    emitir certidao de empresa baixada (encerramento, baixa recente).
+
+    Esta permissao e uma AUSENCIA de codigo — `_validar_baixar` simplesmente nao
+    olha a situacao cadastral. Ausencia nao se testa por acidente: sem este teste,
+    alguem "reforcando" o filtro poderia bloquear a emissao individual junto e a
+    suite ficaria verde.
+    """
+    from app.services import emissao_service
+
+    with app.app_context():
+        morta = _empresa_com_situacao('Morta', '33.000.167/0001-01', 'BAIXADA')
+        cert = _certidao_a_vencer(morta, tipo=TipoCertidao.FGTS)
+
+        # nao entra no lote...
+        assert cert.id not in batch_engine.calc_targets(None, scope='default')['ids']
+        # ...mas a emissao individual segue liberada
+        assert emissao_service._validar_baixar(cert) is None
+
+
+def test_emissao_individual_de_baixada_permitida_em_todos_os_tipos(app, ids):
+    """A mesma garantia para os tipos dirigidos por Selenium (a Federal redireciona
+    para o portal por desenho, entao fica fora)."""
+    from app.services import emissao_service
+
+    with app.app_context():
+        morta = _empresa_com_situacao('Morta', '33.000.167/0001-01', 'BAIXADA')
+        for tipo in (TipoCertidao.FGTS, TipoCertidao.ESTADUAL,
+                     TipoCertidao.MUNICIPAL, TipoCertidao.TRABALHISTA):
+            cert = _certidao_a_vencer(morta, tipo=tipo)
+            assert emissao_service._validar_baixar(cert) is None, tipo
+
+
+def test_fluxo_do_agendador_nao_enfileira_empresa_baixada(app, ids):
+    """DATA-02.3: o AC nomeia a fila do agendador, entao a garantia precisa passar
+    pelo `calc_ids` de cada fluxo — e nao so pelo `calc_targets` la embaixo.
+    Sem isso, trocar a implementacao de um `_fluxo_*_calc_ids` por uma query
+    direta ao banco passaria despercebido."""
+    from app.routes import lotes
+
+    with app.app_context():
+        viva = _empresa_com_situacao('Viva', '33.000.167/0001-01', 'ATIVA')
+        morta = _empresa_com_situacao('Morta', '11.222.333/0001-81', 'BAIXADA')
+        cert_viva = _certidao_a_vencer(viva, tipo=TipoCertidao.FGTS)
+        cert_morta = _certidao_a_vencer(morta, tipo=TipoCertidao.FGTS)
+
+        ids_fgts = lotes._fluxo_fgts_calc_ids(app)
+
+        assert cert_viva.id in ids_fgts
+        assert cert_morta.id not in ids_fgts
+
+
+def test_fila_do_agendador_nao_recebe_empresa_baixada(app, ids):
+    """DATA-02.3 ponta a ponta: o que o agendador ENFILEIRA de fato."""
+    from app.routes import lotes
+    from app.services import fila_emissao
+
+    with app.app_context():
+        morta = _empresa_com_situacao('Morta', '33.000.167/0001-01', 'BAIXADA')
+        cert_morta = _certidao_a_vencer(morta, tipo=TipoCertidao.FGTS)
+
+        enfileiradas = fila_emissao.enfileirar_a_vencer(
+            {TipoCertidao.FGTS.value: lotes._fluxo_fgts_calc_ids(app)})
+
+        assert cert_morta.id not in enfileiradas[TipoCertidao.FGTS.value]
+
+
+def test_empresa_reativada_volta_para_o_lote(app, ids):
+    """Edge case do spec: BAIXADA -> ATIVA reentra nos alvos naturalmente, sem
+    nenhuma acao manual. Se a exclusao fosse gravada em algum lugar em vez de
+    derivada da situacao atual, a empresa ficaria fora para sempre."""
+    with app.app_context():
+        emp = _empresa_com_situacao('Vai e Volta', '33.000.167/0001-01', 'ATIVA')
+        cert = _certidao_a_vencer(emp, tipo=TipoCertidao.FGTS)
+        assert cert.id in batch_engine.calc_targets(None, scope='default')['ids']
+
+        emp.dados_receita.situacao = 'BAIXADA'
+        db.session.commit()
+        assert cert.id not in batch_engine.calc_targets(None, scope='default')['ids']
+
+        emp.dados_receita.situacao = 'ATIVA'
+        db.session.commit()
+        assert cert.id in batch_engine.calc_targets(None, scope='default')['ids']
