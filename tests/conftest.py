@@ -59,6 +59,20 @@ USUARIOS_TESTE = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _sem_cert_store_real(monkeypatch):
+    """Nenhum teste le o repositorio de certificados da maquina.
+
+    `PoliticaCertificado.montar` resolve o issuer no store do Windows, entao sem
+    este duble o resultado dependeria de quais certificados estao instalados em
+    quem roda a suite. None = "nao sei", que e o caminho de fallback para o
+    issuer configurado; os testes da resolucao sobrescrevem este duble.
+    """
+    from app.automation import cert_store
+
+    monkeypatch.setattr(cert_store, 'encontrar_issuer', lambda subject_cn: None)
+
+
 @pytest.fixture(scope='session')
 def app():
     return create_app()

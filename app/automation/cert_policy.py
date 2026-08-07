@@ -14,6 +14,14 @@ Duas restricoes do desenho (ND-002c/ND-006):
 - issuer e subject sao **por politica**, nunca herdados: cada fluxo usa um
   certificado diferente (o RS um e-CPF, a NFSe um e-CNPJ) e existem certificados
   com o mesmo subject e issuers distintos — filtrar so por subject e ambiguo.
+
+O issuer configurado e apenas o **fallback**: na renovacao do certificado o
+titular continua o mesmo mas a AC emissora pode mudar, e um issuer fixado no
+.env passa a nao casar com nada — o Chrome volta a pedir o certificado no meio
+do lote. Por isso `montar()` primeiro pergunta ao `cert_store` qual e o issuer
+do certificado valido daquele subject, e so usa o configurado quando a store nao
+responde. O filtro gravado continua com ISSUER + SUBJECT (a ambiguidade da
+ND-006 e resolvida na escolha, nao afrouxando o filtro).
 """
 import json
 import os
@@ -24,6 +32,7 @@ try:
 except ImportError:
     winreg = None
 
+from app.automation import cert_store
 from app.services.execution_logger import log_event
 
 CHAVE_REGISTRO = r"Software\Policies\Google\Chrome\AutoSelectCertificateForUrls"
@@ -42,15 +51,35 @@ class PoliticaCertificado:
         self.issuer_cn = (issuer_cn or '').strip()
         self.subject_cn = (subject_cn or '').strip()
         self.prefixo_log = prefixo_log
+        self._issuer_resolvido = None
+
+    def issuer_efetivo(self):
+        """Issuer do certificado instalado para este subject; o configurado como fallback.
+
+        O resultado e memorizado na instancia: `ativar()` e a gravacao no
+        registro precisam enxergar o mesmo issuer, e cada ativacao ja constroi
+        uma instancia nova — entao uma renovacao e vista no proximo lote.
+        """
+        if self._issuer_resolvido is None:
+            if not self.subject_cn:
+                # sem subject nao ha chave de busca; o filtro fica so com o issuer
+                self._issuer_resolvido = self.issuer_cn
+            else:
+                self._issuer_resolvido = (
+                    cert_store.encontrar_issuer(self.subject_cn) or self.issuer_cn
+                )
+        return self._issuer_resolvido
 
     def montar(self):
         """Dict da policy, ou None quando falta pattern ou o filtro fica vazio."""
         if not self.pattern:
             return None
 
+        issuer_cn = self.issuer_efetivo()
+
         filtro = {}
-        if self.issuer_cn:
-            filtro['ISSUER'] = {'CN': self.issuer_cn}
+        if issuer_cn:
+            filtro['ISSUER'] = {'CN': issuer_cn}
         if self.subject_cn:
             filtro['SUBJECT'] = {'CN': self.subject_cn}
 

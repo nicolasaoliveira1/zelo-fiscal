@@ -82,6 +82,7 @@ SECRET_KEY=uma_chave_segura
 # CHROME_UC_VERSION_MAIN=149
 
 # Certificado Estadual RS (opcional)
+# SUBJECT é a chave (não muda na renovação); ISSUER é apenas o fallback.
 # RS_CERT_AUTOSELECT_ENABLED=true
 # RS_CERT_AUTOSELECT_PATTERN=https://www.sefaz.rs.gov.br
 # RS_CERT_AUTOSELECT_POLICY_INDEX=1
@@ -151,9 +152,21 @@ O caminho base onde os PDFs das empresas são organizados pode ser definido de d
 Os dois fluxos que exigem certificado usam a política `AutoSelectCertificateForUrls` do Chrome para escolher o certificado sem exibir o diálogo. Cada um declara o seu conjunto completo (padrão de URL, índice no registro, issuer e subject) e **nada é herdado do outro**: o RS usa um e-CPF e a NFSe um e-CNPJ.
 
 - Use um `POLICY_INDEX` **diferente** para cada fluxo. Eles convivem, e reutilizar o mesmo índice faria um sobrescrever a política do outro.
-- Informe **issuer e subject juntos**. É comum haver mais de um certificado com o mesmo titular e emissores diferentes (um deles vencido); filtrar só pelo titular é ambíguo e pode selecionar o certificado errado.
+- O **`SUBJECT_CN` é a variável que importa**: é a chave de busca no repositório de certificados do Windows e é o dado que **não muda** na renovação (nome do titular + CPF/CNPJ). Copie-o exatamente como aparece no CN do certificado, incluindo o número depois dos dois-pontos.
+- O **`ISSUER_CN` é só o fallback**, usado quando o certificado não está instalado na máquina. Na renovação a AC emissora costuma mudar, então o valor do `.env` envelhece sozinho — por isso o issuer é descoberto a cada ativação, e não lido do `.env` quando há certificado instalado.
+- A escolha, quando há mais de um certificado com o mesmo titular, é: **dentro da validade**, **com chave privada**, e entre os que sobram vence o de **vencimento mais distante** (o recém-renovado). O vencido fica de fora, e a política gravada continua com issuer + subject — o filtro não é afrouxado.
 - Sem essas variáveis o fluxo continua funcionando: o Chrome passa a pedir o certificado na tela, e o operador escolhe.
-- Certificado vencido é uma causa comum de "parou de funcionar do nada": a auto-seleção deixa de casar e o diálogo volta a aparecer.
+
+**"O lote parou na tela 'Selecione um certificado'"** — é o sintoma de a política não casar com nenhum certificado, e não gera erro no log da automação (o lote fica só esperando um clique). Procure no log por:
+
+- `cert_store_issuer_resolvido` — achou; o campo `issuer_cn` mostra qual AC foi usada.
+- `cert_store_sem_certificado_valido` — **nenhum** certificado válido para aquele subject: o certificado venceu e o novo ainda não foi instalado, ou o `SUBJECT_CN` está escrito diferente do CN real. Confira com o PowerShell:
+
+  ```powershell
+  Get-ChildItem Cert:\CurrentUser\My | Select-Object Subject, Issuer, NotAfter
+  ```
+
+- `cert_store_issuer_ambiguo` — mais de um certificado válido para o mesmo titular, com emissores diferentes; o log mostra o escolhido e os descartados.
 
 ### Estadual RS e 2captcha
 

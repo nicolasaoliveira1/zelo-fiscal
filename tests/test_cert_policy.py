@@ -228,3 +228,86 @@ def test_desativar_a_politica_do_rs_nao_apaga_a_da_nfse(monkeypatch, registro_po
     # o isolamento vale nos dois sentidos (ND-002c: "nem vice-versa")
     assert registro_por_indice.politica('1') is None
     assert json.loads(registro_por_indice.politica('2')) == POLITICA_NFSE
+
+
+# --- Issuer descoberto no store: sobreviver a renovacao do certificado ---
+#
+# O bug real: renovado o e-CPF em 30/07/2026, o titular (subject) seguiu igual
+# mas a AC emissora mudou de "AC DIGITALSIGN RFB G3" para "AC SyngularID
+# Multipla". Com o issuer antigo fixado no .env a policy nao casava com
+# certificado nenhum, e o Chrome voltava a abrir o dialogo de selecao no meio do
+# lote do RS — sem erro, so parado.
+
+ISSUER_RENOVADO = 'AC SyngularID Multipla'
+
+
+def _store_devolve(monkeypatch, issuer, esperado_subject=None):
+    def _fake(subject_cn):
+        if esperado_subject is not None:
+            assert subject_cn == esperado_subject
+        return issuer
+
+    monkeypatch.setattr(cert_policy.cert_store, 'encontrar_issuer', _fake)
+
+
+def test_issuer_vem_do_store_e_nao_do_env_quando_o_certificado_foi_renovado(monkeypatch, registro):
+    _config_rs(monkeypatch)  # env ainda aponta para a AC antiga
+    _store_devolve(monkeypatch, ISSUER_RENOVADO, esperado_subject=SUBJECT_RS)
+
+    driver._ativar_politica_autoselect_rs_temporaria()
+
+    gravada = json.loads(registro.politica('1'))
+    assert gravada['filter']['ISSUER'] == {'CN': ISSUER_RENOVADO}
+    # o subject e a chave estavel da busca: continua o do .env, intocado
+    assert gravada['filter']['SUBJECT'] == {'CN': SUBJECT_RS}
+
+
+def test_sem_resposta_do_store_mantem_o_issuer_configurado(monkeypatch, registro):
+    _config_rs(monkeypatch)
+    _store_devolve(monkeypatch, None)
+
+    driver._ativar_politica_autoselect_rs_temporaria()
+
+    # "nao sei" (fora do Windows, store vazia, crypt32 indisponivel) nao pode
+    # virar policy sem ISSUER: o fallback e o valor configurado
+    assert json.loads(registro.politica('1')) == POLITICA_RS
+
+
+def test_a_politica_da_nfse_tambem_resolve_o_issuer_no_store(monkeypatch, registro_por_indice):
+    _store_devolve(monkeypatch, 'AC NOVA', esperado_subject=NFSE_SUBJECT)
+
+    cert_policy.ativar(_politica_nfse())
+
+    gravada = json.loads(registro_por_indice.politica('2'))
+    assert gravada['filter']['ISSUER'] == {'CN': 'AC NOVA'}
+
+
+def test_o_issuer_resolvido_e_o_mesmo_na_checagem_e_na_gravacao(monkeypatch, registro):
+    """Uma consulta por instancia: `ativar` e a gravacao nao podem divergir."""
+    _config_rs(monkeypatch)
+    chamadas = []
+
+    def _fake(subject_cn):
+        chamadas.append(subject_cn)
+        return ISSUER_RENOVADO
+
+    monkeypatch.setattr(cert_policy.cert_store, 'encontrar_issuer', _fake)
+
+    politica = driver._politica_autoselect_rs()
+    cert_policy.ativar(politica)
+
+    assert len(chamadas) == 1
+    assert json.loads(registro.politica('1'))['filter']['ISSUER'] == {'CN': ISSUER_RENOVADO}
+
+
+def test_sem_subject_configurado_nao_consulta_o_store(monkeypatch, registro):
+    _config_rs(monkeypatch, RS_CERT_AUTOSELECT_SUBJECT_CN='')
+    chamadas = []
+    monkeypatch.setattr(cert_policy.cert_store, 'encontrar_issuer',
+                        lambda subject_cn: chamadas.append(subject_cn))
+
+    driver._ativar_politica_autoselect_rs_temporaria()
+
+    # sem subject nao ha o que buscar; o filtro fica so com o ISSUER do .env
+    assert chamadas == []
+    assert json.loads(registro.politica('1'))['filter'] == {'ISSUER': {'CN': ISSUER_RS}}
