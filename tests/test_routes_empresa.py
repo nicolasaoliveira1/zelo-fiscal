@@ -1,18 +1,27 @@
 """Caracterizacao do POST /empresa/adicionar.
 
 Todas as respostas sao redirect (302); o efeito e verificado no banco.
-O conftest (fixture client/ids) ja semeia 1 empresa RS/Tramandai com
-CNPJ 11.111.111/1111-11, usada no teste de duplicidade.
+
+Desde a spec 08 (DATA-01.1) a rota valida o digito verificador, entao o CNPJ
+do caminho feliz precisa ter DV valido — o antigo '22.222.222/2222-22' passava
+so porque a rota contava 14 digitos. As assercoes seguem as mesmas; mudou o
+dado. O teste de duplicidade semeia a empresa pre-existente com DV valido em
+vez de usar o seed do conftest, senao ele passaria pelo motivo errado (recusa
+por DV, nao por duplicidade).
 """
+from app import db
 from app.models import Certidao, Empresa, SubtipoCertidao, TipoCertidao
 
 N_TIPOS = len(list(TipoCertidao))
+
+CNPJ_VALIDO = '33.000.167/0001-01'
+CNPJ_VALIDO_2 = '11.222.333/0001-81'
 
 
 def _form(**over):
     base = {
         'nome': 'Nova Empresa',
-        'cnpj': '22.222.222/2222-22',
+        'cnpj': CNPJ_VALIDO,
         'estado': 'RS',
         'cidade': 'Porto Alegre',
         'inscricao_mobiliaria': '',
@@ -60,11 +69,20 @@ def test_adicionar_empresa_estado_invalido(app, client):
 
 
 def test_adicionar_empresa_duplicada(app, client):
-    r = client.post('/empresa/adicionar', data=_form(cnpj='11111111111111'))
+    """O CNPJ ja cadastrado e recusado — e a recusa tem de vir da duplicidade,
+    por isso a empresa pre-existente e semeada com DV valido."""
+    with app.app_context():
+        db.session.add(Empresa(nome='Ja Existe', cnpj=CNPJ_VALIDO_2,
+                               estado='RS', cidade='Porto Alegre'))
+        db.session.commit()
+
+    r = client.post('/empresa/adicionar',
+                    data=_form(cnpj='11222333000181'))
     assert r.status_code == 302
     with app.app_context():
         assert Empresa.query.filter(
-            Empresa.cnpj.in_({'11111111111111', '11.111.111/1111-11'})).count() == 1
+            Empresa.cnpj.in_({'11222333000181', CNPJ_VALIDO_2})).count() == 1
+        assert Empresa.query.filter_by(nome='Nova Empresa').first() is None
 
 
 def test_adicionar_empresa_inscricao_longa(app, client):

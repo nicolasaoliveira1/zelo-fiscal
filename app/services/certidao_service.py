@@ -60,6 +60,14 @@ def finalizar_federal(certidao, caminho_pdf):
         if classificacao == 'erro':
             return {'ok': False, 'grave': True, 'message': msg_pos}
 
+        # DATA-03.3: o arquivo nao e uma certidao (pagina de erro do portal, ou
+        # PDF errado no upload manual). Sem validade e sem fallback de 180 dias.
+        if classificacao == 'invalida':
+            mensagem = pdf.descartar_pdf_invalido(
+                certidao, caminho_pdf, validade_anterior=certidao.data_validade,
+                tipo_label='Federal')
+            return {'ok': False, 'grave': False, 'message': mensagem}
+
         if classificacao == 'positiva':
             # classificar_e_tratar_positivo ja marcou PENDENTE, removeu o arquivo e commitou.
             return {'ok': True, 'pendente': True, 'data_validade': None, 'message': msg_pos}

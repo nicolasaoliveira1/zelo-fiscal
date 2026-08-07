@@ -593,8 +593,20 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
         if not sucesso:
             return False, True, f'Falha ao mover arquivo Estadual RS: {caminho_final}'
 
+        caminho_anterior = certidao.caminho_arquivo
         certidao.caminho_arquivo = caminho_final
+        validade_anterior = certidao.data_validade
+        status_anterior = certidao.status_especial
         classificacao = pdf.classificar_estadual_rs(caminho_final)
+
+        # DATA-03.3/03.4: o portal devolveu algo que nao e certidao (pagina de
+        # erro/sessao expirada). Descarta e falha — o item volta pelo retry.
+        if classificacao == 'invalida':
+            mensagem = pdf.descartar_pdf_invalido(
+                certidao, caminho_final, validade_anterior=validade_anterior,
+                status_anterior=status_anterior, caminho_anterior=caminho_anterior,
+                tipo_label='Estadual RS')
+            return False, False, mensagem
 
         if classificacao == 'positiva':
             try:
@@ -1015,6 +1027,8 @@ def _emitir_municipal_certidao_lote(certidao_id, driver=None, execution_id=None)
                     return False, False, f'Erro ao salvar: {msg}'
 
                 certidao.caminho_arquivo = msg
+                validade_anterior = certidao.data_validade
+                status_anterior = certidao.status_especial
                 data_calc = _calcular_validade_municipal(regra_municipio)
                 certidao.data_validade = data_calc
                 certidao.status_especial = None
@@ -1024,9 +1038,19 @@ def _emitir_municipal_certidao_lote(certidao_id, driver=None, execution_id=None)
                     db.session.rollback()
                     return False, False, f'Erro ao salvar no banco: {e_db}'
 
+                origem_pdf = f"MUNICIPAL-{regra_municipio.nome}"
+                municipal_pdf_classificacao = pdf.classificar_status(msg, origem_log=origem_pdf)
+
+                # DATA-03.2: o gate vale para TODO municipio, nao so os que pedem
+                # classificacao positiva/negativa no config — pagina de erro salva
+                # como PDF acontece igual nos dois.
+                if municipal_pdf_classificacao == 'invalida':
+                    mensagem = pdf.descartar_pdf_invalido(
+                        certidao, msg, validade_anterior=validade_anterior,
+                        status_anterior=status_anterior, tipo_label='Municipal')
+                    return False, False, mensagem
+
                 if bool((config_municipal or {}).get('classificar_pdf_status')):
-                    origem_pdf = f"MUNICIPAL-{regra_municipio.nome}"
-                    municipal_pdf_classificacao = pdf.classificar_status(msg, origem_log=origem_pdf)
                     if municipal_pdf_classificacao == 'positiva':
                         try:
                             if msg and os.path.exists(msg):
@@ -1219,6 +1243,12 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
             msg_pdf = contexto.get('pdf_msg') or 'Erro ao tratar certidão FGTS positiva.'
             return False, True, msg_pdf
 
+        # DATA-03.3/03.4: grave=False para o item entrar no retry do lote, como
+        # qualquer outra falha de emissao.
+        if contexto.get('pdf_classificacao') == 'invalida':
+            return False, False, (contexto.get('pdf_msg')
+                                  or 'O arquivo baixado não é uma certidão FGTS válida.')
+
         if contexto.get('arquivo_salvo_msg'):
             nova_data = calcular_validade_padrao(certidao, contexto.get('data_encontrada'))
             if nova_data:
@@ -1360,12 +1390,23 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
         if not sucesso_mv:
             return False, True, f'Falha ao mover arquivo Trabalhista: {caminho_final}'
 
+        caminho_anterior = certidao.caminho_arquivo
         certidao.caminho_arquivo = caminho_final
+        validade_anterior = certidao.data_validade
+        status_anterior = certidao.status_especial
         classificacao, msg_pos = pdf.classificar_e_tratar_positivo(
             certidao, caminho_final, origem_log='TRABALHISTA', tipo_label='Trabalhista')
 
         if classificacao == 'erro':
             return False, True, msg_pos
+
+        # DATA-03.3/03.4: reprovado no gate -> descarta e falha (entra no retry).
+        if classificacao == 'invalida':
+            mensagem = pdf.descartar_pdf_invalido(
+                certidao, caminho_final, validade_anterior=validade_anterior,
+                status_anterior=status_anterior, caminho_anterior=caminho_anterior,
+                tipo_label='Trabalhista')
+            return False, False, mensagem
 
         if classificacao == 'positiva':
             # classificar_e_tratar_positivo já removeu o arquivo e marcou PENDENTE.
@@ -1794,7 +1835,14 @@ def _automatizar_fgts(contexto, driver, wait, certidao, detectar_impedimento=Fal
                     origem_log='FGTS',
                     tipo_label=certidao.tipo.value,
                 )
-                if classificacao_pdf in {'positiva', 'erro'}:
+                # 'invalida' entra junto: zerar arquivo_salvo_msg/data_encontrada
+                # e o que impede a validade de ser concedida mais adiante.
+                if classificacao_pdf in {'positiva', 'erro', 'invalida'}:
+                    if classificacao_pdf == 'invalida':
+                        msg_pdf = pdf.descartar_pdf_invalido(
+                            certidao, msg, validade_anterior=certidao.data_validade,
+                            status_anterior=certidao.status_especial,
+                            tipo_label=certidao.tipo.value)
                     contexto['pdf_classificacao'] = classificacao_pdf
                     contexto['pdf_msg'] = msg_pdf
                     contexto['arquivo_salvo_msg'] = None

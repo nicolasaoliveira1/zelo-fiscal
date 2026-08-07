@@ -35,16 +35,27 @@ def extrair_validade_federal(caminho_pdf):
         return None
 
 
-def extrair_texto(caminho_pdf, origem_log='PDF'):
+def extrair_texto_com_status(caminho_pdf, origem_log='PDF'):
+    """(texto, leitura_ok). Separa "li e nao havia texto" de "nao consegui ler".
+
+    A distincao existe por seguranca: `extrair_texto` devolve '' nos dois casos, e
+    o gate de sanidade (spec 08) trata texto ausente como evidencia. Sem separar,
+    um arquivo travado no drive de rede pareceria pagina de erro e a certidao
+    LEGITIMA seria apagada.
+    """
     if not caminho_pdf:
-        return ''
+        return '', False
 
     try:
         with pdfplumber.open(caminho_pdf) as pdf:
-            return "\n".join(page.extract_text() or "" for page in pdf.pages)
+            return "\n".join(page.extract_text() or "" for page in pdf.pages), True
     except Exception as exc:
         log_event('pdf_read_error', level='WARNING', origem=origem_log, error=str(exc))
-        return ''
+        return '', False
+
+
+def extrair_texto(caminho_pdf, origem_log='PDF'):
+    return extrair_texto_com_status(caminho_pdf, origem_log=origem_log)[0]
 
 
 def _normalizar(texto):
@@ -74,12 +85,116 @@ def classificar_texto(texto):
     return 'desconhecida'
 
 
+# Abaixo disso o arquivo esta truncado ou e um stub de erro — nenhuma certidao
+# real do sistema chega perto. Sinal fraco de proposito: o criterio forte e o
+# marcador de texto abaixo.
+TAMANHO_MINIMO_PDF_BYTES = 1024
+
+# Vocabulario AMPLO de certidao (spec 08, DATA-03.1). Amplo porque o gate so
+# reprova por EVIDENCIA NEGATIVA: certidao com redacao que `classificar_texto`
+# nao reconhece ('desconhecida') tem de continuar passando — Trabalhista e
+# Municipal dependem desse caminho. Siglas curtas exigem palavra inteira, senao
+# 'SEGUNDO' viraria CND.
+_MARCADORES_CERTIDAO = re.compile(
+    r'CERTIDAO'
+    r'|CERTIFICADO\s+DE\s+REGULARIDADE'
+    r'|CONSULTA\s+REGULARIDADE'
+    r'|REGULARIDADE\s+DO\s+EMPREGADOR'
+    r'|NADA\s+CONSTA'
+    r'|\bCND\b'
+    r'|\bCNDT\b'
+    r'|\bCRF\b'
+)
+
+
+def tem_marcador_certidao(texto):
+    """True se o texto tem alguma marca de que e uma certidao (logica pura)."""
+    return bool(_MARCADORES_CERTIDAO.search(_normalizar(texto)))
+
+
+def _motivo_arquivo_invalido(caminho_pdf):
+    """Motivo da reprovacao pelas checagens de arquivo, ou None. Nao le o PDF."""
+    if not caminho_pdf or not os.path.exists(caminho_pdf):
+        return 'arquivo ausente'
+    try:
+        tamanho = os.path.getsize(caminho_pdf)
+    except OSError as exc:
+        return f'arquivo ilegivel ({exc})'
+    if tamanho < TAMANHO_MINIMO_PDF_BYTES:
+        return f'arquivo pequeno demais para uma certidao ({tamanho} bytes)'
+    return None
+
+
+def _motivo_texto_invalido(texto, leitura_ok=True):
+    """Motivo da reprovacao pelo conteudo, ou None.
+
+    `leitura_ok=False` (nao consegui abrir o PDF) e INCONCLUSIVO, nunca reprovacao:
+    arquivo travado no drive de rede, antivirus segurando o handle ou I/O lento
+    sao indistinguiveis de uma pagina de erro se olharmos so o texto vazio — e o
+    tratamento de reprovado APAGA o arquivo. Na duvida, preserva.
+    """
+    if not leitura_ok:
+        return None
+    if not (texto or '').strip():
+        return 'sem texto extraivel (possivel pagina de erro ou PDF vazio)'
+    if not tem_marcador_certidao(texto):
+        return 'o texto nao parece de uma certidao'
+    return None
+
+
+def _reprovar(motivo, origem_log):
+    log_event('pdf_gate_reprovado', level='WARNING', origem=origem_log, motivo=motivo)
+    return False, motivo
+
+
+def avaliar_arquivo_certidao(caminho_pdf, origem_log='PDF'):
+    """Responde "isto e um PDF de certidao?" — (ok, motivo). Nunca levanta.
+
+    Nucleo compartilhado do gate (spec 08, DATA-03): reprova apenas por
+    evidencia negativa — arquivo ausente/truncado, sem texto extraivel, ou sem
+    nenhum marcador de certidao. NAO reprova por classificacao 'desconhecida'.
+    """
+    motivo = _motivo_arquivo_invalido(caminho_pdf)
+    if motivo:
+        return _reprovar(motivo, origem_log)
+
+    texto, leitura_ok = extrair_texto_com_status(caminho_pdf, origem_log=origem_log)
+    motivo = _motivo_texto_invalido(texto, leitura_ok=leitura_ok)
+    if motivo:
+        return _reprovar(motivo, origem_log)
+    return True, None
+
+
 def classificar_status(caminho_pdf, origem_log='PDF'):
-    return classificar_texto(extrair_texto(caminho_pdf, origem_log=origem_log))
+    """Classifica o PDF, reprovando antes o que nao e certidao (DATA-03.2).
+
+    Este e o funil unico por onde os 5 fluxos passam, entao plugar o gate aqui
+    cobre todos de uma vez. Devolve 'invalida' quando o arquivo nao passa no
+    gate; nos demais casos, a classificacao de sempre.
+    """
+    motivo = _motivo_arquivo_invalido(caminho_pdf)
+    if motivo:
+        _reprovar(motivo, origem_log)
+        return 'invalida'
+
+    # Le o PDF uma vez so: o gate de conteudo e a classificacao usam o mesmo texto.
+    texto, leitura_ok = extrair_texto_com_status(caminho_pdf, origem_log=origem_log)
+    motivo = _motivo_texto_invalido(texto, leitura_ok=leitura_ok)
+    if motivo:
+        _reprovar(motivo, origem_log)
+        return 'invalida'
+
+    # Falha de leitura cai aqui como 'desconhecida' — o comportamento de antes do
+    # gate. Perder a classificacao e aceitavel; apagar a certidao nao e.
+    return classificar_texto(texto)
 
 
-def classificar_e_tratar_positivo(certidao, caminho_pdf, origem_log='PDF', tipo_label=None):
-    classificacao = classificar_status(caminho_pdf, origem_log=origem_log)
+def classificar_e_tratar_positivo(certidao, caminho_pdf, origem_log='PDF',
+                                  tipo_label=None, classificacao=None):
+    """`classificacao` permite reaproveitar uma leitura ja feita pelo chamador —
+    sem isso a emissao individual abre e extrai o PDF da rede duas vezes."""
+    if classificacao is None:
+        classificacao = classificar_status(caminho_pdf, origem_log=origem_log)
     if classificacao != 'positiva':
         return classificacao, None
 
@@ -109,6 +224,61 @@ def classificar_e_tratar_positivo(certidao, caminho_pdf, origem_log='PDF', tipo_
     if erro_remocao:
         msg += f' Não foi possível remover o arquivo automaticamente: {erro_remocao}'
     return 'positiva', msg
+
+
+def descartar_pdf_invalido(certidao, caminho_pdf, *, validade_anterior=None,
+                           status_anterior=None, caminho_anterior=None,
+                           tipo_label=None):
+    """PDF reprovado no gate: apaga o arquivo e desfaz o que a emissao concedeu.
+
+    Nucleo compartilhado dos fluxos (spec 08, DATA-03.3/03.4). Espelha
+    `classificar_e_tratar_positivo`, com uma diferenca deliberada: NAO marca
+    PENDENTE. Certidao positiva e um fato fiscal sobre a empresa; PDF reprovado
+    e falha da emissao, entao a certidao volta ao ESTADO ANTERIOR e o item entra
+    no retry do lote. Retorna a mensagem acionavel.
+
+    `status_anterior` existe porque o fluxo municipal grava `status_especial=None`
+    ANTES de classificar: sem restaurar, uma certidao que estava PENDENTE perderia
+    a marca e sumiria da lista de pendencias e do escopo `pendentes` do lote.
+    """
+    erro_remocao = None
+    removido = False
+    try:
+        if caminho_pdf and os.path.exists(caminho_pdf):
+            os.remove(caminho_pdf)
+            removido = True
+    except Exception as exc_remove:
+        erro_remocao = str(exc_remove)
+
+    label = (tipo_label or (certidao.tipo.value if certidao else '') or 'certidão').strip()
+    try:
+        if certidao:
+            # So aponta para o arquivo anterior se ele ainda existir: o
+            # `mover_e_renomear` pode ter sobrescrito o PDF bom com o ruim, e
+            # nesse caso nao ha para onde voltar.
+            if caminho_anterior and os.path.exists(caminho_anterior) and not removido:
+                certidao.caminho_arquivo = caminho_anterior
+            else:
+                certidao.caminho_arquivo = None
+            certidao.data_validade = validade_anterior
+            certidao.status_especial = status_anterior
+            db.session.commit()
+    except Exception as exc_db:
+        db.session.rollback()
+        log_event('pdf_gate_descarte_db_error', level='ERROR', error=str(exc_db))
+
+    if certidao and certidao.data_validade and not certidao.caminho_arquivo:
+        # Estado legitimo (a validade e por data, nao pela presenca do arquivo),
+        # mas o operador precisa saber que o PDF nao esta mais la.
+        log_event('pdf_gate_validade_sem_arquivo', level='WARNING',
+                  certidao_id=getattr(certidao, 'id', None),
+                  validade=str(certidao.data_validade))
+
+    msg = (f'O arquivo baixado não é uma certidão {label} válida '
+           '(possível página de erro do portal). Nada foi gravado.')
+    if erro_remocao:
+        msg += f' Não foi possível remover o arquivo automaticamente: {erro_remocao}'
+    return msg
 
 
 def classificar_estadual_rs(caminho_pdf):

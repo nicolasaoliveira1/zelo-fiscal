@@ -33,9 +33,82 @@ class Empresa(db.Model):
 
     certidoes = db.relationship(
         'Certidao', backref='empresa', lazy='selectin', cascade="all, delete-orphan")
+    # 1:1 com o espelho da Receita. delete-orphan porque remover a empresa tem
+    # de levar o dado dela junto — senao fica linha orfa com FK pendurada.
+    # selectin como `certidoes`: a listagem de empresas le a situacao de cada
+    # linha, e com lazy='select' isso viraria uma query por empresa.
+    dados_receita = db.relationship(
+        'DadosReceita', backref='empresa', uselist=False, lazy='selectin',
+        cascade='all, delete-orphan')
 
     def __repr__(self):
         return f'<Empresa {self.nome}>'
+
+
+class DadosReceita(db.Model):
+    """O que a Receita diz sobre a empresa — a contraparte do cadastro.
+
+    Tabela separada da `Empresa` de proposito, pela mesma razao que separou
+    `NotaEmitidaNfse` de `NotaNfse`: `Empresa` guarda o que o ESCRITORIO
+    decidiu, esta guarda o que a RECEITA informa. Guardar junto perderia
+    justamente a diferenca entre as duas, que e o dado interessante — a
+    divergencia que o operador precisa conferir.
+
+    Invariante inegociavel (spec 08, DATA-01.8): NADA aqui sobrescreve
+    `Empresa.nome`. Aquele campo e a chave de busca da pasta no drive de rede
+    (`file_manager.encontrar_pasta_empresa`); trocar pelo `razao_social` da
+    Receita quebraria o casamento com as pastas ja existentes. Por isso a razao
+    social vive aqui, como coluna propria.
+    """
+    __tablename__ = 'dados_receita'
+
+    id = db.Column(db.Integer, primary_key=True)
+    empresa_id = db.Column(db.Integer, db.ForeignKey('empresa.id'),
+                           unique=True, nullable=False)
+
+    # --- situacao cadastral (DATA-02) ---
+    # String, nunca db.Enum nativo: o enum nativo diverge entre SQLite e MySQL e
+    # a suite roda nos dois (AD-016/AD-020).
+    situacao = db.Column(db.String(40), nullable=True)
+    situacao_data = db.Column(db.Date, nullable=True)
+    situacao_motivo = db.Column(db.String(200), nullable=True)
+
+    # --- identificacao ---
+    razao_social = db.Column(db.String(200), nullable=True)
+    nome_fantasia = db.Column(db.String(200), nullable=True)
+    data_inicio_atividade = db.Column(db.Date, nullable=True)
+    porte = db.Column(db.String(40), nullable=True)
+    natureza_juridica = db.Column(db.String(120), nullable=True)
+    matriz_filial = db.Column(db.String(20), nullable=True)
+
+    # --- endereco ---
+    logradouro = db.Column(db.String(200), nullable=True)
+    numero = db.Column(db.String(20), nullable=True)
+    complemento = db.Column(db.String(120), nullable=True)
+    bairro = db.Column(db.String(100), nullable=True)
+    cep = db.Column(db.String(9), nullable=True)
+    # Casa com `Municipio` melhor que string de cidade; a coluna entra agora,
+    # trocar o matching da automacao fica fora do escopo desta spec.
+    municipio_ibge = db.Column(db.String(7), nullable=True)
+    municipio = db.Column(db.String(100), nullable=True)
+    uf = db.Column(db.String(2), nullable=True)
+
+    # --- fiscal ---
+    cnae_fiscal = db.Column(db.String(10), nullable=True)
+    cnae_descricao = db.Column(db.String(200), nullable=True)
+    # Tri-estado de proposito: None = "a fonte nao informou", que e diferente de
+    # False = "nao optante". A BrasilAPI devolve null nos dois casos antigos.
+    opcao_simples = db.Column(db.Boolean, nullable=True)
+    opcao_simples_data = db.Column(db.Date, nullable=True)
+
+    # --- proveniencia ---
+    fonte = db.Column(db.String(20), nullable=True)
+    # Hora local naive (AD-004): e carimbo de dominio, nao log tecnico. Indexado
+    # porque o job de recheck ordena por ele a cada execucao.
+    verificado_em = db.Column(db.DateTime, nullable=True, index=True)
+
+    def __repr__(self):
+        return f'<DadosReceita empresa={self.empresa_id} {self.situacao}>'
 
 
 class Certidao(db.Model):
@@ -384,6 +457,12 @@ class ConfiguracaoSistema(db.Model):
     # ficam em env (config.py), nunca aqui.
     notif_destinatarios = db.Column(db.String(1000), nullable=True)
     notif_cadencia = db.Column(db.String(10), nullable=False, default='semanal')
+    # Recheck da situacao cadastral na Receita (spec 08, DATA-02.6/02.7). O job
+    # e fatiado de proposito: a ReceitaWS aceita ~3 req/min, entao a carteira
+    # gira em alguns dias em vez de estourar cota num dia so.
+    receita_recheck_ativo = db.Column(db.Boolean, nullable=False, default=True)
+    receita_recheck_idade_dias = db.Column(db.Integer, nullable=False, default=30)
+    receita_recheck_limite = db.Column(db.Integer, nullable=False, default=50)
 
     def __repr__(self):
         return f'<ConfiguracaoSistema {self.id}>'

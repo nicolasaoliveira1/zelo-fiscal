@@ -392,10 +392,20 @@ window.showToast = showToast;
                 const vencidas = Number(data.vencidas || 0);
                 const aVencer = Number(data.a_vencer || 0);
                 const total = Number(data.total || 0);
+                const excluidasSituacao = Number(data.excluidas_situacao || 0);
 
                 if (config.scopeHintEl) {
+                    const avisos = [];
                     if (scopeNorm === 'pendentes') {
-                        config.scopeHintEl.textContent = 'Modo pendentes: você pode emitir apenas esta empresa ou iniciar o lote com todas as pendentes deste tipo.';
+                        avisos.push('Modo pendentes: você pode emitir apenas esta empresa ou iniciar o lote com todas as pendentes deste tipo.');
+                    }
+                    // Sem esta linha o operador veria um total menor que o esperado
+                    // e não teria como saber por quê (spec 08, DATA-02.9).
+                    if (excluidasSituacao > 0) {
+                        avisos.push(`${excluidasSituacao} ${excluidasSituacao === 1 ? 'certidão ficou' : 'certidões ficaram'} de fora: a empresa não consta como ativa na Receita.`);
+                    }
+                    if (avisos.length) {
+                        config.scopeHintEl.textContent = avisos.join(' ');
                         config.scopeHintEl.classList.remove('d-none');
                     } else {
                         config.scopeHintEl.textContent = '';

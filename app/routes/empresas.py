@@ -29,11 +29,15 @@ from app.models import (
     get_a_vencer_dias,
 )
 from app.utils import (
+    cnpj_valido,
     json_error as _json_error,
 )
 from app.services import (
     auditoria,
+    receita_client,
+    receita_service,
 )
+from app.services.cidade_canonica import canonicalizar
 from app.services.execution_logger import log_event
 from app.auth import requer_papel
 
@@ -113,6 +117,9 @@ def empresa_detalhe(empresa_id):
         certidoes=certidoes,
         hoje=date.today(),
         a_vencer_dias=get_a_vencer_dias(),
+        dados_receita=empresa.dados_receita,
+        receita_ativa=receita_service.empresa_ativa(empresa),
+        receita_divergencias=receita_service.divergencias_atuais(empresa),
     )
 
 
@@ -137,6 +144,10 @@ def empresa_editar(empresa_id):
     if not cidade:
         flash('Cidade é obrigatória.', 'warning')
         return redirect(next_url)
+
+    # DATA-04.2: grava a grafia canonica (COV-05). O matching do backend ja
+    # normaliza, entao isto so evita recriar a variacao que a migration corrigiu.
+    cidade = canonicalizar(cidade)
 
     if inscricao and len(inscricao) > 6:
         flash('Inscrição municipal deve ter até 6 caracteres.', 'warning')
@@ -223,15 +234,102 @@ def abrir_pasta_empresa(empresa_id):
     return jsonify({'status': 'ok', 'pasta': pasta})
 
 
-_NOMES_EXIBICAO_CIDADE = {
-    'Capao da Canoa': 'Capão da Canoa',
-    'Imbe': 'Imbé',
-    'Osorio': 'Osório',
-    'Ponta Pora': 'Ponta Porã',
-    'Sao Paulo': 'São Paulo',
-    'Tramandai': 'Tramandaí',
-    'Xangrila': 'Xangri-Lá',
+def _cnpj_do_pedido():
+    """CNPJ do corpo JSON ou do form — o JS manda JSON, mas a rota aceita os dois."""
+    corpo = request.get_json(silent=True) or {}
+    return (corpo.get('cnpj') or request.form.get('cnpj') or '').strip()
+
+
+# Motivo da falha de consulta -> (status HTTP, mensagem acionavel). "CNPJ nao
+# existe" e "nao consegui perguntar" sao coisas diferentes para quem cadastra.
+_ERROS_RECEITA = {
+    receita_client.ERRO_CNPJ_INVALIDO: (
+        400, 'CNPJ inválido: confira os 14 dígitos e o dígito verificador.'),
+    receita_client.ERRO_NAO_ENCONTRADO: (
+        404, 'CNPJ não encontrado na base da Receita. Confira a digitação.'),
+    receita_client.ERRO_INDISPONIVEL: (
+        503, 'Não foi possível consultar a Receita agora. '
+             'Cadastre a empresa normalmente — os dados são buscados depois.'),
 }
+
+
+@bp.route('/empresa/receita/consultar', methods=['POST'])
+@requer_papel('operador')
+def consultar_receita():
+    """Consulta o CNPJ na Receita e devolve os campos para o formulário.
+
+    NAO persiste nada (DATA-01.3): o operador confere e corrige antes de salvar.
+    Quem grava e o POST /empresa/adicionar, que por sua vez nunca toca a rede
+    (DATA-01.4) — cadastro nao pode ficar pendurado em API externa.
+    """
+    cnpj = _cnpj_do_pedido()
+
+    # Digito verificador antes da rede: nao faz sentido gastar a consulta (e a
+    # cota) com um CNPJ que ja sabemos estar errado.
+    if not cnpj_valido(cnpj):
+        codigo, mensagem = _ERROS_RECEITA[receita_client.ERRO_CNPJ_INVALIDO]
+        return _json_error(mensagem, codigo, error_type='cnpj_invalido')
+
+    dados, erro = receita_service.consultar_para_formulario(cnpj)
+    if dados is None:
+        codigo, mensagem = _ERROS_RECEITA.get(
+            erro, _ERROS_RECEITA[receita_client.ERRO_INDISPONIVEL])
+        return _json_error(mensagem, codigo, error_type=erro)
+
+    log_event('receita_consulta_formulario', fonte=dados.get('fonte'))
+    return jsonify({'status': 'ok', 'dados': dados})
+
+
+@bp.route('/empresa/<int:empresa_id>/receita/atualizar', methods=['POST'])
+@requer_papel('operador')
+def atualizar_receita(empresa_id):
+    """Recheca uma empresa sob demanda e persiste o espelho da Receita.
+
+    Campo vazio do cadastro e preenchido; campo preenchido que difere volta em
+    `divergencias` para o operador decidir (DATA-01.9) — nunca sobrescrito.
+    """
+    empresa = Empresa.query.get_or_404(empresa_id)
+
+    dto, erro = receita_client.consultar(empresa.cnpj)
+    if dto is None:
+        codigo, mensagem = _ERROS_RECEITA.get(
+            erro, _ERROS_RECEITA[receita_client.ERRO_INDISPONIVEL])
+        return _json_error(mensagem, codigo, error_type=erro)
+
+    resultado = receita_service.enriquecer(empresa, dto)
+    if not resultado['ok']:
+        return _json_error(resultado['erro'] or 'Falha ao aplicar os dados.', 500)
+
+    auditoria.registrar('empresa.receita_atualizar', alvo_tipo='empresa',
+                        alvo_id=empresa_id)
+    return jsonify({
+        'status': 'ok',
+        'situacao': resultado.get('situacao'),
+        'ativa': receita_service.empresa_ativa(empresa),
+        'preenchidos': resultado['preenchidos'],
+        'divergencias': resultado['divergencias'],
+    })
+
+
+@bp.route('/empresa/<int:empresa_id>/receita/aceitar', methods=['POST'])
+@requer_papel('operador')
+def aceitar_receita(empresa_id):
+    """Aplica no cadastro o valor que a Receita informa para UM campo.
+
+    A lista de campos aceitos vive em `receita_service._CAMPOS_CADASTRO` e nao
+    inclui `nome` — sem essa guarda a rota viraria um "escreva qualquer coluna
+    da Empresa", e o nome e a chave da pasta no drive de rede.
+    """
+    empresa = Empresa.query.get_or_404(empresa_id)
+    corpo = request.get_json(silent=True) or {}
+    campo = (corpo.get('campo') or request.form.get('campo') or '').strip()
+
+    ok, erro = receita_service.aceitar_divergencia(empresa, campo)
+    if not ok:
+        return _json_error(erro, 400, error_type='campo_invalido')
+
+    return jsonify({'status': 'ok', 'campo': campo,
+                    'valor': getattr(empresa, campo, None)})
 
 
 @bp.route('/empresa/nova', endpoint='nova_empresa')
@@ -241,7 +339,9 @@ def pagina_nova_empresa():
     vistos = set()
     municipios = []
     for m in municipios_db:
-        exibicao = _NOMES_EXIBICAO_CIDADE.get(m.nome, m.nome)
+        # DATA-04.3: a grafia de exibicao vem do mapa canonico compartilhado
+        # (cidade_canonica), nao de uma segunda tabela local que divergiria dele.
+        exibicao = canonicalizar(m.nome)
         if exibicao not in vistos:
             vistos.add(exibicao)
             municipios.append((m.nome, exibicao))
@@ -278,7 +378,14 @@ def adicionar_empresa():
 
     cnpj_limpo = _normalizar_cnpj(cnpj)
     if len(cnpj_limpo) != 14:
-        flash('CNPJ inválido, verifique os dígitos.', 'warning')
+        flash('CNPJ inválido: informe os 14 dígitos.', 'warning')
+        return _redirect_apos_cadastro()
+
+    # DATA-01.1: contar 14 digitos deixava passar erro de digitacao. O criterio
+    # e o digito verificador, pelo mesmo nucleo que a NFSe ja usa (app/utils.py).
+    if not cnpj_valido(cnpj_limpo):
+        flash('CNPJ inválido: o dígito verificador não confere. Confira a digitação.',
+              'warning')
         return _redirect_apos_cadastro()
 
     if not estado or not re.match(r'^[A-Z]{2}$', estado):
@@ -288,6 +395,10 @@ def adicionar_empresa():
     if not cidade:
         flash('Cidade é obrigatória.', 'warning')
         return _redirect_apos_cadastro()
+
+    # DATA-04.1: mesma canonicalizacao da edicao — a cidade entra no banco na
+    # grafia de exibicao correta desde o cadastro.
+    cidade = canonicalizar(cidade)
 
     if inscricao and len(inscricao) > 6:
         flash('Inscrição municipal deve ter até 6 caracteres.', 'warning')

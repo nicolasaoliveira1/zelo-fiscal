@@ -33,12 +33,21 @@
 
                     <div class="col-12 col-lg-6">
                         <label for="cnpj" class="form-label">CNPJ</label>
-                        <input type="text" class="form-control" id="cnpj" name="cnpj"
-                               value="{{ cnpj_inicial | default('', true) }}"
-                               placeholder="XX.XXX.XXX/XXXX-XX" required
-                               oninput="mascaraCnpj(this)" maxlength="18"
-                               minlength="18" inputmode="numeric" autocomplete="off"
-                               title="Digite um CNPJ válido.">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="cnpj" name="cnpj"
+                                   value="{{ cnpj_inicial | default('', true) }}"
+                                   placeholder="XX.XXX.XXX/XXXX-XX" required
+                                   oninput="mascaraCnpj(this)" maxlength="18"
+                                   minlength="18" inputmode="numeric" autocomplete="off"
+                                   title="Digite um CNPJ válido.">
+                            <button type="button" class="btn btn-soft-primary"
+                                    id="btn-buscar-receita">Buscar dados</button>
+                        </div>
+                        <div class="form-text">
+                            Preenche nome, estado e cidade pela Receita. Você confere
+                            antes de cadastrar.
+                        </div>
+                        <div id="previa-receita" class="mt-2 d-none"></div>
                     </div>
 
                     <div class="col-12 col-lg-6">
@@ -105,6 +114,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script type="module" src="{{ static_versionado('js/nova_empresa.js') }}"></script>
 <script>
 // Espelha `utils.normalizar_cidade` do backend (remove acento + upper): o valor
 // da option vem de `municipio.nome`, que a COV-05 padronizou para a grafia

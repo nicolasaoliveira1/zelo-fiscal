@@ -13,7 +13,7 @@ O foco do projeto é reduzir trabalho manual naquilo que **se repete todo mês e
 - Dashboard único com o status das certidões de toda a carteira.
 - Automação Selenium sobre portais públicos reais (RFB, Caixa, SEFAZ RS, prefeituras, TST), individual e em lote, com pausa, retomada e parada.
 - Ciclo completo do arquivo: download, estabilização, classificação do PDF, movimentação para a pasta da empresa e vínculo ao registro.
-- Agendador diário que emite o que está vencendo e avisa por e-mail, sem serviço externo.
+- Agendador diário que emite o que está vencendo, recheca a situação cadastral dos clientes na Receita e avisa por e-mail, sem serviço externo.
 - Emissão das NFS-e de honorários no Emissor Nacional a partir do extrato bancário (CSV do Banrisul e PDF do Inter).
 
 ## Documentação
@@ -30,6 +30,8 @@ O foco do projeto é reduzir trabalho manual naquilo que **se repete todo mês e
 - **Observabilidade de verdade.** Logs com saída dupla (console legível + `app.jsonl`), `request_id` por requisição e `execution_id` por lote, taxonomia de erros traduzida em mensagens acionáveis (título + causa + ação), preflight antes de emitir e detector de erros recorrentes com hipótese de causa.
 - **CI com paridade de banco.** Dois jobs em paralelo: lint + suíte em SQLite (gate rápido) e a suíte inteira contra **MySQL 8.0**, para pegar divergência de enum, colação e tipo antes da produção. Há ainda um teste de migração idempotente (`upgrade → downgrade → upgrade`).
 - **Segurança aplicada ao uso diário.** Autenticação *deny-by-default* por um `before_request` global (imune a esquecer de decorar rota nova), três papéis com hierarquia, CSRF, trilha de auditoria, PDF servido por token assinado e expirável, credenciais sensíveis só via ambiente.
+- **Dado de cadastro que se defende sozinho.** O CNPJ é validado por dígito verificador antes de entrar, e os dados da Receita (razão social, endereço, CNAE, Simples) chegam por consulta à BrasilAPI com fallback ReceitaWS. Campo vazio é preenchido; campo preenchido que diverge é **sinalizado, nunca sobrescrito** — a automação municipal casa cidade por string, e uma troca silenciosa quebraria o acesso ao portal sem ninguém perceber. Empresa que a Receita reporta como baixada sai do lote automático, para não gastar solver emitindo certidão de CNPJ morto.
+- **O PDF salvo precisa ser mesmo uma certidão.** Antes de gravar validade, um gate confere que o arquivo tem texto e vocabulário de certidão — uma página de erro devolvida pelo portal é descartada e a emissão vira falha com retry, em vez de virar certidão "válida" no painel. O gate reprova só por evidência negativa: redação que o classificador não reconhece continua passando, porque endurecer isso quebraria fluxos que funcionam.
 - **Reuso deliberado no lugar de cópias.** Um motor de lotes compartilhado por cinco fluxos distintos e núcleos únicos para captcha de imagem, política de certificado do Chrome e classificação de PDF. Cada duplicata seria uma divergência silenciosa entre dois portais.
 
 ## Stack
@@ -38,6 +40,7 @@ O foco do projeto é reduzir trabalho manual naquilo que **se repete todo mês e
 | --- | --- |
 | Backend | Python 3.10+, Flask, SQLAlchemy 2.0 / Flask-Migrate, Flask-Login, Flask-WTF, APScheduler |
 | Automação | Selenium, undetected-chromedriver, 2captcha, pdfplumber, certificado digital A1/A3 via política do Chrome |
+| Integrações | BrasilAPI e ReceitaWS (consulta de CNPJ) via `requests` |
 | Frontend | Jinja2, Bootstrap 5.3 com identidade própria (design tokens, IBM Plex, dark/light), JS vanilla (ES modules, sem bundler) |
 | Dados | MySQL 8.0 (produção), SQLite (desenvolvimento) |
 | Documentos | openpyxl (XLSX), pypdf + fpdf2 (dossiê PDF), thefuzz (casamento de nomes) |

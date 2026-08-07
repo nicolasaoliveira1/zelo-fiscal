@@ -25,3 +25,7 @@ APScheduler==3.11.3
 openpyxl==3.1.5
 pypdf==6.14.2
 fpdf2==2.8.7
+# Consulta de CNPJ na Receita (spec 08): BrasilAPI com fallback ReceitaWS.
+# Ja vinha instalado como dependencia TRANSITIVA do 2captcha-python; declarado
+# explicitamente porque depender disso quebraria o app numa atualizacao daquele.
+requests==2.32.5
