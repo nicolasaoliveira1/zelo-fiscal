@@ -3,6 +3,9 @@
 Falha recorrente e saldo baixo geram no maximo um e-mail por janela anti-spam;
 saldo None (API fora) nao gera falso-baixo; sem SMTP nao envia.
 """
+import re
+from pathlib import Path
+
 import pytest
 
 from app import db
@@ -112,6 +115,24 @@ def test_saldo_baixo_nao_reenvia_dentro_da_janela(ctx, monkeypatch):
     assert notificacoes.enviar_alertas(ctx) == 1
     assert notificacoes.enviar_alertas(ctx) == 0  # AC saldo.3
     assert NotificacaoLog.query.filter_by(tipo='alerta_saldo').count() == 1
+
+
+# --- guarda de tamanho da coluna tipo --------------------------------------
+
+def test_todo_tipo_de_alerta_cabe_na_coluna_tipo():
+    """Tipo maior que a coluna quebra o anti-spam EM SILENCIO.
+
+    `_registrar_envio` e best-effort: no MySQL (strict mode) o INSERT longo demais
+    levanta, a excecao e engolida e o registro nao entra — o alerta volta a ser
+    enviado na proxima execucao, todo dia. No SQLite entraria truncado, sem erro,
+    e a falha so apareceria no job de MySQL do CI. Le os tipos da propria fonte
+    para que um alerta novo tambem seja conferido."""
+    fonte = Path(notificacoes.__file__).read_text(encoding='utf-8')
+    tipos = set(re.findall(r"'(alerta_\w+)'", fonte))
+    limite = NotificacaoLog.__table__.c.tipo.type.length
+
+    assert tipos, 'nenhum tipo de alerta encontrado na fonte — regex desatualizada?'
+    assert {t for t in tipos if len(t) > limite} == set()
 
 
 # --- sem SMTP --------------------------------------------------------------
