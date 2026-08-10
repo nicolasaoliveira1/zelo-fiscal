@@ -343,9 +343,15 @@ class NotificacaoLog(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     # 'digest' | 'saldo_baixo' | 'falha:<error_type>:<alvo>'
+    #   | 'empresa_baixada:<id>' | 'municipio_quebrado:<nome>'
     chave = db.Column(db.String(120), nullable=False, index=True)
-    # 'digest' | 'alerta_saldo' | 'alerta_falha'
-    tipo = db.Column(db.String(20), nullable=False)
+    # 'digest' | 'alerta_saldo' | 'alerta_falha' | 'alerta_municipio'
+    #   | 'alerta_empresa_baixada'
+    # Folga proposital no tamanho: no MySQL (strict mode) um tipo mais longo que a
+    # coluna e ERRO, e como _registrar_envio e best-effort o registro simplesmente
+    # nao entra — o anti-spam para de funcionar EM SILENCIO e o alerta vira um
+    # e-mail por execucao do job. No SQLite passaria truncado sem reclamar.
+    tipo = db.Column(db.String(40), nullable=False)
     detalhe = db.Column(db.String(500), nullable=True)
     enviada_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
 
