@@ -94,9 +94,14 @@ def test_rota_reprocessar_por_motivo(app, client, ids):
 
 
 def test_rota_reprocessar_devolve_recusadas_nomeadas(app, client, ids):
-    """Parcial por desenho: o que nao der volta com o motivo."""
+    """Parcial por desenho: o que nao der volta com o motivo.
+
+    Recusa por ja haver tarefa ativa para a certidao — motivo real e compativel
+    com a FK do MySQL (apontar para certidao inexistente nao passa la)."""
     with app.app_context():
-        tarefa = _tarefa_falha(app, ids, certidao_id=999999)
+        tarefa = _tarefa_falha(app, ids)
+        _tarefa_falha(app, ids, status='pendente', tentativas=0,
+                      erro=None, concluida_em=None)
 
         r = client.post('/diagnostico/fila/reprocessar', json={'ids': [tarefa.id]})
 

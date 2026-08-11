@@ -313,11 +313,18 @@ def test_devolver_nao_cria_tarefa_nova(app, ids):
 
 
 def test_devolver_recusa_certidao_inexistente(app, ids):
-    """RESOP-01.8: certidao apagada no meio-tempo nao quebra o reprocessamento."""
+    """RESOP-01.8: certidao que sumiu nao quebra o reprocessamento.
+
+    A tarefa e montada em MEMORIA, sem persistir: no MySQL a FK
+    `tarefa_emissao.certidao_id -> certidao.id` recusa gravar um id inexistente
+    (o SQLite deixa passar, e foi assim que a versao anterior deste teste passou
+    local e quebrou no CI). O que se prova aqui e a guarda do servico, que so
+    depende do `db.session.get` devolver None."""
     with app.app_context():
-        tarefa = _falha(app, ids, 'timeout')
-        tarefa.certidao_id = 999999
-        db.session.commit()
+        cert = db.session.get(Certidao, ids['fgts'])
+        tarefa = TarefaEmissao(tipo='FGTS', empresa_id=cert.empresa_id,
+                               certidao_id=999999, status='falha', tentativas=3,
+                               erro='timeout')
 
         ok, motivo = fila_emissao.devolver_para_fila(tarefa)
 
@@ -387,14 +394,22 @@ def test_reprocessar_por_motivo_pega_so_o_grupo(app, ids):
 
 
 def test_reprocessar_e_parcial_o_que_nao_der_volta_nomeado(app, ids):
-    """O que der certo e aplicado; o que nao der volta em 'recusadas'."""
+    """O que der certo e aplicado; o que nao der volta em 'recusadas'.
+
+    A recusa aqui e por JA HAVER tarefa ativa para a mesma certidao (RESOP-01.7):
+    e um motivo real, e — diferente de apontar para uma certidao inexistente —
+    respeita a FK que o MySQL impoe."""
     with app.app_context():
         boa = _falha(app, ids, 'timeout')
+
         cert_rs = db.session.get(Certidao, ids['rs'])
         ruim = TarefaEmissao(tipo='Estadual', empresa_id=cert_rs.empresa_id,
-                             certidao_id=999999, status='falha', tentativas=3,
+                             certidao_id=cert_rs.id, status='falha', tentativas=3,
                              erro='timeout', concluida_em=datetime.now())
         db.session.add(ruim)
+        db.session.add(TarefaEmissao(
+            tipo='Estadual', empresa_id=cert_rs.empresa_id,
+            certidao_id=cert_rs.id, status='pendente'))
         db.session.commit()
 
         resultado = fila_emissao.reprocessar(ids=[boa.id, ruim.id])
@@ -403,6 +418,7 @@ def test_reprocessar_e_parcial_o_que_nao_der_volta_nomeado(app, ids):
         assert [r['id'] for r in resultado['recusadas']] == [ruim.id]
         assert resultado['recusadas'][0]['motivo']
         assert boa.status == 'pendente'
+        assert ruim.status == 'falha'
 
 
 def test_reprocessar_ignora_tarefa_que_nao_esta_em_falha(app, ids):
