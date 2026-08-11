@@ -10,6 +10,7 @@ import sys
 os.environ.setdefault('SECRET_KEY', 'test')
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app.services import batch_engine
 from app.services.batch_engine import run_batch_loop, batch_state_defaults, GRAVE_FATAL
 
 
@@ -313,6 +314,126 @@ def test_on_finish_called_em_erro_grave():
     print('ok test_on_finish_called_em_erro_grave')
 
 
+# --- circuit breaker por portal (spec 09, RESOP-02) ------------------------
+
+def _breaker_com(abertos):
+    """Substitui o circuit_breaker do batch_engine por um duble que abre para os
+    alvos informados e registra o que o loop alimentou."""
+    class FakeBreaker:
+        def __init__(self):
+            self.sucessos = []
+            self.falhas = []
+
+        def aberto(self, alvo):
+            return alvo in abertos
+
+        def registrar_sucesso(self, alvo):
+            self.sucessos.append(alvo)
+
+        def registrar_falha(self, alvo, mensagem=None):
+            self.falhas.append((alvo, mensagem))
+            return False
+
+    return FakeBreaker()
+
+
+def _com_breaker(fake, fn):
+    original = batch_engine.circuit_breaker
+    batch_engine.circuit_breaker = fake
+    try:
+        return fn()
+    finally:
+        batch_engine.circuit_breaker = original
+
+
+def test_breaker_aberto_com_alvo_fn_pula_o_item_e_segue():
+    # Lote multi-portal (municipal): o municipio fora nao pode derrubar os outros.
+    state = make_state([1, 2, 3])
+    emit = make_emit([(True, False, None), (True, False, None)])
+    fake = _breaker_com({'Imbe'})
+    alvos = {1: 'Imbe', 2: 'Tramandai', 3: 'Osorio'}
+
+    _com_breaker(fake, lambda: run(state, emit, alvo_fn=lambda cid: alvos[cid]))
+
+    assert state['status'] == 'completed', state['status']
+    assert emit.calls['n'] == 2, emit.calls  # o item do portal aberto nao emitiu
+    assert state['success'] == 2
+    assert state['index'] == 3
+    assert fake.sucessos == ['Tramandai', 'Osorio']
+    print('ok test_breaker_aberto_com_alvo_fn_pula_o_item_e_segue')
+
+
+def test_breaker_aberto_nao_cria_driver_para_o_item_pulado():
+    # RESOP-02.6: item recusado nao abre navegador nem chama o solver.
+    state = make_state([1])
+    emit = make_emit([])
+    fake = _breaker_com({'Imbe'})
+
+    drivers = _com_breaker(fake, lambda: run(state, emit, alvo_fn=lambda cid: 'Imbe'))
+
+    assert emit.calls['n'] == 0
+    assert drivers == [], drivers
+    print('ok test_breaker_aberto_nao_cria_driver_para_o_item_pulado')
+
+
+def test_breaker_aberto_sem_alvo_fn_pausa_o_lote():
+    # Lote de portal unico: nao ha mais nada a fazer -> pausa retomavel.
+    state = make_state([1, 2, 3])
+    emit = make_emit([])
+    fake = _breaker_com({'FGTS'})
+
+    drivers = _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+    assert state['status'] == 'paused', state['status']
+    assert emit.calls['n'] == 0
+    assert drivers == []
+    assert state['index'] == 0  # retoma exatamente de onde parou
+    print('ok test_breaker_aberto_sem_alvo_fn_pausa_o_lote')
+
+
+def test_loop_alimenta_breaker_com_sucesso_e_falha():
+    state = make_state([1, 2])
+    emit = make_emit([(True, False, None), (False, False, 'timeout do portal')])
+    fake = _breaker_com(set())
+
+    _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+    assert fake.sucessos == ['FGTS']
+    assert fake.falhas == [('FGTS', 'timeout do portal')]
+    print('ok test_loop_alimenta_breaker_com_sucesso_e_falha')
+
+
+def test_desfecho_pendente_conta_como_sucesso_para_o_breaker():
+    # Certidao positiva nao e portal fora — nao pode contar para abrir o breaker.
+    state = make_state([1])
+
+    def on_call(cid, driver, eid, i):
+        state['pendentes_resultado'] = state.get('pendentes_resultado', 0) + 1
+
+    emit = make_emit([(False, False, 'positiva')], on_call=on_call)
+    fake = _breaker_com(set())
+
+    _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+    assert fake.sucessos == ['FGTS']
+    assert fake.falhas == []
+    print('ok test_desfecho_pendente_conta_como_sucesso_para_o_breaker')
+
+
+def test_sem_alvo_o_loop_nao_toca_no_breaker():
+    # Comportamento atual preservado para quem nao passa alvo.
+    state = make_state([1, 2])
+    emit = make_emit([(True, False, None), (False, False, 'x')])
+    fake = _breaker_com({'FGTS'})
+
+    _com_breaker(fake, lambda: run(state, emit))
+
+    assert emit.calls['n'] == 2
+    assert fake.sucessos == [] and fake.falhas == []
+    assert state['status'] == 'completed'
+    print('ok test_sem_alvo_o_loop_nao_toca_no_breaker')
+
+
 def main():
     tests = [
         test_all_success,
@@ -331,6 +452,12 @@ def main():
         test_setup_teardown_called,
         test_on_finish_called_com_estado_final,
         test_on_finish_called_em_erro_grave,
+        test_breaker_aberto_com_alvo_fn_pula_o_item_e_segue,
+        test_breaker_aberto_nao_cria_driver_para_o_item_pulado,
+        test_breaker_aberto_sem_alvo_fn_pausa_o_lote,
+        test_loop_alimenta_breaker_com_sucesso_e_falha,
+        test_desfecho_pendente_conta_como_sucesso_para_o_breaker,
+        test_sem_alvo_o_loop_nao_toca_no_breaker,
     ]
     for t in tests:
         t()

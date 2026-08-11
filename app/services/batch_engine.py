@@ -11,6 +11,7 @@ from app.models import (
     get_a_vencer_dias,
 )
 from app.utils import utcnow_naive
+from app.services import circuit_breaker
 from app.services.correlation import CorrelationContext
 from app.services.execution_logger import log_event
 
@@ -129,6 +130,22 @@ def run_worker(worker_fn, app_factory):
     thread.start()
 
 
+def _breaker_falha(alvo, mensagem, on_breaker_aberto):
+    """Conta a falha no breaker do portal e avisa quando ele ABRE agora.
+
+    GRAVE_FATAL (driver/sessao morta) nao passa por aqui de proposito: aquilo e
+    ambiente local quebrado, nao portal fora — contar abriria o breaker de um
+    portal que talvez esteja no ar."""
+    if not alvo:
+        return
+    if circuit_breaker.registrar_falha(alvo, mensagem) and on_breaker_aberto:
+        try:
+            on_breaker_aberto(alvo, mensagem)
+        except Exception:
+            # alerta e best-effort (AD-011): nunca derruba o lote
+            pass
+
+
 def run_batch_loop(
     app,
     *,
@@ -146,6 +163,9 @@ def run_batch_loop(
     recover_fn=None,
     on_finish=None,
     parar_em_grave=True,
+    alvo_lote=None,
+    alvo_fn=None,
+    on_breaker_aberto=None,
 ):
     """Loop generico de lote compartilhado por FGTS, Estadual RS e Municipal.
 
@@ -167,6 +187,18 @@ def run_batch_loop(
       parar_em_grave: True (default, lote manual) aborta o lote em qualquer
         `grave`. False (caminho do agendador) tolera grave "comum" (vira falha
         por-item e continua); GRAVE_FATAL para o lote independente deste flag.
+      alvo_lote: portal unico deste lote (ex.: 'FGTS'). Com o breaker aberto
+        nele nao ha mais nada a fazer -> o lote PAUSA (retomavel).
+      alvo_fn(certidao_id) -> alvo: usado quando o lote cobre varios portais
+        (municipal). Com o breaker aberto num alvo, so os itens DAQUELE portal
+        sao pulados e o lote segue nos demais (spec 09, RESOP-02.4).
+      on_breaker_aberto(alvo, mensagem): callback opcional disparado quando o
+        breaker ABRE durante este lote (o alerta por e-mail vive fora do motor).
+
+    Breaker (spec 09): consultado ANTES de criar driver/emitir — item recusado
+    nao abre navegador nem gasta captcha, e como o `emit_fn` nao roda, a
+    `TarefaEmissao` do agendador continua `pendente` (nao consome tentativa:
+    portal fora nao e defeito do item).
     """
     with app.app_context():
         driver = None
@@ -213,6 +245,32 @@ def run_batch_loop(
                         break
 
                     certidao_id = state['ids'][state['index']]
+
+                    # Circuit breaker (spec 09): decidido ANTES do driver/emit.
+                    alvo = alvo_fn(certidao_id) if alvo_fn else alvo_lote
+                    if alvo and circuit_breaker.aberto(alvo):
+                        if alvo_fn:
+                            # Lote multi-portal (municipal): so este alvo para.
+                            append_batch_message(
+                                state,
+                                f'{curto} pulado ID={certidao_id}: portal {alvo} '
+                                f'fora (circuit breaker).',
+                                level='warning',
+                                certidao_id=certidao_id,
+                            )
+                            state['index'] += 1
+                            continue
+                        # Lote de portal unico: nao ha o que fazer -> pausa
+                        # retomavel (o operador retoma quando o portal voltar).
+                        state['status'] = 'paused'
+                        append_batch_message(
+                            state,
+                            f'Lote {nome_lote} pausado: portal {alvo} fora '
+                            f'(circuit breaker).',
+                            level='warning',
+                        )
+                        break
+
                     state['current_id'] = certidao_id
                     append_batch_message(
                         state,
@@ -255,6 +313,7 @@ def run_batch_loop(
                         # Modo tolerante (agendador): um grave "comum" (ex.: timeout
                         # de download) NAO aborta o lote — vira falha por-item e o
                         # loop segue para o proximo (RESIL-01).
+                        _breaker_falha(alvo, mensagem, on_breaker_aberto)
                         state['falhas'] += 1
                         append_batch_message(
                             state,
@@ -271,6 +330,14 @@ def run_batch_loop(
                     # Esse desfecho é uma 3ª categoria: nem sucesso (nada emitido)
                     # nem falha técnica.
                     resultou_pendente = state.get('pendentes_resultado', 0) > pendentes_antes
+
+                    if sucesso or resultou_pendente:
+                        # Desfecho nao-erro: o portal respondeu. Certidao positiva
+                        # (pendente) e resposta do portal, nao portal fora.
+                        if alvo:
+                            circuit_breaker.registrar_sucesso(alvo)
+                    else:
+                        _breaker_falha(alvo, mensagem, on_breaker_aberto)
 
                     if resultou_pendente:
                         append_batch_message(
