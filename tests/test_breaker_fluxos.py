@@ -217,3 +217,46 @@ def test_falha_do_alerta_nao_propaga(ctx, monkeypatch):
 
     monkeypatch.setattr(notificacoes, 'alertar_portal_fora', _explode)
     lotes._alertar_breaker_aberto('FGTS', 'timeout')  # nao levanta
+
+
+def test_item_recusado_pelo_breaker_mantem_a_tarefa_pendente(ctx):
+    """RESOP-02.6 ponta a ponta: com o breaker aberto o item nem chega ao emit,
+    entao a TarefaEmissao continua `pendente` e NAO consome tentativa — portal
+    fora nao pode gastar o orcamento de retry do item."""
+    from app.models import TarefaEmissao
+    from app.services import agendador, fila_emissao
+
+    certidao = _certidao_municipal('Imbé')
+    tarefa = fila_emissao.enfileirar(certidao.id, TipoCertidao.MUNICIPAL)
+    assert tarefa.status == 'pendente'
+
+    circuit_breaker.limpar()
+    for _ in range(3):
+        circuit_breaker.registrar_falha('IMBE', 'portal fora')
+
+    emitidos = []
+    state = batch_engine.batch_state_defaults()
+    state.update(status='running', ids=[certidao.id], total=1)
+
+    class _Lock:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    # mesmo empacotamento do agendador: o wrapper e quem transiciona a tarefa
+    wrap = agendador._wrap_emit('exec-breaker')
+    emit_fn = wrap(lambda cid, drv, eid: (emitidos.append(cid), (True, False, None))[1])
+
+    batch_engine.run_batch_loop(
+        ctx, lock=_Lock(), state=state, emit_fn=emit_fn,
+        nome_lote='Municipal', curto='Municipal', tag=None,
+        event_prefix='municipal_batch_worker',
+        alvo_fn=lotes._alvo_breaker_municipal)
+
+    assert emitidos == []
+    tarefa_atual = db.session.get(TarefaEmissao, tarefa.id)
+    assert tarefa_atual.status == 'pendente'
+    assert tarefa_atual.tentativas == 0
+    assert tarefa_atual.iniciada_em is None

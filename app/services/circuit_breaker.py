@@ -130,7 +130,9 @@ def abertos():
 
 
 def limpar():
-    """Zera contagem e estado (testes / inicio de ciclo)."""
+    """Zera contagem e estado. Usado pelos testes; NAO e chamado no inicio de
+    cada ciclo do agendador de proposito — a janela (60 min) e menor que o
+    intervalo entre ciclos (diario), entao o breaker ja chega fechado."""
     _contador.limpar()
     with _lock:
         _abertos.clear()

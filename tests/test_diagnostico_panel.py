@@ -188,3 +188,30 @@ def test_rota_portais_exige_admin(login_as, client_anon, ids, monkeypatch):
     for papel in ('operador', 'leitura'):
         assert login_as(papel).get('/diagnostico/portais').status_code == 403
     assert client_anon.get('/diagnostico/portais').status_code in (302, 401)
+
+
+def test_reprocessar_nao_abre_navegador_nem_gasta_captcha(app, client, ids, monkeypatch):
+    """RESOP-01.6: devolver a fila e barato — quem executa e o ciclo seguinte do
+    agendador. Prova por AUSENCIA: nenhuma fabrica de driver e nenhum solver e
+    chamado durante a requisicao."""
+    from app.automation import driver as driver_mod
+    from app import captcha_solver
+
+    chamadas = []
+    monkeypatch.setattr(driver_mod, '_criar_driver_chrome',
+                        lambda *a, **k: chamadas.append('chrome'))
+    monkeypatch.setattr(driver_mod, '_criar_driver_uc',
+                        lambda *a, **k: chamadas.append('uc'))
+    monkeypatch.setattr(captcha_solver, 'solve_normal_captcha',
+                        lambda *a, **k: chamadas.append('captcha'))
+    monkeypatch.setattr(captcha_solver, 'solve_altcha',
+                        lambda *a, **k: chamadas.append('altcha'))
+
+    with app.app_context():
+        tarefa = _tarefa_falha(app, ids)
+
+        r = client.post('/diagnostico/fila/reprocessar', json={'ids': [tarefa.id]})
+
+        assert r.status_code == 200
+        assert r.get_json()['devolvidas'] == [tarefa.id]
+        assert chamadas == []

@@ -281,3 +281,33 @@ def test_snapshot_sem_breaker_aberto(app, monkeypatch):
 
     assert snap['breakers'] == []
     assert all(p['breaker_aberto'] is False for p in snap['portais'])
+
+
+@pytest.mark.parametrize('resultado,esperado', [
+    (dryrun_municipio.OK, 'ok'),
+    # captcha barrou a verificacao: o portal respondeu ate onde deu para ir
+    (dryrun_municipio.PARCIAL, 'ok'),
+    (dryrun_municipio.QUEBRADO, 'fora'),
+    # infra local (driver/perfil ocupado) nao e' veredito sobre o portal
+    (dryrun_municipio.ERRO, 'desconhecido'),
+    # automacao_ativa=false: nunca verde por omissao (edge case do spec)
+    (dryrun_municipio.PULADO, 'desconhecido'),
+])
+def test_estado_do_municipio_por_resultado_do_dryrun(app, monkeypatch, resultado, esperado):
+    _mock_get(monkeypatch)
+    dryrun_municipio.registrar_resultado(
+        {'municipio': 'Imbe', 'resultado': resultado, 'quebrados': [], 'mensagem': None})
+
+    with app.app_context():
+        from app import db
+        from app.models import Municipio
+        db.create_all()
+        db.session.add(Municipio(nome='Imbe', url_certidao='http://imbe.example'))
+        db.session.commit()
+
+        snap = portal_health.snapshot(app.config)
+
+        imbe = next(p for p in snap['portais'] if p.get('municipio') == 'Imbe')
+        assert imbe['estado'] == esperado
+        db.session.remove()
+        db.drop_all()

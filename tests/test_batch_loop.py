@@ -434,6 +434,21 @@ def test_sem_alvo_o_loop_nao_toca_no_breaker():
     print('ok test_sem_alvo_o_loop_nao_toca_no_breaker')
 
 
+def test_grave_fatal_nao_alimenta_o_breaker():
+    # Driver/sessao morta e ambiente LOCAL quebrado, nao portal fora. Contar isso
+    # abriria o breaker de um portal saudavel: o lote pararia por 60 min e sairia
+    # um alerta "portal fora" mentiroso.
+    state = make_state([1, 2])
+    emit = make_emit([(False, GRAVE_FATAL, 'browser fechado')])
+    fake = _breaker_com(set())
+
+    _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+    assert fake.falhas == [], fake.falhas
+    assert state['status'] == 'error'
+    print('ok test_grave_fatal_nao_alimenta_o_breaker')
+
+
 def main():
     tests = [
         test_all_success,
@@ -458,6 +473,7 @@ def main():
         test_loop_alimenta_breaker_com_sucesso_e_falha,
         test_desfecho_pendente_conta_como_sucesso_para_o_breaker,
         test_sem_alvo_o_loop_nao_toca_no_breaker,
+        test_grave_fatal_nao_alimenta_o_breaker,
     ]
     for t in tests:
         t()
