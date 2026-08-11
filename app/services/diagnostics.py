@@ -10,13 +10,19 @@ import threading
 from collections import deque
 from datetime import datetime, timedelta, timezone
 
+from app.services.recorrencia import ContadorRecorrencia
+
 _MAX_EVENTOS = 200
 _LIMIAR_RECORRENCIA = 3  # falhas iguais seguidas para abrir um alerta
 _NIVEIS_PERSISTIDOS = {'WARNING', 'ERROR'}
 
 _lock = threading.Lock()
 _eventos = deque(maxlen=_MAX_EVENTOS)
-_recorrencia = {}  # (error_type, alvo) -> contagem
+# Contagem de falhas seguidas: conta por (error_type, alvo) e zera o ALVO
+# inteiro num desfecho nao-erro. A regra vive em `recorrencia` porque o
+# circuit_breaker (spec 09) precisa da mesma — uma implementacao, dois
+# alimentadores (aqui pelo log; la pelo loop de lote, com alvo explicito).
+_contador = ContadorRecorrencia(_LIMIAR_RECORRENCIA)
 _alertas = {}      # (error_type, alvo) -> alerta ativo
 
 # Persistencia desacoplada: a fila e drenada por uma unica thread escritora,
@@ -67,9 +73,8 @@ def registrar(payload):
         _eventos.append(payload)
         if nivel == 'ERROR' and payload.get('error_type'):
             chave = (payload['error_type'], alvo)
-            n = _recorrencia.get(chave, 0) + 1
-            _recorrencia[chave] = n
-            if n >= _LIMIAR_RECORRENCIA:
+            n = _contador.falha(chave, grupo=alvo)
+            if _contador.estourou(chave):
                 _alertas[chave] = {
                     'error_type': payload['error_type'],
                     'alvo': alvo,
@@ -80,8 +85,8 @@ def registrar(payload):
                 }
         else:
             # qualquer atividade nao-erro no mesmo alvo zera contadores e alerta
-            for chave in [k for k in _recorrencia if k[1] == alvo]:
-                _recorrencia.pop(chave, None)
+            _contador.sucesso(alvo)
+            for chave in [k for k in _alertas if k[1] == alvo]:
                 _alertas.pop(chave, None)
 
     if _writer_iniciado and nivel in _NIVEIS_PERSISTIDOS:
@@ -106,7 +111,7 @@ def alertas_ativos():
 def limpar():
     with _lock:
         _eventos.clear()
-        _recorrencia.clear()
+        _contador.limpar()
         _alertas.clear()
 
 
