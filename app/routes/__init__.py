@@ -26,7 +26,13 @@ from app.utils import (
     normalizar_cidade,
     to_bool as _to_bool,
 )
-from app.services import auditoria, diagnostics, dryrun_municipio, fila_emissao
+from app.services import (
+    auditoria,
+    diagnostics,
+    dryrun_municipio,
+    fila_emissao,
+    portal_health,
+)
 from app.services.correlation import CorrelationContext
 from app.services.execution_logger import log_event
 from app.services.visualizar_token import _gerar_visualizar_token
@@ -172,6 +178,23 @@ def diagnostico_fila_reprocessar():
         + f"devolvidas={len(resultado['devolvidas'])} "
         f"recusadas={len(resultado['recusadas'])}")
     return jsonify({'status': 'ok', **resultado})
+
+
+@bp.route('/diagnostico/portais')
+@requer_papel('admin')
+def diagnostico_portais():
+    """Semaforo de saude dos portais + breakers abertos (spec 09, RESOP-03).
+
+    Verde diz que o portal RESPONDE, nao que a emissao funciona — o rotulo na
+    tela precisa deixar isso claro. Falha aqui nao pode virar 500: o painel
+    mostra o que der e segue."""
+    try:
+        dados = portal_health.snapshot(current_app.config)
+    except Exception as exc:
+        log_event('portais_snapshot_falhou', level='WARNING', error=str(exc))
+        return jsonify({'status': 'ok', 'portais': [], 'breakers': [],
+                        'message': 'Não foi possível medir os portais agora.'})
+    return jsonify({'status': 'ok', **dados})
 
 
 @bp.route('/diagnostico/2captcha')

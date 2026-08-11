@@ -130,3 +130,61 @@ def test_rotas_da_fila_exigem_admin(login_as, client_anon, ids):
         assert c.post('/diagnostico/fila/reprocessar',
                       json={'ids': [1]}).status_code == 403
     assert client_anon.get('/diagnostico/fila/falhas').status_code in (302, 401)
+
+
+# === semaforo de saude dos portais (spec 09, RESOP-03) ====================
+
+def _sem_rede(monkeypatch):
+    from app.services import portal_health
+
+    class _Resp:
+        status_code = 200
+
+    portal_health.limpar_cache()
+    monkeypatch.setattr(portal_health.requests, 'get', lambda url, **kw: _Resp())
+
+
+def test_rota_portais_lista_portais_e_breakers(client, ids, monkeypatch):
+    _sem_rede(monkeypatch)
+
+    r = client.get('/diagnostico/portais')
+
+    assert r.status_code == 200
+    j = r.get_json()
+    assert j['status'] == 'ok'
+    assert {p['chave'] for p in j['portais']} >= {'FGTS', 'Estadual RS', 'Trabalhista'}
+    assert j['breakers'] == []
+
+
+def test_rota_portais_mostra_breaker_aberto(client, ids, monkeypatch):
+    from app.services import circuit_breaker
+    _sem_rede(monkeypatch)
+    circuit_breaker.limpar()
+    for _ in range(3):
+        circuit_breaker.registrar_falha('FGTS', 'portal fora')
+
+    j = client.get('/diagnostico/portais').get_json()
+
+    assert [b['alvo'] for b in j['breakers']] == ['FGTS']
+    assert next(p for p in j['portais'] if p['chave'] == 'FGTS')['breaker_aberto'] is True
+    circuit_breaker.limpar()
+
+
+def test_rota_portais_nao_quebra_quando_a_medicao_falha(client, ids, monkeypatch):
+    from app.services import portal_health
+    portal_health.limpar_cache()
+    monkeypatch.setattr(portal_health, 'snapshot',
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError('boom')))
+
+    r = client.get('/diagnostico/portais')
+
+    assert r.status_code == 200
+    j = r.get_json()
+    assert j['portais'] == [] and j['message']
+
+
+def test_rota_portais_exige_admin(login_as, client_anon, ids, monkeypatch):
+    _sem_rede(monkeypatch)
+    for papel in ('operador', 'leitura'):
+        assert login_as(papel).get('/diagnostico/portais').status_code == 403
+    assert client_anon.get('/diagnostico/portais').status_code in (302, 401)
