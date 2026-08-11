@@ -181,7 +181,8 @@ def test_alerta_e_disparado_quando_o_breaker_abre(ctx, monkeypatch):
     from app.services import notificacoes
     chamadas = []
     monkeypatch.setattr(notificacoes, 'alertar_portal_fora',
-                        lambda app, alvo, motivo=None: chamadas.append((alvo, motivo)))
+                        lambda app, alvo, motivo=None, causa='portal':
+                        chamadas.append((alvo, motivo)))
 
     lotes._alertar_breaker_aberto('FGTS', 'timeout')
 
@@ -362,3 +363,17 @@ def test_agendador_roda_o_ciclo_seguinte_apos_pausa_vencida(ctx, monkeypatch):
     lotes._fluxo_fgts_rodar(ctx, [1], wrap_emit=lambda emit: emit, execution_id='e2')
 
     assert kw.get('alvo_lote') == 'FGTS', 'o ciclo seguinte deveria ter rodado'
+
+
+def test_causa_do_alerta_separa_captcha_de_portal(ctx, monkeypatch):
+    """O lote classifica a causa antes de avisar (RESOP-02.7)."""
+    from app.services import notificacoes
+    chamadas = []
+    monkeypatch.setattr(notificacoes, 'alertar_portal_fora',
+                        lambda app, alvo, motivo=None, causa='portal':
+                        chamadas.append((alvo, causa)))
+
+    lotes._alertar_breaker_aberto('Estadual RS', 'Falha ao resolver o captcha.')
+    lotes._alertar_breaker_aberto('FGTS', 'Erro ao carregar pagina FGTS.')
+
+    assert chamadas == [('Estadual RS', 'captcha'), ('FGTS', 'portal')]

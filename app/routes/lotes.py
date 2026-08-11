@@ -162,12 +162,25 @@ def _alvo_breaker_municipal(certidao_id):
     return normalizar_cidade(cidade) or ALVO_BREAKER_MUNICIPAL_GENERICO
 
 
+def _causa_do_breaker(mensagem):
+    """'captcha' quando o que falhou foi o solver; 'portal' no resto.
+
+    O breaker abre nos dois casos (parar de gastar em cima de falha repetida),
+    mas a acao do operador e outra: portal fora se resolve esperando, captcha
+    falhando se resolve na conta do 2captcha."""
+    from app.errors import ErrorType, map_exception_to_error_type
+    if map_exception_to_error_type(mensagem or '') == ErrorType.CAPTCHA:
+        return 'captcha'
+    return 'portal'
+
+
 def _alertar_breaker_aberto(alvo, mensagem):
     """Push por e-mail quando o breaker abre no meio de um lote. Best-effort
     (AD-011): o motor ja engole a excecao, mas nem chegamos a levantar."""
     try:
         from app.services import notificacoes
-        notificacoes.alertar_portal_fora(_current_app_object(), alvo, mensagem)
+        notificacoes.alertar_portal_fora(_current_app_object(), alvo, mensagem,
+                                         causa=_causa_do_breaker(mensagem))
     except Exception as exc:
         log_event('breaker_alerta_falhou', level='WARNING', alvo=alvo, error=str(exc))
 

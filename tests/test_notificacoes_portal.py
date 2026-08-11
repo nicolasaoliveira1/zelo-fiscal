@@ -83,3 +83,42 @@ def test_sem_motivo_nao_quebra(ctx, monkeypatch):
 
     assert notificacoes.alertar_portal_fora(ctx, 'FGTS') is True
     assert 'FGTS' in enviados[0][0]
+
+
+# --- causa: portal fora x solver de captcha falhando -----------------------
+
+def test_falha_de_captcha_avisa_do_solver_nao_do_portal(ctx, monkeypatch):
+    """Dizer 'portal fora' quando quem falhou foi o 2captcha manda o operador
+    depurar o site errado."""
+    enviados = _mock_envio(monkeypatch)
+
+    assert notificacoes.alertar_portal_fora(
+        ctx, 'Estadual RS', 'Falha ao resolver o captcha.', causa='captcha') is True
+
+    assunto, corpo = enviados[0]
+    assert 'captcha' in assunto.lower()
+    assert 'fora do ar' not in assunto.lower()
+    assert '2captcha' in corpo
+    assert 'O portal pode estar no ar' in corpo
+    assert NotificacaoLog.query.filter_by(tipo='alerta_solver').count() == 1
+
+
+def test_causas_diferentes_nao_se_silenciam(ctx, monkeypatch):
+    """Sao problemas distintos, com acoes distintas: cada um tem chave propria."""
+    enviados = _mock_envio(monkeypatch)
+
+    notificacoes.alertar_portal_fora(ctx, 'FGTS', 'timeout', causa='portal')
+    assert notificacoes.alertar_portal_fora(
+        ctx, 'FGTS', 'captcha falhou', causa='captcha') is True
+
+    assert len(enviados) == 2
+    chaves = {n.chave for n in NotificacaoLog.query.all()}
+    assert chaves == {'portal_fora:FGTS', 'solver_captcha:FGTS'}
+
+
+def test_causa_desconhecida_cai_no_texto_de_portal(ctx, monkeypatch):
+    enviados = _mock_envio(monkeypatch)
+
+    notificacoes.alertar_portal_fora(ctx, 'FGTS', 'x', causa='???')
+
+    assert 'fora do ar' in enviados[0][0].lower()

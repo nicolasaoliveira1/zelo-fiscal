@@ -284,8 +284,8 @@ def run_batch_loop(
                             # Lote multi-portal (municipal): so este alvo para.
                             append_batch_message(
                                 state,
-                                f'{curto} pulado ID={certidao_id}: portal {alvo} '
-                                f'fora (circuit breaker).',
+                                f'{curto} pulado ID={certidao_id}: {alvo} pausado '
+                                f'por falhas seguidas (circuit breaker).',
                                 level='warning',
                                 certidao_id=certidao_id,
                             )
@@ -297,9 +297,9 @@ def run_batch_loop(
                         state['pausado_por_breaker'] = alvo
                         append_batch_message(
                             state,
-                            f'Lote {nome_lote} pausado: portal {alvo} fora '
-                            f'(circuit breaker). Volta sozinho quando o portal '
-                            f'voltar a responder.',
+                            f'Lote {nome_lote} pausado: falhas seguidas em '
+                            f'{alvo} (circuit breaker). Volta sozinho quando o '
+                            f'portal voltar a responder.',
                             level='warning',
                         )
                         break
