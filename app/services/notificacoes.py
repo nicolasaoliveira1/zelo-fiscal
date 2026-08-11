@@ -258,6 +258,35 @@ def alertar_empresas_baixadas(app, baixadas):
     return enviados
 
 
+def alertar_portal_fora(app, alvo, motivo=None):
+    """Alerta que o circuit breaker abriu para um portal (spec 09, RESOP-02.7).
+
+    Uma chave anti-spam POR PORTAL (`portal_fora:<alvo>`), como o alerta de
+    municipio: um portal fora nao pode silenciar o alerta de outro dentro da
+    janela. Best-effort (AD-011) — sem SMTP/destinatario nao envia, nao levanta
+    e o breaker abre do mesmo jeito. Retorna True se enviou agora."""
+    cfg = _config()
+    destinatarios = _destinatarios(cfg)
+    if not email_sender.smtp_configurado(app.config) or not destinatarios:
+        log_event('notif_portal_sem_smtp', level='WARNING', alvo=alvo,
+                  destinatarios=len(destinatarios))
+        return False
+
+    janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
+    assunto = f'[Certidoes] Alerta: portal {alvo} pausado (fora do ar)'
+    corpo = '\n'.join([
+        f'O sistema detectou falhas seguidas no portal {alvo} e pausou a emissao',
+        'nele para nao gastar creditos de captcha contra um portal fora.',
+        '',
+        f'Ultimo erro: {motivo or "-"}',
+        '',
+        'Nada precisa ser religado: o bloqueio expira sozinho e o proximo ciclo',
+        'tenta de novo. Se o portal seguir fora, o alerta se repete na proxima janela.',
+    ])
+    return _enviar_alerta(app, destinatarios, f'portal_fora:{alvo}', 'alerta_portal',
+                          assunto, corpo, janela, detalhe=motivo)
+
+
 def alertar_municipios_quebrados(app, relatorios):
     """Alerta os municipios cujo dry-run acusou seletor quebrado (COV-05 A3).
 
