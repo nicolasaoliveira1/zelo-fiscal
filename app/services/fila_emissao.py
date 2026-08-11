@@ -8,7 +8,8 @@ lote (isso é `batch_engine`): aqui só vive a fila persistente.
 from datetime import datetime, timedelta
 
 from app import db
-from app.models import Certidao, TarefaEmissao
+from app.errors import ErrorType, _CATALOGO, map_exception_to_error_type
+from app.models import Certidao, Empresa, TarefaEmissao
 from app.services.execution_logger import log_event
 
 # Estados em que uma tarefa ainda representa trabalho ativo (não terminal).
@@ -137,6 +138,72 @@ def resolver_falha(tarefa, erro, *, max_tentativas=MAX_TENTATIVAS_PADRAO):
         tarefa.concluida_em = datetime.now()
     _commit(tarefa)
     return tarefa.status
+
+
+# --- dead-letter: o que morreu na fila (spec 09, RESOP-01) ------------------
+
+def tarefas_falhas(limite=200):
+    """Tarefas que esgotaram as tentativas, mais recentes primeiro.
+
+    So `falha`: `retry` e `pendente` sao trabalho vivo, e misturar os dois
+    transformaria a tela de "o que morreu" na fila inteira."""
+    return (TarefaEmissao.query
+            .filter(TarefaEmissao.status == 'falha')
+            .order_by(TarefaEmissao.concluida_em.desc(), TarefaEmissao.id.desc())
+            .limit(limite)
+            .all())
+
+
+def motivo_da_tarefa(tarefa):
+    """Motivo da falha como `ErrorType`, classificando a mensagem gravada.
+
+    Reusa o catalogo de `app/errors.py` (a funcao normaliza com `str(exc)`, logo
+    aceita a string do campo `erro`): nenhuma tabela de palavras-chave nova, e as
+    falhas antigas — anteriores a esta feature — saem classificadas do mesmo
+    jeito, sem backfill."""
+    return map_exception_to_error_type(getattr(tarefa, 'erro', None) or '').value
+
+
+def _nomes_das_empresas(tarefas):
+    """{empresa_id: nome} numa unica query (sem N+1 na lista de falhas)."""
+    ids = {t.empresa_id for t in tarefas if t.empresa_id}
+    if not ids:
+        return {}
+    linhas = db.session.query(Empresa.id, Empresa.nome).filter(Empresa.id.in_(ids)).all()
+    return dict(linhas)
+
+
+def _item_falha(tarefa, nomes):
+    return {
+        'id': tarefa.id,
+        'certidao_id': tarefa.certidao_id,
+        'empresa_id': tarefa.empresa_id,
+        'empresa': nomes.get(tarefa.empresa_id),
+        'tipo': tarefa.tipo,
+        'tentativas': tarefa.tentativas or 0,
+        'erro': tarefa.erro,
+        'concluida_em': tarefa.concluida_em.isoformat() if tarefa.concluida_em else None,
+    }
+
+
+def agrupar_falhas(limite=200):
+    """Falhas agrupadas por motivo, com o titulo/acao do catalogo de erro —
+    o operador le "Tempo esgotado", nao `TIMEOUT`. Grupos maiores primeiro."""
+    tarefas = tarefas_falhas(limite=limite)
+    nomes = _nomes_das_empresas(tarefas)
+    grupos = {}
+    for tarefa in tarefas:
+        motivo = motivo_da_tarefa(tarefa)
+        grupo = grupos.get(motivo)
+        if grupo is None:
+            titulo, _causa, acao, _rec = _CATALOGO[ErrorType(motivo)]
+            grupo = grupos[motivo] = {
+                'error_type': motivo, 'titulo': titulo, 'acao': acao,
+                'total': 0, 'itens': [],
+            }
+        grupo['total'] += 1
+        grupo['itens'].append(_item_falha(tarefa, nomes))
+    return sorted(grupos.values(), key=lambda g: g['total'], reverse=True)
 
 
 def reconciliar_orfas(*, apenas_timeout=False):

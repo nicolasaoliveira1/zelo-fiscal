@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from app import db
+from app.errors import ErrorType, _CATALOGO
 from app.models import Certidao, TarefaEmissao, TipoCertidao
 from app.services import fila_emissao
 
@@ -189,3 +190,98 @@ def test_tarefas_elegiveis_inclui_pendente_e_retry_exclui_terminais(app, ids):
         elegiveis = fila_emissao.tarefas_elegiveis(TipoCertidao.FGTS)
         estados = sorted(t.status for t in elegiveis)
         assert estados == ['pendente', 'retry']
+
+
+# === dead-letter: listar, agrupar e reprocessar (spec 09, RESOP-01) ========
+
+def _falha(app, ids, erro, **kwargs):
+    return _nova_tarefa(app, ids, status='falha', tentativas=3, erro=erro,
+                        concluida_em=datetime.now(), **kwargs)
+
+
+def test_tarefas_falhas_traz_so_status_falha(app, ids):
+    """RESOP-01.1: a tela e 'o que morreu', nao a fila inteira."""
+    with app.app_context():
+        _falha(app, ids, 'Timeout aguardando download.')
+        _nova_tarefa(app, ids, status='retry', tentativas=1, erro='x')
+        _nova_tarefa(app, ids, status='pendente')
+        _nova_tarefa(app, ids, status='rodando')
+        _nova_tarefa(app, ids, status='ok')
+
+        falhas = fila_emissao.tarefas_falhas()
+
+        assert len(falhas) == 1
+        assert falhas[0].status == 'falha'
+
+
+def test_tarefas_falhas_mais_recentes_primeiro(app, ids):
+    with app.app_context():
+        antiga = _falha(app, ids, 'erro antigo')
+        antiga.concluida_em = datetime.now() - timedelta(days=2)
+        db.session.commit()
+        nova = _falha(app, ids, 'erro novo')
+
+        falhas = fila_emissao.tarefas_falhas()
+
+        assert [t.id for t in falhas] == [nova.id, antiga.id]
+
+
+def test_motivo_classifica_pelo_catalogo_de_erro(app, ids):
+    """RESOP-01.2: reusa map_exception_to_error_type — sem vocabulario novo."""
+    with app.app_context():
+        assert fila_emissao.motivo_da_tarefa(
+            _falha(app, ids, 'Timeout aguardando download da certidao.')) == 'TIMEOUT'
+        assert fila_emissao.motivo_da_tarefa(
+            _falha(app, ids, 'Falha ao resolver o captcha.')) == 'CAPTCHA'
+
+
+def test_motivo_de_erro_vazio_e_unknown(app, ids):
+    """RESOP-01.3: falha antiga sem mensagem nao pode sumir da lista."""
+    with app.app_context():
+        assert fila_emissao.motivo_da_tarefa(_falha(app, ids, None)) == 'UNKNOWN'
+        assert fila_emissao.motivo_da_tarefa(_falha(app, ids, '')) == 'UNKNOWN'
+
+
+def test_agrupar_falhas_conta_por_motivo(app, ids):
+    with app.app_context():
+        _falha(app, ids, 'Timeout aguardando download.')
+        _falha(app, ids, 'Timeout no portal.')
+        _falha(app, ids, 'Falha no captcha.')
+
+        grupos = {g['error_type']: g for g in fila_emissao.agrupar_falhas()}
+
+        assert grupos['TIMEOUT']['total'] == 2
+        assert grupos['CAPTCHA']['total'] == 1
+        assert len(grupos['TIMEOUT']['itens']) == 2
+
+
+def test_grupo_traz_titulo_e_acao_do_catalogo(app, ids):
+    """O operador le 'Tempo esgotado', nao a sigla crua."""
+    with app.app_context():
+        _falha(app, ids, 'Timeout aguardando download.')
+
+        grupo = fila_emissao.agrupar_falhas()[0]
+
+        titulo, _causa, acao, _rec = _CATALOGO[ErrorType.TIMEOUT]
+        assert grupo['titulo'] == titulo == 'Tempo esgotado'
+        assert grupo['acao'] == acao
+
+
+def test_item_do_grupo_traz_dados_do_alvo(app, ids):
+    with app.app_context():
+        tarefa = _falha(app, ids, 'Timeout aguardando download.')
+
+        item = fila_emissao.agrupar_falhas()[0]['itens'][0]
+
+        assert item['id'] == tarefa.id
+        assert item['certidao_id'] == ids['fgts']
+        assert item['tipo'] == 'FGTS'
+        assert item['empresa'] == 'Empresa Teste'
+        assert item['tentativas'] == 3
+        assert item['erro'] == 'Timeout aguardando download.'
+        assert item['concluida_em']
+
+
+def test_agrupar_falhas_sem_nada_devolve_lista_vazia(app, ids):
+    with app.app_context():
+        assert fila_emissao.agrupar_falhas() == []
