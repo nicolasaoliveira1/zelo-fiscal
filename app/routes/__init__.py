@@ -26,7 +26,7 @@ from app.utils import (
     normalizar_cidade,
     to_bool as _to_bool,
 )
-from app.services import diagnostics, dryrun_municipio
+from app.services import auditoria, diagnostics, dryrun_municipio, fila_emissao
 from app.services.correlation import CorrelationContext
 from app.services.execution_logger import log_event
 from app.services.visualizar_token import _gerar_visualizar_token
@@ -137,6 +137,41 @@ def diagnostico_municipio_dryrun(municipio_id):
         return _json_error('Município não encontrado.', 404)
     relatorio = dryrun_municipio.executar_dry_run(municipio)
     return jsonify({'status': 'ok', 'relatorio': relatorio})
+
+
+@bp.route('/diagnostico/fila/falhas')
+@requer_papel('admin')
+def diagnostico_fila_falhas():
+    """Dead-letter da fila: o que esgotou as tentativas, agrupado por motivo
+    (spec 09, RESOP-01). So leitura — reprocessar e a rota abaixo."""
+    grupos = fila_emissao.agrupar_falhas()
+    return jsonify({
+        'status': 'ok',
+        'grupos': grupos,
+        'total': sum(g['total'] for g in grupos),
+    })
+
+
+@bp.route('/diagnostico/fila/reprocessar', methods=['POST'])
+@requer_papel('admin')
+def diagnostico_fila_reprocessar():
+    """Devolve falhas para a fila, por ids ou por motivo (RESOP-01.5).
+
+    Nao emite nada aqui: quem executa e o ciclo seguinte do agendador. Resposta
+    parcial por desenho — o que nao der volta em `recusadas`."""
+    dados = request.get_json(silent=True) or {}
+    ids = dados.get('ids')
+    error_type = (dados.get('error_type') or '').strip() or None
+    if not ids and not error_type:
+        return _json_error('Informe "ids" ou "error_type" para reprocessar.', 400)
+
+    resultado = fila_emissao.reprocessar(ids=ids, error_type=error_type)
+    auditoria.registrar(
+        'fila.reprocessar', alvo_tipo='tarefa_emissao',
+        detalhe=(f'motivo={error_type} ' if error_type else '')
+        + f"devolvidas={len(resultado['devolvidas'])} "
+        f"recusadas={len(resultado['recusadas'])}")
+    return jsonify({'status': 'ok', **resultado})
 
 
 @bp.route('/diagnostico/2captcha')
