@@ -513,6 +513,36 @@ def test_falha_de_portal_continua_alimentando_o_breaker():
     print('ok test_falha_de_portal_continua_alimentando_o_breaker')
 
 
+def test_alerta_de_breaker_sai_na_hora_e_nao_no_fim_do_lote():
+    # Lote multi-portal segue rodando depois que um alvo abre (pode durar horas).
+    # Se o alerta so saisse na saida do laco, o e-mail chegaria com o estrago
+    # feito. Prova de PRONTIDAO: o aviso acontece antes dos itens seguintes.
+    ordem = []
+    state = make_state([1, 2, 3, 4, 5, 6])
+    alvos = {1: 'A', 2: 'A', 3: 'A', 4: 'B', 5: 'B', 6: 'B'}
+
+    def emit(cid, driver, eid):
+        ordem.append(f'emit:{cid}')
+        return (False, False, 'portal fora') if alvos[cid] == 'A' else (True, False, None)
+
+    emit.calls = {'n': 0}
+
+    def _avisar(alvo, msg):
+        ordem.append(f'alerta:{alvo}')
+
+    batch_engine.circuit_breaker.limpar()
+    run_batch_loop(FakeApp(), lock=FakeLock(), state=state, emit_fn=emit,
+                   create_driver=lambda: FakeDriver(),
+                   alvo_fn=lambda cid: alvos[cid],
+                   on_breaker_aberto=_avisar, **COMMON)
+    batch_engine.circuit_breaker.limpar()
+
+    assert 'alerta:A' in ordem, ordem
+    # o aviso saiu ANTES de o lote terminar de processar os itens do outro portal
+    assert ordem.index('alerta:A') < ordem.index('emit:6'), ordem
+    print('ok test_alerta_de_breaker_sai_na_hora_e_nao_no_fim_do_lote')
+
+
 def main():
     tests = [
         test_all_success,
@@ -541,6 +571,7 @@ def main():
         test_alerta_de_breaker_nao_e_disparado_com_o_lock_na_mao,
         test_falha_de_rede_local_nao_abre_o_breaker_do_portal,
         test_falha_de_portal_continua_alimentando_o_breaker,
+        test_alerta_de_breaker_sai_na_hora_e_nao_no_fim_do_lote,
     ]
     for t in tests:
         t()
