@@ -116,7 +116,15 @@ def aberto(alvo):
 
 
 def abertos():
-    """Portais atualmente marcados como fora, para o painel."""
+    """Portais atualmente marcados como fora, para o painel.
+
+    Passa por `aberto()` de proposito: e la que a janela vence. Sem isso o
+    painel mostraria "pausado" para sempre, contradizendo o e-mail que promete
+    que o bloqueio expira sozinho. A chamada e FORA do lock — `_lock` nao e
+    reentrante e `aberto()` o adquire."""
+    with _lock:
+        alvos = list(_abertos)
+    vivos = [alvo for alvo in alvos if aberto(alvo)]
     with _lock:
         return [
             {
@@ -126,6 +134,7 @@ def abertos():
                 'motivo': registro['motivo'],
             }
             for alvo, registro in _abertos.items()
+            if alvo in vivos
         ]
 
 

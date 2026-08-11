@@ -377,3 +377,36 @@ def test_causa_do_alerta_separa_captcha_de_portal(ctx, monkeypatch):
     lotes._alertar_breaker_aberto('FGTS', 'Erro ao carregar pagina FGTS.')
 
     assert chamadas == [('Estadual RS', 'captcha'), ('FGTS', 'portal')]
+
+
+def test_pausa_manual_apaga_a_marca_do_breaker(ctx):
+    """Cenario do code-review: breaker pausa -> operador retoma -> operador
+    pausa. Se a marca do breaker sobrevivesse, `liberar_pausa_de_breaker`
+    apagaria em silencio um lote que o OPERADOR pausou de proposito."""
+    circuit_breaker.limpar()
+    lock = _LockFake()
+    state = batch_engine.batch_state_defaults()
+    state.update(status='paused', pausado_por_breaker='FGTS',
+                 ids=[1, 2, 3], index=1, total=3)
+
+    batch_engine.resume_batch(lock, state, lambda app: None, lambda: ctx)
+    assert state['pausado_por_breaker'] is None
+
+    batch_engine.request_pause(lock, state)
+    assert state['pausado_por_breaker'] is None
+
+    # a pausa agora e manual: nao pode ser liberada nem o progresso perdido
+    assert batch_engine.liberar_pausa_de_breaker(lock, state) is False
+    assert state['status'] == 'paused'
+    assert state['ids'] == [1, 2, 3]
+    assert state['index'] == 1
+
+
+def test_parar_tambem_apaga_a_marca_do_breaker(ctx):
+    circuit_breaker.limpar()
+    state = batch_engine.batch_state_defaults()
+    state.update(status='paused', pausado_por_breaker='FGTS', ids=[1], total=1)
+
+    batch_engine.request_stop(_LockFake(), state)
+
+    assert state['pausado_por_breaker'] is None

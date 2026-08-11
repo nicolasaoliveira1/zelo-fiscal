@@ -13,6 +13,32 @@ class ErrorType(str, Enum):
     UNKNOWN = 'UNKNOWN'
 
 
+# Marcadores de falha ao CONECTAR num host remoto. Existem separados do
+# `map_exception_to_error_type` de proposito: o catalogo joga tanto o drive de
+# rede local (Z: caiu) quanto a conexao recusada pelo portal em NETWORK_PATH, e
+# para o circuit breaker (spec 09) a diferenca e tudo — ERR_CONNECTION_REFUSED e
+# a assinatura MAIS COMUM de "portal fora", enquanto Z: fora nao diz nada sobre
+# o portal. Lista estreita de proposito: exige a marca especifica do Chrome/
+# socket, nunca a palavra solta "connection" (que aparece em erro de drive).
+_MARCADORES_CONEXAO_HOST = (
+    'ERR_CONNECTION', 'ERR_NAME_NOT_RESOLVED', 'ERR_INTERNET_DISCONNECTED',
+    'ERR_ADDRESS_UNREACHABLE', 'ERR_TIMED_OUT', 'ERR_EMPTY_RESPONSE',
+    'ECONNREFUSED', 'ECONNRESET', 'CONNECTIONERROR', 'CONNECTIONREFUSED',
+    'CONNECTIONRESET', 'CONNECTION REFUSED', 'CONNECTION RESET',
+    'CONNECTION ABORTED', 'MAX RETRIES EXCEEDED', 'NAME RESOLUTION',
+)
+
+
+def falha_de_conexao_com_host(exc):
+    """True quando o texto indica que nao foi possivel CONECTAR no host remoto.
+
+    Complementa (nao substitui) `map_exception_to_error_type`: aquele responde
+    "de que familia e o erro"; este responde "isso e o portal nao respondendo?".
+    """
+    texto = str(exc or '').upper()
+    return any(marcador in texto for marcador in _MARCADORES_CONEXAO_HOST)
+
+
 def map_exception_to_error_type(exc):
     text = str(exc or '').upper()
     name = exc.__class__.__name__.upper() if exc else ''

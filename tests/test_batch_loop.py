@@ -543,6 +543,38 @@ def test_alerta_de_breaker_sai_na_hora_e_nao_no_fim_do_lote():
     print('ok test_alerta_de_breaker_sai_na_hora_e_nao_no_fim_do_lote')
 
 
+def test_conexao_recusada_abre_o_breaker():
+    # ERR_CONNECTION_REFUSED e a assinatura MAIS COMUM de portal fora, e o
+    # catalogo a classifica como NETWORK_PATH (junto com o drive Z: local).
+    # Se ela nao contasse, o breaker nunca abriria no caso que justifica existir.
+    for mensagem in ('net::ERR_CONNECTION_REFUSED',
+                     'net::ERR_CONNECTION_RESET ao abrir o portal',
+                     'net::ERR_CONNECTION_TIMED_OUT',
+                     'ConnectionError: Max retries exceeded'):
+        state = make_state([1, 2, 3])
+        emit = make_emit([(False, False, mensagem)] * 3)
+        fake = _breaker_com(set())
+
+        _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+        assert [m for _a, m in fake.falhas] == [mensagem] * 3, mensagem
+    print('ok test_conexao_recusada_abre_o_breaker')
+
+
+def test_drive_de_rede_continua_fora_do_breaker():
+    # O contraponto: o Z: caindo nao diz nada sobre o portal.
+    for mensagem in ('Pasta de rede inacessivel: Z: nao mapeado',
+                     'Falha ao acessar o caminho de rede (network path)'):
+        state = make_state([1, 2, 3])
+        emit = make_emit([(False, False, mensagem)] * 3)
+        fake = _breaker_com(set())
+
+        _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+        assert fake.falhas == [], (mensagem, fake.falhas)
+    print('ok test_drive_de_rede_continua_fora_do_breaker')
+
+
 def main():
     tests = [
         test_all_success,
@@ -572,6 +604,8 @@ def main():
         test_falha_de_rede_local_nao_abre_o_breaker_do_portal,
         test_falha_de_portal_continua_alimentando_o_breaker,
         test_alerta_de_breaker_sai_na_hora_e_nao_no_fim_do_lote,
+        test_conexao_recusada_abre_o_breaker,
+        test_drive_de_rede_continua_fora_do_breaker,
     ]
     for t in tests:
         t()

@@ -112,9 +112,12 @@ def test_alvo_vazio_e_ignorado():
     assert circuit_breaker.aberto(None) is False
 
 
-def test_limiar_vem_da_config(app):
+def test_limiar_vem_da_config(app, monkeypatch):
+    # setitem via monkeypatch (e nao atribuicao direta): a fixture `app` e
+    # SESSION-scoped, entao mexer no config sem restaurar envenena o limiar de
+    # todo teste seguinte que rode dentro de um app context.
+    monkeypatch.setitem(app.config, 'BREAKER_LIMIAR', 2)
     with app.app_context():
-        app.config['BREAKER_LIMIAR'] = 2
         assert _falhar('FGTS', 2) == [False, True]
 
 
@@ -131,3 +134,28 @@ def test_abertura_e_fechamento_sao_logados(app, monkeypatch):
     eventos = [e.get('event') for e in diagnostics.eventos_recentes(limite=20)]
     assert 'breaker_aberto' in eventos
     assert 'breaker_fechado' in eventos
+
+
+def test_abertos_nao_lista_breaker_com_janela_vencida(monkeypatch):
+    """O painel nao pode mostrar 'pausado' para sempre: `abertos()` tem de
+    respeitar a mesma janela que `aberto()` — senao a tela contradiz o e-mail
+    que promete que o bloqueio expira sozinho."""
+    agora = datetime(2026, 8, 11, 3, 0, 0)
+    monkeypatch.setattr(circuit_breaker, '_agora', lambda: agora)
+    _falhar('FGTS', 3)
+    assert len(circuit_breaker.abertos()) == 1
+
+    monkeypatch.setattr(circuit_breaker, '_agora', lambda: agora + timedelta(hours=4))
+
+    assert circuit_breaker.abertos() == []
+
+
+def test_abertos_mantem_o_que_ainda_esta_na_janela(monkeypatch):
+    agora = datetime(2026, 8, 11, 3, 0, 0)
+    monkeypatch.setattr(circuit_breaker, '_agora', lambda: agora)
+    _falhar('FGTS', 3)
+    _falhar('Imbe', 3)
+
+    monkeypatch.setattr(circuit_breaker, '_agora', lambda: agora + timedelta(minutes=59))
+
+    assert {b['alvo'] for b in circuit_breaker.abertos()} == {'FGTS', 'Imbe'}

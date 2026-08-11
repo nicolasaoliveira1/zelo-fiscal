@@ -10,7 +10,11 @@ from app.models import (
     TipoCertidao,
     get_a_vencer_dias,
 )
-from app.errors import ErrorType, map_exception_to_error_type
+from app.errors import (
+    ErrorType,
+    falha_de_conexao_com_host,
+    map_exception_to_error_type,
+)
 from app.utils import utcnow_naive
 from app.services import circuit_breaker
 from app.services.correlation import CorrelationContext
@@ -146,6 +150,15 @@ _TIPOS_NAO_SAO_PORTAL = {
 
 
 def _falha_e_do_portal(mensagem):
+    """A falha diz algo sobre o PORTAL (e nao sobre o ambiente local)?
+
+    A checagem positiva vem primeiro e nao e detalhe: `ERR_CONNECTION_REFUSED`,
+    `ERR_CONNECTION_RESET` e afins — a assinatura mais comum de portal fora —
+    caem em NETWORK_PATH no catalogo, junto com o drive `Z:` inacessivel. Sem
+    esta linha, o breaker nunca abriria justamente no caso que ele existe para
+    pegar, e o lote queimaria solver item a item."""
+    if falha_de_conexao_com_host(mensagem):
+        return True
     return map_exception_to_error_type(mensagem or '') not in _TIPOS_NAO_SAO_PORTAL
 
 
@@ -449,6 +462,11 @@ def request_pause(batch_lock, batch_state):
     with batch_lock:
         batch_state['stop_requested'] = True
         batch_state['stop_action'] = 'pause'
+        # Pausa pedida pelo operador SUBSTITUI o motivo anterior: sem isto, um
+        # lote que ja tinha sido pausado pelo breaker seguiria marcado e
+        # `liberar_pausa_de_breaker` apagaria, em silencio, um lote que o
+        # operador pausou de proposito (e o "Retomar" dele pararia de funcionar).
+        batch_state['pausado_por_breaker'] = None
         if batch_state['status'] == 'running':
             batch_state['status'] = 'paused'
         return batch_state.get('driver')
@@ -459,6 +477,7 @@ def request_stop(batch_lock, batch_state):
         batch_state['stop_requested'] = True
         batch_state['stop_action'] = 'stop'
         batch_state['status'] = 'stopped'
+        batch_state['pausado_por_breaker'] = None
         batch_state['finished_at'] = utcnow_naive()
         return batch_state.get('driver')
 
@@ -470,6 +489,9 @@ def resume_batch(batch_lock, batch_state, worker_fn, app_factory):
 
         batch_state['stop_requested'] = False
         batch_state['status'] = 'running'
+        # retomou: a pausa do breaker deixou de existir (se o portal ainda
+        # estiver fora, o proprio laco pausa de novo e remarca)
+        batch_state['pausado_por_breaker'] = None
 
     run_worker(worker_fn, app_factory)
     return True
