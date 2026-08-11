@@ -541,6 +541,10 @@ def _rodar_lote_agendado(app, ids, *, wrap_emit, execution_id, lock, state,
         log_event('agendador_lote_pulado_emissao_individual', lote=nome_lote,
                   execution_id=execution_id)
         return
+    # Pausa de breaker ja vencida nao pode roubar o ciclo de hoje (spec 09): sem
+    # isto, um portal que caiu numa noite bloquearia o lote em TODAS as noites
+    # seguintes, porque quem fecha e a janela do breaker, nao o estado do lote.
+    batch_engine.liberar_pausa_de_breaker(lock, state)
     with lock:
         # Serialização com o lote manual: se já há um em andamento/pausado deste
         # tipo, o agendador não clobbera o estado — pula e roda no próximo ciclo

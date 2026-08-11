@@ -56,6 +56,14 @@ def _certidao_municipal(cidade):
     return certidao
 
 
+class _LockFake:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
 def _capturar_kwargs(monkeypatch):
     capturado = {}
     monkeypatch.setattr(batch_engine, 'run_batch_loop',
@@ -264,3 +272,93 @@ def test_item_recusado_pelo_breaker_mantem_a_tarefa_pendente(ctx):
     assert tarefa_atual.status == 'pendente'
     assert tarefa_atual.tentativas == 0
     assert tarefa_atual.iniciada_em is None
+
+
+# --- a pausa do breaker nao pode virar armadilha (code-review) --------------
+
+def test_pausa_do_breaker_registra_o_alvo(ctx):
+    """Sem saber QUEM pausou, ninguem consegue soltar depois."""
+    circuit_breaker.limpar()
+    for _ in range(3):
+        circuit_breaker.registrar_falha('FGTS', 'portal fora')
+
+    state = batch_engine.batch_state_defaults()
+    state.update(status='running', ids=[1], total=1)
+    batch_engine.run_batch_loop(
+        ctx, lock=_LockFake(), state=state,
+        emit_fn=lambda cid, drv, eid: (True, False, None),
+        nome_lote='FGTS', curto='FGTS', tag='FGTS-LOTE',
+        event_prefix='fgts_batch_worker', alvo_lote='FGTS')
+
+    assert state['status'] == 'paused'
+    assert state['pausado_por_breaker'] == 'FGTS'
+
+
+def test_pausa_e_liberada_quando_o_breaker_fecha(ctx, monkeypatch):
+    """O breaker fecha sozinho em 60 min; o estado do lote tambem precisa, senao
+    o agendador, o lote manual e ate a emissao individual ficam bloqueados para
+    sempre — exatamente o oposto do que o alerta promete."""
+    from datetime import datetime, timedelta
+    agora = datetime(2026, 8, 11, 3, 0, 0)
+    monkeypatch.setattr(circuit_breaker, '_agora', lambda: agora)
+    circuit_breaker.limpar()
+    for _ in range(3):
+        circuit_breaker.registrar_falha('FGTS', 'portal fora')
+
+    lock = _LockFake()
+    state = batch_engine.batch_state_defaults()
+    state.update(status='paused', pausado_por_breaker='FGTS', ids=[1], total=1)
+
+    # ainda dentro da janela: continua pausado (o portal segue fora)
+    assert batch_engine.liberar_pausa_de_breaker(lock, state) is False
+    assert state['status'] == 'paused'
+
+    # janela vencida: o lote volta a ser idle sozinho
+    monkeypatch.setattr(circuit_breaker, '_agora', lambda: agora + timedelta(minutes=61))
+    assert batch_engine.liberar_pausa_de_breaker(lock, state) is True
+    assert state['status'] == 'idle'
+    assert state['pausado_por_breaker'] is None
+
+
+def test_liberar_nao_toca_em_pausa_manual(ctx):
+    """Pausa pedida pelo operador continua pausada — quem solta e ele."""
+    circuit_breaker.limpar()
+    state = batch_engine.batch_state_defaults()
+    state.update(status='paused', ids=[1], total=1)
+
+    assert batch_engine.liberar_pausa_de_breaker(_LockFake(), state) is False
+    assert state['status'] == 'paused'
+
+
+def test_liberar_nao_toca_em_lote_rodando(ctx):
+    circuit_breaker.limpar()
+    state = batch_engine.batch_state_defaults()
+    state.update(status='running', pausado_por_breaker='FGTS', ids=[1], total=1)
+
+    assert batch_engine.liberar_pausa_de_breaker(_LockFake(), state) is False
+    assert state['status'] == 'running'
+
+
+def test_agendador_roda_o_ciclo_seguinte_apos_pausa_vencida(ctx, monkeypatch):
+    """O caminho que o achado descrevia: lote pausado pelo breaker numa noite
+    nao pode fazer o agendador pular todas as noites seguintes."""
+    from app.automation.batch_state import FGTS_BATCH_STATE, FGTS_BATCH_LOCK
+    from datetime import datetime, timedelta
+    agora = datetime(2026, 8, 11, 3, 0, 0)
+    monkeypatch.setattr(circuit_breaker, '_agora', lambda: agora)
+    circuit_breaker.limpar()
+    for _ in range(3):
+        circuit_breaker.registrar_falha('FGTS', 'portal fora')
+
+    with FGTS_BATCH_LOCK:
+        batch_engine.reset_batch_state(FGTS_BATCH_STATE)
+        FGTS_BATCH_STATE.update(status='paused', pausado_por_breaker='FGTS')
+
+    kw = _capturar_kwargs(monkeypatch)
+    monkeypatch.setattr(lotes, 'emissao_individual_ativa', lambda: False)
+
+    # noite seguinte, ja fora da janela do breaker
+    monkeypatch.setattr(circuit_breaker, '_agora', lambda: agora + timedelta(hours=24))
+    lotes._fluxo_fgts_rodar(ctx, [1], wrap_emit=lambda emit: emit, execution_id='e2')
+
+    assert kw.get('alvo_lote') == 'FGTS', 'o ciclo seguinte deveria ter rodado'

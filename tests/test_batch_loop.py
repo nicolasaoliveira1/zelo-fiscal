@@ -449,6 +449,70 @@ def test_grave_fatal_nao_alimenta_o_breaker():
     print('ok test_grave_fatal_nao_alimenta_o_breaker')
 
 
+def test_alerta_de_breaker_nao_e_disparado_com_o_lock_na_mao():
+    # O alerta faz envio SMTP com retry (ate ~60s). Com o lock do lote na mao,
+    # o polling de status e os botoes de pausar/parar ficariam pendurados.
+    class LockObservavel:
+        def __init__(self):
+            self.preso = False
+
+        def __enter__(self):
+            self.preso = True
+            return self
+
+        def __exit__(self, *a):
+            self.preso = False
+            return False
+
+    lock = LockObservavel()
+    preso_no_alerta = []
+    state = make_state([1, 2, 3, 4])
+    emit = make_emit([(False, False, 'portal fora')] * 4)
+
+    def _avisar(alvo, msg):
+        preso_no_alerta.append(lock.preso)
+
+    def _rodar():
+        run_batch_loop(FakeApp(), lock=lock, state=state, emit_fn=emit,
+                       create_driver=lambda: FakeDriver(), alvo_lote='FGTS',
+                       on_breaker_aberto=_avisar, **COMMON)
+
+    # breaker real: precisa abrir de verdade para o alerta sair
+    batch_engine.circuit_breaker.limpar()
+    _rodar()
+    batch_engine.circuit_breaker.limpar()
+
+    assert preso_no_alerta == [False], preso_no_alerta
+    print('ok test_alerta_de_breaker_nao_e_disparado_com_o_lock_na_mao')
+
+
+def test_falha_de_rede_local_nao_abre_o_breaker_do_portal():
+    # Z: cai -> 3 falhas seguidas. Abrir o breaker aqui pausaria o lote e
+    # mandaria "portal FGTS fora" com a Caixa perfeitamente no ar.
+    state = make_state([1, 2, 3])
+    emit = make_emit([(False, False, r'Pasta de rede inacessivel: Z:\ nao mapeado')] * 3)
+    fake = _breaker_com(set())
+
+    _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+    assert fake.falhas == [], fake.falhas
+    assert state['falhas'] == 3
+    assert state['status'] == 'completed'
+    print('ok test_falha_de_rede_local_nao_abre_o_breaker_do_portal')
+
+
+def test_falha_de_portal_continua_alimentando_o_breaker():
+    # O filtro nao pode virar peneira: mensagem propria do fluxo (UNKNOWN) conta.
+    state = make_state([1])
+    emit = make_emit([(False, False, 'Erro ao carregar pagina FGTS.')])
+    fake = _breaker_com(set())
+
+    _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+    assert fake.falhas == [('FGTS', 'Erro ao carregar pagina FGTS.')]
+    print('ok test_falha_de_portal_continua_alimentando_o_breaker')
+
+
 def main():
     tests = [
         test_all_success,
@@ -474,6 +538,9 @@ def main():
         test_desfecho_pendente_conta_como_sucesso_para_o_breaker,
         test_sem_alvo_o_loop_nao_toca_no_breaker,
         test_grave_fatal_nao_alimenta_o_breaker,
+        test_alerta_de_breaker_nao_e_disparado_com_o_lock_na_mao,
+        test_falha_de_rede_local_nao_abre_o_breaker_do_portal,
+        test_falha_de_portal_continua_alimentando_o_breaker,
     ]
     for t in tests:
         t()

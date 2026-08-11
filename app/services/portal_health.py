@@ -31,6 +31,9 @@ TIMEOUT_S_PADRAO = 6
 USER_AGENT = 'Zelo-Certidoes/1.0 (monitor de disponibilidade)'
 
 _lock = threading.Lock()
+# Lock separado, so para a medicao: segurar `_lock` durante os pings (ate
+# 4 x timeout) travaria ate a leitura do cache.
+_medindo = threading.Lock()
 _cache = {}  # chave -> item medido
 _medido_em = None
 
@@ -151,16 +154,26 @@ def snapshot(config, forcar=False):
     global _medido_em
     ttl = timedelta(minutes=_config_int(config, 'PORTAL_PING_TTL_MINUTOS',
                                         TTL_MINUTOS_PADRAO))
-    with _lock:
-        valido = (_medido_em is not None and not forcar
-                  and _agora() - _medido_em < ttl)
-        fixos = list(_cache.get('fixos') or []) if valido else None
 
-    if fixos is None:
-        fixos = _medir(config)
+    def _do_cache():
         with _lock:
-            _cache['fixos'] = fixos
-            _medido_em = _agora()
+            valido = (_medido_em is not None and not forcar
+                      and _agora() - _medido_em < ttl)
+            return list(_cache.get('fixos') or []) if valido else None
+
+    fixos = _do_cache()
+    if fixos is None:
+        # Serializa a MEDICAO (nao a leitura): dois carregamentos simultaneos do
+        # painel com o cache vencido fariam, cada um, a rodada inteira de pings
+        # — exatamente o "martelar o portal" que o cache existe para evitar. O
+        # segundo espera o primeiro e reaproveita o resultado (dupla checagem).
+        with _medindo:
+            fixos = _do_cache()
+            if fixos is None:
+                fixos = _medir(config)
+                with _lock:
+                    _cache['fixos'] = fixos
+                    _medido_em = _agora()
 
     abertos = circuit_breaker.abertos()
     alvos_abertos = {b['alvo'] for b in abertos}

@@ -311,3 +311,40 @@ def test_estado_do_municipio_por_resultado_do_dryrun(app, monkeypatch, resultado
         assert imbe['estado'] == esperado
         db.session.remove()
         db.drop_all()
+
+
+def test_medicoes_concorrentes_fazem_uma_rodada_so(app, monkeypatch):
+    """Dois carregamentos simultaneos do painel com o cache vencido nao podem
+    virar duas rodadas de ping — e o oposto do motivo de existir o cache."""
+    import threading
+
+    chamadas = []
+    barreira = threading.Event()
+
+    def _get(url, **kwargs):
+        chamadas.append(url)
+        barreira.wait(timeout=2)   # segura a 1a medicao ate a 2a chegar
+        return _Resposta()
+
+    monkeypatch.setattr(portal_health.requests, 'get', _get)
+    portal_health.limpar_cache()
+
+    resultados = []
+
+    def _medir():
+        with app.app_context():
+            resultados.append(portal_health.snapshot(app.config))
+
+    t1 = threading.Thread(target=_medir)
+    t2 = threading.Thread(target=_medir)
+    t1.start()
+    while not chamadas:            # garante que a 1a ja esta medindo
+        pass
+    t2.start()
+    barreira.set()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    assert len(resultados) == 2
+    # 4 portais fixos = uma rodada; duas rodadas dariam 8
+    assert len(chamadas) == 4, chamadas

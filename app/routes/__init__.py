@@ -166,8 +166,23 @@ def diagnostico_fila_reprocessar():
     Nao emite nada aqui: quem executa e o ciclo seguinte do agendador. Resposta
     parcial por desenho — o que nao der volta em `recusadas`."""
     dados = request.get_json(silent=True) or {}
-    ids = dados.get('ids')
-    error_type = (dados.get('error_type') or '').strip() or None
+    # Entrada de fora do sistema: sem checar o TIPO, `{"ids": 5}` chega em
+    # `list(5)` e `{"error_type": 5}` em `.strip()` — os dois viram 500 em vez
+    # de uma recusa clara.
+    ids_bruto = dados.get('ids')
+    if ids_bruto is not None and not isinstance(ids_bruto, list):
+        return _json_error('"ids" deve ser uma lista de inteiros.', 400)
+    ids = []
+    for valor in (ids_bruto or []):
+        if isinstance(valor, bool) or not isinstance(valor, int):
+            return _json_error('"ids" deve conter apenas inteiros.', 400)
+        ids.append(valor)
+
+    error_type_bruto = dados.get('error_type')
+    if error_type_bruto is not None and not isinstance(error_type_bruto, str):
+        return _json_error('"error_type" deve ser texto.', 400)
+    error_type = (error_type_bruto or '').strip() or None
+
     if not ids and not error_type:
         return _json_error('Informe "ids" ou "error_type" para reprocessar.', 400)
 

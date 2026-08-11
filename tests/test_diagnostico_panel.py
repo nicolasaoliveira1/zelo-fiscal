@@ -215,3 +215,17 @@ def test_reprocessar_nao_abre_navegador_nem_gasta_captcha(app, client, ids, monk
         assert r.status_code == 200
         assert r.get_json()['devolvidas'] == [tarefa.id]
         assert chamadas == []
+
+
+def test_rota_reprocessar_recusa_ids_de_tipo_errado(client, ids):
+    """Entrada de fora do sistema: sem checar o tipo, `list(5)` vira 500."""
+    for corpo in ({'ids': 5}, {'ids': 'abc'}, {'ids': [1, 'x']}, {'ids': [True]}):
+        r = client.post('/diagnostico/fila/reprocessar', json=corpo)
+        assert r.status_code == 400, (corpo, r.status_code)
+        assert r.get_json()['status'] == 'error'
+
+
+def test_rota_reprocessar_recusa_error_type_de_tipo_errado(client, ids):
+    r = client.post('/diagnostico/fila/reprocessar', json={'error_type': 5})
+    assert r.status_code == 400
+    assert r.get_json()['status'] == 'error'

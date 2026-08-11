@@ -347,6 +347,16 @@
         // O resultado aparece no proprio card (a pagina de diagnostico nao carrega
         // o modulo de toasts; ver base.html, que degrada silenciosamente sem ele).
         function resultado(d) {
+            // Envelope de erro (CSRF expirado, body invalido) tem status !== 'ok'
+            // e nenhum campo devolvidas: sem esta guarda, uma falha apareceria
+            // como "0 itens devolvidos" em cinza — um erro lido como no-op.
+            if (!d || d.status !== 'ok') {
+                avisoEl.className = 'small mb-3 text-danger';
+                avisoEl.textContent = (d && (d.message || d.mensagem))
+                    || 'Falha ao devolver à fila.';
+                avisoEl.classList.remove('d-none');
+                return;
+            }
             const devolvidas = (d.devolvidas || []).length;
             const recusadas = d.recusadas || [];
             let msg = devolvidas + (devolvidas === 1 ? ' item devolvido' : ' itens devolvidos') + ' à fila.';
@@ -368,8 +378,11 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(corpo)
             })
-                .then(r => r.json())
-                .then(d => { resultado(d); carregar(); })
+                .then(r => r.json().catch(() => ({ status: 'error' })))
+                .then(d => {
+                    resultado(d);
+                    if (d && d.status === 'ok') carregar();
+                })
                 .catch(() => {
                     avisoEl.className = 'small mb-3 text-danger';
                     avisoEl.textContent = 'Falha ao devolver à fila.';
