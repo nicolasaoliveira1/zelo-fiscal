@@ -8,7 +8,8 @@ lote (isso é `batch_engine`): aqui só vive a fila persistente.
 from datetime import datetime, timedelta
 
 from app import db
-from app.models import Certidao, TarefaEmissao
+from app.errors import ErrorType, _CATALOGO, map_exception_to_error_type
+from app.models import Certidao, Empresa, TarefaEmissao
 from app.services.execution_logger import log_event
 
 # Estados em que uma tarefa ainda representa trabalho ativo (não terminal).
@@ -137,6 +138,125 @@ def resolver_falha(tarefa, erro, *, max_tentativas=MAX_TENTATIVAS_PADRAO):
         tarefa.concluida_em = datetime.now()
     _commit(tarefa)
     return tarefa.status
+
+
+# --- dead-letter: o que morreu na fila (spec 09, RESOP-01) ------------------
+
+def tarefas_falhas(limite=200):
+    """Tarefas que esgotaram as tentativas, mais recentes primeiro.
+
+    So `falha`: `retry` e `pendente` sao trabalho vivo, e misturar os dois
+    transformaria a tela de "o que morreu" na fila inteira."""
+    return (TarefaEmissao.query
+            .filter(TarefaEmissao.status == 'falha')
+            .order_by(TarefaEmissao.concluida_em.desc(), TarefaEmissao.id.desc())
+            .limit(limite)
+            .all())
+
+
+def motivo_da_tarefa(tarefa):
+    """Motivo da falha como `ErrorType`, classificando a mensagem gravada.
+
+    Reusa o catalogo de `app/errors.py` (a funcao normaliza com `str(exc)`, logo
+    aceita a string do campo `erro`): nenhuma tabela de palavras-chave nova, e as
+    falhas antigas — anteriores a esta feature — saem classificadas do mesmo
+    jeito, sem backfill."""
+    return map_exception_to_error_type(getattr(tarefa, 'erro', None) or '').value
+
+
+def _nomes_das_empresas(tarefas):
+    """{empresa_id: nome} numa unica query (sem N+1 na lista de falhas)."""
+    ids = {t.empresa_id for t in tarefas if t.empresa_id}
+    if not ids:
+        return {}
+    linhas = db.session.query(Empresa.id, Empresa.nome).filter(Empresa.id.in_(ids)).all()
+    return dict(linhas)
+
+
+def _item_falha(tarefa, nomes):
+    return {
+        'id': tarefa.id,
+        'certidao_id': tarefa.certidao_id,
+        'empresa_id': tarefa.empresa_id,
+        'empresa': nomes.get(tarefa.empresa_id),
+        'tipo': tarefa.tipo,
+        'tentativas': tarefa.tentativas or 0,
+        'erro': tarefa.erro,
+        'concluida_em': tarefa.concluida_em.isoformat() if tarefa.concluida_em else None,
+    }
+
+
+def agrupar_falhas(limite=200):
+    """Falhas agrupadas por motivo, com o titulo/acao do catalogo de erro —
+    o operador le "Tempo esgotado", nao `TIMEOUT`. Grupos maiores primeiro."""
+    tarefas = tarefas_falhas(limite=limite)
+    nomes = _nomes_das_empresas(tarefas)
+    grupos = {}
+    for tarefa in tarefas:
+        motivo = motivo_da_tarefa(tarefa)
+        grupo = grupos.get(motivo)
+        if grupo is None:
+            titulo, _causa, acao, _rec = _CATALOGO[ErrorType(motivo)]
+            grupo = grupos[motivo] = {
+                'error_type': motivo, 'titulo': titulo, 'acao': acao,
+                'total': 0, 'itens': [],
+            }
+        grupo['total'] += 1
+        grupo['itens'].append(_item_falha(tarefa, nomes))
+    return sorted(grupos.values(), key=lambda g: g['total'], reverse=True)
+
+
+def devolver_para_fila(tarefa):
+    """Devolve uma tarefa `falha` para a fila: `pendente` e tentativas zeradas.
+
+    Nao emite nada — quem executa e o ciclo seguinte do agendador. Devolve
+    `(ok, motivo_da_recusa)`. Recusa (sem tocar na tarefa) quando a certidao nao
+    existe mais e quando ja ha tarefa ATIVA para a mesma certidao: o
+    reprocessamento em bloco nao pode criar uma segunda tarefa viva para o mesmo
+    alvo (RESOP-01.7)."""
+    if tarefa is None:
+        return False, 'tarefa nao encontrada'
+    if tarefa.status != 'falha':
+        return False, f'tarefa nao esta em falha (status: {tarefa.status})'
+    if db.session.get(Certidao, tarefa.certidao_id) is None:
+        return False, 'certidao nao existe mais'
+    if tarefa_ativa(tarefa.certidao_id) is not None:
+        return False, 'ja existe tarefa ativa para esta certidao'
+
+    tarefa.status = 'pendente'
+    tarefa.tentativas = 0
+    tarefa.iniciada_em = None
+    tarefa.concluida_em = None
+    if not _commit(tarefa):
+        return False, 'falha ao gravar'
+    return True, None
+
+
+def reprocessar(ids=None, error_type=None):
+    """Devolve a fila as falhas indicadas por `ids` ou por motivo (`error_type`).
+
+    **Parcial por desenho** (mesmo padrao da acao em massa da NFSe): o que der
+    certo e aplicado e o que nao der volta nomeado em `recusadas` — abortar tudo
+    porque uma linha ja voltara a fila obrigaria o operador a refazer a selecao.
+    """
+    resultado = {'devolvidas': [], 'recusadas': []}
+    if ids:
+        tarefas = TarefaEmissao.query.filter(TarefaEmissao.id.in_(list(ids))).all()
+    elif error_type:
+        tarefas = [t for t in tarefas_falhas() if motivo_da_tarefa(t) == error_type]
+    else:
+        return resultado
+
+    for tarefa in tarefas:
+        ok, motivo = devolver_para_fila(tarefa)
+        if ok:
+            resultado['devolvidas'].append(tarefa.id)
+        else:
+            resultado['recusadas'].append({'id': tarefa.id, 'motivo': motivo})
+
+    log_event('fila_reprocessada', devolvidas=len(resultado['devolvidas']),
+              recusadas=len(resultado['recusadas']), error_type=error_type)
+    return resultado
 
 
 def reconciliar_orfas(*, apenas_timeout=False):

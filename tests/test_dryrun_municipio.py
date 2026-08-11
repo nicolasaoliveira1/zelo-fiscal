@@ -575,3 +575,49 @@ def test_cap_timeout_preserva_valores_menores():
     original = {'timeout': 120}
     dr._cap_timeout(original, 8)
     assert original['timeout'] == 120  # nao muta o passo original
+
+
+# === ultimo resultado em memoria (spec 09, RESOP-03.3) ====================
+
+def test_executar_dry_run_publica_o_ultimo_resultado():
+    dr.limpar_resultados()
+    relatorio = {'municipio': 'Imbe', 'resultado': dr.OK, 'checagens': [],
+                 'quebrados': [], 'mensagem': None}
+    with patch.object(dr, '_executar_dry_run', return_value=relatorio):
+        dr.executar_dry_run(SimpleNamespace(nome='Imbe', url_certidao='http://x'))
+
+    ultimos = dr.ultimos_resultados()
+    assert ultimos['Imbe']['resultado'] == dr.OK
+    assert ultimos['Imbe']['medido_em']
+
+
+def test_ultimo_resultado_e_sobrescrito_pela_verificacao_nova():
+    dr.limpar_resultados()
+    municipio = SimpleNamespace(nome='Imbe', url_certidao='http://x')
+    for resultado in (dr.OK, dr.QUEBRADO):
+        relatorio = {'municipio': 'Imbe', 'resultado': resultado, 'checagens': [],
+                     'quebrados': [], 'mensagem': None}
+        with patch.object(dr, '_executar_dry_run', return_value=relatorio):
+            dr.executar_dry_run(municipio)
+
+    assert dr.ultimos_resultados()['Imbe']['resultado'] == dr.QUEBRADO
+
+
+def test_municipio_nunca_verificado_nao_aparece():
+    dr.limpar_resultados()
+    assert dr.ultimos_resultados() == {}
+
+
+def test_varios_publica_cada_municipio():
+    dr.limpar_resultados()
+    municipios = [SimpleNamespace(nome='Imbe', url_certidao='http://x'),
+                  SimpleNamespace(nome='Tramandai', url_certidao='http://y')]
+
+    def _fake(municipio, timeout=20):
+        return {'municipio': municipio.nome, 'resultado': dr.OK, 'checagens': [],
+                'quebrados': [], 'mensagem': None}
+
+    with patch.object(dr, '_executar_dry_run', side_effect=_fake):
+        dr.executar_dry_run_varios(municipios)
+
+    assert set(dr.ultimos_resultados()) == {'Imbe', 'Tramandai'}

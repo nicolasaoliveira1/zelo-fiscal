@@ -258,6 +258,67 @@ def alertar_empresas_baixadas(app, baixadas):
     return enviados
 
 
+# Causas de abertura do breaker que geram mensagens DIFERENTES. O breaker e o
+# mesmo (parar de gastar em cima de falha repetida), mas o que o operador faz e
+# outro: portal fora se resolve esperando; solver falhando se resolve na conta
+# do 2captcha. Dizer "portal fora" quando o problema e o solver manda a pessoa
+# depurar o site errado.
+_ALERTA_POR_CAUSA = {
+    'portal': {
+        'chave': 'portal_fora:{alvo}',
+        'tipo': 'alerta_portal',
+        'assunto': '[Certidoes] Alerta: portal {alvo} pausado (fora do ar)',
+        'linhas': [
+            'O sistema detectou falhas seguidas no portal {alvo} e pausou a emissao',
+            'nele para nao gastar creditos de captcha contra um portal fora.',
+        ],
+    },
+    'captcha': {
+        'chave': 'solver_captcha:{alvo}',
+        'tipo': 'alerta_solver',
+        'assunto': '[Certidoes] Alerta: captcha falhando em {alvo} (emissao pausada)',
+        'linhas': [
+            'O sistema detectou falhas seguidas de CAPTCHA em {alvo} e pausou a',
+            'emissao para nao queimar mais chamadas pagas do solver.',
+            '',
+            'O portal pode estar no ar: o que falhou foi a resolucao do captcha.',
+            'Confira saldo e chave do 2captcha antes de investigar o site.',
+        ],
+    },
+}
+
+
+def alertar_portal_fora(app, alvo, motivo=None, causa='portal'):
+    """Alerta que o circuit breaker abriu para um alvo (spec 09, RESOP-02.7).
+
+    `causa` escolhe a mensagem: 'portal' (o site nao respondeu) ou 'captcha' (o
+    solver falhou; o portal pode estar de pe). Cada causa tem chave anti-spam
+    propria — sao problemas diferentes, com acoes diferentes, e um nao pode
+    silenciar o outro dentro da janela. Best-effort (AD-011): sem SMTP nao envia,
+    nao levanta e o breaker abre do mesmo jeito. Retorna True se enviou agora."""
+    cfg = _config()
+    destinatarios = _destinatarios(cfg)
+    if not email_sender.smtp_configurado(app.config) or not destinatarios:
+        log_event('notif_portal_sem_smtp', level='WARNING', alvo=alvo,
+                  destinatarios=len(destinatarios))
+        return False
+
+    modelo = _ALERTA_POR_CAUSA.get(causa) or _ALERTA_POR_CAUSA['portal']
+    janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
+    corpo = '\n'.join(
+        [linha.format(alvo=alvo) for linha in modelo['linhas']]
+        + [
+            '',
+            f'Ultimo erro: {motivo or "-"}',
+            '',
+            'Nada precisa ser religado: o bloqueio expira sozinho e o proximo ciclo',
+            'tenta de novo. Se o problema seguir, o alerta se repete na proxima janela.',
+        ])
+    return _enviar_alerta(app, destinatarios, modelo['chave'].format(alvo=alvo),
+                          modelo['tipo'], modelo['assunto'].format(alvo=alvo),
+                          corpo, janela, detalhe=motivo)
+
+
 def alertar_municipios_quebrados(app, relatorios):
     """Alerta os municipios cujo dry-run acusou seletor quebrado (COV-05 A3).
 

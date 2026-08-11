@@ -47,6 +47,7 @@ from app.models import (
 from app.utils import (
     get_config_value as _get_config_value,
     json_error as _json_error,
+    normalizar_cidade,
     to_bool as _to_bool,
     utcnow_naive,
 )
@@ -54,6 +55,7 @@ from app.services import (
     agendador,
     auditoria,
     batch_engine,
+    circuit_breaker,
     preflight,
 )
 from app.services.correlation import CorrelationContext
@@ -136,6 +138,56 @@ def _calc_municipal_targets_by_scope(start_certidao_id, scope='default'):
     )
 
 
+# === circuit breaker por portal (spec 09, RESOP-02) ========================
+# Os rotulos vem do proprio circuit_breaker: sao a chave que o painel usa para
+# saber se ESTE portal esta pausado. Duas listas divergiriam em silencio.
+ALVO_BREAKER_FGTS = circuit_breaker.ALVO_FGTS
+ALVO_BREAKER_RS = circuit_breaker.ALVO_ESTADUAL_RS
+ALVO_BREAKER_TRABALHISTA = circuit_breaker.ALVO_TRABALHISTA
+ALVO_BREAKER_MUNICIPAL_GENERICO = circuit_breaker.ALVO_MUNICIPAL_GENERICO
+
+
+def _alvo_breaker_municipal(certidao_id):
+    """Alvo do breaker no lote municipal: a CIDADE, nao o tipo.
+
+    O lote municipal do agendador cobre varias cidades; se Imbe cair, Tramandai
+    tem de continuar emitindo (RESOP-02.4). Usa a chave canonica de cidade para
+    que 'Imbé' e 'IMBE' nao virem dois breakers. Defensivo de proposito: roda
+    dentro do lock do loop e nao pode levantar."""
+    try:
+        certidao = db.session.get(Certidao, certidao_id)
+        cidade = (certidao.empresa.cidade or '').strip() if certidao else ''
+    except Exception:
+        cidade = ''
+    return normalizar_cidade(cidade) or ALVO_BREAKER_MUNICIPAL_GENERICO
+
+
+def _causa_do_breaker(mensagem):
+    """'captcha' quando o que falhou foi o solver; 'portal' no resto.
+
+    O breaker abre nos dois casos (parar de gastar em cima de falha repetida),
+    mas a acao do operador e outra: portal fora se resolve esperando, captcha
+    falhando se resolve na conta do 2captcha."""
+    from app.errors import falha_de_solver_captcha
+    # Predicado positivo, e nao a familia do catalogo: a mensagem real do
+    # 2captcha carrega "Read timed out", e a regra de TIMEOUT vem antes da de
+    # CAPTCHA — pelo catalogo, a falha do solver viraria "portal fora".
+    if falha_de_solver_captcha(mensagem):
+        return 'captcha'
+    return 'portal'
+
+
+def _alertar_breaker_aberto(alvo, mensagem):
+    """Push por e-mail quando o breaker abre no meio de um lote. Best-effort
+    (AD-011): o motor ja engole a excecao, mas nem chegamos a levantar."""
+    try:
+        from app.services import notificacoes
+        notificacoes.alertar_portal_fora(_current_app_object(), alvo, mensagem,
+                                         causa=_causa_do_breaker(mensagem))
+    except Exception as exc:
+        log_event('breaker_alerta_falhou', level='WARNING', alvo=alvo, error=str(exc))
+
+
 def _parse_batch_scope(raw_scope):
     scope = (raw_scope or 'default').strip().lower()
     if scope in {'pendente', 'pendentes'}:
@@ -198,6 +250,8 @@ def _rs_batch_worker(app):
         on_setup=_on_setup,
         on_teardown=_on_teardown,
         on_finish=_registrar_desfecho_lote,
+        alvo_lote=ALVO_BREAKER_RS,
+        on_breaker_aberto=_alertar_breaker_aberto,
     )
 
 
@@ -215,6 +269,8 @@ def _municipal_batch_worker(app):
         event_prefix='municipal_batch_worker',
         create_driver=_criar_driver_chrome,
         on_finish=_registrar_desfecho_lote,
+        alvo_fn=_alvo_breaker_municipal,
+        on_breaker_aberto=_alertar_breaker_aberto,
     )
 
 
@@ -232,6 +288,8 @@ def _trabalhista_batch_worker(app):
         event_prefix='trabalhista_batch_worker',
         create_driver=_criar_driver_chrome,
         on_finish=_registrar_desfecho_lote,
+        alvo_lote=ALVO_BREAKER_TRABALHISTA,
+        on_breaker_aberto=_alertar_breaker_aberto,
     )
 
 
@@ -266,6 +324,8 @@ def _fgts_batch_worker(app):
         create_driver=_criar_driver_chrome,
         recover_fn=_recover,
         on_finish=_registrar_desfecho_lote,
+        alvo_lote=ALVO_BREAKER_FGTS,
+        on_breaker_aberto=_alertar_breaker_aberto,
     )
 
 
@@ -500,8 +560,10 @@ def _rodar_lote_agendado(app, ids, *, wrap_emit, execution_id, lock, state,
     with lock:
         # Serialização com o lote manual: se já há um em andamento/pausado deste
         # tipo, o agendador não clobbera o estado — pula e roda no próximo ciclo
-        # (edge case da spec: "respeitar o lock global do tipo").
-        if state.get('status') in ('running', 'paused'):
+        # (edge case da spec: "respeitar o lock global do tipo"). Pausa de breaker
+        # ja vencida nao conta: senao um portal que caiu numa noite bloquearia o
+        # lote em TODAS as noites seguintes (spec 09).
+        if batch_engine.lote_ocupa_o_tipo(state):
             log_event('agendador_lote_pulado_em_andamento', lote=nome_lote,
                       execution_id=execution_id)
             return
@@ -531,7 +593,8 @@ def _fluxo_fgts_rodar(app, ids, *, wrap_emit, execution_id):
         real_emit=lambda cid, drv, eid: _emitir_fgts_certidao(cid, driver=drv, execution_id=eid),
         nome_lote='FGTS', curto='FGTS', tag='FGTS-LOTE',
         event_prefix='fgts_batch_worker', create_driver=_criar_driver_chrome,
-        on_finish=_registrar_desfecho_lote)
+        on_finish=_registrar_desfecho_lote, alvo_lote=ALVO_BREAKER_FGTS,
+        on_breaker_aberto=_alertar_breaker_aberto)
 
 
 def _fluxo_rs_habilitado():
@@ -563,7 +626,8 @@ def _fluxo_rs_rodar(app, ids, *, wrap_emit, execution_id):
         event_prefix='rs_batch_worker',
         create_driver=lambda: _criar_driver_chrome(anonimo=False, usar_perfil=True),
         eager_driver=True, on_setup=_on_setup, on_teardown=_on_teardown,
-        on_finish=_registrar_desfecho_lote)
+        on_finish=_registrar_desfecho_lote, alvo_lote=ALVO_BREAKER_RS,
+        on_breaker_aberto=_alertar_breaker_aberto)
 
 
 def _fluxo_municipal_calc_ids(app):
@@ -589,7 +653,8 @@ def _fluxo_municipal_rodar(app, ids, *, wrap_emit, execution_id):
             cid, driver=drv, execution_id=eid),
         nome_lote='Municipal', curto='Municipal', tag=None,
         event_prefix='municipal_batch_worker', create_driver=_criar_driver_chrome,
-        on_finish=_registrar_desfecho_lote)
+        on_finish=_registrar_desfecho_lote, alvo_fn=_alvo_breaker_municipal,
+        on_breaker_aberto=_alertar_breaker_aberto)
 
 
 def _fluxo_trabalhista_calc_ids(app):
@@ -604,7 +669,8 @@ def _fluxo_trabalhista_rodar(app, ids, *, wrap_emit, execution_id):
             cid, driver=drv, execution_id=eid),
         nome_lote='Trabalhista', curto='Trabalhista', tag='TRABALHISTA-LOTE',
         event_prefix='trabalhista_batch_worker', create_driver=_criar_driver_chrome,
-        on_finish=_registrar_desfecho_lote)
+        on_finish=_registrar_desfecho_lote, alvo_lote=ALVO_BREAKER_TRABALHISTA,
+        on_breaker_aberto=_alertar_breaker_aberto)
 
 
 def _registrar_fluxos_agendador():

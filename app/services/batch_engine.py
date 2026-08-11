@@ -10,7 +10,13 @@ from app.models import (
     TipoCertidao,
     get_a_vencer_dias,
 )
+from app.errors import (
+    ErrorType,
+    falha_de_conexao_com_host,
+    map_exception_to_error_type,
+)
 from app.utils import utcnow_naive
+from app.services import circuit_breaker
 from app.services.correlation import CorrelationContext
 from app.services.execution_logger import log_event
 
@@ -38,6 +44,9 @@ def batch_state_defaults():
         'message': None,
         'stop_requested': False,
         'stop_action': None,
+        # alvo do circuit breaker que pausou este lote (spec 09); None = pausa
+        # manual ou nenhuma. E o que permite liberar a pausa sozinha depois.
+        'pausado_por_breaker': None,
         'driver': None,
         'last_completed': None,
         'started_at': None,
@@ -129,6 +138,43 @@ def run_worker(worker_fn, app_factory):
     thread.start()
 
 
+# Tipos de erro que NAO sao veredito sobre o portal: o drive de rede caiu, o
+# arquivo esta bloqueado, o banco falhou. Contar isso abriria o breaker do FGTS
+# (e mandaria "portal FGTS fora") enquanto a Caixa esta perfeitamente no ar — o
+# operador iria depurar o site errado. Reprovar so por evidencia POSITIVA de
+# portal: os demais tipos (inclusive UNKNOWN, onde cai a maioria das mensagens
+# proprias dos fluxos) seguem contando.
+_TIPOS_NAO_SAO_PORTAL = {
+    ErrorType.NETWORK_PATH, ErrorType.PERMISSION, ErrorType.DB,
+}
+
+
+def _falha_e_do_portal(mensagem):
+    """A falha diz algo sobre o PORTAL (e nao sobre o ambiente local)?
+
+    A checagem positiva vem primeiro e nao e detalhe: `ERR_CONNECTION_REFUSED`,
+    `ERR_CONNECTION_RESET` e afins — a assinatura mais comum de portal fora —
+    caem em NETWORK_PATH no catalogo, junto com o drive `Z:` inacessivel. Sem
+    esta linha, o breaker nunca abriria justamente no caso que ele existe para
+    pegar, e o lote queimaria solver item a item."""
+    if falha_de_conexao_com_host(mensagem):
+        return True
+    return map_exception_to_error_type(mensagem or '') not in _TIPOS_NAO_SAO_PORTAL
+
+
+def _breaker_falha(alvo, mensagem):
+    """Conta a falha no breaker do portal. Devolve o alvo quando ele ABRIU agora
+    (para o chamador avisar FORA do lock), senao None.
+
+    GRAVE_FATAL (driver/sessao morta) nao passa por aqui de proposito: aquilo e
+    ambiente local quebrado, nao portal fora — contar abriria o breaker de um
+    portal que talvez esteja no ar. Pela mesma razao, falha de rede/permissao/
+    banco tambem nao conta."""
+    if not alvo or not _falha_e_do_portal(mensagem):
+        return None
+    return alvo if circuit_breaker.registrar_falha(alvo, mensagem) else None
+
+
 def run_batch_loop(
     app,
     *,
@@ -146,6 +192,9 @@ def run_batch_loop(
     recover_fn=None,
     on_finish=None,
     parar_em_grave=True,
+    alvo_lote=None,
+    alvo_fn=None,
+    on_breaker_aberto=None,
 ):
     """Loop generico de lote compartilhado por FGTS, Estadual RS e Municipal.
 
@@ -167,6 +216,18 @@ def run_batch_loop(
       parar_em_grave: True (default, lote manual) aborta o lote em qualquer
         `grave`. False (caminho do agendador) tolera grave "comum" (vira falha
         por-item e continua); GRAVE_FATAL para o lote independente deste flag.
+      alvo_lote: portal unico deste lote (ex.: 'FGTS'). Com o breaker aberto
+        nele nao ha mais nada a fazer -> o lote PAUSA (retomavel).
+      alvo_fn(certidao_id) -> alvo: usado quando o lote cobre varios portais
+        (municipal). Com o breaker aberto num alvo, so os itens DAQUELE portal
+        sao pulados e o lote segue nos demais (spec 09, RESOP-02.4).
+      on_breaker_aberto(alvo, mensagem): callback opcional disparado quando o
+        breaker ABRE durante este lote (o alerta por e-mail vive fora do motor).
+
+    Breaker (spec 09): consultado ANTES de criar driver/emitir — item recusado
+    nao abre navegador nem gasta captcha, e como o `emit_fn` nao roda, a
+    `TarefaEmissao` do agendador continua `pendente` (nao consome tentativa:
+    portal fora nao e defeito do item).
     """
     with app.app_context():
         driver = None
@@ -176,13 +237,48 @@ def run_batch_loop(
             CorrelationContext.set_execution_id(execution_id)
         log_event(f'{event_prefix}_start', status='running', tag=tag)
 
-        try:
-            if on_setup:
-                setup_ctx = on_setup(app)
-            if eager_driver and create_driver:
-                driver = create_driver()
+        # Alerta de breaker pendente: e disparado no topo da iteracao seguinte,
+        # FORA do lock. O envio e SMTP com retry (ate ~60s); com o lock na mao,
+        # o polling de status, o pausar e o parar do operador ficariam pendurados
+        # exatamente no momento em que ele quer intervir.
+        alerta_pendente = None
 
-            while True:
+        def _pausar_por_breaker(alvo):
+            state['status'] = 'paused'
+            state['pausado_por_breaker'] = alvo
+            append_batch_message(
+                state,
+                f'Lote {nome_lote} pausado: falhas seguidas em {alvo} '
+                f'(circuit breaker). Volta sozinho quando o portal voltar a '
+                f'responder.',
+                level='warning',
+            )
+
+        try:
+            # Portal unico ja pausado: decide ANTES de `on_setup` e do driver
+            # eager. No Estadual RS esses dois abrem o Chrome e mexem na policy
+            # de certificado do registro do Windows — efeito colateral caro para
+            # um lote que nao vai emitir nada.
+            barrado_pelo_breaker = bool(alvo_lote) and circuit_breaker.aberto(alvo_lote)
+            if barrado_pelo_breaker:
+                with lock:
+                    _pausar_por_breaker(alvo_lote)
+            else:
+                if on_setup:
+                    setup_ctx = on_setup(app)
+                if eager_driver and create_driver:
+                    driver = create_driver()
+
+            while not barrado_pelo_breaker:
+                if alerta_pendente is not None and on_breaker_aberto:
+                    alvo_aberto, motivo_aberto = alerta_pendente
+                    alerta_pendente = None
+                    try:
+                        on_breaker_aberto(alvo_aberto, motivo_aberto)
+                    except Exception:
+                        # alerta e best-effort (AD-011): nunca derruba o lote
+                        pass
+
                 with lock:
                     if state['stop_requested']:
                         if state.get('stop_action') == 'stop':
@@ -213,6 +309,26 @@ def run_batch_loop(
                         break
 
                     certidao_id = state['ids'][state['index']]
+
+                    # Circuit breaker (spec 09): decidido ANTES do driver/emit.
+                    alvo = alvo_fn(certidao_id) if alvo_fn else alvo_lote
+                    if alvo and circuit_breaker.aberto(alvo):
+                        if alvo_fn:
+                            # Lote multi-portal (municipal): so este alvo para.
+                            append_batch_message(
+                                state,
+                                f'{curto} pulado ID={certidao_id}: {alvo} pausado '
+                                f'por falhas seguidas (circuit breaker).',
+                                level='warning',
+                                certidao_id=certidao_id,
+                            )
+                            state['index'] += 1
+                            continue
+                        # Lote de portal unico: nao ha o que fazer -> pausa
+                        # retomavel (o operador retoma quando o portal voltar).
+                        _pausar_por_breaker(alvo)
+                        break
+
                     state['current_id'] = certidao_id
                     append_batch_message(
                         state,
@@ -255,6 +371,8 @@ def run_batch_loop(
                         # Modo tolerante (agendador): um grave "comum" (ex.: timeout
                         # de download) NAO aborta o lote — vira falha por-item e o
                         # loop segue para o proximo (RESIL-01).
+                        if _breaker_falha(alvo, mensagem):
+                            alerta_pendente = (alvo, mensagem)
                         state['falhas'] += 1
                         append_batch_message(
                             state,
@@ -271,6 +389,14 @@ def run_batch_loop(
                     # Esse desfecho é uma 3ª categoria: nem sucesso (nada emitido)
                     # nem falha técnica.
                     resultou_pendente = state.get('pendentes_resultado', 0) > pendentes_antes
+
+                    if sucesso or resultou_pendente:
+                        # Desfecho nao-erro: o portal respondeu. Certidao positiva
+                        # (pendente) e resposta do portal, nao portal fora.
+                        if alvo:
+                            circuit_breaker.registrar_sucesso(alvo)
+                    elif _breaker_falha(alvo, mensagem):
+                        alerta_pendente = (alvo, mensagem)
 
                     if resultou_pendente:
                         append_batch_message(
@@ -298,6 +424,12 @@ def run_batch_loop(
                         )
 
                     state['index'] += 1
+            if alerta_pendente is not None and on_breaker_aberto:
+                # o lote saiu do laco (pausou/terminou) com um alerta na agulha
+                try:
+                    on_breaker_aberto(*alerta_pendente)
+                except Exception:
+                    pass
         finally:
             if driver:
                 try:
@@ -319,10 +451,45 @@ def run_batch_loop(
             CorrelationContext.clear()
 
 
+def pausa_de_breaker_vencida(batch_state):
+    """O lote esta parado por um breaker que JA fechou?
+
+    Nao muta nada — de proposito. A versao anterior desta ideia dava
+    `reset_batch_state` e, com isso, uma emissao individual qualquer depois da
+    janela apagava os itens restantes de um lote pausado pelo breaker e sumia
+    com o "Retomar". Perguntar basta: quem vai de fato assumir o tipo (iniciar
+    um lote manual, rodar o ciclo do agendador) ja reseta o estado por conta
+    propria; quem so quer saber se pode emitir uma certidao nao precisa mexer em
+    nada.
+
+    Chamar com o lock do lote na mao (a ordem batch -> breaker e a de sempre)."""
+    alvo = batch_state.get('pausado_por_breaker')
+    if not alvo or batch_state.get('status') != 'paused':
+        return False
+    return not circuit_breaker.aberto(alvo)
+
+
+def lote_ocupa_o_tipo(batch_state):
+    """O lote esta segurando o tipo (impedindo lote novo e emissao individual)?
+
+    Regra unica para as tres guardas — com tres copias, uma divergiria. Uma
+    pausa de breaker ja vencida NAO ocupa: quem fecha e a janela do breaker, nao
+    o estado do lote, e sem isso um portal fora de madrugada travaria o tipo
+    inteiro pelo resto da vida do processo (o e-mail promete o contrario)."""
+    if batch_state.get('status') not in ('running', 'paused'):
+        return False
+    return not pausa_de_breaker_vencida(batch_state)
+
+
 def request_pause(batch_lock, batch_state):
     with batch_lock:
         batch_state['stop_requested'] = True
         batch_state['stop_action'] = 'pause'
+        # Pausa pedida pelo operador SUBSTITUI o motivo anterior: sem isto, um
+        # lote que ja tinha sido pausado pelo breaker seguiria marcado e
+        # `liberar_pausa_de_breaker` apagaria, em silencio, um lote que o
+        # operador pausou de proposito (e o "Retomar" dele pararia de funcionar).
+        batch_state['pausado_por_breaker'] = None
         if batch_state['status'] == 'running':
             batch_state['status'] = 'paused'
         return batch_state.get('driver')
@@ -333,6 +500,7 @@ def request_stop(batch_lock, batch_state):
         batch_state['stop_requested'] = True
         batch_state['stop_action'] = 'stop'
         batch_state['status'] = 'stopped'
+        batch_state['pausado_por_breaker'] = None
         batch_state['finished_at'] = utcnow_naive()
         return batch_state.get('driver')
 
@@ -344,6 +512,9 @@ def resume_batch(batch_lock, batch_state, worker_fn, app_factory):
 
         batch_state['stop_requested'] = False
         batch_state['status'] = 'running'
+        # retomou: a pausa do breaker deixou de existir (se o portal ainda
+        # estiver fora, o proprio laco pausa de novo e remarca)
+        batch_state['pausado_por_breaker'] = None
 
     run_worker(worker_fn, app_factory)
     return True
@@ -351,7 +522,9 @@ def resume_batch(batch_lock, batch_state, worker_fn, app_factory):
 
 def init_batch_run(batch_lock, batch_state, start_id, calc_targets_fn, worker_fn, app_factory):
     with batch_lock:
-        if batch_state['status'] in ['running', 'paused']:
+        # Pausa de breaker ja vencida nao ocupa o tipo (spec 09). O reset logo
+        # abaixo e quem descarta o estado antigo — aqui so se decide.
+        if lote_ocupa_o_tipo(batch_state):
             return None
 
         dados_lote = calc_targets_fn(start_id)

@@ -344,9 +344,10 @@ class NotificacaoLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     # 'digest' | 'saldo_baixo' | 'falha:<error_type>:<alvo>'
     #   | 'empresa_baixada:<id>' | 'municipio_quebrado:<nome>'
+    #   | 'portal_fora:<alvo>' | 'solver_captcha:<alvo>'
     chave = db.Column(db.String(120), nullable=False, index=True)
     # 'digest' | 'alerta_saldo' | 'alerta_falha' | 'alerta_municipio'
-    #   | 'alerta_empresa_baixada'
+    #   | 'alerta_empresa_baixada' | 'alerta_portal' | 'alerta_solver'
     # Folga proposital no tamanho: no MySQL (strict mode) um tipo mais longo que a
     # coluna e ERRO, e como _registrar_envio e best-effort o registro simplesmente
     # nao entra — o anti-spam para de funcionar EM SILENCIO e o alerta vira um

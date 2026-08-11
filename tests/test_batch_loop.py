@@ -10,6 +10,7 @@ import sys
 os.environ.setdefault('SECRET_KEY', 'test')
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app.services import batch_engine
 from app.services.batch_engine import run_batch_loop, batch_state_defaults, GRAVE_FATAL
 
 
@@ -313,6 +314,307 @@ def test_on_finish_called_em_erro_grave():
     print('ok test_on_finish_called_em_erro_grave')
 
 
+# --- circuit breaker por portal (spec 09, RESOP-02) ------------------------
+
+def _breaker_com(abertos):
+    """Substitui o circuit_breaker do batch_engine por um duble que abre para os
+    alvos informados e registra o que o loop alimentou."""
+    class FakeBreaker:
+        def __init__(self):
+            self.sucessos = []
+            self.falhas = []
+
+        def aberto(self, alvo):
+            return alvo in abertos
+
+        def registrar_sucesso(self, alvo):
+            self.sucessos.append(alvo)
+
+        def registrar_falha(self, alvo, mensagem=None):
+            self.falhas.append((alvo, mensagem))
+            return False
+
+    return FakeBreaker()
+
+
+def _com_breaker(fake, fn):
+    original = batch_engine.circuit_breaker
+    batch_engine.circuit_breaker = fake
+    try:
+        return fn()
+    finally:
+        batch_engine.circuit_breaker = original
+
+
+def test_breaker_aberto_com_alvo_fn_pula_o_item_e_segue():
+    # Lote multi-portal (municipal): o municipio fora nao pode derrubar os outros.
+    state = make_state([1, 2, 3])
+    emit = make_emit([(True, False, None), (True, False, None)])
+    fake = _breaker_com({'Imbe'})
+    alvos = {1: 'Imbe', 2: 'Tramandai', 3: 'Osorio'}
+
+    _com_breaker(fake, lambda: run(state, emit, alvo_fn=lambda cid: alvos[cid]))
+
+    assert state['status'] == 'completed', state['status']
+    assert emit.calls['n'] == 2, emit.calls  # o item do portal aberto nao emitiu
+    assert state['success'] == 2
+    assert state['index'] == 3
+    assert fake.sucessos == ['Tramandai', 'Osorio']
+    print('ok test_breaker_aberto_com_alvo_fn_pula_o_item_e_segue')
+
+
+def test_breaker_aberto_nao_cria_driver_para_o_item_pulado():
+    # RESOP-02.6: item recusado nao abre navegador nem chama o solver.
+    state = make_state([1])
+    emit = make_emit([])
+    fake = _breaker_com({'Imbe'})
+
+    drivers = _com_breaker(fake, lambda: run(state, emit, alvo_fn=lambda cid: 'Imbe'))
+
+    assert emit.calls['n'] == 0
+    assert drivers == [], drivers
+    print('ok test_breaker_aberto_nao_cria_driver_para_o_item_pulado')
+
+
+def test_breaker_aberto_sem_alvo_fn_pausa_o_lote():
+    # Lote de portal unico: nao ha mais nada a fazer -> pausa retomavel.
+    state = make_state([1, 2, 3])
+    emit = make_emit([])
+    fake = _breaker_com({'FGTS'})
+
+    drivers = _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+    assert state['status'] == 'paused', state['status']
+    assert emit.calls['n'] == 0
+    assert drivers == []
+    assert state['index'] == 0  # retoma exatamente de onde parou
+    print('ok test_breaker_aberto_sem_alvo_fn_pausa_o_lote')
+
+
+def test_loop_alimenta_breaker_com_sucesso_e_falha():
+    state = make_state([1, 2])
+    emit = make_emit([(True, False, None), (False, False, 'timeout do portal')])
+    fake = _breaker_com(set())
+
+    _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+    assert fake.sucessos == ['FGTS']
+    assert fake.falhas == [('FGTS', 'timeout do portal')]
+    print('ok test_loop_alimenta_breaker_com_sucesso_e_falha')
+
+
+def test_desfecho_pendente_conta_como_sucesso_para_o_breaker():
+    # Certidao positiva nao e portal fora — nao pode contar para abrir o breaker.
+    state = make_state([1])
+
+    def on_call(cid, driver, eid, i):
+        state['pendentes_resultado'] = state.get('pendentes_resultado', 0) + 1
+
+    emit = make_emit([(False, False, 'positiva')], on_call=on_call)
+    fake = _breaker_com(set())
+
+    _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+    assert fake.sucessos == ['FGTS']
+    assert fake.falhas == []
+    print('ok test_desfecho_pendente_conta_como_sucesso_para_o_breaker')
+
+
+def test_sem_alvo_o_loop_nao_toca_no_breaker():
+    # Comportamento atual preservado para quem nao passa alvo.
+    state = make_state([1, 2])
+    emit = make_emit([(True, False, None), (False, False, 'x')])
+    fake = _breaker_com({'FGTS'})
+
+    _com_breaker(fake, lambda: run(state, emit))
+
+    assert emit.calls['n'] == 2
+    assert fake.sucessos == [] and fake.falhas == []
+    assert state['status'] == 'completed'
+    print('ok test_sem_alvo_o_loop_nao_toca_no_breaker')
+
+
+def test_grave_fatal_nao_alimenta_o_breaker():
+    # Driver/sessao morta e ambiente LOCAL quebrado, nao portal fora. Contar isso
+    # abriria o breaker de um portal saudavel: o lote pararia por 60 min e sairia
+    # um alerta "portal fora" mentiroso.
+    state = make_state([1, 2])
+    emit = make_emit([(False, GRAVE_FATAL, 'browser fechado')])
+    fake = _breaker_com(set())
+
+    _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+    assert fake.falhas == [], fake.falhas
+    assert state['status'] == 'error'
+    print('ok test_grave_fatal_nao_alimenta_o_breaker')
+
+
+def test_alerta_de_breaker_nao_e_disparado_com_o_lock_na_mao():
+    # O alerta faz envio SMTP com retry (ate ~60s). Com o lock do lote na mao,
+    # o polling de status e os botoes de pausar/parar ficariam pendurados.
+    class LockObservavel:
+        def __init__(self):
+            self.preso = False
+
+        def __enter__(self):
+            self.preso = True
+            return self
+
+        def __exit__(self, *a):
+            self.preso = False
+            return False
+
+    lock = LockObservavel()
+    preso_no_alerta = []
+    state = make_state([1, 2, 3, 4])
+    emit = make_emit([(False, False, 'portal fora')] * 4)
+
+    def _avisar(alvo, msg):
+        preso_no_alerta.append(lock.preso)
+
+    def _rodar():
+        run_batch_loop(FakeApp(), lock=lock, state=state, emit_fn=emit,
+                       create_driver=lambda: FakeDriver(), alvo_lote='FGTS',
+                       on_breaker_aberto=_avisar, **COMMON)
+
+    # breaker real: precisa abrir de verdade para o alerta sair
+    batch_engine.circuit_breaker.limpar()
+    _rodar()
+    batch_engine.circuit_breaker.limpar()
+
+    assert preso_no_alerta == [False], preso_no_alerta
+    print('ok test_alerta_de_breaker_nao_e_disparado_com_o_lock_na_mao')
+
+
+def test_falha_de_rede_local_nao_abre_o_breaker_do_portal():
+    # Z: cai -> 3 falhas seguidas. Abrir o breaker aqui pausaria o lote e
+    # mandaria "portal FGTS fora" com a Caixa perfeitamente no ar.
+    state = make_state([1, 2, 3])
+    emit = make_emit([(False, False, r'Pasta de rede inacessivel: Z:\ nao mapeado')] * 3)
+    fake = _breaker_com(set())
+
+    _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+    assert fake.falhas == [], fake.falhas
+    assert state['falhas'] == 3
+    assert state['status'] == 'completed'
+    print('ok test_falha_de_rede_local_nao_abre_o_breaker_do_portal')
+
+
+def test_falha_de_portal_continua_alimentando_o_breaker():
+    # O filtro nao pode virar peneira: mensagem propria do fluxo (UNKNOWN) conta.
+    state = make_state([1])
+    emit = make_emit([(False, False, 'Erro ao carregar pagina FGTS.')])
+    fake = _breaker_com(set())
+
+    _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+    assert fake.falhas == [('FGTS', 'Erro ao carregar pagina FGTS.')]
+    print('ok test_falha_de_portal_continua_alimentando_o_breaker')
+
+
+def test_alerta_de_breaker_sai_na_hora_e_nao_no_fim_do_lote():
+    # Lote multi-portal segue rodando depois que um alvo abre (pode durar horas).
+    # Se o alerta so saisse na saida do laco, o e-mail chegaria com o estrago
+    # feito. Prova de PRONTIDAO: o aviso acontece antes dos itens seguintes.
+    ordem = []
+    state = make_state([1, 2, 3, 4, 5, 6])
+    alvos = {1: 'A', 2: 'A', 3: 'A', 4: 'B', 5: 'B', 6: 'B'}
+
+    def emit(cid, driver, eid):
+        ordem.append(f'emit:{cid}')
+        return (False, False, 'portal fora') if alvos[cid] == 'A' else (True, False, None)
+
+    emit.calls = {'n': 0}
+
+    def _avisar(alvo, msg):
+        ordem.append(f'alerta:{alvo}')
+
+    batch_engine.circuit_breaker.limpar()
+    run_batch_loop(FakeApp(), lock=FakeLock(), state=state, emit_fn=emit,
+                   create_driver=lambda: FakeDriver(),
+                   alvo_fn=lambda cid: alvos[cid],
+                   on_breaker_aberto=_avisar, **COMMON)
+    batch_engine.circuit_breaker.limpar()
+
+    assert 'alerta:A' in ordem, ordem
+    # o aviso saiu ANTES de o lote terminar de processar os itens do outro portal
+    assert ordem.index('alerta:A') < ordem.index('emit:6'), ordem
+    print('ok test_alerta_de_breaker_sai_na_hora_e_nao_no_fim_do_lote')
+
+
+def test_conexao_recusada_abre_o_breaker():
+    # ERR_CONNECTION_REFUSED e a assinatura MAIS COMUM de portal fora, e o
+    # catalogo a classifica como NETWORK_PATH (junto com o drive Z: local).
+    # Se ela nao contasse, o breaker nunca abriria no caso que justifica existir.
+    for mensagem in ('net::ERR_CONNECTION_REFUSED',
+                     'net::ERR_CONNECTION_RESET ao abrir o portal',
+                     'net::ERR_CONNECTION_TIMED_OUT',
+                     'ConnectionError: Max retries exceeded'):
+        state = make_state([1, 2, 3])
+        emit = make_emit([(False, False, mensagem)] * 3)
+        fake = _breaker_com(set())
+
+        _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+        assert [m for _a, m in fake.falhas] == [mensagem] * 3, mensagem
+    print('ok test_conexao_recusada_abre_o_breaker')
+
+
+def test_drive_de_rede_continua_fora_do_breaker():
+    # O contraponto: o Z: caindo nao diz nada sobre o portal. A 3a mensagem e a
+    # que exige o marcador ESTREITO: ela contem a palavra "connection", mas e
+    # erro de drive — aceitar a palavra solta faria o breaker do portal abrir
+    # por causa da rede do escritorio.
+    for mensagem in ('Pasta de rede inacessivel: Z: nao mapeado',
+                     'Falha ao acessar o caminho de rede (network path)',
+                     'The network connection was lost while accessing Z:'):
+        state = make_state([1, 2, 3])
+        emit = make_emit([(False, False, mensagem)] * 3)
+        fake = _breaker_com(set())
+
+        _com_breaker(fake, lambda: run(state, emit, alvo_lote='FGTS'))
+
+        assert fake.falhas == [], (mensagem, fake.falhas)
+    print('ok test_drive_de_rede_continua_fora_do_breaker')
+
+
+def test_breaker_aberto_nao_roda_setup_nem_driver_eager():
+    # No Estadual RS o on_setup mexe na policy de certificado do REGISTRO do
+    # Windows e o driver eager abre o Chrome. Fazer isso para so descobrir que o
+    # portal esta pausado e efeito colateral caro e inutil.
+    setups, drivers = [], []
+    state = make_state([1, 2])
+    emit = make_emit([])
+
+    class BreakerAberto:
+        def aberto(self, alvo):
+            return True
+
+        def registrar_sucesso(self, alvo):
+            pass
+
+        def registrar_falha(self, alvo, mensagem=None):
+            return False
+
+    def _rodar():
+        run_batch_loop(
+            FakeApp(), lock=FakeLock(), state=state, emit_fn=emit,
+            create_driver=lambda: drivers.append('chrome'),
+            eager_driver=True,
+            on_setup=lambda app: setups.append('policy'),
+            alvo_lote='Estadual RS', **COMMON)
+
+    _com_breaker(BreakerAberto(), _rodar)
+
+    assert setups == [], setups
+    assert drivers == [], drivers
+    assert emit.calls['n'] == 0
+    assert state['status'] == 'paused'
+    assert state['pausado_por_breaker'] == 'Estadual RS'
+    print('ok test_breaker_aberto_nao_roda_setup_nem_driver_eager')
+
+
 def main():
     tests = [
         test_all_success,
@@ -331,6 +633,20 @@ def main():
         test_setup_teardown_called,
         test_on_finish_called_com_estado_final,
         test_on_finish_called_em_erro_grave,
+        test_breaker_aberto_com_alvo_fn_pula_o_item_e_segue,
+        test_breaker_aberto_nao_cria_driver_para_o_item_pulado,
+        test_breaker_aberto_sem_alvo_fn_pausa_o_lote,
+        test_loop_alimenta_breaker_com_sucesso_e_falha,
+        test_desfecho_pendente_conta_como_sucesso_para_o_breaker,
+        test_sem_alvo_o_loop_nao_toca_no_breaker,
+        test_grave_fatal_nao_alimenta_o_breaker,
+        test_alerta_de_breaker_nao_e_disparado_com_o_lock_na_mao,
+        test_falha_de_rede_local_nao_abre_o_breaker_do_portal,
+        test_falha_de_portal_continua_alimentando_o_breaker,
+        test_alerta_de_breaker_sai_na_hora_e_nao_no_fim_do_lote,
+        test_conexao_recusada_abre_o_breaker,
+        test_drive_de_rede_continua_fora_do_breaker,
+        test_breaker_aberto_nao_roda_setup_nem_driver_eager,
     ]
     for t in tests:
         t()

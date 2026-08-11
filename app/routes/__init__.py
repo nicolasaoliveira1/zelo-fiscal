@@ -26,7 +26,13 @@ from app.utils import (
     normalizar_cidade,
     to_bool as _to_bool,
 )
-from app.services import diagnostics, dryrun_municipio
+from app.services import (
+    auditoria,
+    diagnostics,
+    dryrun_municipio,
+    fila_emissao,
+    portal_health,
+)
 from app.services.correlation import CorrelationContext
 from app.services.execution_logger import log_event
 from app.services.visualizar_token import _gerar_visualizar_token
@@ -137,6 +143,73 @@ def diagnostico_municipio_dryrun(municipio_id):
         return _json_error('Município não encontrado.', 404)
     relatorio = dryrun_municipio.executar_dry_run(municipio)
     return jsonify({'status': 'ok', 'relatorio': relatorio})
+
+
+@bp.route('/diagnostico/fila/falhas')
+@requer_papel('admin')
+def diagnostico_fila_falhas():
+    """Dead-letter da fila: o que esgotou as tentativas, agrupado por motivo
+    (spec 09, RESOP-01). So leitura — reprocessar e a rota abaixo."""
+    grupos = fila_emissao.agrupar_falhas()
+    return jsonify({
+        'status': 'ok',
+        'grupos': grupos,
+        'total': sum(g['total'] for g in grupos),
+    })
+
+
+@bp.route('/diagnostico/fila/reprocessar', methods=['POST'])
+@requer_papel('admin')
+def diagnostico_fila_reprocessar():
+    """Devolve falhas para a fila, por ids ou por motivo (RESOP-01.5).
+
+    Nao emite nada aqui: quem executa e o ciclo seguinte do agendador. Resposta
+    parcial por desenho — o que nao der volta em `recusadas`."""
+    dados = request.get_json(silent=True) or {}
+    # Entrada de fora do sistema: sem checar o TIPO, `{"ids": 5}` chega em
+    # `list(5)` e `{"error_type": 5}` em `.strip()` — os dois viram 500 em vez
+    # de uma recusa clara.
+    ids_bruto = dados.get('ids')
+    if ids_bruto is not None and not isinstance(ids_bruto, list):
+        return _json_error('"ids" deve ser uma lista de inteiros.', 400)
+    ids = []
+    for valor in (ids_bruto or []):
+        if isinstance(valor, bool) or not isinstance(valor, int):
+            return _json_error('"ids" deve conter apenas inteiros.', 400)
+        ids.append(valor)
+
+    error_type_bruto = dados.get('error_type')
+    if error_type_bruto is not None and not isinstance(error_type_bruto, str):
+        return _json_error('"error_type" deve ser texto.', 400)
+    error_type = (error_type_bruto or '').strip() or None
+
+    if not ids and not error_type:
+        return _json_error('Informe "ids" ou "error_type" para reprocessar.', 400)
+
+    resultado = fila_emissao.reprocessar(ids=ids, error_type=error_type)
+    auditoria.registrar(
+        'fila.reprocessar', alvo_tipo='tarefa_emissao',
+        detalhe=(f'motivo={error_type} ' if error_type else '')
+        + f"devolvidas={len(resultado['devolvidas'])} "
+        f"recusadas={len(resultado['recusadas'])}")
+    return jsonify({'status': 'ok', **resultado})
+
+
+@bp.route('/diagnostico/portais')
+@requer_papel('admin')
+def diagnostico_portais():
+    """Semaforo de saude dos portais + breakers abertos (spec 09, RESOP-03).
+
+    Verde diz que o portal RESPONDE, nao que a emissao funciona — o rotulo na
+    tela precisa deixar isso claro. Falha aqui nao pode virar 500: o painel
+    mostra o que der e segue."""
+    try:
+        dados = portal_health.snapshot(current_app.config)
+    except Exception as exc:
+        log_event('portais_snapshot_falhou', level='WARNING', error=str(exc))
+        return jsonify({'status': 'ok', 'portais': [], 'breakers': [],
+                        'message': 'Não foi possível medir os portais agora.'})
+    return jsonify({'status': 'ok', **dados})
 
 
 @bp.route('/diagnostico/2captcha')

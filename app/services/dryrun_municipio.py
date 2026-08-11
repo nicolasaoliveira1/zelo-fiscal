@@ -18,7 +18,9 @@ Nao gasta captcha: `wait_for` de portais com captcha (ex.: IPM) expira no teto d
 dry-run e vira `parcial` — sinal de "nao deu para verificar", nao de quebra.
 """
 import copy
+import threading
 import time
+from datetime import datetime
 
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -41,6 +43,34 @@ QUEBRADO = 'quebrado'      # um seletor verificavel nao resolve -> drift real
 PARCIAL = 'parcial'        # interrompido por captcha/gate; sem garantia total
 PULADO = 'pulado'          # automacao_ativa=false (ex.: Sao Paulo)
 ERRO = 'erro'              # falha de infra (driver/rede), nao do municipio
+
+# Ultimo resultado por municipio, em memoria de processo (mesmo modelo do
+# diagnostics/batch_state): responde "como esta agora", nao guarda historico.
+# Depois de um restart o municipio fica DESCONHECIDO ate o proximo dry-run —
+# honesto de proposito: melhor "nao sei" do que um verde velho.
+_ultimos_lock = threading.Lock()
+_ultimos = {}
+
+
+def registrar_resultado(relatorio):
+    """Publica o relatorio de um municipio como o resultado mais recente."""
+    nome = (relatorio or {}).get('municipio')
+    if not nome:
+        return
+    with _ultimos_lock:
+        _ultimos[nome] = {**relatorio, 'medido_em': datetime.now().isoformat()}
+
+
+def ultimos_resultados():
+    """{nome: relatorio + medido_em} dos municipios ja verificados."""
+    with _ultimos_lock:
+        return dict(_ultimos)
+
+
+def limpar_resultados():
+    with _ultimos_lock:
+        _ultimos.clear()
+
 
 # CNPJ valido e publico (Banco do Brasil) para portais que validam digito.
 CNPJ_TESTE = '00000000000191'
@@ -291,7 +321,7 @@ def _bloquear_downloads(driver):
         log_event('dryrun_bloqueio_download_falhou', level='WARNING', error=str(exc))
 
 
-def executar_dry_run(municipio, timeout=20):
+def _executar_dry_run(municipio, timeout=20):
     """Abre o driver adequado, roda o dry-run e fecha o driver. Nunca levanta.
 
     A escolha do driver segue o mesmo predicado por URL da emissao (AD-001/AD-002):
@@ -331,6 +361,17 @@ def executar_dry_run(municipio, timeout=20):
                 pass
         if lock_ativo:
             _municipal_profile_release()
+
+
+def executar_dry_run(municipio, timeout=20):
+    """Roda o dry-run e PUBLICA o resultado em memoria (spec 09, RESOP-03.3).
+
+    O semaforo de saude dos portais le daqui em vez de abrir navegador de novo:
+    para municipio, "o portal responde" nao diz nada — o que importa e se o
+    fluxo ainda resolve, e isso o dry-run ja mede (de graca, no job diario)."""
+    relatorio = _executar_dry_run(municipio, timeout=timeout)
+    registrar_resultado(relatorio)
+    return relatorio
 
 
 def executar_dry_run_varios(municipios, timeout=20):
