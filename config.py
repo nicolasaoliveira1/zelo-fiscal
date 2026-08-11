@@ -119,6 +119,18 @@ class Config:
     # Janela minima (horas) entre alertas iguais (anti-spam).
     NOTIF_ALERTA_JANELA_HORAS = _env_int('NOTIF_ALERTA_JANELA_HORAS', 24)
 
+    # --- Resiliencia operacional (spec 09) ---
+    # Circuit breaker por portal: quantas falhas SEGUIDAS do mesmo portal abrem o
+    # breaker, e por quanto tempo ele fica aberto antes de o proximo lote tentar
+    # de novo (fecha sozinho — sem reset manual, RESOP-02.8).
+    BREAKER_LIMIAR = _env_int('BREAKER_LIMIAR', 3)
+    BREAKER_JANELA_MINUTOS = _env_int('BREAKER_JANELA_MINUTOS', 60)
+    # Semaforo de saude dos portais: por quanto tempo o resultado do ping vale
+    # (recarregar o painel dentro da janela nao gera nova requisicao ao portal) e
+    # o teto de espera de cada ping.
+    PORTAL_PING_TTL_MINUTOS = _env_int('PORTAL_PING_TTL_MINUTOS', 5)
+    PORTAL_PING_TIMEOUT_S = _env_int('PORTAL_PING_TIMEOUT_S', 6)
+
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # recarrega templates Jinja a cada request
