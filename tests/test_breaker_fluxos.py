@@ -295,10 +295,10 @@ def test_pausa_do_breaker_registra_o_alvo(ctx):
     assert state['pausado_por_breaker'] == 'FGTS'
 
 
-def test_pausa_e_liberada_quando_o_breaker_fecha(ctx, monkeypatch):
-    """O breaker fecha sozinho em 60 min; o estado do lote tambem precisa, senao
-    o agendador, o lote manual e ate a emissao individual ficam bloqueados para
-    sempre — exatamente o oposto do que o alerta promete."""
+def test_pausa_vencida_libera_o_tipo_sem_destruir_o_lote(ctx, monkeypatch):
+    """O breaker fecha sozinho em 60 min; o tipo tem de voltar a aceitar lote e
+    emissao individual. Mas o lote pausado NAO pode ser apagado no caminho: os
+    itens restantes e o "Retomar" do operador continuam la."""
     from datetime import datetime, timedelta
     agora = datetime(2026, 8, 11, 3, 0, 0)
     monkeypatch.setattr(circuit_breaker, '_agora', lambda: agora)
@@ -306,38 +306,41 @@ def test_pausa_e_liberada_quando_o_breaker_fecha(ctx, monkeypatch):
     for _ in range(3):
         circuit_breaker.registrar_falha('FGTS', 'portal fora')
 
-    lock = _LockFake()
     state = batch_engine.batch_state_defaults()
-    state.update(status='paused', pausado_por_breaker='FGTS', ids=[1], total=1)
+    state.update(status='paused', pausado_por_breaker='FGTS',
+                 ids=[1, 2, 3], index=1, total=3)
 
-    # ainda dentro da janela: continua pausado (o portal segue fora)
-    assert batch_engine.liberar_pausa_de_breaker(lock, state) is False
-    assert state['status'] == 'paused'
+    # dentro da janela: o portal segue fora, o tipo segue ocupado
+    assert batch_engine.lote_ocupa_o_tipo(state) is True
 
-    # janela vencida: o lote volta a ser idle sozinho
+    # janela vencida: o tipo libera...
     monkeypatch.setattr(circuit_breaker, '_agora', lambda: agora + timedelta(minutes=61))
-    assert batch_engine.liberar_pausa_de_breaker(lock, state) is True
-    assert state['status'] == 'idle'
-    assert state['pausado_por_breaker'] is None
+    assert batch_engine.lote_ocupa_o_tipo(state) is False
+    # ...e o lote continua intacto (nada de reset por baixo)
+    assert state['status'] == 'paused'
+    assert state['ids'] == [1, 2, 3]
+    assert state['index'] == 1
 
 
-def test_liberar_nao_toca_em_pausa_manual(ctx):
-    """Pausa pedida pelo operador continua pausada — quem solta e ele."""
+def test_pausa_manual_ocupa_o_tipo_para_sempre(ctx):
+    """Pausa pedida pelo operador nao vence: quem solta e ele."""
     circuit_breaker.limpar()
     state = batch_engine.batch_state_defaults()
     state.update(status='paused', ids=[1], total=1)
 
-    assert batch_engine.liberar_pausa_de_breaker(_LockFake(), state) is False
-    assert state['status'] == 'paused'
+    assert batch_engine.lote_ocupa_o_tipo(state) is True
 
 
-def test_liberar_nao_toca_em_lote_rodando(ctx):
+def test_lote_rodando_ocupa_o_tipo(ctx):
     circuit_breaker.limpar()
     state = batch_engine.batch_state_defaults()
     state.update(status='running', pausado_por_breaker='FGTS', ids=[1], total=1)
 
-    assert batch_engine.liberar_pausa_de_breaker(_LockFake(), state) is False
-    assert state['status'] == 'running'
+    assert batch_engine.lote_ocupa_o_tipo(state) is True
+
+
+def test_lote_idle_nao_ocupa_o_tipo(ctx):
+    assert batch_engine.lote_ocupa_o_tipo(batch_engine.batch_state_defaults()) is False
 
 
 def test_agendador_roda_o_ciclo_seguinte_apos_pausa_vencida(ctx, monkeypatch):
@@ -365,6 +368,21 @@ def test_agendador_roda_o_ciclo_seguinte_apos_pausa_vencida(ctx, monkeypatch):
     assert kw.get('alvo_lote') == 'FGTS', 'o ciclo seguinte deveria ter rodado'
 
 
+def test_causa_do_solver_sobrevive_a_palavra_timeout(ctx):
+    """A mensagem REAL do 2captcha traz "Read timed out", e no catalogo a regra
+    de TIMEOUT vem antes da de CAPTCHA — pelo catalogo, a falha do solver viraria
+    "portal fora" e o operador iria depurar o site em vez da conta do solver."""
+    real = ('Falha ao resolver ALTCHA no 2captcha: HTTPSConnectionPool'
+            "(host='2captcha.com', port=443): Read timed out. (read timeout=120)")
+
+    assert lotes._causa_do_breaker(real) == 'captcha'
+
+
+def test_timeout_do_portal_continua_sendo_portal(ctx):
+    assert lotes._causa_do_breaker(
+        'Timeout aguardando download da certidao Estadual RS.') == 'portal'
+
+
 def test_causa_do_alerta_separa_captcha_de_portal(ctx, monkeypatch):
     """O lote classifica a causa antes de avisar (RESOP-02.7)."""
     from app.services import notificacoes
@@ -381,8 +399,8 @@ def test_causa_do_alerta_separa_captcha_de_portal(ctx, monkeypatch):
 
 def test_pausa_manual_apaga_a_marca_do_breaker(ctx):
     """Cenario do code-review: breaker pausa -> operador retoma -> operador
-    pausa. Se a marca do breaker sobrevivesse, `liberar_pausa_de_breaker`
-    apagaria em silencio um lote que o OPERADOR pausou de proposito."""
+    pausa. Se a marca do breaker sobrevivesse, a pausa do operador seria tratada
+    como pausa de breaker e o tipo seria liberado pelas costas dele."""
     circuit_breaker.limpar()
     lock = _LockFake()
     state = batch_engine.batch_state_defaults()
@@ -395,8 +413,8 @@ def test_pausa_manual_apaga_a_marca_do_breaker(ctx):
     batch_engine.request_pause(lock, state)
     assert state['pausado_por_breaker'] is None
 
-    # a pausa agora e manual: nao pode ser liberada nem o progresso perdido
-    assert batch_engine.liberar_pausa_de_breaker(lock, state) is False
+    # a pausa agora e manual: segue ocupando o tipo, com o progresso intacto
+    assert batch_engine.lote_ocupa_o_tipo(state) is True
     assert state['status'] == 'paused'
     assert state['ids'] == [1, 2, 3]
     assert state['index'] == 1
@@ -425,5 +443,5 @@ def test_pausar_sozinho_ja_apaga_a_marca_do_breaker(ctx):
 
     assert state['status'] == 'paused'
     assert state['pausado_por_breaker'] is None
-    assert batch_engine.liberar_pausa_de_breaker(_LockFake(), state) is False
+    assert batch_engine.lote_ocupa_o_tipo(state) is True
     assert state['index'] == 1

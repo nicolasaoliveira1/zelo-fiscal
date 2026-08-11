@@ -16,6 +16,7 @@ uma rajada de requisicoes contra o portal.
 """
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 import requests
@@ -130,20 +131,30 @@ def _municipios():
 
 
 def _medir(config):
+    """Mede os portais de tipo unico EM PARALELO.
+
+    Em serie, com todos fora, a requisicao do painel duraria 4x o timeout (~24s)
+    e os demais admins ficariam na fila atras dela — exatamente durante o
+    incidente em que a tela existe para ajudar. Em paralelo o pior caso e um
+    timeout."""
     timeout = _config_int(config, 'PORTAL_PING_TIMEOUT_S', TIMEOUT_S_PADRAO)
     agora = _agora().isoformat()
-    itens = []
-    for chave, nome, url in _portais_fixos():
-        if not url:
-            continue
-        estado, latencia, mensagem = _pingar(url, timeout)
-        itens.append({
+    alvos = [(chave, nome, url) for chave, nome, url in _portais_fixos() if url]
+    if not alvos:
+        return []
+
+    with ThreadPoolExecutor(max_workers=len(alvos)) as executor:
+        medidas = list(executor.map(lambda a: _pingar(a[2], timeout), alvos))
+
+    return [
+        {
             'chave': chave, 'nome': nome, 'url': url, 'fonte': 'ping',
             'municipio': None,
             'estado': estado, 'latencia_ms': latencia, 'mensagem': mensagem,
             'medido_em': agora,
-        })
-    return itens
+        }
+        for (chave, nome, url), (estado, latencia, mensagem) in zip(alvos, medidas)
+    ]
 
 
 def snapshot(config, forcar=False):

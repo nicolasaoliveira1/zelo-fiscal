@@ -243,13 +243,33 @@ def run_batch_loop(
         # exatamente no momento em que ele quer intervir.
         alerta_pendente = None
 
-        try:
-            if on_setup:
-                setup_ctx = on_setup(app)
-            if eager_driver and create_driver:
-                driver = create_driver()
+        def _pausar_por_breaker(alvo):
+            state['status'] = 'paused'
+            state['pausado_por_breaker'] = alvo
+            append_batch_message(
+                state,
+                f'Lote {nome_lote} pausado: falhas seguidas em {alvo} '
+                f'(circuit breaker). Volta sozinho quando o portal voltar a '
+                f'responder.',
+                level='warning',
+            )
 
-            while True:
+        try:
+            # Portal unico ja pausado: decide ANTES de `on_setup` e do driver
+            # eager. No Estadual RS esses dois abrem o Chrome e mexem na policy
+            # de certificado do registro do Windows — efeito colateral caro para
+            # um lote que nao vai emitir nada.
+            barrado_pelo_breaker = bool(alvo_lote) and circuit_breaker.aberto(alvo_lote)
+            if barrado_pelo_breaker:
+                with lock:
+                    _pausar_por_breaker(alvo_lote)
+            else:
+                if on_setup:
+                    setup_ctx = on_setup(app)
+                if eager_driver and create_driver:
+                    driver = create_driver()
+
+            while not barrado_pelo_breaker:
                 if alerta_pendente is not None and on_breaker_aberto:
                     alvo_aberto, motivo_aberto = alerta_pendente
                     alerta_pendente = None
@@ -306,15 +326,7 @@ def run_batch_loop(
                             continue
                         # Lote de portal unico: nao ha o que fazer -> pausa
                         # retomavel (o operador retoma quando o portal voltar).
-                        state['status'] = 'paused'
-                        state['pausado_por_breaker'] = alvo
-                        append_batch_message(
-                            state,
-                            f'Lote {nome_lote} pausado: falhas seguidas em '
-                            f'{alvo} (circuit breaker). Volta sozinho quando o '
-                            f'portal voltar a responder.',
-                            level='warning',
-                        )
+                        _pausar_por_breaker(alvo)
                         break
 
                     state['current_id'] = certidao_id
@@ -439,23 +451,34 @@ def run_batch_loop(
             CorrelationContext.clear()
 
 
-def liberar_pausa_de_breaker(batch_lock, batch_state):
-    """Solta o lote que o circuit breaker pausou, quando aquele portal ja fechou.
+def pausa_de_breaker_vencida(batch_state):
+    """O lote esta parado por um breaker que JA fechou?
 
-    Sem isto o `paused` seria uma armadilha: ele bloqueia o proximo ciclo do
-    agendador, o inicio de um lote manual E a emissao individual do tipo — e
-    nada o encerraria, porque quem fecha e a janela do breaker, nao o lote. O
-    e-mail de alerta promete "nada precisa ser religado"; e aqui que isso vira
-    verdade. Devolve True se liberou."""
-    with batch_lock:
-        alvo = batch_state.get('pausado_por_breaker')
-        if not alvo or batch_state.get('status') != 'paused':
-            return False
-        if circuit_breaker.aberto(alvo):
-            return False
-        reset_batch_state(batch_state)
-    log_event('breaker_pausa_liberada', alvo=alvo)
-    return True
+    Nao muta nada — de proposito. A versao anterior desta ideia dava
+    `reset_batch_state` e, com isso, uma emissao individual qualquer depois da
+    janela apagava os itens restantes de um lote pausado pelo breaker e sumia
+    com o "Retomar". Perguntar basta: quem vai de fato assumir o tipo (iniciar
+    um lote manual, rodar o ciclo do agendador) ja reseta o estado por conta
+    propria; quem so quer saber se pode emitir uma certidao nao precisa mexer em
+    nada.
+
+    Chamar com o lock do lote na mao (a ordem batch -> breaker e a de sempre)."""
+    alvo = batch_state.get('pausado_por_breaker')
+    if not alvo or batch_state.get('status') != 'paused':
+        return False
+    return not circuit_breaker.aberto(alvo)
+
+
+def lote_ocupa_o_tipo(batch_state):
+    """O lote esta segurando o tipo (impedindo lote novo e emissao individual)?
+
+    Regra unica para as tres guardas — com tres copias, uma divergiria. Uma
+    pausa de breaker ja vencida NAO ocupa: quem fecha e a janela do breaker, nao
+    o estado do lote, e sem isso um portal fora de madrugada travaria o tipo
+    inteiro pelo resto da vida do processo (o e-mail promete o contrario)."""
+    if batch_state.get('status') not in ('running', 'paused'):
+        return False
+    return not pausa_de_breaker_vencida(batch_state)
 
 
 def request_pause(batch_lock, batch_state):
@@ -498,10 +521,10 @@ def resume_batch(batch_lock, batch_state, worker_fn, app_factory):
 
 
 def init_batch_run(batch_lock, batch_state, start_id, calc_targets_fn, worker_fn, app_factory):
-    # Uma pausa de breaker ja vencida nao pode impedir um lote novo (spec 09).
-    liberar_pausa_de_breaker(batch_lock, batch_state)
     with batch_lock:
-        if batch_state['status'] in ['running', 'paused']:
+        # Pausa de breaker ja vencida nao ocupa o tipo (spec 09). O reset logo
+        # abaixo e quem descarta o estado antigo — aqui so se decide.
+        if lote_ocupa_o_tipo(batch_state):
             return None
 
         dados_lote = calc_targets_fn(start_id)

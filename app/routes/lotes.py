@@ -168,8 +168,11 @@ def _causa_do_breaker(mensagem):
     O breaker abre nos dois casos (parar de gastar em cima de falha repetida),
     mas a acao do operador e outra: portal fora se resolve esperando, captcha
     falhando se resolve na conta do 2captcha."""
-    from app.errors import ErrorType, map_exception_to_error_type
-    if map_exception_to_error_type(mensagem or '') == ErrorType.CAPTCHA:
+    from app.errors import falha_de_solver_captcha
+    # Predicado positivo, e nao a familia do catalogo: a mensagem real do
+    # 2captcha carrega "Read timed out", e a regra de TIMEOUT vem antes da de
+    # CAPTCHA — pelo catalogo, a falha do solver viraria "portal fora".
+    if falha_de_solver_captcha(mensagem):
         return 'captcha'
     return 'portal'
 
@@ -554,15 +557,13 @@ def _rodar_lote_agendado(app, ids, *, wrap_emit, execution_id, lock, state,
         log_event('agendador_lote_pulado_emissao_individual', lote=nome_lote,
                   execution_id=execution_id)
         return
-    # Pausa de breaker ja vencida nao pode roubar o ciclo de hoje (spec 09): sem
-    # isto, um portal que caiu numa noite bloquearia o lote em TODAS as noites
-    # seguintes, porque quem fecha e a janela do breaker, nao o estado do lote.
-    batch_engine.liberar_pausa_de_breaker(lock, state)
     with lock:
         # Serialização com o lote manual: se já há um em andamento/pausado deste
         # tipo, o agendador não clobbera o estado — pula e roda no próximo ciclo
-        # (edge case da spec: "respeitar o lock global do tipo").
-        if state.get('status') in ('running', 'paused'):
+        # (edge case da spec: "respeitar o lock global do tipo"). Pausa de breaker
+        # ja vencida nao conta: senao um portal que caiu numa noite bloquearia o
+        # lote em TODAS as noites seguintes (spec 09).
+        if batch_engine.lote_ocupa_o_tipo(state):
             log_event('agendador_lote_pulado_em_andamento', lote=nome_lote,
                       execution_id=execution_id)
             return

@@ -29,6 +29,22 @@ _MARCADORES_CONEXAO_HOST = (
 )
 
 
+# Marcas de que o SOLVER de captcha esteve envolvido. Mesma lista que o
+# catalogo usa para a familia CAPTCHA — uma so, para nao divergirem.
+_MARCADORES_SOLVER = ('CAPTCHA', 'ALTCHA', '2CAPTCHA')
+
+
+def falha_de_solver_captcha(exc):
+    """True quando o texto acusa o solver de captcha.
+
+    Existe porque a ORDEM do catalogo nao serve para esta pergunta: a mensagem
+    real do 2captcha traz "Read timed out", e a regra de TIMEOUT vem antes da de
+    CAPTCHA — entao `map_exception_to_error_type` devolve TIMEOUT e o alerta
+    diria "portal fora" quando o conserto e na conta do solver."""
+    texto = str(exc or '').upper()
+    return any(marcador in texto for marcador in _MARCADORES_SOLVER)
+
+
 def falha_de_conexao_com_host(exc):
     """True quando o texto indica que nao foi possivel CONECTAR no host remoto.
 
@@ -46,7 +62,7 @@ def map_exception_to_error_type(exc):
     if 'TIMEOUT' in name or 'TIMEOUT' in text:
         return ErrorType.TIMEOUT
 
-    if 'CAPTCHA' in text or 'ALTCHA' in text or '2CAPTCHA' in text:
+    if any(marcador in text for marcador in _MARCADORES_SOLVER):
         return ErrorType.CAPTCHA
 
     if 'PERMISSION' in name or 'ACCESS IS DENIED' in text or 'PERMISSAO' in text:

@@ -73,13 +73,13 @@ def _calcular_validade_sem_data(certidao, tipo_chave, regra):
 def _lote_bloqueia_emissao(lock, state, mensagem):
     """Retorna erro JSON 400 se o lote (lock/state) estiver em andamento; senão None.
 
-    Antes de recusar, solta a pausa que o circuit breaker deixou para tras se
-    aquele portal ja fechou (spec 09) — senao um portal que caiu de madrugada
-    bloquearia a emissao individual do tipo pelo resto da vida do processo."""
+    Uma pausa de breaker cuja janela ja venceu nao bloqueia (spec 09) — senao um
+    portal que caiu de madrugada impediria a emissao individual do tipo pelo
+    resto da vida do processo. Consultar, e nao mexer: o lote pausado segue
+    intacto, com o "Retomar" disponivel."""
     from app.services import batch_engine
-    batch_engine.liberar_pausa_de_breaker(lock, state)
     with lock:
-        if state['status'] in ['running', 'paused']:
+        if batch_engine.lote_ocupa_o_tipo(state):
             return _json_error(mensagem, 400)
     return None
 

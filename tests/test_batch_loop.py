@@ -579,6 +579,42 @@ def test_drive_de_rede_continua_fora_do_breaker():
     print('ok test_drive_de_rede_continua_fora_do_breaker')
 
 
+def test_breaker_aberto_nao_roda_setup_nem_driver_eager():
+    # No Estadual RS o on_setup mexe na policy de certificado do REGISTRO do
+    # Windows e o driver eager abre o Chrome. Fazer isso para so descobrir que o
+    # portal esta pausado e efeito colateral caro e inutil.
+    setups, drivers = [], []
+    state = make_state([1, 2])
+    emit = make_emit([])
+
+    class BreakerAberto:
+        def aberto(self, alvo):
+            return True
+
+        def registrar_sucesso(self, alvo):
+            pass
+
+        def registrar_falha(self, alvo, mensagem=None):
+            return False
+
+    def _rodar():
+        run_batch_loop(
+            FakeApp(), lock=FakeLock(), state=state, emit_fn=emit,
+            create_driver=lambda: drivers.append('chrome'),
+            eager_driver=True,
+            on_setup=lambda app: setups.append('policy'),
+            alvo_lote='Estadual RS', **COMMON)
+
+    _com_breaker(BreakerAberto(), _rodar)
+
+    assert setups == [], setups
+    assert drivers == [], drivers
+    assert emit.calls['n'] == 0
+    assert state['status'] == 'paused'
+    assert state['pausado_por_breaker'] == 'Estadual RS'
+    print('ok test_breaker_aberto_nao_roda_setup_nem_driver_eager')
+
+
 def main():
     tests = [
         test_all_success,
@@ -610,6 +646,7 @@ def main():
         test_alerta_de_breaker_sai_na_hora_e_nao_no_fim_do_lote,
         test_conexao_recusada_abre_o_breaker,
         test_drive_de_rede_continua_fora_do_breaker,
+        test_breaker_aberto_nao_roda_setup_nem_driver_eager,
     ]
     for t in tests:
         t()
