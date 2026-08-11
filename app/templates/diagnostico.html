@@ -29,6 +29,50 @@
     </div>
 </div>
 
+<div class="card mb-3">
+    <div class="card-header fw-semibold d-flex align-items-center justify-content-between gap-2">
+        <span>Saúde dos portais</span>
+        <span class="small text-muted fw-normal">Verde = o portal responde (não garante que a emissão funciona)</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0 align-middle">
+            <thead>
+                <tr>
+                    <th style="width: 230px;">Portal</th>
+                    <th style="width: 120px;">Situação</th>
+                    <th style="width: 110px;">Resposta</th>
+                    <th>Detalhe</th>
+                    <th style="width: 150px;">Medido em</th>
+                </tr>
+            </thead>
+            <tbody id="diag-portais">
+                <tr><td colspan="5" class="text-center text-muted py-3">Carregando…</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer small text-muted">
+        Os portais de tipo único são medidos por uma consulta leve (sem abrir navegador, sem captcha);
+        os municípios reaproveitam a verificação diária de seletores. Um portal <strong>pausado</strong>
+        teve 3 falhas seguidas e volta a ser tentado sozinho.
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header fw-semibold d-flex align-items-center justify-content-between gap-2">
+        <span>Falhas da fila</span>
+        <span class="small text-muted fw-normal">Emissões que esgotaram as tentativas</span>
+    </div>
+    <div class="card-body py-3">
+        <div id="diag-falhas-aviso" class="small mb-3 text-muted d-none"></div>
+        <div id="diag-falhas">
+            <div class="text-muted small">Carregando…</div>
+        </div>
+    </div>
+    <div class="card-footer small text-muted">
+        Devolver à fila não emite nada agora: zera as tentativas e o próximo ciclo do agendador executa.
+    </div>
+</div>
+
 <div class="card">
     <div class="card-header fw-semibold">Últimos erros e avisos</div>
     <div class="table-responsive">
@@ -190,6 +234,158 @@
             .then(r => r.json())
             .then(render)
             .catch(() => { notaEl.textContent = 'Falha ao consultar o saldo.'; });
+    })();
+
+    // Saúde dos portais (spec 09): semáforo + estado do circuit breaker.
+    (function () {
+        const tbody = document.getElementById('diag-portais');
+        if (!tbody) return;
+
+        // A cor aqui é status — coerente com "a única cor é o status".
+        const BADGE = { ok: 'text-bg-success', fora: 'text-bg-danger', desconhecido: 'text-bg-secondary' };
+        const ROTULO = { ok: 'responde', fora: 'fora', desconhecido: 'sem dado' };
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+            c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+        function quando(iso) {
+            if (!iso) return '<span class="text-muted">—</span>';
+            const d = new Date(iso);
+            return isNaN(d) ? esc(iso) : d.toLocaleString('pt-BR');
+        }
+
+        function linha(p) {
+            const badge = '<span class="badge rounded-pill ' + (BADGE[p.estado] || 'text-bg-secondary')
+                + '">' + esc(ROTULO[p.estado] || p.estado) + '</span>';
+            const pausado = p.breaker_aberto
+                ? ' <span class="badge rounded-pill text-bg-warning">pausado</span>'
+                : '';
+            const latencia = (p.latencia_ms === null || p.latencia_ms === undefined)
+                ? '<span class="text-muted">—</span>'
+                : '<span style="font-family: var(--zelo-font-mono);">' + esc(p.latencia_ms) + ' ms</span>';
+            return '<tr>'
+                + '<td class="fw-medium">' + esc(p.nome) + '</td>'
+                + '<td>' + badge + pausado + '</td>'
+                + '<td class="small">' + latencia + '</td>'
+                + '<td class="small text-muted">' + esc(p.mensagem || '') + '</td>'
+                + '<td class="small text-muted">' + quando(p.medido_em) + '</td>'
+                + '</tr>';
+        }
+
+        fetch('{{ url_for("main.diagnostico_portais") }}')
+            .then(r => r.json())
+            .then(d => {
+                const lista = (d && d.portais) || [];
+                tbody.innerHTML = lista.length
+                    ? lista.map(linha).join('')
+                    : '<tr><td colspan="5" class="text-center text-muted py-3">'
+                    + esc(d.message || 'Nenhum portal para medir.') + '</td></tr>';
+            })
+            .catch(() => {
+                tbody.innerHTML =
+                    '<tr><td colspan="5" class="text-center text-muted py-3">Falha ao medir os portais.</td></tr>';
+            });
+    })();
+
+    // Falhas da fila (spec 09): dead-letter agrupada por motivo + devolver à fila.
+    (function () {
+        const box = document.getElementById('diag-falhas');
+        const avisoEl = document.getElementById('diag-falhas-aviso');
+        if (!box || !avisoEl) return;
+
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+            c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+        function quando(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            return isNaN(d) ? esc(iso) : d.toLocaleString('pt-BR');
+        }
+
+        function item(it) {
+            return '<tr>'
+                + '<td class="small fw-medium">' + esc(it.empresa || ('empresa #' + it.empresa_id)) + '</td>'
+                + '<td class="small">' + esc(it.tipo) + '</td>'
+                + '<td class="small text-muted">' + esc(it.erro || '') + '</td>'
+                + '<td class="small text-muted">' + esc(it.tentativas) + '</td>'
+                + '<td class="small text-muted">' + quando(it.concluida_em) + '</td>'
+                + '<td class="text-end"><button type="button" class="btn btn-sm btn-ghost"'
+                + ' data-devolver-id="' + esc(it.id) + '">Devolver</button></td>'
+                + '</tr>';
+        }
+
+        function grupo(g) {
+            return '<div class="mb-3" data-grupo="' + esc(g.error_type) + '">'
+                + '<div class="d-flex align-items-center justify-content-between gap-2 mb-2">'
+                + '<div><span class="badge rounded-pill text-bg-danger">' + esc(g.total) + '</span> '
+                + '<strong>' + esc(g.titulo) + '</strong>'
+                + '<div class="small text-muted">' + esc(g.acao) + '</div></div>'
+                + '<button type="button" class="btn btn-sm btn-soft-primary"'
+                + ' data-devolver-motivo="' + esc(g.error_type) + '">Devolver o grupo à fila</button>'
+                + '</div>'
+                + '<div class="table-responsive"><table class="table table-sm mb-0 align-middle">'
+                + '<thead><tr><th>Empresa</th><th style="width:110px;">Tipo</th><th>Último erro</th>'
+                + '<th style="width:90px;">Tentativas</th><th style="width:150px;">Quando</th>'
+                + '<th style="width:110px;"></th></tr></thead>'
+                + '<tbody>' + g.itens.map(item).join('') + '</tbody></table></div>'
+                + '</div>';
+        }
+
+        function render(d) {
+            const grupos = (d && d.grupos) || [];
+            box.innerHTML = grupos.length
+                ? grupos.map(grupo).join('')
+                : '<div class="text-muted small">Nenhuma falha na fila — nada a reprocessar.</div>';
+        }
+
+        function carregar() {
+            fetch('{{ url_for("main.diagnostico_fila_falhas") }}')
+                .then(r => r.json())
+                .then(render)
+                .catch(() => { box.innerHTML = '<div class="text-muted small">Falha ao carregar as falhas da fila.</div>'; });
+        }
+
+        // O resultado aparece no proprio card (a pagina de diagnostico nao carrega
+        // o modulo de toasts; ver base.html, que degrada silenciosamente sem ele).
+        function resultado(d) {
+            const devolvidas = (d.devolvidas || []).length;
+            const recusadas = d.recusadas || [];
+            let msg = devolvidas + (devolvidas === 1 ? ' item devolvido' : ' itens devolvidos') + ' à fila.';
+            if (recusadas.length) {
+                msg += ' ' + recusadas.length + ' não pôde voltar: '
+                    + recusadas.map(r => '#' + esc(r.id) + ' (' + esc(r.motivo) + ')').join('; ');
+            }
+            avisoEl.className = 'small mb-3 ' + (recusadas.length ? 'text-warning' : 'text-muted');
+            avisoEl.textContent = msg;
+            avisoEl.classList.remove('d-none');
+        }
+
+        function devolver(corpo, btn) {
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = 'Devolvendo…';
+            fetch('{{ url_for("main.diagnostico_fila_reprocessar") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(corpo)
+            })
+                .then(r => r.json())
+                .then(d => { resultado(d); carregar(); })
+                .catch(() => {
+                    avisoEl.className = 'small mb-3 text-danger';
+                    avisoEl.textContent = 'Falha ao devolver à fila.';
+                    avisoEl.classList.remove('d-none');
+                })
+                .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+        }
+
+        box.addEventListener('click', function (ev) {
+            const porMotivo = ev.target.closest('[data-devolver-motivo]');
+            if (porMotivo) return devolver({ error_type: porMotivo.dataset.devolverMotivo }, porMotivo);
+            const porItem = ev.target.closest('[data-devolver-id]');
+            if (porItem) return devolver({ ids: [Number(porItem.dataset.devolverId)] }, porItem);
+        });
+
+        carregar();
     })();
 
     // Verificação de seletores dos municípios (COV-05): lista + teste sob demanda.
