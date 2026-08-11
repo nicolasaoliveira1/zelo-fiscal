@@ -111,6 +111,12 @@ SECRET_KEY=uma_chave_segura
 # Agendador da emissão proativa (opcional; liga/desliga e hora também no painel)
 # AGENDADOR_ENABLED=true
 
+# Resiliência operacional (opcional; valores padrão entre parênteses)
+# BREAKER_LIMIAR=3                  # falhas seguidas que pausam um portal (3)
+# BREAKER_JANELA_MINUTOS=60         # quanto tempo o portal fica pausado (60)
+# PORTAL_PING_TTL_MINUTOS=5         # cache do semáforo de saúde no painel (5)
+# PORTAL_PING_TIMEOUT_S=6           # teto de espera de cada checagem (6)
+
 # Notificações por e-mail (opcional; sem SMTP_HOST/SMTP_FROM o envio é ignorado com aviso)
 # SMTP_HOST=smtp.seuprovedor.com
 # SMTP_PORT=587
@@ -250,7 +256,8 @@ app/
     capture.py               #   Screenshot + HTML na falha Selenium
     batch_state.py           #   Estado e locks compartilhados dos lotes
   services/                  # Camada de serviços (motor de lotes, agendador, notificações,
-                             #   exportação, observabilidade, importação e emissão de NFS-e)
+                             #   exportação, observabilidade, importação e emissão de NFS-e,
+                             #   circuit breaker por portal e saúde dos portais)
   static/                    # CSS, imagens e JS por página (ES modules, sem bundler)
   templates/                 # Jinja2
 ```
