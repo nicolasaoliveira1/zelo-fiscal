@@ -28,6 +28,18 @@ from app.utils import get_config_value
 LIMIAR_PADRAO = 3
 JANELA_MINUTOS_PADRAO = 60
 
+# Rotulos dos portais de tipo unico. Vivem AQUI (e nao em routes) porque sao a
+# chave do breaker para dois lados: quem alimenta (os fluxos de lote) e quem le
+# (o semaforo do painel). Com duas listas, o painel marcaria como aberto um
+# portal que o lote chama por outro nome — em silencio.
+ALVO_FGTS = 'FGTS'
+ALVO_ESTADUAL_RS = 'Estadual RS'
+ALVO_TRABALHISTA = 'Trabalhista'
+ALVO_FEDERAL = 'Federal'
+# Municipio nao tem rotulo fixo: o alvo e a chave canonica da cidade
+# (`utils.normalizar_cidade`), a mesma dos dois lados.
+ALVO_MUNICIPAL_GENERICO = 'Municipal'
+
 _lock = threading.Lock()
 _contador = ContadorRecorrencia(LIMIAR_PADRAO)
 _abertos = {}  # alvo -> {'desde': datetime, 'ocorrencias': int, 'motivo': str|None}

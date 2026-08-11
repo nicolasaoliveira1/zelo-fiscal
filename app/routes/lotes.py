@@ -55,6 +55,7 @@ from app.services import (
     agendador,
     auditoria,
     batch_engine,
+    circuit_breaker,
     preflight,
 )
 from app.services.correlation import CorrelationContext
@@ -138,12 +139,12 @@ def _calc_municipal_targets_by_scope(start_certidao_id, scope='default'):
 
 
 # === circuit breaker por portal (spec 09, RESOP-02) ========================
-# Rotulos estaveis dos lotes de portal unico. Sao a CHAVE do breaker e aparecem
-# no alerta/painel — mudar aqui muda o que o operador le.
-ALVO_BREAKER_FGTS = 'FGTS'
-ALVO_BREAKER_RS = 'Estadual RS'
-ALVO_BREAKER_TRABALHISTA = 'Trabalhista'
-ALVO_BREAKER_MUNICIPAL_GENERICO = 'Municipal'
+# Os rotulos vem do proprio circuit_breaker: sao a chave que o painel usa para
+# saber se ESTE portal esta pausado. Duas listas divergiriam em silencio.
+ALVO_BREAKER_FGTS = circuit_breaker.ALVO_FGTS
+ALVO_BREAKER_RS = circuit_breaker.ALVO_ESTADUAL_RS
+ALVO_BREAKER_TRABALHISTA = circuit_breaker.ALVO_TRABALHISTA
+ALVO_BREAKER_MUNICIPAL_GENERICO = circuit_breaker.ALVO_MUNICIPAL_GENERICO
 
 
 def _alvo_breaker_municipal(certidao_id):
