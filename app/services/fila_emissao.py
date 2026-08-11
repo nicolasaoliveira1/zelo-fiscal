@@ -206,6 +206,59 @@ def agrupar_falhas(limite=200):
     return sorted(grupos.values(), key=lambda g: g['total'], reverse=True)
 
 
+def devolver_para_fila(tarefa):
+    """Devolve uma tarefa `falha` para a fila: `pendente` e tentativas zeradas.
+
+    Nao emite nada — quem executa e o ciclo seguinte do agendador. Devolve
+    `(ok, motivo_da_recusa)`. Recusa (sem tocar na tarefa) quando a certidao nao
+    existe mais e quando ja ha tarefa ATIVA para a mesma certidao: o
+    reprocessamento em bloco nao pode criar uma segunda tarefa viva para o mesmo
+    alvo (RESOP-01.7)."""
+    if tarefa is None:
+        return False, 'tarefa nao encontrada'
+    if tarefa.status != 'falha':
+        return False, f'tarefa nao esta em falha (status: {tarefa.status})'
+    if db.session.get(Certidao, tarefa.certidao_id) is None:
+        return False, 'certidao nao existe mais'
+    if tarefa_ativa(tarefa.certidao_id) is not None:
+        return False, 'ja existe tarefa ativa para esta certidao'
+
+    tarefa.status = 'pendente'
+    tarefa.tentativas = 0
+    tarefa.iniciada_em = None
+    tarefa.concluida_em = None
+    if not _commit(tarefa):
+        return False, 'falha ao gravar'
+    return True, None
+
+
+def reprocessar(ids=None, error_type=None):
+    """Devolve a fila as falhas indicadas por `ids` ou por motivo (`error_type`).
+
+    **Parcial por desenho** (mesmo padrao da acao em massa da NFSe): o que der
+    certo e aplicado e o que nao der volta nomeado em `recusadas` — abortar tudo
+    porque uma linha ja voltara a fila obrigaria o operador a refazer a selecao.
+    """
+    resultado = {'devolvidas': [], 'recusadas': []}
+    if ids:
+        tarefas = TarefaEmissao.query.filter(TarefaEmissao.id.in_(list(ids))).all()
+    elif error_type:
+        tarefas = [t for t in tarefas_falhas() if motivo_da_tarefa(t) == error_type]
+    else:
+        return resultado
+
+    for tarefa in tarefas:
+        ok, motivo = devolver_para_fila(tarefa)
+        if ok:
+            resultado['devolvidas'].append(tarefa.id)
+        else:
+            resultado['recusadas'].append({'id': tarefa.id, 'motivo': motivo})
+
+    log_event('fila_reprocessada', devolvidas=len(resultado['devolvidas']),
+              recusadas=len(resultado['recusadas']), error_type=error_type)
+    return resultado
+
+
 def reconciliar_orfas(*, apenas_timeout=False):
     """Recupera tarefas 'rodando' que ficaram órfãs (AC P1.3).
 
