@@ -256,6 +256,10 @@ def test_item_recusado_pelo_breaker_mantem_a_tarefa_pendente(ctx):
         alvo_fn=lotes._alvo_breaker_municipal)
 
     assert emitidos == []
+    # O loop roda no proprio app_context (outra sessao). Sem expirar, este get
+    # devolveria o objeto do cache de identidade e a assercao passaria mesmo se o
+    # loop tivesse consumido a tentativa — teste cego, nao teste.
+    db.session.expire_all()
     tarefa_atual = db.session.get(TarefaEmissao, tarefa.id)
     assert tarefa_atual.status == 'pendente'
     assert tarefa_atual.tentativas == 0
