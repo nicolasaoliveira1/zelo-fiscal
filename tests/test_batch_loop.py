@@ -562,9 +562,13 @@ def test_conexao_recusada_abre_o_breaker():
 
 
 def test_drive_de_rede_continua_fora_do_breaker():
-    # O contraponto: o Z: caindo nao diz nada sobre o portal.
+    # O contraponto: o Z: caindo nao diz nada sobre o portal. A 3a mensagem e a
+    # que exige o marcador ESTREITO: ela contem a palavra "connection", mas e
+    # erro de drive — aceitar a palavra solta faria o breaker do portal abrir
+    # por causa da rede do escritorio.
     for mensagem in ('Pasta de rede inacessivel: Z: nao mapeado',
-                     'Falha ao acessar o caminho de rede (network path)'):
+                     'Falha ao acessar o caminho de rede (network path)',
+                     'The network connection was lost while accessing Z:'):
         state = make_state([1, 2, 3])
         emit = make_emit([(False, False, mensagem)] * 3)
         fake = _breaker_com(set())

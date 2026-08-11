@@ -410,3 +410,20 @@ def test_parar_tambem_apaga_a_marca_do_breaker(ctx):
     batch_engine.request_stop(_LockFake(), state)
 
     assert state['pausado_por_breaker'] is None
+
+
+def test_pausar_sozinho_ja_apaga_a_marca_do_breaker(ctx):
+    """Isola o contrato de `request_pause`: uma pausa manual e MANUAL, mesmo que
+    o lote estivesse marcado pelo breaker. (O teste acima passa pelo resume
+    antes, entao nao provaria esta linha sozinha.)"""
+    circuit_breaker.limpar()
+    state = batch_engine.batch_state_defaults()
+    state.update(status='running', pausado_por_breaker='FGTS',
+                 ids=[1, 2, 3], index=1, total=3)
+
+    batch_engine.request_pause(_LockFake(), state)
+
+    assert state['status'] == 'paused'
+    assert state['pausado_por_breaker'] is None
+    assert batch_engine.liberar_pausa_de_breaker(_LockFake(), state) is False
+    assert state['index'] == 1
