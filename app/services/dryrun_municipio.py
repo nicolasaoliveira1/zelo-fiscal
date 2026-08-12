@@ -8,6 +8,10 @@ Fronteira de seguranca (por que e seguro):
 - `before_cnpj` sao passos de navegacao/selecao, executados ANTES de qualquer
   emissao -> executados de verdade (fidelidade real), um a um, reusando
   `steps.executar_municipio` (sem duplicar o engine) para granularidade por passo.
+- o `pre_fill_click` (radio PJ / modo CNPJ, que vive em COLUNA do municipio) e
+  executado pelo mesmo motivo e pelo mesmo nucleo da emissao
+  (`steps.clicar_pre_fill`): em varios portais o campo de CNPJ so e renderizado
+  depois dele;
 - o campo de CNPJ e apenas localizado/preenchido (inofensivo);
 - `after_cnpj` contem o clique que GERA o PDF -> apenas verificamos se o
   localizador resolve (`find_elements`), nunca clicamos. Os passos seguintes
@@ -21,6 +25,7 @@ import copy
 import threading
 import time
 from datetime import datetime
+from types import SimpleNamespace
 
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -32,7 +37,11 @@ from app.automation.driver import (
     _municipal_profile_acquire,
     _municipal_profile_release,
 )
-from app.automation.emissao import _carregar_config_municipio, _normalizar_cnpj
+from app.automation.emissao import (
+    _aplicar_variantes_imbe,
+    _carregar_config_municipio,
+    _normalizar_cnpj,
+)
 from app.automation.sites import is_ipm_atende
 from app.services.execution_logger import log_event
 from app.utils import normalizar_cidade
@@ -174,19 +183,24 @@ def cnpj_para_teste(municipio):
     return CNPJ_TESTE
 
 
-def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None):
-    """Roda o dry-run de um municipio e devolve um relatorio estruturado.
+def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None, rotulo=''):
+    """Roda o dry-run de UMA passada (uma variante) e devolve um relatorio.
 
-    `config` e o `config_automacao` ja desserializado (dict) ou None. Nunca
-    levanta: falhas viram `resultado='erro'`. Retorna:
+    `config` e o `config_automacao` ja desserializado (dict) ou None. `rotulo`
+    nomeia a variante quando o municipio tem mais de uma tela (ver `variantes`) e
+    entra no nome da etapa — sem ele, "cnpj: name=form:cnpjD" nao diria em qual
+    das telas do Imbé o campo sumiu. Nunca levanta: falhas viram `resultado='erro'`.
+    Retorna:
     {'municipio', 'resultado', 'checagens': [{'etapa','alvo','status','detalhe'}],
      'quebrados': [str], 'mensagem': str|None}
     """
     nome = getattr(municipio, 'nome', None) or '?'
     relatorio = {'municipio': nome, 'resultado': OK, 'checagens': [],
-                 'quebrados': [], 'mensagem': None}
+                 'quebrados': [], 'mensagem': None, 'variante': rotulo}
 
     def _registrar(etapa, alvo, status, detalhe=None):
+        if rotulo:
+            etapa = f'{rotulo}/{etapa}'
         relatorio['checagens'].append(
             {'etapa': etapa, 'alvo': alvo, 'status': status, 'detalhe': detalhe})
         if status == QUEBRADO:
@@ -262,7 +276,34 @@ def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None):
                 f'Passo {etapa} ({_descrever(step)}) não resolveu — o seletor mudou.')
             return relatorio
 
-    # 2) campo de CNPJ: so localiza (nao submete nada).
+    # 2) pre_fill_click: o passo pre-CNPJ que vive em COLUNA do municipio, nao em
+    #    `before_cnpj`. Em Imbe/Sorriso e o radio "Pessoa Juridica" e em Capao da
+    #    Canoa a troca de modo para CNPJ — e nesses portais o campo de CNPJ so e
+    #    renderizado DEPOIS do clique. Sem executa-lo, o dry-run procurava um campo
+    #    que ainda nao existe e reportava "quebrado" num portal intacto (relatado
+    #    no Imbe: `form:cnpjDI`). Executar e seguro pela mesma regra do
+    #    `_passo_emite`: e anterior ao CNPJ, e sem CNPJ nao ha o que emitir.
+    if not pula_cnpj:
+        info_pre = {'pre_fill_click_id': getattr(municipio, 'pre_fill_click_id', None),
+                    'pre_fill_click_by': getattr(municipio, 'pre_fill_click_by', None)}
+        clicou = steps_engine.clicar_pre_fill(info_pre, wait, by_padrao='id', pausa=1)
+        if clicou is not None:
+            alvo = (f"{info_pre['pre_fill_click_by'] or 'id'}"
+                    f"={info_pre['pre_fill_click_id']}")
+            if clicou:
+                _registrar('pre_fill_click', alvo, OK)
+            else:
+                # Aborta aqui de proposito: sem esse clique o campo de CNPJ nao
+                # aparece, e continuar acusaria o campo errado.
+                relatorio['resultado'] = QUEBRADO
+                _registrar('pre_fill_click', alvo, QUEBRADO,
+                           'não foi possível clicar (elemento ausente ou "by" inválido)')
+                relatorio['mensagem'] = (
+                    f'Passo pré-CNPJ ({alvo}) não resolveu — sem ele o campo de CNPJ '
+                    'não é exibido pelo portal.')
+                return relatorio
+
+    # 3) campo de CNPJ: so localiza (nao submete nada).
     if not config.get('skip_cnpj_fill'):
         campo = getattr(municipio, 'cnpj_field_id', None)
         by_nome = getattr(municipio, 'by', None)
@@ -276,7 +317,7 @@ def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None):
                 relatorio['mensagem'] = f'Campo de CNPJ ({alvo}) não existe mais no portal.'
                 return relatorio
 
-    # 3) after_cnpj: NAO executa (e o clique que emite). Verifica o primeiro
+    # 4) after_cnpj: NAO executa (e o clique que emite). Verifica o primeiro
     #    localizador; os seguintes dependem dele e ficam sem verificacao.
     depois = [s for s in (config.get('after_cnpj') or []) if (s or {}).get('locator')]
     for idx, step in enumerate(depois, start=1):
@@ -298,14 +339,85 @@ def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None):
         relatorio['resultado'] = PARCIAL
         relatorio['mensagem'] = 'Verificação parcial: alguns passos dependem da emissão/captcha.'
 
-    log_event('municipio_dryrun', municipio=nome, resultado=relatorio['resultado'],
-              quebrados=len(relatorio['quebrados']))
+    log_event('municipio_dryrun', municipio=nome, variante=rotulo or '-',
+              resultado=relatorio['resultado'], quebrados=len(relatorio['quebrados']))
     return relatorio
+
+
+# Do menos para o mais grave: a fusao das passadas fica com o PIOR (uma tela
+# quebrada nao pode ser escondida pela outra que passou).
+_SEVERIDADE = {PULADO: 0, OK: 1, PARCIAL: 2, ERRO: 3, QUEBRADO: 4}
+
+
+def variantes(municipio, config):
+    """Passadas do dry-run de um municipio: [(rotulo, municipio, config)].
+
+    Quase todo municipio tem UMA. O Imbé tem duas telas diferentes — mobiliário e
+    geral — e a emissao escolhe pelo subtipo da certidao: a variante 'geral' troca
+    URL, campo de CNPJ e o `by` (e o `press_tab` do after_cnpj). Com uma passada
+    so, o dry-run media apenas a tela cadastrada nas colunas (a mobiliária) e uma
+    mudanca na tela geral passaria despercebida ate a emissao falhar.
+
+    A variante e montada pelo `_aplicar_variantes_imbe`, o MESMO nucleo que a
+    emissao usa: os defaults da tela geral (URL e `form:cnpjD`) moram la, e uma
+    segunda copia aqui envelheceria em silencio — o dry-run passaria verde
+    conferindo uma tela que a emissao nao usa mais. Cada passada leva sua propria
+    copia do config (o `_aplicar_variantes_imbe` mexe no `after_cnpj`).
+    """
+    base = copy.deepcopy(config or {})
+    if normalizar_cidade(getattr(municipio, 'nome', '') or '') != 'IMBE':
+        return [('', municipio, base)]
+
+    info = {'url': getattr(municipio, 'url_certidao', None),
+            'cnpj_field_id': getattr(municipio, 'cnpj_field_id', None),
+            'by': getattr(municipio, 'by', None),
+            'pre_fill_click_id': getattr(municipio, 'pre_fill_click_id', None),
+            'pre_fill_click_by': getattr(municipio, 'pre_fill_click_by', None)}
+    cfg_geral = copy.deepcopy(config or {})
+    _aplicar_variantes_imbe(info, cfg_geral, 'geral')
+    geral = SimpleNamespace(
+        nome=getattr(municipio, 'nome', None),
+        automacao_ativa=getattr(municipio, 'automacao_ativa', True),
+        url_certidao=info.get('url'),
+        cnpj_field_id=info.get('cnpj_field_id'),
+        by=info.get('by'),
+        pre_fill_click_id=info.get('pre_fill_click_id'),
+        pre_fill_click_by=info.get('pre_fill_click_by'),
+    )
+    return [('mobiliário', municipio, base), ('geral', geral, cfg_geral)]
+
+
+def _mesclar(relatorios):
+    """Funde as passadas num relatorio POR MUNICIPIO.
+
+    O painel e o alerta sao por municipio (`registrar_resultado` guarda por nome e
+    o e-mail tem chave anti-spam por nome), entao duas linhas para o mesmo
+    municipio disputariam o mesmo slot. O resultado e o pior das passadas e as
+    mensagens vem rotuladas — "[geral] Campo de CNPJ ... " diz qual tela consertar.
+    """
+    if len(relatorios) == 1:
+        return relatorios[0]
+
+    fundido = {'municipio': relatorios[0]['municipio'], 'resultado': OK,
+               'checagens': [], 'quebrados': [], 'mensagem': None, 'variante': ''}
+    mensagens = []
+    for rel in relatorios:
+        fundido['checagens'].extend(rel.get('checagens') or [])
+        fundido['quebrados'].extend(rel.get('quebrados') or [])
+        if _SEVERIDADE.get(rel['resultado'], 0) > _SEVERIDADE.get(fundido['resultado'], 0):
+            fundido['resultado'] = rel['resultado']
+        if rel.get('mensagem'):
+            rotulo = rel.get('variante')
+            mensagens.append(f'[{rotulo}] {rel["mensagem"]}' if rotulo else rel['mensagem'])
+    if relatorios and all(r['resultado'] == PULADO for r in relatorios):
+        fundido['resultado'] = PULADO
+    fundido['mensagem'] = ' | '.join(mensagens) or None
+    return fundido
 
 
 def _erro(nome, mensagem):
     return {'municipio': nome, 'resultado': ERRO, 'checagens': [],
-            'quebrados': [], 'mensagem': mensagem}
+            'quebrados': [], 'mensagem': mensagem, 'variante': ''}
 
 
 def _bloquear_downloads(driver):
@@ -348,8 +460,18 @@ def _executar_dry_run(municipio, timeout=20):
 
         _bloquear_downloads(driver)
         config = _carregar_config_municipio(municipio)
-        return verificar_municipio(municipio, driver, config=config, timeout=timeout,
-                                   cnpj=cnpj_para_teste(municipio))
+        cnpj = cnpj_para_teste(municipio)
+        # Uma passada por variante, no MESMO driver: cada `verificar_municipio`
+        # comeca com um `driver.get(url)`, entao a segunda tela e navegada a
+        # partir da primeira. As variantes ficam no mesmo portal (Imbé: dois
+        # `codigo=` do mesmo host), logo a escolha de driver feita acima vale para
+        # as duas.
+        relatorios = [
+            verificar_municipio(muni_var, driver, config=cfg_var, timeout=timeout,
+                                cnpj=cnpj, rotulo=rotulo)
+            for rotulo, muni_var, cfg_var in variantes(municipio, config)
+        ]
+        return _mesclar(relatorios)
     except Exception as exc:
         log_event('municipio_dryrun_falha', level='ERROR', municipio=nome, error=str(exc))
         return _erro(nome, f'Falha ao executar a verificação: {exc}')

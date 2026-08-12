@@ -24,6 +24,37 @@ BY_MAP = {
 }
 
 
+def clicar_pre_fill(info_site, wait, by_padrao=None, pausa=0.0):
+    """Executa o clique pré-CNPJ configurado em `pre_fill_click_*`.
+
+    Núcleo compartilhado: este passo NÃO vive em `before_cnpj` (JSON), e sim em
+    colunas do município — e em vários portais o campo de CNPJ só existe DEPOIS
+    dele (Imbé/Sorriso selecionam o radio "Pessoa Jurídica"; Capão da Canoa troca
+    o modo para CNPJ). Quem navega até o campo de CNPJ precisa passar por aqui,
+    senão procura um elemento que o portal ainda não renderizou.
+
+    `by_padrao` e `pausa` existem porque os fluxos que já faziam isso inline
+    divergiam no default do `by` e no sleep pós-clique; cada chamador mantém o
+    seu. Retorna: None = nada configurado; True = clicou; False = configurado mas
+    não deu para clicar (elemento ausente ou `by` inválido) — os fluxos de
+    emissão ignoram o retorno (best-effort, como antes), o dry-run o reporta.
+    """
+    locator = (info_site or {}).get('pre_fill_click_id')
+    if not locator:
+        return None
+    by = BY_MAP.get((info_site or {}).get('pre_fill_click_by') or by_padrao)
+    if not by:
+        return False
+    try:
+        elemento = wait.until(EC.element_to_be_clickable((by, locator)))
+        elemento.click()
+    except Exception:
+        return False
+    if pausa:
+        time.sleep(pausa)
+    return True
+
+
 def executar_municipio(driver, wait, steps, cnpj_limpo, inscricao_limpa, etapa_label='steps'):
     if not steps:
         return None
