@@ -49,3 +49,52 @@ def test_by_invalido_ignora_step():
     # by desconhecido -> step ignorado, sem chamar wait.until
     steps.executar_municipio(driver, wait, steps_def, '', '')
     assert not wait.until.called
+
+
+# --- clicar_pre_fill: nucleo compartilhado do passo pre-CNPJ ---------------
+
+def test_pre_fill_clica_e_usa_o_by_configurado():
+    from unittest.mock import patch
+
+    from selenium.webdriver.common.by import By
+    wait = MagicMock()
+    elemento = MagicMock()
+    wait.until.return_value = elemento
+    info = {'pre_fill_click_id': "input[value='J']", 'pre_fill_click_by': 'css_selector'}
+
+    with patch.object(steps.EC, 'element_to_be_clickable') as cond:
+        assert steps.clicar_pre_fill(info, wait, by_padrao='id') is True
+    assert elemento.click.called
+    # o by da config vence o padrao do chamador
+    assert cond.call_args.args[0] == (By.CSS_SELECTOR, "input[value='J']")
+
+
+def test_pre_fill_sem_configuracao_nao_toca_no_driver():
+    wait = MagicMock()
+    assert steps.clicar_pre_fill({}, wait) is None
+    assert steps.clicar_pre_fill(None, wait) is None
+    assert not wait.until.called
+
+
+def test_pre_fill_by_invalido_e_falha_declarada():
+    # Nao clica (como antes), mas devolve False: o dry-run precisa distinguir
+    # "nao ha passo" de "ha passo e nao deu para executar".
+    wait = MagicMock()
+    info = {'pre_fill_click_id': 'x', 'pre_fill_click_by': 'xpto_invalido'}
+    assert steps.clicar_pre_fill(info, wait) is False
+    assert not wait.until.called
+
+
+def test_pre_fill_elemento_ausente_nao_levanta():
+    wait = MagicMock()
+    wait.until.side_effect = RuntimeError('sumiu')
+    info = {'pre_fill_click_id': 'x', 'pre_fill_click_by': 'id'}
+    assert steps.clicar_pre_fill(info, wait) is False   # best-effort, como antes
+
+
+def test_pre_fill_usa_by_padrao_quando_a_config_nao_diz():
+    wait = MagicMock()
+    wait.until.return_value = MagicMock()
+    info = {'pre_fill_click_id': 'x', 'pre_fill_click_by': None}
+    assert steps.clicar_pre_fill(info, wait, by_padrao='id') is True
+    assert steps.clicar_pre_fill(info, wait) is False   # sem padrao, nada a fazer

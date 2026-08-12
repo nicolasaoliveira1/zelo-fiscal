@@ -879,17 +879,9 @@ def _emitir_municipal_certidao_lote(certidao_id, driver=None, execution_id=None)
             batch_engine.marcar_resultado_pendente(MUNICIPAL_BATCH_STATE, MUNICIPAL_BATCH_LOCK)
             return True, False, 'Certidão sem negativa, marcada como pendente.'
 
-        if info_site.get('pre_fill_click_id'):
-            click_by = info_site.get('pre_fill_click_by') or 'id'
-            click_map = steps.BY_MAP
-            by = click_map.get(click_by)
-            if by:
-                try:
-                    elemento_inicial = wait.until(EC.element_to_be_clickable((by, info_site['pre_fill_click_id'])))
-                    elemento_inicial.click()
-                    time.sleep(1)
-                except Exception:
-                    pass
+        # passo pré-CNPJ em coluna (radio PJ/modo CNPJ): o campo de CNPJ de
+        # vários portais só existe depois dele — ver steps.clicar_pre_fill.
+        steps.clicar_pre_fill(info_site, wait, by_padrao='id', pausa=1)
 
         if info_site.get('cnpj_field_id'):
             by_map = steps.BY_MAP
@@ -1342,14 +1334,7 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
                       certidao_id=certidao_id, error=str(exc))
 
         # abre o formulário de emissão (pre-fill "Emitir Certidão")
-        pre_by = steps.BY_MAP.get(info_site.get('pre_fill_click_by') or 'css_selector')
-        if info_site.get('pre_fill_click_id') and pre_by:
-            try:
-                botao = wait.until(EC.element_to_be_clickable(
-                    (pre_by, info_site['pre_fill_click_id'])))
-                botao.click()
-            except Exception:
-                pass
+        steps.clicar_pre_fill(info_site, wait, by_padrao='css_selector')
 
         # preenche o CNPJ
         cnpj_by = steps.BY_MAP.get(info_site.get('by') or 'id')

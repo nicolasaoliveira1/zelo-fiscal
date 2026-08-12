@@ -432,21 +432,7 @@ def _baixar_executar_acao(nome_acao, info_site, wait, driver, certidao, contexto
     select de tipo ou emissao FGTS via CDP. Dispatch por nome_acao."""
     # 1 pre click inicial
     if nome_acao == 'pre_fill':
-        if not info_site.get('pre_fill_click_id'):
-            return
-        click_by = steps.BY_MAP.get(info_site.get('pre_fill_click_by'))
-        if not click_by:
-            return
-        try:
-            elemento_inicial = wait.until(
-                EC.element_to_be_clickable(
-                    (click_by, info_site['pre_fill_click_id'])
-                )
-            )
-            elemento_inicial.click()
-            time.sleep(2)
-        except Exception:
-            pass
+        steps.clicar_pre_fill(info_site, wait, pausa=2)
 
     # 2 select de tipo
     elif nome_acao == 'select_tipo':
