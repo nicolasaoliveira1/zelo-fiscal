@@ -8,6 +8,10 @@ Fronteira de seguranca (por que e seguro):
 - `before_cnpj` sao passos de navegacao/selecao, executados ANTES de qualquer
   emissao -> executados de verdade (fidelidade real), um a um, reusando
   `steps.executar_municipio` (sem duplicar o engine) para granularidade por passo.
+- o `pre_fill_click` (radio PJ / modo CNPJ, que vive em COLUNA do municipio) e
+  executado pelo mesmo motivo e pelo mesmo nucleo da emissao
+  (`steps.clicar_pre_fill`): em varios portais o campo de CNPJ so e renderizado
+  depois dele;
 - o campo de CNPJ e apenas localizado/preenchido (inofensivo);
 - `after_cnpj` contem o clique que GERA o PDF -> apenas verificamos se o
   localizador resolve (`find_elements`), nunca clicamos. Os passos seguintes
@@ -262,7 +266,34 @@ def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None):
                 f'Passo {etapa} ({_descrever(step)}) não resolveu — o seletor mudou.')
             return relatorio
 
-    # 2) campo de CNPJ: so localiza (nao submete nada).
+    # 2) pre_fill_click: o passo pre-CNPJ que vive em COLUNA do municipio, nao em
+    #    `before_cnpj`. Em Imbe/Sorriso e o radio "Pessoa Juridica" e em Capao da
+    #    Canoa a troca de modo para CNPJ — e nesses portais o campo de CNPJ so e
+    #    renderizado DEPOIS do clique. Sem executa-lo, o dry-run procurava um campo
+    #    que ainda nao existe e reportava "quebrado" num portal intacto (relatado
+    #    no Imbe: `form:cnpjDI`). Executar e seguro pela mesma regra do
+    #    `_passo_emite`: e anterior ao CNPJ, e sem CNPJ nao ha o que emitir.
+    if not pula_cnpj:
+        info_pre = {'pre_fill_click_id': getattr(municipio, 'pre_fill_click_id', None),
+                    'pre_fill_click_by': getattr(municipio, 'pre_fill_click_by', None)}
+        clicou = steps_engine.clicar_pre_fill(info_pre, wait, by_padrao='id', pausa=1)
+        if clicou is not None:
+            alvo = (f"{info_pre['pre_fill_click_by'] or 'id'}"
+                    f"={info_pre['pre_fill_click_id']}")
+            if clicou:
+                _registrar('pre_fill_click', alvo, OK)
+            else:
+                # Aborta aqui de proposito: sem esse clique o campo de CNPJ nao
+                # aparece, e continuar acusaria o campo errado.
+                relatorio['resultado'] = QUEBRADO
+                _registrar('pre_fill_click', alvo, QUEBRADO,
+                           'não foi possível clicar (elemento ausente ou "by" inválido)')
+                relatorio['mensagem'] = (
+                    f'Passo pré-CNPJ ({alvo}) não resolveu — sem ele o campo de CNPJ '
+                    'não é exibido pelo portal.')
+                return relatorio
+
+    # 3) campo de CNPJ: so localiza (nao submete nada).
     if not config.get('skip_cnpj_fill'):
         campo = getattr(municipio, 'cnpj_field_id', None)
         by_nome = getattr(municipio, 'by', None)
@@ -276,7 +307,7 @@ def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None):
                 relatorio['mensagem'] = f'Campo de CNPJ ({alvo}) não existe mais no portal.'
                 return relatorio
 
-    # 3) after_cnpj: NAO executa (e o clique que emite). Verifica o primeiro
+    # 4) after_cnpj: NAO executa (e o clique que emite). Verifica o primeiro
     #    localizador; os seguintes dependem dele e ficam sem verificacao.
     depois = [s for s in (config.get('after_cnpj') or []) if (s or {}).get('locator')]
     for idx, step in enumerate(depois, start=1):

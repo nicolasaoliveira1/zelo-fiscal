@@ -96,6 +96,82 @@ def test_espera_o_campo_carregar_antes_de_acusar_quebrado():
     assert drv.tentativas >= 3
 
 
+def test_pre_fill_click_e_executado_antes_de_procurar_o_cnpj():
+    """Regressao (relatado no Imbé): o campo `form:cnpjDI` so existe DEPOIS do
+    radio "Pessoa Juridica", que fica em coluna do municipio e nao em
+    `before_cnpj`. Sem executar o clique, o dry-run acusava drift num portal
+    intacto — clicando a mao, o mesmo fluxo dava OK."""
+    ordem = []
+
+    class _DriverComRadio(_FakeDriver):
+        def find_elements(self, by, locator):
+            # o campo so aparece depois do clique no radio
+            if locator == "input[id='form:cnpjDI']" and 'clicou' not in ordem:
+                return []
+            return ['elemento']
+
+    drv = _DriverComRadio()
+    muni = _municipio(cnpj_field_id="input[id='form:cnpjDI']", by='css_selector',
+                      pre_fill_click_id="input[value='J']", pre_fill_click_by='css_selector')
+
+    def _clicar(info_site, wait, by_padrao=None, pausa=0.0):
+        ordem.append('clicou')
+        return True
+
+    with patch.object(dr.steps_engine, 'clicar_pre_fill', side_effect=_clicar) as pre:
+        rel = dr.verificar_municipio(muni, drv, config={}, timeout=0)
+
+    pre.assert_called_once()
+    info = pre.call_args.args[0]
+    assert info['pre_fill_click_id'] == "input[value='J']"
+    assert rel['resultado'] == dr.OK
+    assert [c['etapa'] for c in rel['checagens']] == ['url', 'pre_fill_click', 'cnpj']
+
+
+def test_pre_fill_click_roda_depois_do_before_cnpj():
+    # Mesma ordem da emissao real: before_cnpj -> pre_fill_click -> campo de CNPJ.
+    ordem = []
+    cfg = {'before_cnpj': [{'tipo': 'click', 'by': 'id', 'locator': 'btnAba'}],
+           'after_cnpj': []}
+    muni = _municipio(pre_fill_click_id="input[value='J']", pre_fill_click_by='css_selector')
+    with patch.object(dr.steps_engine, 'executar_municipio',
+                      side_effect=lambda *a, **k: ordem.append('step')), \
+            patch.object(dr.steps_engine, 'clicar_pre_fill',
+                         side_effect=lambda *a, **k: ordem.append('pre') or True):
+        dr.verificar_municipio(muni, _FakeDriver(encontra=['campoCnpj']), config=cfg)
+    assert ordem == ['step', 'pre']
+
+
+def test_pre_fill_click_que_sumiu_e_quebrado_no_passo_certo():
+    # O radio some -> a mensagem aponta o passo pre-CNPJ, nao o campo de CNPJ.
+    muni = _municipio(pre_fill_click_id="input[value='J']", pre_fill_click_by='css_selector')
+    with patch.object(dr.steps_engine, 'clicar_pre_fill', return_value=False):
+        rel = dr.verificar_municipio(muni, _FakeDriver(), config={}, timeout=0)
+    assert rel['resultado'] == dr.QUEBRADO
+    assert rel['quebrados'] == ["pre_fill_click: css_selector=input[value='J']"]
+    assert 'pré-CNPJ' in rel['mensagem']
+    assert all(c['etapa'] != 'cnpj' for c in rel['checagens'])   # nao acusa o campo errado
+
+
+def test_sem_pre_fill_click_nao_registra_etapa():
+    # Maioria dos municipios nao tem o passo: nada muda no relatorio.
+    drv = _FakeDriver(encontra=['campoCnpj'])
+    with patch.object(dr.steps_engine, 'clicar_pre_fill', return_value=None) as pre:
+        rel = dr.verificar_municipio(_municipio(), drv, config={})
+    pre.assert_called_once()
+    assert [c['etapa'] for c in rel['checagens']] == ['url', 'cnpj']
+
+
+def test_pre_fill_click_nao_roda_com_skip_cnpj_fill():
+    # Sem campo proprio de CNPJ o clique perde a finalidade, e a pagina esta num
+    # estado que o fluxo real nunca alcanca (o passo que emite nao foi executado).
+    cfg = {'skip_cnpj_fill': True, 'before_cnpj': []}
+    muni = _municipio(pre_fill_click_id="input[value='J']", pre_fill_click_by='css_selector')
+    with patch.object(dr.steps_engine, 'clicar_pre_fill') as pre:
+        dr.verificar_municipio(muni, _FakeDriver(), config=cfg)
+    pre.assert_not_called()
+
+
 def test_localiza_respeita_o_teto_e_desiste():
     # Sem elemento nenhum, desiste no teto (nao trava o dry-run).
     inicio = time.monotonic()
