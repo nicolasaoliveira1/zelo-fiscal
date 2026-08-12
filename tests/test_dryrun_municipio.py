@@ -4,6 +4,7 @@ Sem Selenium/rede: driver falso + o engine de steps mockado no seam
 `steps_engine.executar_municipio`. Foco no vocabulario de resultado
 (ok/quebrado/parcial/pulado/erro) e em qual etapa e apontada como quebrada.
 """
+import copy
 import time
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -31,8 +32,11 @@ class _FakeDriver:
 
 
 def _municipio(**kw):
-    base = dict(nome='Imbé', url_certidao='https://portal.exemplo/cnd',
-                automacao_ativa=True, cnpj_field_id='campoCnpj', by='id')
+    # Nome neutro de proposito: 'Imbé' dispara a segunda passada (variante geral),
+    # entao os testes que a querem pedem o nome explicitamente.
+    base = dict(nome='Vila Teste', url_certidao='https://portal.exemplo/cnd',
+                automacao_ativa=True, cnpj_field_id='campoCnpj', by='id',
+                pre_fill_click_id=None, pre_fill_click_by=None)
     base.update(kw)
     return SimpleNamespace(**base)
 
@@ -378,6 +382,130 @@ def test_executar_dry_run_uc_indisponivel_libera_lock():
         rel = dr.executar_dry_run(muni)
     assert rel['resultado'] == dr.ERRO
     mocks['libera'].assert_called_once()     # sem vazar o perfil
+
+
+# ---- Variantes: Imbé tem DUAS telas (mobiliário e geral) ----
+
+# Config REAL do Imbé (migration c9f1a2d4e7b3): as colunas descrevem a tela
+# MOBILIARIA e a tela GERAL vive em `imbe_variantes`.
+_CONFIG_IMBE_REAL = {
+    'before_cnpj': [], 'after_cnpj': [],
+    'imbe_variantes': {'geral': {
+        'url': 'https://grp.imbe.rs.gov.br/grp/acessoexterno/programaAcessoExterno.faces?codigo=684509',
+        'cnpj_field_id': 'form:cnpjD', 'by': 'name',
+        'pre_fill_click_id': "input[value='J']", 'pre_fill_click_by': 'css_selector'}},
+}
+
+
+def _municipio_imbe(**kw):
+    base = dict(
+        nome='Imbé',
+        url_certidao='https://grp.imbe.rs.gov.br/grp/acessoexterno/programaAcessoExterno.faces?codigo=689513',
+        cnpj_field_id="input[id='form:cnpjDI']", by='css_selector',
+        pre_fill_click_id="input[value='J']", pre_fill_click_by='css_selector')
+    base.update(kw)
+    return _municipio(**base)
+
+
+def test_variantes_imbe_descreve_as_duas_telas():
+    passadas = dr.variantes(_municipio_imbe(), _CONFIG_IMBE_REAL)
+    assert [rot for rot, _m, _c in passadas] == ['mobiliário', 'geral']
+
+    (_r1, mob, _c1), (_r2, geral, cfg_geral) = passadas
+    assert mob.cnpj_field_id == "input[id='form:cnpjDI']" and mob.by == 'css_selector'
+    # a tela geral vem do nucleo da emissao (_aplicar_variantes_imbe): outra URL,
+    # outro campo, outro `by` — e o radio PJ herdado das colunas.
+    assert geral.cnpj_field_id == 'form:cnpjD' and geral.by == 'name'
+    assert geral.url_certidao.endswith('codigo=684509')
+    assert geral.pre_fill_click_id == "input[value='J']"
+    assert cfg_geral['after_cnpj'][-1]['tipo'] == 'press_tab'   # o que a emissao faz
+
+
+def test_variantes_nao_contaminam_o_config_original():
+    # `_aplicar_variantes_imbe` mexe no after_cnpj: cada passada leva sua copia.
+    original = copy.deepcopy(_CONFIG_IMBE_REAL)
+    dr.variantes(_municipio_imbe(), _CONFIG_IMBE_REAL)
+    assert _CONFIG_IMBE_REAL == original
+
+
+def test_variantes_municipio_comum_tem_uma_passada_sem_rotulo():
+    passadas = dr.variantes(_municipio(nome='Tramandaí'), {'before_cnpj': []})
+    assert len(passadas) == 1
+    rotulo, muni, _cfg = passadas[0]
+    assert rotulo == '' and muni.nome == 'Tramandaí'
+
+
+def test_dry_run_do_imbe_verifica_as_duas_telas():
+    # Contrato central: as DUAS URLs sao abertas e os DOIS campos conferidos.
+    visitadas = []
+
+    class _DriverImbe(_FakeDriver):
+        def get(self, url):
+            visitadas.append(url)
+
+        def find_elements(self, by, locator):
+            return ['elemento'] if locator in ("input[id='form:cnpjDI']", 'form:cnpjD') else []
+
+    drv = _DriverImbe()
+    drv.quit = lambda: None
+    pilha, _mocks = _patch_driver(chrome=drv)
+    with pilha, patch.object(dr, '_carregar_config_municipio', return_value=_CONFIG_IMBE_REAL), \
+            patch.object(dr.steps_engine, 'clicar_pre_fill', return_value=True):
+        rel = dr.executar_dry_run(_municipio_imbe())
+
+    assert [u.rsplit('=', 1)[-1] for u in visitadas] == ['689513', '684509']
+    etapas = [c['etapa'] for c in rel['checagens']]
+    assert 'mobiliário/cnpj' in etapas and 'geral/cnpj' in etapas
+    assert rel['resultado'] == dr.OK
+
+
+def test_quebra_so_na_tela_geral_e_reportada_com_o_rotulo():
+    # A regressao que motivou as duas passadas: a tela mobiliaria segue de pe e a
+    # geral quebra — com uma passada so, isso passava verde.
+    class _DriverGeralQuebrada(_FakeDriver):
+        def find_elements(self, by, locator):
+            return ['elemento'] if locator == "input[id='form:cnpjDI']" else []
+
+    drv = _DriverGeralQuebrada()
+    drv.quit = lambda: None
+    pilha, _mocks = _patch_driver(chrome=drv)
+    with pilha, patch.object(dr, '_carregar_config_municipio', return_value=_CONFIG_IMBE_REAL), \
+            patch.object(dr.steps_engine, 'clicar_pre_fill', return_value=True):
+        rel = dr.executar_dry_run(_municipio_imbe(), timeout=0)
+
+    assert rel['resultado'] == dr.QUEBRADO
+    assert rel['quebrados'] == ['geral/cnpj: name=form:cnpjD']   # diz QUAL tela
+    assert rel['mensagem'].startswith('[geral]')
+    # o municipio continua com UMA linha no painel/alerta
+    assert dr.ultimos_resultados()['Imbé']['resultado'] == dr.QUEBRADO
+
+
+def test_mescla_fica_com_o_pior_resultado():
+    piores = [
+        ([dr.OK, dr.OK], dr.OK),
+        ([dr.OK, dr.PARCIAL], dr.PARCIAL),
+        ([dr.PARCIAL, dr.QUEBRADO], dr.QUEBRADO),
+        ([dr.OK, dr.ERRO], dr.ERRO),
+        ([dr.ERRO, dr.QUEBRADO], dr.QUEBRADO),   # drift vence infra: alerta sai
+        ([dr.PULADO, dr.PULADO], dr.PULADO),     # automacao inativa em ambas
+    ]
+    for resultados, esperado in piores:
+        relatorios = [{'municipio': 'Imbé', 'resultado': r, 'checagens': [],
+                       'quebrados': [], 'mensagem': None, 'variante': 'x'}
+                      for r in resultados]
+        assert dr._mesclar(relatorios)['resultado'] == esperado, resultados
+
+
+def test_mescla_junta_as_mensagens_rotuladas():
+    relatorios = [
+        {'municipio': 'Imbé', 'resultado': dr.PARCIAL, 'checagens': [], 'quebrados': ['a'],
+         'mensagem': 'captcha', 'variante': 'mobiliário'},
+        {'municipio': 'Imbé', 'resultado': dr.QUEBRADO, 'checagens': [], 'quebrados': ['b'],
+         'mensagem': 'campo sumiu', 'variante': 'geral'},
+    ]
+    fundido = dr._mesclar(relatorios)
+    assert fundido['quebrados'] == ['a', 'b']
+    assert fundido['mensagem'] == '[mobiliário] captcha | [geral] campo sumiu'
 
 
 def test_executar_dry_run_varios_resume_por_resultado():
