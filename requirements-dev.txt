@@ -8,3 +8,7 @@ pytest-timeout==2.3.1
 # Emite a falha de teste como annotation do GitHub Actions (file:line + mensagem),
 # legivel pela API — util para diagnosticar falha que so acontece no CI.
 pytest-github-actions-annotate-failures==0.3.0
+# Paralelismo da suite (-n auto). A suite e quase toda CPU/setup, entao escala
+# bem: ~1479 testes caem de ~152s para ~45s em 4 workers. Cada worker e um
+# processo com o SEU banco (ver o sufixo por worker no conftest).
+pytest-xdist==3.6.1
