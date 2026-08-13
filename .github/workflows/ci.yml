@@ -1,13 +1,26 @@
 name: CI
 
 on:
+  # `push:` sem filtro rodava DUAS vezes por commit em branch com PR aberto (uma
+  # pelo push, outra pelo pull_request) — o mesmo commit, o mesmo resultado, o
+  # dobro do tempo de fila. Push cobre a main (guarda do que ja foi mergeado) e o
+  # PR cobre o resto; nenhum commit fica sem CI.
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
+# Push seguido de push na mesma branch cancela a execucao anterior: o resultado
+# do commit intermediario ja nasce obsoleto e so ocupa runner. A main fica de
+# fora (`cancel-in-progress: false`) porque ali cada commit e um ponto de
+# historico que se quer verde individualmente.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   # Gate rapido: lint + suite em SQLite (comportamento historico do CI). Roda em
-  # todo push/PR — e o gate que mantem a main verde e rapida.
+  # todo PR e em push na main — e o gate que mantem a main verde e rapida.
   testes-sqlite:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -28,13 +41,16 @@ jobs:
       - name: Lint (ruff)
         run: ruff check .
 
+      # -n auto: um processo por vCPU do runner. Cada worker recebe o seu proprio
+      # SQLite temporario (o mkstemp do conftest roda por processo), entao nao ha
+      # banco compartilhado entre eles.
       - name: Testes (pytest, SQLite)
-        run: pytest -q
+        run: pytest -q -n auto
 
   # Paridade com producao (MySQL 8.0, utf8mb4/utf8mb4_0900_ai_ci): roda a suite
   # inteira contra um MySQL real para pegar divergencia de enum nativo/colacao/
-  # DateTime antes de chegar a producao (spec 06). Roda em push/PR, em paralelo
-  # ao SQLite. Rede de seguranca: timeout-minutes (nunca mais 6h de hang) + o
+  # DateTime antes de chegar a producao (spec 06). Roda em PR e push na main, em
+  # paralelo ao SQLite. Rede de seguranca: timeout-minutes (nunca mais 6h de hang) + o
   # --timeout por teste (transforma hang em falha nomeada). A isolacao de sessao
   # dos testes (db.session.remove antes de drop_all) evita o metadata-lock hang.
   testes-mysql:
@@ -90,8 +106,11 @@ jobs:
           TEST_DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/sistema_certidoes_test?charset=utf8mb4
           AUTO_DB_UPGRADE: '0'
         # --timeout por teste (metodo thread) converte um hang em falha nomeada em
-        # vez de pendurar o job ate o teto; -rA mostra o resumo de cada teste.
-        run: pytest -q --timeout=120 --timeout-method=thread
+        # vez de pendurar o job ate o teto.
+        # -n auto: cada worker cria e usa `sistema_certidoes_test_gw<N>` (sufixo
+        # por worker no conftest) — sem isso o drop_all de um worker derrubaria a
+        # tabela que o outro esta usando.
+        run: pytest -q -n auto --timeout=120 --timeout-method=thread
 
       # Migracao idempotente contra MySQL real: exercita batch_alter_table/enum num
       # banco dedicado. AUTO_DB_UPGRADE=0 para a CLI controlar o estado (o boot nao
