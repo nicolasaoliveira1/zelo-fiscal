@@ -2,7 +2,29 @@
 {% block titulo %}Configurações{% endblock %}
 
 {% block content %}
-<div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
+{# Blocos em colunas CSS (masonry): cada card ocupa só a altura do seu conteúdo,
+   em vez de esticar até a altura do vizinho como faria a grid do Bootstrap com
+   h-100 — é o que tira o vazio dos cards curtos. Espaçamentos compactados aqui
+   para não repetir utilitário em cada card. #}
+<style>
+    .cfg-blocos { column-count: 1; column-gap: .75rem; }
+    @media (min-width: 768px)  { .cfg-blocos { column-count: 2; } }
+    @media (min-width: 1400px) { .cfg-blocos { column-count: 3; } }
+
+    .cfg-bloco {
+        break-inside: avoid;
+        -webkit-column-break-inside: avoid;
+        margin-bottom: .75rem;
+        display: inline-block; /* evita quebra do card entre colunas no WebKit */
+        width: 100%;
+    }
+    .cfg-bloco .card-header { padding: .5rem .875rem; }
+    .cfg-bloco .card-body { padding: .875rem; }
+    .cfg-bloco .form-text { margin-top: .15rem; }
+    .cfg-bloco p { margin-bottom: .5rem; }
+</style>
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-3">
     <div>
         <h4 class="mb-1 fw-bold">Configurações</h4>
         <p class="text-body-secondary mb-0">Área inicial para ajustes do sistema.</p>
@@ -20,181 +42,171 @@
   {% endif %}
 {% endwith %}
 
-<div class="row g-3">
-    <div class="col-12 col-lg-6">
-        <div class="card border-0 shadow-sm h-100">
+{# Um único form envolvendo todos os cards: a rota trata os campos em conjunto
+   (POST parcial pula seções), então dividir em vários forms mudaria comportamento.
+   O card "Tema" entra no mesmo fluxo por não ter campo nenhum — só um botão
+   type="button" — e assim não sobra uma faixa vazia depois da última linha. #}
+<form method="POST" action="{{ url_for('main.configuracoes') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="cfg-blocos">
+        <div class="card border-0 shadow-sm cfg-bloco">
             <div class="card-header bg-body-tertiary border-bottom">
-                <strong>Parâmetros do sistema</strong>
+                <strong>Alerta de vencimento</strong>
             </div>
             <div class="card-body">
-                <form method="POST" action="{{ url_for('main.configuracoes') }}" class="row g-3">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="col-12">
-                        <h6 class="fw-bold mb-1">Alerta de vencimento</h6>
-                        <p class="text-body-secondary mb-0">
-                            Defina com quantos dias de antecedência uma certidão passa a ser sinalizada como
-                            <span class="fw-semibold text-warning-emphasis">a vencer</span> (amarelo) no dashboard.
-                            Acima desse limite ela fica verde; depois da data de validade, vermelha.
-                        </p>
-                    </div>
+                <p class="text-body-secondary small">
+                    Dias de antecedência para uma certidão ser sinalizada como
+                    <span class="fw-semibold text-warning-emphasis">a vencer</span> (amarelo) no dashboard.
+                    Acima disso ela fica verde; depois da validade, vermelha.
+                </p>
 
-                    <div class="col-12">
-                        <label class="form-label fw-semibold" for="a-vencer-dias">Antecedência padrão</label>
-                        <div class="input-group">
-                            <input
-                                type="number"
-                                class="form-control"
-                                id="a-vencer-dias"
-                                name="a_vencer_dias"
-                                min="1"
-                                max="90"
-                                required
-                                value="{{ a_vencer_dias }}"
-                            >
-                            <span class="input-group-text">dias</span>
-                        </div>
-                        <div class="form-text">Vale para todos os tipos de certidão que não tiverem um valor próprio abaixo.</div>
-                    </div>
-
-                    <div class="col-12">
-                        <p class="form-label fw-semibold mb-2">Antecedência por tipo</p>
-                        <div class="row g-2">
-                            {% for chave, label, _ in tipos_vencer %}
-                            <div class="col-6">
-                                <label class="form-label small mb-1" for="a-vencer-{{ chave }}">{{ label }}</label>
-                                <input
-                                    type="number"
-                                    class="form-control form-control-sm"
-                                    id="a-vencer-{{ chave }}"
-                                    name="a_vencer_dias_{{ chave }}"
-                                    min="1"
-                                    max="90"
-                                    placeholder="{{ a_vencer_dias }} dias"
-                                    value="{{ por_tipo[chave] if por_tipo[chave] is not none else '' }}"
-                                >
-                            </div>
-                            {% endfor %}
-                        </div>
-                        <div class="form-text mt-1">Deixe em branco para usar a antecedência padrão de {{ a_vencer_dias }} dias.</div>
-                    </div>
-
-                    <div class="col-12"><hr class="my-1"></div>
-
-                    <div class="col-12">
-                        <h6 class="fw-bold mb-1">Armazenamento</h6>
-                        <label class="form-label fw-semibold" for="caminho-rede">Caminho de rede (pasta base das empresas)</label>
-                        <input
-                            type="text"
-                            class="form-control"
-                            id="caminho-rede"
-                            name="caminho_rede"
-                            placeholder="{{ caminho_rede_efetivo }}"
-                            value="{{ caminho_rede }}"
-                        >
-                        <div class="form-text">
-                            Pasta onde os PDFs das empresas são organizados. Em branco usa o padrão
-                            do ambiente (atual: <code>{{ caminho_rede_efetivo }}</code>).
-                        </div>
-                    </div>
-
-                    <div class="col-12"><hr class="my-1"></div>
-
-                    <div class="col-12">
-                        <h6 class="fw-bold mb-1">Agendador de renovação</h6>
-                        <div class="form-check form-switch mb-2">
-                            <input
-                                class="form-check-input"
-                                type="checkbox"
-                                role="switch"
-                                id="agendador-ativo"
-                                name="agendador_ativo"
-                                {% if agendador_ativo %}checked{% endif %}
-                            >
-                            <label class="form-check-label" for="agendador-ativo">
-                                Emitir automaticamente as certidões a vencer, de madrugada
-                            </label>
-                        </div>
-                        <label class="form-label fw-semibold" for="agendador-hora">Horário diário</label>
+                <div class="mb-2">
+                    <label class="form-label fw-semibold mb-1" for="a-vencer-dias">Antecedência padrão</label>
+                    <div class="input-group input-group-sm" style="max-width: 11rem;">
                         <input
                             type="number"
                             class="form-control"
-                            id="agendador-hora"
-                            name="agendador_hora"
-                            min="0"
-                            max="23"
-                            step="1"
-                            value="{{ agendador_hora }}"
-                            style="max-width: 8rem;"
+                            id="a-vencer-dias"
+                            name="a_vencer_dias"
+                            min="1"
+                            max="90"
+                            required
+                            value="{{ a_vencer_dias }}"
                         >
-                        <div class="form-text">
-                            Hora local (0–23) em que o lote de renovação roda. Alterar aqui
-                            reprograma sem reiniciar o sistema.
-                        </div>
+                        <span class="input-group-text">dias</span>
                     </div>
+                </div>
 
-                    <div class="col-12"><hr class="my-1"></div>
-
-                    <div class="col-12">
-                        <h6 class="fw-bold mb-1">Notificações por e-mail</h6>
-                        <label class="form-label fw-semibold" for="notif-destinatarios">Destinatários</label>
-                        <textarea
-                            class="form-control"
-                            id="notif-destinatarios"
-                            name="notif_destinatarios"
-                            rows="2"
-                            placeholder="fulano@empresa.com, ciclano@empresa.com"
-                        >{{ notif_destinatarios }}</textarea>
-                        <div class="form-text mb-2">
-                            E-mails separados por vírgula, ponto e vírgula ou quebra de linha.
-                            As credenciais SMTP ficam no ambiente (arquivo <code>.env</code>).
-                        </div>
-                        <label class="form-label fw-semibold" for="notif-cadencia">Cadência do digest</label>
-                        <select
-                            class="form-select"
-                            id="notif-cadencia"
-                            name="notif_cadencia"
-                            style="max-width: 12rem;"
+                <p class="form-label fw-semibold mb-1">Antecedência por tipo</p>
+                {# grid fluido: acompanha a largura do card, não a do viewport #}
+                <div class="d-grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));">
+                    {% for chave, label, _ in tipos_vencer %}
+                    <div>
+                        <label class="form-label small mb-1" for="a-vencer-{{ chave }}">{{ label }}</label>
+                        <input
+                            type="number"
+                            class="form-control form-control-sm"
+                            id="a-vencer-{{ chave }}"
+                            name="a_vencer_dias_{{ chave }}"
+                            min="1"
+                            max="90"
+                            placeholder="{{ a_vencer_dias }} dias"
+                            value="{{ por_tipo[chave] if por_tipo[chave] is not none else '' }}"
                         >
-                            <option value="semanal" {% if notif_cadencia == 'semanal' %}selected{% endif %}>Semanal</option>
-                            <option value="diaria" {% if notif_cadencia == 'diaria' %}selected{% endif %}>Diária</option>
-                        </select>
-                        <div class="form-text">
-                            Frequência do resumo de vencimentos (a vencer / vencidas / pendentes).
-                            Alertas de falha e de saldo baixo são enviados assim que detectados.
-                        </div>
                     </div>
-
-                    <div class="col-12">
-                        <button type="submit" class="btn btn-primary">Salvar</button>
-                    </div>
-                </form>
+                    {% endfor %}
+                </div>
+                <div class="form-text">Em branco usa a antecedência padrão de {{ a_vencer_dias }} dias.</div>
             </div>
         </div>
-    </div>
-    <div class="col-12 col-lg-6">
-        <div class="card border-0 shadow-sm h-100">
+
+        <div class="card border-0 shadow-sm cfg-bloco">
+            <div class="card-header bg-body-tertiary border-bottom">
+                <strong>Armazenamento</strong>
+            </div>
+            <div class="card-body">
+                <label class="form-label fw-semibold mb-1" for="caminho-rede">Caminho de rede (pasta base das empresas)</label>
+                <input
+                    type="text"
+                    class="form-control form-control-sm"
+                    id="caminho-rede"
+                    name="caminho_rede"
+                    placeholder="{{ caminho_rede_efetivo }}"
+                    value="{{ caminho_rede }}"
+                >
+                <div class="form-text">
+                    Pasta onde os PDFs das empresas são organizados. Em branco usa o padrão
+                    do ambiente (atual: <code>{{ caminho_rede_efetivo }}</code>).
+                </div>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm cfg-bloco">
+            <div class="card-header bg-body-tertiary border-bottom">
+                <strong>Agendador de renovação</strong>
+            </div>
+            <div class="card-body">
+                <div class="form-check form-switch mb-2">
+                    <input
+                        class="form-check-input"
+                        type="checkbox"
+                        role="switch"
+                        id="agendador-ativo"
+                        name="agendador_ativo"
+                        {% if agendador_ativo %}checked{% endif %}
+                    >
+                    <label class="form-check-label" for="agendador-ativo">
+                        Emitir automaticamente as certidões a vencer, de madrugada
+                    </label>
+                </div>
+                <label class="form-label fw-semibold mb-1" for="agendador-hora">Horário diário</label>
+                <input
+                    type="number"
+                    class="form-control form-control-sm"
+                    id="agendador-hora"
+                    name="agendador_hora"
+                    min="0"
+                    max="23"
+                    step="1"
+                    value="{{ agendador_hora }}"
+                    style="max-width: 7rem;"
+                >
+                <div class="form-text">
+                    Hora local (0–23) em que o lote de renovação roda. Alterar aqui
+                    reprograma sem reiniciar o sistema.
+                </div>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm cfg-bloco">
+            <div class="card-header bg-body-tertiary border-bottom">
+                <strong>Notificações por e-mail</strong>
+            </div>
+            <div class="card-body">
+                <label class="form-label fw-semibold mb-1" for="notif-destinatarios">Destinatários</label>
+                <textarea
+                    class="form-control form-control-sm"
+                    id="notif-destinatarios"
+                    name="notif_destinatarios"
+                    rows="2"
+                    placeholder="fulano@empresa.com, ciclano@empresa.com"
+                >{{ notif_destinatarios }}</textarea>
+                <div class="form-text mb-2">
+                    Separados por vírgula, ponto e vírgula ou quebra de linha.
+                    As credenciais SMTP ficam no <code>.env</code>.
+                </div>
+                <label class="form-label fw-semibold mb-1" for="notif-cadencia">Cadência do digest</label>
+                <select
+                    class="form-select form-select-sm"
+                    id="notif-cadencia"
+                    name="notif_cadencia"
+                    style="max-width: 11rem;"
+                >
+                    <option value="semanal" {% if notif_cadencia == 'semanal' %}selected{% endif %}>Semanal</option>
+                    <option value="diaria" {% if notif_cadencia == 'diaria' %}selected{% endif %}>Diária</option>
+                </select>
+                <div class="form-text">
+                    Frequência do resumo de vencimentos (a vencer / vencidas / pendentes).
+                    Alertas de falha e de saldo baixo saem assim que detectados.
+                </div>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm cfg-bloco">
             <div class="card-header bg-body-tertiary border-bottom">
                 <strong>Tema</strong>
             </div>
-            <div class="card-body">
-                <p class="text-body-secondary mb-3">A alternância Light/Dark continua disponível no botão de tema da barra superior.</p>
-                <button type="button" class="btn btn-outline-primary" onclick="toggleTheme()" aria-label="Alternar tema">Alternar tema</button>
+            <div class="card-body d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <span class="text-body-secondary small">Também disponível no botão de tema da barra superior.</span>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleTheme()" aria-label="Alternar tema">Alternar tema</button>
             </div>
         </div>
     </div>
-    <div class="col-12 col-lg-6">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-header bg-body-tertiary border-bottom">
-                <strong>Evolução planejada</strong>
-            </div>
-            <div class="card-body">
-                <ul class="mb-0 text-body-secondary">
-                    <li>Preferências de visualização do dashboard</li>
-                    <li>Padrões de filtro por usuário</li>
-                    <li>Parâmetros de automação e alertas</li>
-                </ul>
-            </div>
-        </div>
+
+    <div class="d-flex flex-wrap justify-content-end align-items-center gap-2">
+        <span class="text-body-secondary small me-auto">Salva todos os blocos acima de uma vez.</span>
+        <button type="submit" class="btn btn-primary">Salvar</button>
     </div>
-</div>
+</form>
 {% endblock %}
