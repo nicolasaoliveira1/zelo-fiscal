@@ -10,16 +10,28 @@ on:
   # Qualquer .py, template, JS, requirements* ou o proprio workflow continua
   # rodando o CI inteiro — la mora tudo que pode quebrar. A main nao tem branch
   # protection, entao pular nao deixa PR travado esperando check que nunca vem.
+  # A lista esta DUPLICADA de proposito. Reusa-la por ancora/alias YAML
+  # (`&nome` / `*nome`) quebra o gatilho que usa o ALIAS: o parser do GitHub nao
+  # resolve a referencia, e `pull_request` para de disparar — sem erro, sem
+  # startup_failure, com o workflow ainda "active". O `push` continuava rodando
+  # porque carregava a definicao seguida da lista literal, o que torna a falha
+  # ainda mais dificil de ver: CI verde na main e PR nenhum sem check.
+  # Ao editar, altere as DUAS listas.
   push:
     branches: [main]
-    paths-ignore: &caminhos_inertes
+    paths-ignore:
       - '**.md'
       - '.specs/**'
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
   pull_request:
-    paths-ignore: *caminhos_inertes
+    paths-ignore:
+      - '**.md'
+      - '.specs/**'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
   workflow_dispatch:
 
 # Push seguido de push na mesma branch cancela a execucao anterior: o resultado
