@@ -81,10 +81,50 @@ def _desativar_politica_autoselect_rs_temporaria():
     cert_policy.desativar(_politica_autoselect_rs())
 
 
-def _build_chrome_options(anonimo=True, usar_perfil=False, profile_dir=None, profile_name=None):
+# Posicao usada para tirar a janela do lote do campo de visao. Nao e headless:
+# o portal continua renderizando (medido — screenshot de elemento sai igual ao
+# da janela visivel, inclusive em aba nova apos switch_to.window), so nao rouba
+# o foco de quem esta trabalhando na maquina.
+_POSICAO_FORA_DA_TELA = (-32000, -32000)
+_TAMANHO_JANELA_BACKGROUND = (1920, 1080)
+
+# Sem estas flags o Chrome trata janela invisivel como ociosa e estrangula
+# renderizacao e timers. O lote espera ate 90s por download e tira screenshot de
+# captcha; um renderizador em segundo plano transformaria isso em falha
+# intermitente que so aparece com a janela escondida.
+_FLAGS_SEM_THROTTLE_EM_BACKGROUND = (
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling",
+)
+# Uma flag --disable-features so: repetir a chave faz o Chrome honrar apenas a
+# ultima, e a segunda apagaria silenciosamente a desativacao do DownloadBubble.
+_FEATURES_DESLIGADAS = ("DownloadBubble", "DownloadBubbleV2")
+_FEATURES_DESLIGADAS_BACKGROUND = ("CalculateNativeWinOcclusion",)
+
+
+def _build_chrome_options(anonimo=True, usar_perfil=False, profile_dir=None,
+                          profile_name=None, background=False):
+    """Monta as opcoes do Chrome. `background=True` abre a janela fora da tela.
+
+    Usado pelos lotes, que rodam sem operador junto: o chromedriver traz a
+    janela para a frente a cada `switch_to.window` (`Target.activateTarget`) e
+    na abertura, o que interrompia quem estava usando a maquina. Fora da tela a
+    ativacao continua acontecendo e simplesmente nao aparece. Fluxos que pedem o
+    operador (emissao individual, dry-run, sessao NFSe) NAO usam isto."""
     chrome_options = Options()
-    chrome_options.add_argument("--start-maximized")
-    chrome_options.add_argument("--disable-features=DownloadBubble,DownloadBubbleV2")
+    features_off = list(_FEATURES_DESLIGADAS)
+    if background:
+        chrome_options.add_argument(
+            "--window-position={},{}".format(*_POSICAO_FORA_DA_TELA))
+        chrome_options.add_argument(
+            "--window-size={},{}".format(*_TAMANHO_JANELA_BACKGROUND))
+        for flag in _FLAGS_SEM_THROTTLE_EM_BACKGROUND:
+            chrome_options.add_argument(flag)
+        features_off.extend(_FEATURES_DESLIGADAS_BACKGROUND)
+    else:
+        chrome_options.add_argument("--start-maximized")
+    chrome_options.add_argument("--disable-features=" + ",".join(features_off))
     chrome_options.add_argument("--no-first-run")
     chrome_options.add_argument("--no-default-browser-check")
 
@@ -147,10 +187,21 @@ def _configurar_download_automatico_chrome(driver):
         pass
 
 
-def _criar_driver_chrome(anonimo=True, usar_perfil=False):
-    chrome_options = _build_chrome_options(anonimo=anonimo, usar_perfil=usar_perfil)
+def _criar_driver_chrome(anonimo=True, usar_perfil=False, background=False):
+    chrome_options = _build_chrome_options(
+        anonimo=anonimo, usar_perfil=usar_perfil, background=background)
     driver = webdriver.Chrome(service=ChromeService(
         ChromeDriverManager().install()), options=chrome_options)
+
+    if background:
+        # Com perfil persistente o Chrome restaura a ultima geometria e ignora
+        # --window-position; reposiciona explicitamente (mesmo motivo do
+        # maximize_window no driver uc). Best-effort: janela na frente incomoda,
+        # nao quebra o lote.
+        try:
+            driver.set_window_position(*_POSICAO_FORA_DA_TELA)
+        except Exception as exc:
+            log_event('janela_background_falhou', level='WARNING', error=str(exc))
 
     try:
         _configurar_download_automatico_chrome(driver)

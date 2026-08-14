@@ -104,6 +104,13 @@ class Config:
     # Liga o agendador de emissao proativa no boot (spec 02). Desligado nos testes.
     AGENDADOR_ENABLED = _env_bool('AGENDADOR_ENABLED', True)
 
+    # Janela do Chrome dos LOTES fora da tela. O chromedriver traz a janela para
+    # a frente a cada switch_to.window (aba do PDF no Imbe, fechamento de abas do
+    # FGTS/RS) e o lote roda sem operador junto — sem isto ele interrompe quem
+    # esta usando a maquina. Nao e headless: o portal segue renderizando (o
+    # screenshot do captcha depende disso). Desligue para acompanhar o lote.
+    LOTE_JANELA_BACKGROUND = _env_bool('LOTE_JANELA_BACKGROUND', True)
+
     # --- Notificacoes por e-mail (spec 03) ---
     # Credenciais SMTP SOMENTE por env (nunca versionadas). Destinatarios e
     # cadencia do digest ficam em ConfiguracaoSistema (editaveis no painel).

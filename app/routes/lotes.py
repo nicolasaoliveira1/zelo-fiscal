@@ -65,6 +65,22 @@ from app.auth import requer_papel
 from app.routes import bp, _current_app_object
 
 
+def _criar_driver_lote(**kwargs):
+    """Driver dos lotes: igual ao da emissao individual, porem com a janela fora
+    da tela (`background=True`).
+
+    Ponto UNICO dessa decisao para os 4 lotes (manual e agendado). O lote roda
+    sem operador junto e o chromedriver traz a janela para a frente a cada
+    `switch_to.window` — o PDF em aba nova do Imbe, o fechamento de abas do FGTS
+    e do RS — interrompendo quem esta usando a maquina. Espalhar o parametro
+    pelos 9 pontos de criacao faria um deles ficar para tras na proxima mudanca.
+
+    Desligavel por `LOTE_JANELA_BACKGROUND=0` (config ou env) quando o operador
+    quer acompanhar o lote na tela."""
+    background = _to_bool(_get_config_value('LOTE_JANELA_BACKGROUND', True), True)
+    return _criar_driver_chrome(background=background, **kwargs)
+
+
 # === bloco de lotes extraido de app/routes (mover != reescrever) ===
 def _calc_fgts_targets_by_scope(start_certidao_id, scope='default'):
     return batch_engine.calc_targets(
@@ -289,7 +305,7 @@ def _rs_batch_worker(app):
         curto='RS',
         tag='ESTADUAL-RS-LOTE',
         event_prefix='rs_batch_worker',
-        create_driver=lambda: _criar_driver_chrome(anonimo=False, usar_perfil=True),
+        create_driver=lambda: _criar_driver_lote(anonimo=False, usar_perfil=True),
         eager_driver=True,
         on_setup=_on_setup,
         on_teardown=_on_teardown,
@@ -311,7 +327,7 @@ def _municipal_batch_worker(app):
         curto='Municipal',
         tag='MUNICIPAL-LOTE',
         event_prefix='municipal_batch_worker',
-        create_driver=_criar_driver_chrome,
+        create_driver=_criar_driver_lote,
         on_finish=_registrar_desfecho_lote,
         alvo_fn=_alvo_breaker_municipal,
         on_breaker_aberto=_alertar_breaker_aberto,
@@ -330,7 +346,7 @@ def _trabalhista_batch_worker(app):
         curto='Trabalhista',
         tag='TRABALHISTA-LOTE',
         event_prefix='trabalhista_batch_worker',
-        create_driver=_criar_driver_chrome,
+        create_driver=_criar_driver_lote,
         on_finish=_registrar_desfecho_lote,
         alvo_lote=ALVO_BREAKER_TRABALHISTA,
         on_breaker_aberto=_alertar_breaker_aberto,
@@ -345,7 +361,7 @@ def _fgts_batch_worker(app):
                 driver.quit()
             except Exception:
                 pass
-            driver = _criar_driver_chrome()
+            driver = _criar_driver_lote()
             log_event(
                 'fgts_batch_driver_recreate', level='WARNING',
                 certidao_id=certidao_id, execution_id=execution_id,
@@ -365,7 +381,7 @@ def _fgts_batch_worker(app):
         curto='FGTS',
         tag='FGTS-LOTE',
         event_prefix='fgts_batch_worker',
-        create_driver=_criar_driver_chrome,
+        create_driver=_criar_driver_lote,
         recover_fn=_recover,
         on_finish=_registrar_desfecho_lote,
         alvo_lote=ALVO_BREAKER_FGTS,
@@ -636,7 +652,7 @@ def _fluxo_fgts_rodar(app, ids, *, wrap_emit, execution_id):
         lock=FGTS_BATCH_LOCK, state=FGTS_BATCH_STATE,
         real_emit=lambda cid, drv, eid: _emitir_fgts_certidao(cid, driver=drv, execution_id=eid),
         nome_lote='FGTS', curto='FGTS', tag='FGTS-LOTE',
-        event_prefix='fgts_batch_worker', create_driver=_criar_driver_chrome,
+        event_prefix='fgts_batch_worker', create_driver=_criar_driver_lote,
         on_finish=_registrar_desfecho_lote, alvo_lote=ALVO_BREAKER_FGTS,
         on_breaker_aberto=_alertar_breaker_aberto)
 
@@ -668,7 +684,7 @@ def _fluxo_rs_rodar(app, ids, *, wrap_emit, execution_id):
             cid, driver=drv, usar_2captcha=True, execution_id=eid),
         nome_lote='Estadual RS', curto='RS', tag='ESTADUAL-RS-LOTE',
         event_prefix='rs_batch_worker',
-        create_driver=lambda: _criar_driver_chrome(anonimo=False, usar_perfil=True),
+        create_driver=lambda: _criar_driver_lote(anonimo=False, usar_perfil=True),
         eager_driver=True, on_setup=_on_setup, on_teardown=_on_teardown,
         on_finish=_registrar_desfecho_lote, alvo_lote=ALVO_BREAKER_RS,
         on_breaker_aberto=_alertar_breaker_aberto)
@@ -699,7 +715,7 @@ def _fluxo_municipal_rodar(app, ids, *, wrap_emit, execution_id):
         real_emit=lambda cid, drv, eid: _emitir_municipal_certidao_lote(
             cid, driver=drv, execution_id=eid),
         nome_lote='Municipal', curto='Municipal', tag=None,
-        event_prefix='municipal_batch_worker', create_driver=_criar_driver_chrome,
+        event_prefix='municipal_batch_worker', create_driver=_criar_driver_lote,
         on_finish=_registrar_desfecho_lote, alvo_fn=_alvo_breaker_municipal,
         on_breaker_aberto=_alertar_breaker_aberto)
 
@@ -715,7 +731,7 @@ def _fluxo_trabalhista_rodar(app, ids, *, wrap_emit, execution_id):
         real_emit=lambda cid, drv, eid: _emitir_trabalhista_certidao(
             cid, driver=drv, execution_id=eid),
         nome_lote='Trabalhista', curto='Trabalhista', tag='TRABALHISTA-LOTE',
-        event_prefix='trabalhista_batch_worker', create_driver=_criar_driver_chrome,
+        event_prefix='trabalhista_batch_worker', create_driver=_criar_driver_lote,
         on_finish=_registrar_desfecho_lote, alvo_lote=ALVO_BREAKER_TRABALHISTA,
         on_breaker_aberto=_alertar_breaker_aberto)
 
