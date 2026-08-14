@@ -5,9 +5,21 @@ on:
   # pelo push, outra pelo pull_request) — o mesmo commit, o mesmo resultado, o
   # dobro do tempo de fila. Push cobre a main (guarda do que ja foi mergeado) e o
   # PR cobre o resto; nenhum commit fica sem CI.
+  # paths-ignore: so caminhos INERTES, que nenhum teste le e nenhum codigo abre em
+  # runtime (verificado: as unicas mencoes a .specs/docs no app/ sao comentario).
+  # Qualquer .py, template, JS, requirements* ou o proprio workflow continua
+  # rodando o CI inteiro — la mora tudo que pode quebrar. A main nao tem branch
+  # protection, entao pular nao deixa PR travado esperando check que nunca vem.
   push:
     branches: [main]
+    paths-ignore: &caminhos_inertes
+      - '**.md'
+      - '.specs/**'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
   pull_request:
+    paths-ignore: *caminhos_inertes
   workflow_dispatch:
 
 # Push seguido de push na mesma branch cancela a execucao anterior: o resultado
@@ -24,6 +36,12 @@ jobs:
   testes-sqlite:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # PR em rascunho nao roda: push de WIP nao precisa queimar runner, e nada e
+    # mergeado em draft. O guard do event_name e obrigatorio — em push a
+    # `github.event.pull_request` nem existe, e sem ele a condicao daria falso e
+    # pularia o CI da main, exatamente o oposto do que se quer. Marcar o PR como
+    # "ready for review" dispara o CI.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v7
 
@@ -54,6 +72,8 @@ jobs:
   testes-mysql:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Mesma regra do job acima (ver o comentario la sobre o guard do event_name).
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     services:
       mysql:
         image: mysql:8.0
