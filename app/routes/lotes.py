@@ -110,6 +110,48 @@ def _batch_targets_vazios(scope='default'):
     }
 
 
+def _agrupar_ids_por_empresa(ids, start_certidao_id=None):
+    """Reordena os ids do lote mantendo as certidoes da MESMA empresa juntas.
+
+    Existe por causa do Imbe, que tem duas certidoes municipais por empresa
+    (geral e mobiliario): as duas entram no mesmo lote e o operador espera que
+    saiam uma depois da outra, nao intercaladas com outras empresas. A ordem
+    relativa vinda do calc_targets (por id) e preservada dentro do grupo e entre
+    grupos; so o grupo da certidao inicial vai para a frente, com ela primeiro,
+    para nao quebrar o `start_incluida` do modal.
+
+    Uma query so (id, empresa_id) para nao virar N+1."""
+    if not ids or len(ids) < 2:
+        return list(ids)
+    try:
+        rows = (db.session.query(Certidao.id, Certidao.empresa_id)
+                .filter(Certidao.id.in_(ids))
+                .all())
+    except Exception:
+        return list(ids)
+    empresa_por_id = {cid: eid for cid, eid in rows}
+
+    grupos = {}
+    ordem_grupos = []
+    for cid in ids:
+        chave = empresa_por_id.get(cid, ('_solto', cid))
+        if chave not in grupos:
+            grupos[chave] = []
+            ordem_grupos.append(chave)
+        grupos[chave].append(cid)
+
+    chave_start = empresa_por_id.get(start_certidao_id)
+    if chave_start is not None and chave_start in grupos:
+        ordem_grupos.remove(chave_start)
+        ordem_grupos.insert(0, chave_start)
+        grupo = grupos[chave_start]
+        if start_certidao_id in grupo:
+            grupo.remove(start_certidao_id)
+            grupo.insert(0, start_certidao_id)
+
+    return [cid for chave in ordem_grupos for cid in grupos[chave]]
+
+
 def _calc_municipal_targets_by_scope(start_certidao_id, scope='default'):
     certidao = db.session.get(Certidao, start_certidao_id)
     if not certidao or certidao.tipo != TipoCertidao.MUNICIPAL:
@@ -119,23 +161,25 @@ def _calc_municipal_targets_by_scope(start_certidao_id, scope='default'):
     if not _municipal_batch_suportado(cidade):
         return _batch_targets_vazios(scope=scope)
 
-    subtipo = certidao.subtipo
-
     def _extra_filter(query):
-        query = (query
-                 .join(Empresa, Empresa.id == Certidao.empresa_id)
-                 .filter(Certidao.tipo == TipoCertidao.MUNICIPAL)
-                 .filter(Empresa.cidade == cidade))
-        if subtipo and file_manager.remover_acentos(cidade).upper() == 'IMBE':
-            query = query.filter(Certidao.subtipo == subtipo)
-        return query
+        # Sem filtro de subtipo de proposito: no Imbe, geral e mobiliario da
+        # mesma empresa entram no MESMO lote (uma depois da outra, ver
+        # _agrupar_ids_por_empresa). Cada item resolve sua variante de URL em
+        # `_emitir_municipal_certidao_lote` pelo proprio subtipo, entao o driver
+        # reaproveitado navega para a tela certa a cada certidao.
+        return (query
+                .join(Empresa, Empresa.id == Certidao.empresa_id)
+                .filter(Certidao.tipo == TipoCertidao.MUNICIPAL)
+                .filter(Empresa.cidade == cidade))
 
-    return batch_engine.calc_targets(
+    dados = batch_engine.calc_targets(
         start_certidao_id,
         extra_filter=_extra_filter,
         scope=scope,
         tipo=TipoCertidao.MUNICIPAL,
     )
+    dados['ids'] = _agrupar_ids_por_empresa(dados['ids'], start_certidao_id)
+    return dados
 
 
 # === circuit breaker por portal (spec 09, RESOP-02) ========================
@@ -642,7 +686,10 @@ def _fluxo_municipal_calc_ids(app):
             .join(Empresa, Empresa.id == Certidao.empresa_id)
             .filter(Certidao.id.in_(dados['ids']))
             .all())
-    return [cid for cid, cidade in rows if _municipal_batch_suportado(cidade or '')]
+    ids = [cid for cid, cidade in rows if _municipal_batch_suportado(cidade or '')]
+    # Mesma regra do lote manual: as duas certidoes de Imbe da mesma empresa
+    # saem uma depois da outra, em vez de intercaladas com outras empresas.
+    return _agrupar_ids_por_empresa(ids)
 
 
 def _fluxo_municipal_rodar(app, ids, *, wrap_emit, execution_id):
