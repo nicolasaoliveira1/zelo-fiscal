@@ -290,6 +290,7 @@ window.showToast = showToast;
             let urlParaAbrir = null;
             let tipoParaAbrir = null;
             let cnpjParaAbrir = null;
+            let empresaNomeParaAbrir = null;
             let idParaMonitorar = null;
             let fgtsBatchCertidaoId = null;
             let fgtsBatchPoller = null;
@@ -669,6 +670,13 @@ window.showToast = showToast;
                     idParaMonitorar = (btn.dataset.id || '').trim();
                     cnpjParaAbrir = btn.dataset.cnpj;
 
+                    // mesmo padrao do botao de download: nome da empresa no overlay
+                    empresaNomeParaAbrir = '';
+                    const cardAbrirSite = btn.closest('.company-card');
+                    if (cardAbrirSite && cardAbrirSite.dataset.nomeEmpresa) {
+                        empresaNomeParaAbrir = cardAbrirSite.dataset.nomeEmpresa;
+                    }
+
                     if (!urlParaAbrir || urlParaAbrir === '#' || urlParaAbrir === 'undefined' || urlParaAbrir === 'null' || urlParaAbrir === 'none') {
                         showToast('URL não cadastrada.', 'error');
                         return;
@@ -725,7 +733,7 @@ window.showToast = showToast;
                                 hideLoading();
                                 return;
                             }
-                            showLoading('', tipoParaAbrir || '');
+                            showLoading(empresaNomeParaAbrir || '', tipoParaAbrir || '');
                             let arquivoSalvo = false;
                             let federalFinalizado = false;
                             let federalTimer = null;
