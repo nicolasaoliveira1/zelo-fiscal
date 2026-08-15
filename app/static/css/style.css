@@ -51,7 +51,32 @@
     --bs-primary-bg-subtle: #ECEEF1;
     --bs-primary-border-subtle: #CDD2D9;
     --bs-primary-text-emphasis: #2B2F36;
+
+    /* Cores semânticas do Bootstrap → tokens do Zelo. Mapear a variável (como já
+       é feito com --bs-primary) faz todo utilitário derivado seguir junto —
+       .text-bg-*, .bg-*, .border-*, badge, alert — sem tocar em template.
+       Sem isso o app tem DUAS escalas de status: o amarelo do Bootstrap (#ffc107)
+       ao lado do --zelo-warn (#B07408), dizendo a mesma coisa em tons diferentes.
+       Ficam nos valores "light" nos dois temas, pela mesma razão do .btn-success
+       logo abaixo: são fundos sólidos com texto branco, e os tons claros do tema
+       escuro não sustentam #fff. */
+    --bs-success: #2E7D52;
+    --bs-success-rgb: 46, 125, 82;
+    --bs-danger: #B23A33;
+    --bs-danger-rgb: 178, 58, 51;
+    --bs-warning: #B07408;
+    --bs-warning-rgb: 176, 116, 8;
+    --bs-secondary: #6B7280;
+    --bs-secondary-rgb: 107, 114, 128;
 }
+
+/* Utilitários de TEXTO são o caso oposto: a cor vai sobre o fundo da página, não
+   sobre um preenchimento sólido, então precisam do token do tema — o vermelho
+   escuro do claro sumiria no fundo escuro. Bootstrap declara estes utilitários
+   com !important, então a reposição também precisa. */
+.text-success { color: var(--zelo-ok) !important; }
+.text-danger { color: var(--zelo-danger) !important; }
+.text-warning { color: var(--zelo-warn) !important; }
 
 [data-bs-theme="dark"] {
     --zelo-ink: #F2F4F7;
@@ -154,6 +179,16 @@
 }
 
 h1, h2, .h1, .h2 {
+    font-family: var(--zelo-font-display);
+    letter-spacing: -0.01em;
+}
+
+/* Título de diálogo é cabeçalho e vai em display, independente da tag. A regra
+   acima só alcança h1/h2, e os modais do sistema são h5 — o painel de andamento
+   do lote (h2, serif) abria o resumo do lote (h5, sans) logo em seguida, com
+   duas tipografias para a mesma operação. Aqui não se mexe em font-size: cada
+   modal mantém o tamanho que já tinha. */
+.modal-title {
     font-family: var(--zelo-font-display);
     letter-spacing: -0.01em;
 }
@@ -626,12 +661,6 @@ footer {
     align-items: center;
     justify-content: center;
 }
-.loading-box {
-    padding: 2rem 3rem;
-    border-radius: .5rem;
-    background: rgba(0, 0, 0, 0.831);
-}
-
 .batch-summary-modal {
     border: 1px solid var(--bs-border-color-translucent);
     border-radius: 0.85rem;
@@ -675,52 +704,6 @@ footer {
 .batch-modal-intro {
     color: var(--bs-secondary-color);
     font-weight: 400;
-}
-
-.batch-kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.75rem;
-}
-
-.batch-kpi-card {
-    border: 1px solid var(--bs-border-color);
-    border-radius: 0.75rem;
-    background: var(--bs-tertiary-bg);
-    padding: 0.8rem 0.9rem;
-}
-
-.batch-kpi-card.is-danger {
-    border-color: color-mix(in srgb, var(--zelo-danger) 30%, transparent);
-    background: color-mix(in srgb, var(--zelo-danger) 8%, transparent);
-}
-
-.batch-kpi-card.is-warning {
-    border-color: color-mix(in srgb, var(--zelo-warn) 35%, transparent);
-    background: color-mix(in srgb, var(--zelo-warn) 12%, transparent);
-}
-
-/* "total" não é status — fica neutro grafite, não azul */
-.batch-kpi-card.is-total {
-    border-color: color-mix(in srgb, var(--zelo-ink) 22%, transparent);
-    background: color-mix(in srgb, var(--zelo-ink) 6%, transparent);
-}
-
-.batch-kpi-label {
-    display: block;
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--bs-secondary-color);
-    margin-bottom: 0.2rem;
-}
-
-.batch-kpi-value {
-    display: block;
-    font-size: 1.25rem;
-    line-height: 1.1;
-    font-weight: 700;
-    color: var(--bs-emphasis-color);
 }
 
 .batch-modal-footer {
@@ -775,59 +758,446 @@ footer {
     background-color: var(--bs-secondary-bg);
 }
 
-.batch-summary-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.75rem;
+/* ══════════════════════════════════════════════════════════════
+   Componentes de dado — A (composição) e B (ficha).
+   A REGRA que decide qual usar: os números somam num total?
+     SIM  -> .zl-comp  (figura + barra segmentada + legenda)
+     NÃO  -> .zl-ficha (rótulo à esquerda, valor mono à direita)
+   Substituem .batch-kpi-card e .batch-summary-card, que boxavam as
+   duas coisas igual — a soma aparecia como irmã das parcelas.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── A: composição ───────────────────────────────────────────── */
+.zl-comp-fig {
+    display: flex;
+    align-items: baseline;
+    gap: 0.15rem;
+    line-height: 1;
 }
 
-.batch-summary-card {
-    border: 1px solid var(--bs-border-color);
-    border-radius: 0.75rem;
-    background: var(--bs-tertiary-bg);
-    padding: 0.85rem 0.9rem;
+.zl-comp-n {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 2.4rem;
+    font-weight: 500;
+    color: var(--bs-emphasis-color);
 }
 
-.batch-summary-card.is-success {
-    border-color: rgba(25, 135, 84, 0.3);
-    background: rgba(25, 135, 84, 0.08);
-}
-
-.batch-summary-card.is-danger {
-    border-color: rgba(220, 53, 69, 0.3);
-    background: rgba(220, 53, 69, 0.08);
-}
-
-.batch-summary-card.is-pending {
-    border-color: color-mix(in srgb, var(--zelo-pend) 30%, transparent);
-    background: color-mix(in srgb, var(--zelo-pend) 10%, transparent);
-}
-
-.batch-summary-label {
-    display: block;
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+.zl-comp-d {
+    font-family: var(--zelo-font-mono);
+    font-size: 1.1rem;
     color: var(--bs-secondary-color);
-    margin-bottom: 0.2rem;
 }
 
-.batch-summary-value {
+.zl-comp-u {
+    margin-left: auto;
+    font-size: 0.8rem;
+    color: var(--bs-secondary-color);
+}
+
+.zl-comp-bar {
+    display: flex;
+    height: 0.5rem;
+    margin-top: 0.65rem;
+    border-radius: 999px;
+    background: var(--zelo-line);
+    overflow: hidden;
+}
+
+.zl-comp-seg {
+    width: 0;
+    transition: width .35s ease;
+}
+
+/* variante compacta: o mix de status de uma empresa no cabeçalho do card —
+   mesma leitura da barra grande, no tamanho de um indicador */
+.zl-comp-bar.is-mini {
+    width: 6.5rem;
+    height: 0.3rem;
+    margin-top: 0;
+    flex: 0 0 auto;
+}
+
+.zl-comp-seg.is-ok { background: var(--zelo-ok); }
+.zl-comp-seg.is-warn { background: var(--zelo-warn); }
+.zl-comp-seg.is-pend { background: var(--zelo-pend); }
+.zl-comp-seg.is-danger { background: var(--zelo-danger); }
+.zl-comp-seg.is-muted { background: var(--zelo-muted); }
+
+/* No escuro, pendente (laranja) e falha (salmão) encostam sem fronteira
+   nítida. is-vazio impede o fio de aparecer solto onde não há segmento. */
+.zl-comp-seg:not(.is-vazio) + .zl-comp-seg:not(.is-vazio) {
+    box-shadow: inset 1px 0 0 var(--zelo-paper);
+}
+
+.zl-comp-leg {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 0.8rem;
+}
+
+.zl-comp-stat {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-size: 0.82rem;
+    color: var(--bs-secondary-color);
+}
+
+.zl-comp-stat::before {
+    content: "";
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: var(--zelo-muted);
+}
+
+.zl-comp-stat.is-ok::before { background: var(--zelo-ok); }
+.zl-comp-stat.is-warn::before { background: var(--zelo-warn); }
+.zl-comp-stat.is-pend::before { background: var(--zelo-pend); }
+.zl-comp-stat.is-danger::before { background: var(--zelo-danger); }
+
+.zl-comp-v {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--bs-emphasis-color);
+}
+
+/* zero não é notícia: só ganha destaque quando sai de zero */
+.zl-comp-stat[data-zero="1"] { opacity: .45; }
+.zl-comp-stat[data-zero="1"] .zl-comp-v { color: var(--bs-secondary-color); }
+
+/* Fatos que acompanham a composição mas não entram na barra (duração, taxa):
+   ficam inline, rótulo em cima e valor embaixo, atrás de um fio. Não viram
+   ficha — ficha é para lista de fatos, e aqui são dois adendos do mesmo bloco. */
+.zl-comp-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.6rem;
+    margin-top: 1rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid var(--zelo-line);
+}
+
+.zl-comp-meta > div {
+    font-size: 0.78rem;
+    color: var(--bs-secondary-color);
+}
+
+.zl-comp-meta b {
     display: block;
-    font-size: 1.35rem;
-    line-height: 1.1;
-    font-weight: 700;
+    margin-top: 0.1rem;
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--bs-emphasis-color);
+}
+
+/* ── Barras de comparação entre categorias ────────────────────────────
+   NÃO confundir com .zl-comp-bar: aquela empilha partes de um todo numa barra
+   só (composição); esta dá uma barra por categoria, para comparar magnitudes.
+   As duas são legítimas e respondem perguntas diferentes — "como se divide?"
+   contra "qual é maior?". Estava inline em relatorios.html como .rel-bar-*. */
+.zl-bars-row {
+    display: grid;
+    grid-template-columns: 8.5rem 1fr 3rem;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.3rem 0;
+}
+
+.zl-bars-l {
+    font-size: 0.875rem;
+}
+
+.zl-bars-dot {
+    display: inline-block;
+    width: 0.55rem;
+    height: 0.55rem;
+    margin-right: 0.4rem;
+    border-radius: 999px;
+}
+
+.zl-bars-track {
+    height: 0.55rem;
+    border-radius: 999px;
+    background: var(--zelo-line);
+    overflow: hidden;
+}
+
+.zl-bars-fill {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    min-width: 2px;
+}
+
+.zl-bars-v {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.875rem;
+    text-align: right;
+}
+
+@media (max-width: 575.98px) {
+    .zl-bars-row { grid-template-columns: 6.5rem 1fr 2.5rem; gap: 0.5rem; }
+}
+
+/* Eyebrow compartilhado (painel, modais): rótulo pequeno e discreto que diz em
+   que momento a tela está — "Emissão em lote", "Lote concluído", "Confirmar". */
+.zl-eyebrow {
+    display: block;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--bs-secondary-color);
+}
+
+/* Rodapé de modal: fio fino + faixa em mist, o mesmo do painel de andamento
+   (.batch-progress-footer). A faixa separa a área de ação do conteúdo melhor
+   que a borda padrão do Bootstrap, e no escuro fica mais clara que a folha —
+   é isso que dá a leitura de elevação.
+   O raio vem do próprio modal por `inherit`: sem isso a faixa desenharia canto
+   reto por baixo do canto arredondado de .batch-summary-modal / .batch-action-modal,
+   que definem `border-radius` direto e não pela variável do Bootstrap. */
+.zl-modal-footer {
+    border-top: 1px solid var(--zelo-line);
+    background: var(--zelo-mist);
+    border-bottom-left-radius: inherit;
+    border-bottom-right-radius: inherit;
+}
+
+/* ── B: ficha ────────────────────────────────────────────────── */
+.zl-ficha {
+    border-top: 1px solid var(--zelo-line);
+}
+
+/* encostada logo abaixo de uma composição, o fio de cima seria o segundo
+   seguido — a margem separa os dois blocos sem dobrar a régua */
+.zl-comp + .zl-ficha,
+.zl-comp-leg + .zl-ficha {
+    margin-top: 1rem;
+}
+
+.zl-ficha-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.6rem 0 0.6rem 0.7rem;
+    border-bottom: 1px solid var(--zelo-line);
+}
+
+/* O fio de status na borda é a única cor da ficha — mesma escala das linhas da
+   tabela de certidões (td.cert-tipo-col::before), para "vencida" ter a mesma
+   cor aqui e lá. Linha sem classe de status não ganha fio nenhum. */
+.zl-ficha-row::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.55rem;
+    bottom: 0.55rem;
+    width: 3px;
+    border-radius: 2px;
+    background: transparent;
+}
+
+.zl-ficha-row.is-ok::before { background: var(--zelo-ok); }
+.zl-ficha-row.is-warn::before { background: var(--zelo-warn); }
+.zl-ficha-row.is-danger::before { background: var(--zelo-danger); }
+.zl-ficha-row.is-pend::before { background: var(--zelo-pend); }
+.zl-ficha-row.is-muted::before { background: var(--zelo-muted); }
+
+.zl-ficha-row:last-child { border-bottom: none; }
+
+/* Linha de soma: régua dupla acima, como fechamento de coluna contábil — é o
+   que diz que o número abaixo é o total das parcelas, e não mais uma parcela.
+   O :has() tira o fio de 1px da linha anterior para não somar 1px+2px; sem
+   suporte a :has() o resultado é só um fio um pouco mais grosso. */
+.zl-ficha-row:has(+ .zl-ficha-row.is-total) { border-bottom: none; }
+
+.zl-ficha-row.is-total {
+    border-top: 2px solid var(--zelo-ink);
+    border-bottom: none;
+    margin-top: 0.15rem;
+    padding-top: 0.75rem;
+}
+
+.zl-ficha-row.is-total .zl-ficha-l { font-weight: 600; }
+.zl-ficha-row.is-total .zl-ficha-v { font-size: 1.3rem; }
+
+.zl-ficha-l {
+    font-size: 0.86rem;
+    color: var(--bs-body-color);
+}
+
+.zl-ficha-v {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 1.02rem;
+    font-weight: 600;
     color: var(--bs-emphasis-color);
 }
 
 @media (max-width: 576px) {
-    .batch-kpi-grid {
-        grid-template-columns: 1fr;
+    .zl-comp-leg {
+        gap: 0.75rem;
     }
+}
 
-    .batch-summary-grid {
-        grid-template-columns: 1fr;
-    }
+/* ══════════════════════════════════════════════════════════════
+   Painel de andamento do lote (overlay durante a emissão) — só a
+   moldura. O miolo é o .zl-comp compartilhado, o mesmo que o resumo
+   e o rendimento do lote usam: os três momentos do lote (antes,
+   durante, depois) são o mesmo componente, de propósito.
+   ══════════════════════════════════════════════════════════════ */
+.batch-progress-panel {
+    width: min(27rem, calc(100vw - 2rem));
+    border: 1px solid var(--zelo-line);
+    border-radius: 0.85rem;
+    /* Mesmo fundo dos modais (--bs-modal-bg cai em --bs-body-bg): o painel e o
+       resumo do lote aparecem em sequência e não podem ter tons diferentes.
+       Quem separa do app atrás é o scrim do .loading-overlay, não a cor. */
+    background: var(--bs-body-bg);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, .09);
+    overflow: hidden;
+    text-align: left;
+}
+
+.batch-progress-head {
+    padding: 1.1rem 1.25rem 0.85rem;
+}
+
+.batch-progress-title {
+    margin: 0.15rem 0 0;
+    font-family: var(--zelo-font-display);
+    font-size: 1.15rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--bs-emphasis-color);
+}
+
+/* relógio e contadores em mono + tabular: o polling reescreve os
+   números a cada 1,5s e sem largura fixa a linha "dança" na tela. */
+.batch-progress-clock {
+    font-family: var(--zelo-font-mono);
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--bs-secondary-color);
+}
+
+.batch-progress-body {
+    padding: 0 1.25rem 1.1rem;
+}
+
+/* linha viva: quem está sendo emitida agora. Vira o aviso do lote
+   quando a última mensagem é warning/error. */
+.batch-progress-live {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--zelo-line);
+    font-size: 0.84rem;
+    color: var(--bs-secondary-color);
+    min-height: 2.4rem;
+}
+
+.batch-progress-live .batch-progress-live-dot {
+    flex: 0 0 auto;
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 999px;
+    background: var(--zelo-ok);
+    animation: batchPulse 1.6s ease-in-out infinite;
+}
+
+/* Sozinha no corpo (emissão individual): não há legenda acima para o fio
+   separar, então ele sai — o fio marcaria uma divisão que não existe. */
+.batch-progress-live.is-solo {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+    min-height: 0;
+}
+
+/* Spinner na escala do ponto pulsante — não o .spinner-border do Bootstrap,
+   que é grande demais e traria de volta o peso da caixa preta antiga. */
+.zl-spin {
+    display: inline-block;
+    flex: 0 0 auto;
+    width: 0.85rem;
+    height: 0.85rem;
+    border: 2px solid var(--zelo-line);
+    border-top-color: var(--zelo-ok);
+    border-radius: 50%;
+    animation: zlSpin .7s linear infinite;
+}
+
+@keyframes zlSpin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .zl-spin { animation: none; }
+}
+
+/* Linha de apoio em mono (CNPJ sob o nome da empresa) */
+.zl-sub {
+    margin: 0.5rem 0 0 0.95rem;
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.76rem;
+    color: var(--bs-secondary-color);
+}
+
+.batch-progress-live-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.batch-progress-live-text strong {
+    color: var(--bs-emphasis-color);
+    font-weight: 600;
+}
+
+.batch-progress-live.is-warning { color: var(--zelo-warn); }
+.batch-progress-live.is-warning .batch-progress-live-dot { background: var(--zelo-warn); }
+.batch-progress-live.is-error { color: var(--zelo-danger); }
+.batch-progress-live.is-error .batch-progress-live-dot { background: var(--zelo-danger); }
+
+/* pausado: nada está acontecendo — o ponto para de pulsar */
+.batch-progress-live.is-paused .batch-progress-live-dot {
+    background: var(--zelo-muted);
+    animation: none;
+}
+
+@keyframes batchPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .batch-progress-live .batch-progress-live-dot { animation: none; }
+}
+
+.batch-progress-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.85rem 1.25rem;
+    border-top: 1px solid var(--zelo-line);
+    background: var(--zelo-mist);
+}
+
+@media (max-width: 576px) {
 }
 
 .px-6-custom {

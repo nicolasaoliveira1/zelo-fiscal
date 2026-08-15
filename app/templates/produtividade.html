@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block titulo %}Produtividade{% endblock %}
+{% from "_zelo.html" import zl_ficha %}
 
 {% block content %}
 <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
@@ -28,32 +29,17 @@
     ainda não rodam em lote e não entram nestes números.
 </p>
 
-<div class="row g-3 mb-4">
-    <div class="col-12 col-md-4">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-body">
-                <p class="text-body-secondary mb-1 small text-uppercase">Total de lotes</p>
-                <p class="h3 fw-bold mb-0">{{ dados.total_lotes }}</p>
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-md-4">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-body">
-                <p class="text-body-secondary mb-1 small text-uppercase">Emissões</p>
-                <p class="h3 fw-bold mb-0">{{ dados.total_emissoes }}</p>
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-md-4">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-body">
-                <p class="text-body-secondary mb-1 small text-uppercase">Tempo médio de lote</p>
-                <p class="h3 fw-bold mb-0">
-                    {% if dados.tempo_medio_min is not none %}{{ dados.tempo_medio_min }} min{% else %}—{% endif %}
-                </p>
-            </div>
-        </div>
+{# Total de lotes, emissões e tempo médio NÃO somam entre si — são fatos
+   independentes, então é ficha (B) e não composição. Os números vão em mono,
+   como manda a regra de dados; antes estavam em sans. #}
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+        {{ zl_ficha([
+            ('Total de lotes', dados.total_lotes),
+            ('Emissões', dados.total_emissoes),
+            ('Tempo médio de lote',
+             (dados.tempo_medio_min ~ ' min') if dados.tempo_medio_min is not none else '—'),
+        ]) }}
     </div>
 </div>
 

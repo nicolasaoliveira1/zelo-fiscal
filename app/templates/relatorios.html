@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_zelo.html" import zl_comp, zl_ficha, zl_bars %}
 {% block titulo %}Relatórios{% endblock %}
 
 {% block content %}
@@ -10,26 +11,6 @@
         margin-bottom: .25rem;
     }
     .rel-num { font-family: var(--zelo-font-mono); }
-    .rel-bar-row {
-        display: grid;
-        grid-template-columns: 8.5rem 1fr 3rem;
-        align-items: center;
-        gap: .75rem;
-        padding: .3rem 0;
-    }
-    .rel-bar-label { font-size: .875rem; }
-    .rel-bar-track {
-        height: .55rem;
-        border-radius: 999px;
-        background: var(--zelo-mist, var(--bs-tertiary-bg));
-        overflow: hidden;
-    }
-    .rel-bar-fill { height: 100%; border-radius: 999px; min-width: 2px; }
-    .rel-bar-count {
-        font-family: var(--zelo-font-mono);
-        font-size: .875rem;
-        text-align: right;
-    }
     .rel-dot {
         display: inline-block;
         width: .55rem;
@@ -98,32 +79,6 @@
         .rel-lote-row { grid-template-columns: 1fr; gap: .35rem; }
     }
     /* modal de rendimento */
-    .rend-num-mono { font-family: var(--zelo-font-mono); }
-    .rend-bar {
-        display: flex;
-        height: .6rem;
-        border-radius: 999px;
-        overflow: hidden;
-        background: var(--zelo-mist, var(--bs-tertiary-bg));
-        margin: .25rem 0 1rem;
-    }
-    .rend-bar > span { height: 100%; }
-    .rend-legend-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: .35rem 0;
-        border-bottom: 1px solid var(--zelo-line, var(--bs-border-color));
-    }
-    .rend-legend-row:last-child { border-bottom: 0; }
-    .rend-legend-label { display: flex; align-items: center; }
-    .rend-legend-count { font-family: var(--zelo-font-mono); font-weight: 600; }
-    .rend-dot {
-        display: inline-block;
-        width: .6rem; height: .6rem;
-        border-radius: 999px;
-        margin-right: .5rem;
-    }
     /* seletor de período (segmented control) */
     .chart-periodo {
         display: inline-flex;
@@ -228,47 +183,14 @@
     </div>
 </div>
 
-{# ── KPIs ───────────────────────────────────────────────────────────── #}
-<div class="row g-3 mb-4">
-    <div class="col-6 col-md-4 col-xl-2">
-        <div class="card border-0 shadow-sm h-100" aria-label="Total de empresas cadastradas">
-            <div class="card-body">
-                <p class="text-body-secondary text-uppercase small mb-2">Empresas</p>
-                <h3 class="mb-0 fw-bold rel-num">{{ empresas_total }}</h3>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4 col-xl-2">
-        <div class="card border-0 shadow-sm h-100" aria-label="Total de certidoes">
-            <div class="card-body">
-                <p class="text-body-secondary text-uppercase small mb-2">Certidões</p>
-                <h3 class="mb-0 fw-bold rel-num">{{ total_certidoes }}</h3>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4 col-xl-2">
-        <div class="card border-0 shadow-sm h-100" aria-label="Total de certidoes pendentes">
-            <div class="card-body">
-                <p class="text-body-secondary text-uppercase small mb-2">Pendentes</p>
-                <h3 class="mb-0 fw-bold rel-num" style="color: var(--zelo-pend)">{{ pendentes }}</h3>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4 col-xl-2">
-        <div class="card border-0 shadow-sm h-100" aria-label="Total de certidoes vencidas">
-            <div class="card-body">
-                <p class="text-body-secondary text-uppercase small mb-2">Vencidas</p>
-                <h3 class="mb-0 fw-bold rel-num" style="color: var(--zelo-danger)">{{ vencidas }}</h3>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4 col-xl-2">
-        <div class="card border-0 shadow-sm h-100" aria-label="Total de certidoes a vencer em {{ a_vencer_dias }} dias">
-            <div class="card-body">
-                <p class="text-body-secondary text-uppercase small mb-2">A vencer</p>
-                <h3 class="mb-0 fw-bold rel-num" style="color: var(--zelo-warn)">{{ a_vencer }}</h3>
-            </div>
-        </div>
+{# ── Carteira ───────────────────────────────────────────────────────────
+   As 5 categorias de status SOMAM o total de certidões, então são composição
+   (A), não 5 cartões irmãos com a soma parecendo mais uma parcela. "Empresas"
+   não soma com certidão nenhuma e por isso vira linha de ficha (B). #}
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+        {{ zl_comp(total_certidoes, 'certidões', 'na carteira', distribuicao_status) }}
+        {{ zl_ficha([('Empresas na carteira', empresas_total)]) }}
     </div>
 </div>
 
@@ -312,39 +234,14 @@
     </div>
 </div>
 
-{# ── Distribuição ───────────────────────────────────────────────────── #}
-<div class="row g-3 mb-4">
-    <div class="col-12 col-lg-6">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-body">
-                <p class="rel-section-title mb-3">Certidões por status</p>
-                {% for label, valor, cor in distribuicao_status %}
-                <div class="rel-bar-row">
-                    <span class="rel-bar-label"><span class="rel-dot" style="background: var(--zelo-{{ cor }})"></span>{{ label }}</span>
-                    <span class="rel-bar-track">
-                        <span class="rel-bar-fill" style="width: {{ (valor / total_certidoes * 100) if total_certidoes else 0 }}%; background: var(--zelo-{{ cor }})"></span>
-                    </span>
-                    <span class="rel-bar-count">{{ valor }}</span>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-    </div>
-    <div class="col-12 col-lg-6">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-body">
-                <p class="rel-section-title mb-3">Certidões por tipo</p>
-                {% for label, valor in distribuicao_tipo %}
-                <div class="rel-bar-row">
-                    <span class="rel-bar-label">{{ label }}</span>
-                    <span class="rel-bar-track">
-                        <span class="rel-bar-fill" style="width: {{ (valor / total_certidoes * 100) if total_certidoes else 0 }}%; background: var(--zelo-graphite, var(--bs-primary))"></span>
-                    </span>
-                    <span class="rel-bar-count">{{ valor }}</span>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
+{# ── Distribuição por tipo ──────────────────────────────────────────────
+   "Certidões por status" saiu: a composição da carteira, no topo da página, já
+   responde isso — e com a mesma cor. Aqui a pergunta é outra ("qual tipo é
+   maior?"), que pede uma barra por categoria, não uma barra empilhada. #}
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+        <p class="rel-section-title mb-3">Certidões por tipo</p>
+        {{ zl_bars(distribuicao_tipo, total_certidoes) }}
     </div>
 </div>
 
@@ -421,7 +318,7 @@
                 </div>
                 {% endfor %}
                 {% else %}
-                <p class="rel-empty mb-0">Nenhuma certidão pendente. 🎉</p>
+                <p class="rel-empty mb-0">Nenhuma certidão pendente.</p>
                 {% endif %}
             </div>
         </div>
@@ -487,7 +384,38 @@
                 <h5 class="modal-title" id="modalRendimentoLabel">Rendimento do lote</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
             </div>
-            <div class="modal-body" id="rendimentoBody"></div>
+            <div class="modal-body">
+                {# Mesmo componente A do resumo do lote — antes isto era montado
+                   por concatenação de HTML em JS, com classes .rend-* próprias. #}
+                <p class="zl-eyebrow mb-2" id="rendMeta"></p>
+                <div id="rendComposicao">
+                    <div class="zl-comp-fig" aria-hidden="true">
+                        <span class="zl-comp-n" id="rendProc">0</span>
+                        <span class="zl-comp-d">&nbsp;certidões</span>
+                        <span class="zl-comp-u">processadas</span>
+                    </div>
+                    <div class="zl-comp-bar" aria-hidden="true">
+                        <div class="zl-comp-seg is-ok is-vazio" id="rendSegOk"></div>
+                        <div class="zl-comp-seg is-pend is-vazio" id="rendSegPend"></div>
+                        <div class="zl-comp-seg is-danger is-vazio" id="rendSegFalhas"></div>
+                    </div>
+                    <div class="zl-comp-leg">
+                        <span class="zl-comp-stat is-ok" data-zero="1">
+                            <strong class="zl-comp-v" id="rendEmitidas">0</strong><span id="rendLabelOk">emitidas</span>
+                        </span>
+                        <span class="zl-comp-stat is-pend" data-zero="1">
+                            <strong class="zl-comp-v" id="rendPendentes">0</strong>seguem pendentes
+                        </span>
+                        <span class="zl-comp-stat is-danger" data-zero="1">
+                            <strong class="zl-comp-v" id="rendFalhas">0</strong>falhas técnicas
+                        </span>
+                    </div>
+                    <div class="zl-comp-meta">
+                        <div>Total do lote<b id="rendTotal">0</b></div>
+                    </div>
+                </div>
+                <p class="text-body-secondary mb-0 d-none" id="rendSemDesfecho"></p>
+            </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Entendi</button>
             </div>
@@ -502,6 +430,8 @@
     const titulo = document.getElementById('modalRendimentoLabel');
     const corpo = document.getElementById('rendimentoBody');
 
+    const el = (id) => document.getElementById(id);
+
     modal.addEventListener('show.bs.modal', function (ev) {
         const btn = ev.relatedTarget;
         if (!btn) return;
@@ -509,47 +439,50 @@
         const escopoLabel = d.escopo === 'pendentes' ? 'Pendentes' : 'Geral';
         titulo.textContent = 'Rendimento — ' + d.tipo + ' · ' + escopoLabel;
 
+        const comp = el('rendComposicao');
+        const semDesfecho = el('rendSemDesfecho');
+
         // lote sem desfecho registrado (anterior ao recurso ou ainda rodando)
         if (d.temDesfecho !== '1') {
-            corpo.innerHTML =
-                '<p class="mb-2">Lote iniciado em <span class="rend-num-mono">' + d.quando + '</span>.</p>' +
-                '<p class="text-body-secondary mb-0">Desfecho ainda não registrado — este lote começou antes deste recurso ou ainda está em andamento.</p>';
+            comp.classList.add('d-none');
+            semDesfecho.classList.remove('d-none');
+            semDesfecho.textContent = 'Lote iniciado em ' + d.quando +
+                '. Desfecho ainda não registrado — este lote começou antes deste ' +
+                'recurso ou ainda está em andamento.';
+            el('rendMeta').textContent = '';
             return;
         }
+
+        comp.classList.remove('d-none');
+        semDesfecho.classList.add('d-none');
 
         const sucesso = parseInt(d.sucesso || '0', 10);
         const pend = parseInt(d.pendentes || '0', 10);
         const falhas = parseInt(d.falhas || '0', 10);
         const proc = parseInt(d.processados || '0', 10) || (sucesso + pend + falhas);
         const total = parseInt(d.total || '0', 10);
-        const pct = (n) => proc > 0 ? (n / proc * 100) : 0;
 
-        // para lote de pendentes, "emitidas" = certidões que saíram (viraram negativa)
-        const labelSucesso = d.escopo === 'pendentes' ? 'Emitidas (viraram negativa)' : 'Emitidas';
+        el('rendMeta').textContent = d.status + (d.finalizado ? ' · ' + d.finalizado : '');
+        el('rendProc').textContent = proc;
+        el('rendTotal').textContent = total;
 
-        let html = '';
-        html += '<div class="d-flex justify-content-between align-items-baseline mb-1">';
-        html += '<span class="text-body-secondary small">' + d.status +
-                (d.finalizado ? ' · ' + d.finalizado : '') + '</span>';
-        html += '<span class="text-body-secondary small">' + proc + ' de ' + total + ' processadas</span>';
-        html += '</div>';
+        // no lote de pendentes, "emitidas" = certidões que viraram negativa
+        el('rendLabelOk').textContent = d.escopo === 'pendentes'
+            ? 'emitidas (viraram negativa)' : 'emitidas';
 
-        html += '<div class="rend-bar">';
-        if (sucesso) html += '<span style="width:' + pct(sucesso) + '%;background:var(--zelo-ok)"></span>';
-        if (pend)    html += '<span style="width:' + pct(pend) + '%;background:var(--zelo-pend)"></span>';
-        if (falhas)  html += '<span style="width:' + pct(falhas) + '%;background:var(--zelo-danger)"></span>';
-        html += '</div>';
+        [['rendEmitidas', sucesso], ['rendPendentes', pend], ['rendFalhas', falhas]]
+            .forEach(([id, valor]) => {
+                const e = el(id);
+                e.textContent = valor;
+                e.closest('.zl-comp-stat').dataset.zero = valor > 0 ? '0' : '1';
+            });
 
-        const linha = (cor, label, n) =>
-            '<div class="rend-legend-row"><span class="rend-legend-label">' +
-            '<span class="rend-dot" style="background:var(--zelo-' + cor + ')"></span>' + label +
-            '</span><span class="rend-legend-count">' + n + '</span></div>';
-
-        html += linha('ok', labelSucesso, sucesso);
-        html += linha('pend', 'Seguem pendentes', pend);
-        html += linha('danger', 'Falhas técnicas', falhas);
-
-        corpo.innerHTML = html;
+        [['rendSegOk', sucesso], ['rendSegPend', pend], ['rendSegFalhas', falhas]]
+            .forEach(([id, valor]) => {
+                const e = el(id);
+                e.style.width = proc > 0 ? (valor / proc * 100) + '%' : '0%';
+                e.classList.toggle('is-vazio', valor <= 0);
+            });
     });
 })();
 </script>

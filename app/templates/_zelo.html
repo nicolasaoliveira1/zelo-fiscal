@@ -1,0 +1,73 @@
+{#- Macros compartilhados dos componentes de dado do Zelo.
+
+    A REGRA que decide qual usar (ver docs/DESIGN_LANGUAGE.md → Componentes):
+      os números somam num total?  SIM -> zl_comp   ·  NÃO -> zl_ficha
+
+    Estes macros renderizam no servidor (valores fixos). O lote tem versão
+    própria em dashboard.html (`zl_comp_lote`), com ids para o dashboard.js
+    reescrever a cada poll — mesmo desenho, fonte de dados diferente. -#}
+
+{#- Componente A: composição de partes sobre um todo.
+    itens = lista de (rótulo, valor, token de cor sem o prefixo "zelo-"),
+    na ordem em que devem aparecer na barra. -#}
+{% macro zl_comp(total, unidade, complemento, itens) -%}
+{%- set total = total or 0 -%}
+<div class="zl-comp-fig" aria-hidden="true">
+    <span class="zl-comp-n">{{ total }}</span>
+    <span class="zl-comp-d">&nbsp;{{ unidade }}</span>
+    {%- if complemento %}<span class="zl-comp-u">{{ complemento }}</span>{% endif %}
+</div>
+<div class="zl-comp-bar" aria-hidden="true">
+    {%- for rotulo, valor, cor in itens %}
+    <div class="zl-comp-seg is-{{ cor }}{{ ' is-vazio' if not valor }}"
+        style="width: {{ ((valor / total * 100) if total else 0) | round(3) }}%"></div>
+    {%- endfor %}
+</div>
+<div class="zl-comp-leg">
+    {%- for rotulo, valor, cor in itens %}
+    <span class="zl-comp-stat is-{{ cor }}" data-zero="{{ '1' if not valor else '0' }}">
+        <strong class="zl-comp-v">{{ valor }}</strong>{{ rotulo | lower }}
+    </span>
+    {%- endfor %}
+</div>
+{#- Os números acima são desenho (mono, cor, barra); o leitor de tela recebe a
+    frase inteira por aqui, uma vez só. -#}
+<p class="visually-hidden">{{ total }} {{ unidade }}{% if complemento %} {{ complemento }}{% endif %}:
+    {% for rotulo, valor, cor in itens %}{{ valor }} {{ rotulo | lower }}{{ ', ' if not loop.last }}{% endfor %}.</p>
+{%- endmacro %}
+
+{#- Componente B: lista de fatos independentes.
+    linhas = lista de (rótulo, valor) ou (rótulo, valor, classe de status). -#}
+{% macro zl_ficha(linhas) -%}
+<div class="zl-ficha">
+    {%- for linha in linhas %}
+    <div class="zl-ficha-row{{ ' is-' ~ linha[2] if linha|length > 2 and linha[2] }}">
+        <span class="zl-ficha-l">{{ linha[0] }}</span>
+        <span class="zl-ficha-v">{{ linha[1] }}</span>
+    </div>
+    {%- endfor %}
+</div>
+{%- endmacro %}
+
+{#- Barras de comparação entre categorias — NÃO é o componente A.
+    A soma vira uma barra empilhada (zl_comp); comparar magnitudes entre
+    categorias pede uma barra por linha, com o rótulo e a contagem alinhados.
+    itens = lista de (rótulo, valor) ou (rótulo, valor, token de cor). -#}
+{% macro zl_bars(itens, total) -%}
+{%- set total = total or 0 -%}
+{%- for item in itens %}
+{%- set cor = item[2] if item|length > 2 else None %}
+<div class="zl-bars-row">
+    <span class="zl-bars-l">
+        {%- if cor %}<span class="zl-bars-dot" style="background: var(--zelo-{{ cor }})"></span>{% endif -%}
+        {{ item[0] }}
+    </span>
+    <span class="zl-bars-track">
+        <span class="zl-bars-fill"
+            style="width: {{ ((item[1] / total * 100) if total else 0) | round(3) }}%;
+                   background: var(--zelo-{{ cor or 'graphite' }})"></span>
+    </span>
+    <span class="zl-bars-v">{{ item[1] }}</span>
+</div>
+{%- endfor %}
+{%- endmacro %}

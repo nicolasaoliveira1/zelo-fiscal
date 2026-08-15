@@ -123,24 +123,13 @@ window.showToast = showToast;
             const fgtsBatchEmpresaDisplay = document.getElementById('fgtsBatchEmpresaDisplay');
             const btnFgtsBatchStart = document.getElementById('btnFgtsBatchStart');
             const btnFgtsSingleEmit = document.getElementById('btnFgtsSingleEmit');
-
-            const fgtsBatchSummaryEmitidas = document.getElementById('fgtsBatchSummaryEmitidas');
-            const fgtsBatchSummaryOutcomeCard = document.getElementById('fgtsBatchSummaryOutcomeCard');
-            const fgtsBatchSummaryOutcomeLabel = document.getElementById('fgtsBatchSummaryOutcomeLabel');
-            const fgtsBatchSummaryFalhas = document.getElementById('fgtsBatchSummaryFalhas');
-            const fgtsBatchSummaryPendentes = document.getElementById('fgtsBatchSummaryPendentes');
             const fgtsBatchSummaryTotal = document.getElementById('fgtsBatchSummaryTotal');
             const fgtsBatchSummaryTempo = document.getElementById('fgtsBatchSummaryTempo');
             const fgtsBatchSummaryTaxa = document.getElementById('fgtsBatchSummaryTaxa');
             const fgtsBatchSummaryNotice = document.getElementById('fgtsBatchSummaryNotice');
 
             const fgtsBatchOverlay = document.getElementById('fgts-batch-overlay');
-            const fgtsBatchProgress = document.getElementById('fgtsBatchProgress');
-            const fgtsBatchFalhas = document.getElementById('fgtsBatchFalhas');
-            const fgtsBatchPendentes = document.getElementById('fgtsBatchPendentes');
-            const fgtsBatchSuccess = document.getElementById('fgtsBatchSuccess');
-            const fgtsBatchRemaining = document.getElementById('fgtsBatchRemaining');
-            const fgtsBatchLastMessage = document.getElementById('fgtsBatchLastMessage');
+            const fgtsPainel = elementosPainelLote('fgts');
             const btnFgtsBatchPause = document.getElementById('btnFgtsBatchPause');
             const btnFgtsBatchResume = document.getElementById('btnFgtsBatchResume');
             const btnFgtsBatchStop = document.getElementById('btnFgtsBatchStop');
@@ -161,24 +150,13 @@ window.showToast = showToast;
             const trabalhistaBatchEmpresaDisplay = document.getElementById('trabalhistaBatchEmpresaDisplay');
             const btnTrabalhistaBatchStart = document.getElementById('btnTrabalhistaBatchStart');
             const btnTrabalhistaSingleEmit = document.getElementById('btnTrabalhistaSingleEmit');
-
-            const trabalhistaBatchSummaryEmitidas = document.getElementById('trabalhistaBatchSummaryEmitidas');
-            const trabalhistaBatchSummaryOutcomeCard = document.getElementById('trabalhistaBatchSummaryOutcomeCard');
-            const trabalhistaBatchSummaryOutcomeLabel = document.getElementById('trabalhistaBatchSummaryOutcomeLabel');
-            const trabalhistaBatchSummaryFalhas = document.getElementById('trabalhistaBatchSummaryFalhas');
-            const trabalhistaBatchSummaryPendentes = document.getElementById('trabalhistaBatchSummaryPendentes');
             const trabalhistaBatchSummaryTotal = document.getElementById('trabalhistaBatchSummaryTotal');
             const trabalhistaBatchSummaryTempo = document.getElementById('trabalhistaBatchSummaryTempo');
             const trabalhistaBatchSummaryTaxa = document.getElementById('trabalhistaBatchSummaryTaxa');
             const trabalhistaBatchSummaryNotice = document.getElementById('trabalhistaBatchSummaryNotice');
 
             const trabalhistaBatchOverlay = document.getElementById('trabalhista-batch-overlay');
-            const trabalhistaBatchProgress = document.getElementById('trabalhistaBatchProgress');
-            const trabalhistaBatchFalhas = document.getElementById('trabalhistaBatchFalhas');
-            const trabalhistaBatchPendentes = document.getElementById('trabalhistaBatchPendentes');
-            const trabalhistaBatchSuccess = document.getElementById('trabalhistaBatchSuccess');
-            const trabalhistaBatchRemaining = document.getElementById('trabalhistaBatchRemaining');
-            const trabalhistaBatchLastMessage = document.getElementById('trabalhistaBatchLastMessage');
+            const trabalhistaPainel = elementosPainelLote('trabalhista');
             const btnTrabalhistaBatchPause = document.getElementById('btnTrabalhistaBatchPause');
             const btnTrabalhistaBatchResume = document.getElementById('btnTrabalhistaBatchResume');
             const btnTrabalhistaBatchStop = document.getElementById('btnTrabalhistaBatchStop');
@@ -199,12 +177,6 @@ window.showToast = showToast;
             const rsBatchEmpresaDisplay = document.getElementById('rsBatchEmpresaDisplay');
             const btnRsBatchStart = document.getElementById('btnRsBatchStart');
             const btnRsSingleEmit = document.getElementById('btnRsSingleEmit');
-
-            const rsBatchSummaryEmitidas = document.getElementById('rsBatchSummaryEmitidas');
-            const rsBatchSummaryOutcomeCard = document.getElementById('rsBatchSummaryOutcomeCard');
-            const rsBatchSummaryOutcomeLabel = document.getElementById('rsBatchSummaryOutcomeLabel');
-            const rsBatchSummaryFalhas = document.getElementById('rsBatchSummaryFalhas');
-            const rsBatchSummaryPendentes = document.getElementById('rsBatchSummaryPendentes');
             const rsBatchSummaryPositivas = document.getElementById('rsBatchSummaryPositivas');
             const rsBatchSummaryNegativas = document.getElementById('rsBatchSummaryNegativas');
             const rsBatchSummaryEfeitoNegativas = document.getElementById('rsBatchSummaryEfeitoNegativas');
@@ -213,12 +185,7 @@ window.showToast = showToast;
             const rsBatchSummaryTaxa = document.getElementById('rsBatchSummaryTaxa');
 
             const rsBatchOverlay = document.getElementById('rs-batch-overlay');
-            const rsBatchProgress = document.getElementById('rsBatchProgress');
-            const rsBatchFalhas = document.getElementById('rsBatchFalhas');
-            const rsBatchPendentes = document.getElementById('rsBatchPendentes');
-            const rsBatchSuccess = document.getElementById('rsBatchSuccess');
-            const rsBatchRemaining = document.getElementById('rsBatchRemaining');
-            const rsBatchLastMessage = document.getElementById('rsBatchLastMessage');
+            const rsPainel = elementosPainelLote('rs');
             const btnRsBatchPause = document.getElementById('btnRsBatchPause');
             const btnRsBatchResume = document.getElementById('btnRsBatchResume');
             const btnRsBatchStop = document.getElementById('btnRsBatchStop');
@@ -239,24 +206,13 @@ window.showToast = showToast;
             const municipalBatchEmpresaDisplay = document.getElementById('municipalBatchEmpresaDisplay');
             const btnMunicipalBatchStart = document.getElementById('btnMunicipalBatchStart');
             const btnMunicipalSingleEmit = document.getElementById('btnMunicipalSingleEmit');
-
-            const municipalBatchSummaryEmitidas = document.getElementById('municipalBatchSummaryEmitidas');
-            const municipalBatchSummaryOutcomeCard = document.getElementById('municipalBatchSummaryOutcomeCard');
-            const municipalBatchSummaryOutcomeLabel = document.getElementById('municipalBatchSummaryOutcomeLabel');
-            const municipalBatchSummaryFalhas = document.getElementById('municipalBatchSummaryFalhas');
-            const municipalBatchSummaryPendentes = document.getElementById('municipalBatchSummaryPendentes');
             const municipalBatchSummaryTotal = document.getElementById('municipalBatchSummaryTotal');
             const municipalBatchSummaryTempo = document.getElementById('municipalBatchSummaryTempo');
             const municipalBatchSummaryTaxa = document.getElementById('municipalBatchSummaryTaxa');
             const municipalBatchSummaryNotice = document.getElementById('municipalBatchSummaryNotice');
 
             const municipalBatchOverlay = document.getElementById('municipal-batch-overlay');
-            const municipalBatchProgress = document.getElementById('municipalBatchProgress');
-            const municipalBatchFalhas = document.getElementById('municipalBatchFalhas');
-            const municipalBatchPendentes = document.getElementById('municipalBatchPendentes');
-            const municipalBatchSuccess = document.getElementById('municipalBatchSuccess');
-            const municipalBatchRemaining = document.getElementById('municipalBatchRemaining');
-            const municipalBatchLastMessage = document.getElementById('municipalBatchLastMessage');
+            const municipalPainel = elementosPainelLote('municipal');
             const btnMunicipalBatchPause = document.getElementById('btnMunicipalBatchPause');
             const btnMunicipalBatchResume = document.getElementById('btnMunicipalBatchResume');
             const btnMunicipalBatchStop = document.getElementById('btnMunicipalBatchStop');
@@ -328,6 +284,10 @@ window.showToast = showToast;
             let federalMonitorController = null;
             const loadingOverlay = document.getElementById('loading-overlay');
             const loadingDetalhes = document.getElementById('loading-detalhes');
+            const loadingTitulo = document.getElementById('loadingTitulo');
+            const loadingElapsed = document.getElementById('loadingElapsed');
+            const loadingCnpj = document.getElementById('loadingCnpj');
+            let loadingTimer = null;
             const statusesComModal = new Set([
                 'success_file_saved',
                 'window_closed_no_file',
@@ -358,24 +318,79 @@ window.showToast = showToast;
             bindStaticModalShake(rsBatchSummaryModalElement);
             bindStaticModalShake(municipalBatchSummaryModalElement);
 
+            // "FGTS" e "CNDT" são siglas e ficam em caixa alta; "MUNICIPAL" e
+            // "TRABALHISTA" gritariam no título, então viram Capitalizado.
+            function rotuloTipoCertidao(tipo) {
+                const t = (tipo || '').toString().trim();
+                if (!t) return '';
+                if (t.length <= 5) return t.toUpperCase();
+                return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+            }
+
+            // O CNPJ não chega por parâmetro, mas o card da empresa está na
+            // página e traz o valor já formatado no botão de copiar. Best-effort:
+            // sem card (ou com nome que não casa), a linha simplesmente não aparece.
+            function cnpjDaEmpresaPorNome(nomeEmpresa) {
+                if (!nomeEmpresa) return '';
+                const cards = document.querySelectorAll('.company-card');
+                for (const card of cards) {
+                    if (card.dataset.nomeEmpresa !== nomeEmpresa) continue;
+                    const botao = card.querySelector('.copy-cnpj');
+                    return botao ? botao.textContent.trim() : '';
+                }
+                return '';
+            }
+
             function showLoading(nomeEmpresa = '', tipoCertidao = '') {
                 if (loadingOverlay) loadingOverlay.classList.remove('d-none');
 
+                if (loadingTitulo) {
+                    const rotulo = rotuloTipoCertidao(tipoCertidao);
+                    loadingTitulo.textContent = rotulo ? `Certidão ${rotulo}` : 'Executando automação';
+                }
+
                 if (loadingDetalhes) {
-                    if (nomeEmpresa || tipoCertidao) {
-                        const partes = [];
-                        if (nomeEmpresa) partes.push(`${nomeEmpresa}`);
-                        if (tipoCertidao) partes.push(`CERTIDÃO ${tipoCertidao}`);
-                        loadingDetalhes.textContent = partes.join(' | ');
-                        loadingDetalhes.style.display = 'block';
+                    if (nomeEmpresa) {
+                        loadingDetalhes.innerHTML = '';
+                        loadingDetalhes.append('Emitindo ');
+                        const forte = document.createElement('strong');
+                        forte.textContent = nomeEmpresa;
+                        loadingDetalhes.append(forte);
+                        loadingDetalhes.title = nomeEmpresa;
                     } else {
-                        loadingDetalhes.textContent = '';
-                        loadingDetalhes.style.display = 'none';
+                        loadingDetalhes.textContent = 'Executando automação, aguarde…';
+                        loadingDetalhes.title = '';
                     }
                 }
+
+                if (loadingCnpj) {
+                    const cnpj = cnpjDaEmpresaPorNome(nomeEmpresa);
+                    loadingCnpj.textContent = cnpj;
+                    loadingCnpj.classList.toggle('d-none', !cnpj);
+                }
+
+                // Relógio local: aqui não há estado no servidor para consultar,
+                // e é ele (com o ponto pulsante) que diz que a automação está viva.
+                if (loadingElapsed) {
+                    const inicio = Date.now();
+                    loadingElapsed.textContent = '00:00';
+                    if (loadingTimer) clearInterval(loadingTimer);
+                    loadingTimer = setInterval(() => {
+                        loadingElapsed.textContent = formatarRelogio(
+                            Math.floor((Date.now() - inicio) / 1000));
+                    }, 1000);
+                }
             }
+
             function hideLoading() {
                 if (loadingOverlay) loadingOverlay.classList.add('d-none');
+                // sem isso o timer segue rodando por toda a vida da página, e a
+                // próxima emissão abriria com dois intervalos escrevendo no mesmo
+                // elemento.
+                if (loadingTimer) {
+                    clearInterval(loadingTimer);
+                    loadingTimer = null;
+                }
             }
 
             function normalizeBatchScope(scopeValue) {
@@ -1405,6 +1420,89 @@ window.showToast = showToast;
                 });
             });
 
+            // Componente A (composição) do desfecho de um lote. Os ids saem do
+            // macro zl_comp_lote(prefixo), e por isso o painel de andamento e o
+            // resumo do lote são lidos e escritos pelo MESMO par de funções —
+            // duas cópias divergiriam justamente onde o operador compara.
+            function elementosComp(prefixo) {
+                const el = (sufixo) => document.getElementById(`${prefixo}${sufixo}`);
+                return {
+                    segOk: el('SegOk'),
+                    segPend: el('SegPend'),
+                    segFalhas: el('SegFalhas'),
+                    emitidas: el('Emitidas'),
+                    pendentes: el('Pendentes'),
+                    falhas: el('Falhas'),
+                };
+            }
+
+            function atualizarComp(comp, total, emitidas, pendentes, falhas) {
+                if (!comp) return;
+
+                [[comp.emitidas, emitidas], [comp.pendentes, pendentes], [comp.falhas, falhas]]
+                    .forEach(([el, valor]) => {
+                        if (!el) return;
+                        el.textContent = valor;
+                        const stat = el.closest('.zl-comp-stat');
+                        if (stat) stat.dataset.zero = valor > 0 ? '0' : '1';
+                    });
+
+                // A barra é a composição do desfecho sobre o total: o trilho que
+                // sobra é o que falta. is-vazio impede o fio divisório de 1px de
+                // aparecer solto onde não há segmento.
+                [[comp.segOk, emitidas], [comp.segPend, pendentes], [comp.segFalhas, falhas]]
+                    .forEach(([el, valor]) => {
+                        if (!el) return;
+                        el.style.width = total > 0 ? `${(valor / total) * 100}%` : '0%';
+                        el.classList.toggle('is-vazio', valor <= 0);
+                    });
+            }
+
+            // Painel de andamento: o componente A mais o que só ele tem
+            // (relógio, linha viva, fração e o anúncio para leitor de tela).
+            function elementosPainelLote(slug) {
+                const el = (sufixo) => document.getElementById(`${slug}Batch${sufixo}`);
+                return {
+                    comp: elementosComp(`${slug}Batch`),
+                    concluidas: el('Progress'),
+                    total: el('TotalItens'),
+                    relogio: el('Elapsed'),
+                    live: el('Live'),
+                    liveTexto: el('LastMessage'),
+                    anuncio: el('Anuncio'),
+                };
+            }
+
+            // O backend grava started_at em UTC sem tzinfo (utils.utcnow_naive),
+            // e sem o "Z" o navegador leria como hora local — o relógio nasceria
+            // com horas de atraso. calcularTempoLote não sofre disso porque
+            // subtrai duas datas da mesma origem.
+            function segundosDesde(isoUtcNaive) {
+                if (!isoUtcNaive) return 0;
+                const temFuso = /(Z|[+-]\d{2}:?\d{2})$/.test(isoUtcNaive);
+                const inicio = new Date(temFuso ? isoUtcNaive : `${isoUtcNaive}Z`);
+                if (Number.isNaN(inicio.getTime())) return 0;
+                return Math.max(0, Math.floor((Date.now() - inicio.getTime()) / 1000));
+            }
+
+            function formatarRelogio(segundos) {
+                const min = Math.floor(segundos / 60);
+                const sec = segundos % 60;
+                return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+            }
+
+            // O que o operador reconhece é o nome do cliente, não o id da
+            // certidão. A linha da certidão vive dentro do card da empresa,
+            // que carrega o nome em data-nome-empresa.
+            function nomeEmpresaDaCertidao(certidaoId) {
+                if (!certidaoId) return '';
+                const alvo = document.querySelector(
+                    `.btn-baixar-certidao[data-id="${certidaoId}"], .btn-abrir-site[data-id="${certidaoId}"]`
+                );
+                const card = alvo ? alvo.closest('.company-card') : null;
+                return card ? (card.dataset.nomeEmpresa || '') : '';
+            }
+
             function calcularTempoLote(data) {
                 if (!data || !data.started_at || !data.finished_at) return '0s';
                 const ini = new Date(data.started_at);
@@ -1428,34 +1526,92 @@ window.showToast = showToast;
                 return data.last_messages[data.last_messages.length - 1];
             }
 
-            function applyLastMessage(el, data) {
-                if (!el) return;
-                const last = resolveLastMessage(data);
-                if (!last || !last.message) {
-                    el.textContent = '';
-                    el.classList.add('d-none');
+            // Linha viva do painel. Em operação normal ela diz quem está sendo
+            // emitida agora; quando a última mensagem do lote é warning/error,
+            // o aviso toma a linha — é o que o operador precisa ler.
+            function aplicarLinhaViva(painel, data) {
+                if (!painel || !painel.live || !painel.liveTexto) return;
+
+                const ultima = resolveLastMessage(data);
+                const nivel = (ultima && ultima.level || '').toString().toLowerCase();
+                const pausado = data.status === 'paused';
+
+                painel.live.classList.remove('is-warning', 'is-error', 'is-paused');
+
+                if (nivel === 'warning' || nivel === 'error') {
+                    painel.live.classList.add(nivel === 'error' ? 'is-error' : 'is-warning');
+                    painel.liveTexto.textContent = ultima.message;
+                    painel.liveTexto.title = ultima.message;
                     return;
                 }
 
-                const nivel = (last.level || '').toString().toLowerCase();
-                let classe = 'text-light';
-                if (nivel === 'warning') classe = 'text-warning';
-                if (nivel === 'error') classe = 'text-danger';
+                if (pausado) {
+                    painel.live.classList.add('is-paused');
+                    painel.liveTexto.textContent = 'Lote pausado';
+                    painel.liveTexto.title = '';
+                    return;
+                }
 
-                el.textContent = `Ultima: ${last.message}`;
-                el.classList.remove('d-none', 'text-light', 'text-warning', 'text-danger');
-                el.classList.add(classe);
+                const empresa = nomeEmpresaDaCertidao(data.current_id);
+                if (empresa) {
+                    painel.liveTexto.innerHTML = '';
+                    painel.liveTexto.append('Emitindo ');
+                    const forte = document.createElement('strong');
+                    forte.textContent = empresa;
+                    painel.liveTexto.append(forte);
+                    painel.liveTexto.title = empresa;
+                    return;
+                }
+
+                painel.liveTexto.textContent = (ultima && ultima.message) || 'Emitindo…';
+                painel.liveTexto.title = '';
             }
 
-            function applySummaryOutcomeVisual(scope, labelEl, cardEl) {
-                // As certidões que terminam pendentes agora têm card próprio
-                // ("Pendentes"), então o card de desfecho é sempre "Falhas"
-                // (apenas erro técnico), em qualquer escopo (normal ou pendentes).
-                if (!labelEl || !cardEl) return;
-                labelEl.textContent = 'Falhas';
-                cardEl.classList.remove('is-warning');
-                cardEl.classList.add('is-danger');
+            function limparPainelLote(painel, total) {
+                if (!painel) return;
+                atualizarPainelLote(painel, {
+                    status: 'running',
+                    total: total || 0,
+                    index: 0,
+                    success: 0,
+                    pendentes_resultado: 0,
+                    falhas: 0,
+                    last_messages: [],
+                });
+                if (painel.relogio) painel.relogio.textContent = '00:00';
+                if (painel.liveTexto) {
+                    painel.liveTexto.textContent = 'Preparando o lote…';
+                    painel.liveTexto.title = '';
+                }
             }
+
+            function atualizarPainelLote(painel, data) {
+                if (!painel) return;
+
+                const total = Number(data.total || 0);
+                const concluidas = Number(data.index || 0);
+                const sucessos = Number(data.success || 0);
+                const pendentes = Number(data.pendentes_resultado || 0);
+                const falhas = Number(data.falhas || 0);
+
+                if (painel.concluidas) painel.concluidas.textContent = concluidas;
+                if (painel.total) painel.total.textContent = total;
+
+                atualizarComp(painel.comp, total, sucessos, pendentes, falhas);
+
+                if (painel.relogio && data.started_at) {
+                    painel.relogio.textContent = formatarRelogio(segundosDesde(data.started_at));
+                }
+
+                aplicarLinhaViva(painel, data);
+
+                if (painel.anuncio) {
+                    painel.anuncio.textContent =
+                        `${concluidas} de ${total} concluídas. `
+                        + `${sucessos} emitidas, ${pendentes} pendentes, ${falhas} falhas.`;
+                }
+            }
+
 
             function atualizarUltimaLinhaConcluida(data, getLastId, setLastId) {
                 if (!(data && data.last_completed && data.last_completed.certidao_id)) return;
@@ -1483,18 +1639,7 @@ window.showToast = showToast;
                         .then(data => {
                             if (!data) return;
 
-                            const total = Number(data.total || 0);
-                            const index = Number(data.index || 0);
-                            const remaining = Number(
-                                data.remaining !== undefined ? data.remaining : Math.max(total - index, 0)
-                            );
-
-                            if (config.progressEl) config.progressEl.textContent = `${index}/${total} concluídas`;
-                            if (config.falhasEl) config.falhasEl.textContent = `Falhas: ${data.falhas || 0}`;
-                            if (config.pendentesEl) config.pendentesEl.textContent = `Pendentes: ${data.pendentes_resultado || 0}`;
-                            if (config.successEl) config.successEl.textContent = `Sucessos: ${data.success || 0}`;
-                            if (config.remainingEl) config.remainingEl.textContent = `Restantes: ${remaining}`;
-                            applyLastMessage(config.lastMessageEl, data);
+                            atualizarPainelLote(config.painel, data);
 
                             atualizarUltimaLinhaConcluida(data, config.getLastCompletedId, config.setLastCompletedId);
 
@@ -1517,15 +1662,11 @@ window.showToast = showToast;
                                     data.scope || (config.getBatchScope ? config.getBatchScope() : 'default')
                                 );
 
-                                applySummaryOutcomeVisual(
-                                    scopeAtual,
-                                    config.summaryOutcomeLabelEl,
-                                    config.summaryOutcomeCardEl
-                                );
+                                // Mesmo componente A do painel de andamento, com
+                                // os mesmos números — o operador acabou de olhar
+                                // para ele e não pode ver outro desenho aqui.
+                                atualizarComp(config.summaryComp, total, success, pendentes, falhas);
 
-                                if (config.summaryEmitidasEl) config.summaryEmitidasEl.textContent = success;
-                                if (config.summaryFalhasEl) config.summaryFalhasEl.textContent = falhas;
-                                if (config.summaryPendentesEl) config.summaryPendentesEl.textContent = pendentes;
                                 if (config.summaryTotalEl) config.summaryTotalEl.textContent = total;
                                 if (config.summaryTempoEl) config.summaryTempoEl.textContent = calcularTempoLote(data);
                                 // Taxa de sucesso = itens concluídos sem erro técnico
@@ -1600,6 +1741,10 @@ window.showToast = showToast;
                                     return;
                                 }
                                 if (config.batchModal) config.batchModal.hide();
+                                // zera o painel antes de abrir: o primeiro poll
+                                // só chega em ~1,5s e os números do lote
+                                // anterior piscariam nesse intervalo.
+                                limparPainelLote(config.painel, Number(data.total || 0));
                                 if (config.overlayEl) config.overlayEl.classList.remove('d-none');
                                 startBatchPolling(config);
                             })
@@ -1702,12 +1847,7 @@ window.showToast = showToast;
                 getSingleUrl: () => fgtsBatchSingleUrl,
                 getEmpresaNome: () => fgtsBatchEmpresaNome,
                 getTipoCert: () => fgtsBatchTipoCert,
-                progressEl: fgtsBatchProgress,
-                falhasEl: fgtsBatchFalhas,
-                pendentesEl: fgtsBatchPendentes,
-                successEl: fgtsBatchSuccess,
-                remainingEl: fgtsBatchRemaining,
-                lastMessageEl: fgtsBatchLastMessage,
+                painel: fgtsPainel,
                 overlayEl: fgtsBatchOverlay,
                 resumeBtn: btnFgtsBatchResume,
                 pauseBtn: btnFgtsBatchPause,
@@ -1716,11 +1856,7 @@ window.showToast = showToast;
                 singleBtn: btnFgtsSingleEmit,
                 batchModal: fgtsBatchModal,
                 summaryModal: fgtsBatchSummaryModal,
-                summaryEmitidasEl: fgtsBatchSummaryEmitidas,
-                summaryOutcomeCardEl: fgtsBatchSummaryOutcomeCard,
-                summaryOutcomeLabelEl: fgtsBatchSummaryOutcomeLabel,
-                summaryFalhasEl: fgtsBatchSummaryFalhas,
-                summaryPendentesEl: fgtsBatchSummaryPendentes,
+                summaryComp: elementosComp('fgtsBatchSummary'),
                 summaryTotalEl: fgtsBatchSummaryTotal,
                 summaryTempoEl: fgtsBatchSummaryTempo,
                 summaryTaxaEl: fgtsBatchSummaryTaxa,
@@ -1756,12 +1892,7 @@ window.showToast = showToast;
                 getSingleUrl: () => trabalhistaBatchSingleUrl,
                 getEmpresaNome: () => trabalhistaBatchEmpresaNome,
                 getTipoCert: () => trabalhistaBatchTipoCert,
-                progressEl: trabalhistaBatchProgress,
-                falhasEl: trabalhistaBatchFalhas,
-                pendentesEl: trabalhistaBatchPendentes,
-                successEl: trabalhistaBatchSuccess,
-                remainingEl: trabalhistaBatchRemaining,
-                lastMessageEl: trabalhistaBatchLastMessage,
+                painel: trabalhistaPainel,
                 overlayEl: trabalhistaBatchOverlay,
                 resumeBtn: btnTrabalhistaBatchResume,
                 pauseBtn: btnTrabalhistaBatchPause,
@@ -1770,11 +1901,7 @@ window.showToast = showToast;
                 singleBtn: btnTrabalhistaSingleEmit,
                 batchModal: trabalhistaBatchModal,
                 summaryModal: trabalhistaBatchSummaryModal,
-                summaryEmitidasEl: trabalhistaBatchSummaryEmitidas,
-                summaryOutcomeCardEl: trabalhistaBatchSummaryOutcomeCard,
-                summaryOutcomeLabelEl: trabalhistaBatchSummaryOutcomeLabel,
-                summaryFalhasEl: trabalhistaBatchSummaryFalhas,
-                summaryPendentesEl: trabalhistaBatchSummaryPendentes,
+                summaryComp: elementosComp('trabalhistaBatchSummary'),
                 summaryTotalEl: trabalhistaBatchSummaryTotal,
                 summaryTempoEl: trabalhistaBatchSummaryTempo,
                 summaryTaxaEl: trabalhistaBatchSummaryTaxa,
@@ -1810,12 +1937,7 @@ window.showToast = showToast;
                 getSingleUrl: () => rsBatchSingleUrl,
                 getEmpresaNome: () => rsBatchEmpresaNome,
                 getTipoCert: () => rsBatchTipoCert,
-                progressEl: rsBatchProgress,
-                falhasEl: rsBatchFalhas,
-                pendentesEl: rsBatchPendentes,
-                successEl: rsBatchSuccess,
-                remainingEl: rsBatchRemaining,
-                lastMessageEl: rsBatchLastMessage,
+                painel: rsPainel,
                 overlayEl: rsBatchOverlay,
                 resumeBtn: btnRsBatchResume,
                 pauseBtn: btnRsBatchPause,
@@ -1824,11 +1946,7 @@ window.showToast = showToast;
                 singleBtn: btnRsSingleEmit,
                 batchModal: rsBatchModal,
                 summaryModal: rsBatchSummaryModal,
-                summaryEmitidasEl: rsBatchSummaryEmitidas,
-                summaryOutcomeCardEl: rsBatchSummaryOutcomeCard,
-                summaryOutcomeLabelEl: rsBatchSummaryOutcomeLabel,
-                summaryFalhasEl: rsBatchSummaryFalhas,
-                summaryPendentesEl: rsBatchSummaryPendentes,
+                summaryComp: elementosComp('rsBatchSummary'),
                 summaryTotalEl: rsBatchSummaryTotal,
                 summaryTempoEl: rsBatchSummaryTempo,
                 summaryTaxaEl: rsBatchSummaryTaxa,
@@ -1868,12 +1986,7 @@ window.showToast = showToast;
                 getSingleUrl: () => municipalBatchSingleUrl,
                 getEmpresaNome: () => municipalBatchEmpresaNome,
                 getTipoCert: () => municipalBatchTipoCert,
-                progressEl: municipalBatchProgress,
-                falhasEl: municipalBatchFalhas,
-                pendentesEl: municipalBatchPendentes,
-                successEl: municipalBatchSuccess,
-                remainingEl: municipalBatchRemaining,
-                lastMessageEl: municipalBatchLastMessage,
+                painel: municipalPainel,
                 overlayEl: municipalBatchOverlay,
                 resumeBtn: btnMunicipalBatchResume,
                 pauseBtn: btnMunicipalBatchPause,
@@ -1882,11 +1995,7 @@ window.showToast = showToast;
                 singleBtn: btnMunicipalSingleEmit,
                 batchModal: municipalBatchModal,
                 summaryModal: municipalBatchSummaryModal,
-                summaryEmitidasEl: municipalBatchSummaryEmitidas,
-                summaryOutcomeCardEl: municipalBatchSummaryOutcomeCard,
-                summaryOutcomeLabelEl: municipalBatchSummaryOutcomeLabel,
-                summaryFalhasEl: municipalBatchSummaryFalhas,
-                summaryPendentesEl: municipalBatchSummaryPendentes,
+                summaryComp: elementosComp('municipalBatchSummary'),
                 summaryTotalEl: municipalBatchSummaryTotal,
                 summaryTempoEl: municipalBatchSummaryTempo,
                 summaryTaxaEl: municipalBatchSummaryTaxa,

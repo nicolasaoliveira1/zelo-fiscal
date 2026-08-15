@@ -507,7 +507,9 @@ def _register_batch_routes(prefix, endpoint_base, cfg):
             batch_engine.append_batch_message(
                 state, f"Lote {nome} iniciado. Total={dados_lote['total']}.", level='info')
         auditoria.registrar('lote.iniciar', alvo_tipo='certidao', alvo_id=certidao_id, detalhe=nome)
-        return jsonify({'status': 'ok'})
+        # devolve o total para o painel de andamento já abrir com o denominador
+        # certo: o primeiro /status só responde ~1,5s depois.
+        return jsonify({'status': 'ok', 'total': dados_lote['total']})
 
     def pausar():
         driver = batch_engine.request_pause(lock, state)

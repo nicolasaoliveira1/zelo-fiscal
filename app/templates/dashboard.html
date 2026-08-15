@@ -31,6 +31,174 @@
     {{ certidao.tipo.value ~ (' - ' ~ subtipo_label if subtipo_label else '') }}
     {%- endmacro %}
 
+    {#- Composição do desfecho de um lote (emitidas / pendentes / falhas sobre o
+        total) — o componente A. Um macro só porque os TRÊS momentos do lote
+        usam exatamente isto: o modal de confirmação (antes), o painel de
+        andamento (durante) e o resumo (depois). Os ids saem de `prefixo`, que
+        é o que o dashboard.js usa para achar cada campo. -#}
+    {% macro zl_comp_lote(prefixo) -%}
+    {# A barra é o desfecho, não só o avanço: cada segmento é uma categoria e o
+       trilho vazio é o que falta — por isso não existe "Restantes". #}
+    <div class="zl-comp-bar" aria-hidden="true">
+        <div class="zl-comp-seg is-ok is-vazio" id="{{ prefixo }}SegOk"></div>
+        <div class="zl-comp-seg is-pend is-vazio" id="{{ prefixo }}SegPend"></div>
+        <div class="zl-comp-seg is-danger is-vazio" id="{{ prefixo }}SegFalhas"></div>
+    </div>
+    <div class="zl-comp-leg">
+        <span class="zl-comp-stat is-ok" data-zero="1">
+            <strong class="zl-comp-v" id="{{ prefixo }}Emitidas">0</strong>emitidas
+        </span>
+        <span class="zl-comp-stat is-pend" data-zero="1">
+            <strong class="zl-comp-v" id="{{ prefixo }}Pendentes">0</strong>pendentes
+        </span>
+        <span class="zl-comp-stat is-danger" data-zero="1">
+            <strong class="zl-comp-v" id="{{ prefixo }}Falhas">0</strong>falhas
+        </span>
+    </div>
+    {%- endmacro %}
+
+    {#- Modal que confirma o início do lote — componente B (ficha). Vencidas e
+        A vencer NÃO somam entre si um "todo" que a barra saberia desenhar: elas
+        somam o total do lote, e é isso que a régua dupla da linha de soma diz.
+        Antes eram 3 cartões irmãos, com a soma parecendo mais uma parcela. -#}
+    {% macro batch_confirm_modal(slug, titulo, plural) -%}
+    {%- set Slug = slug | capitalize -%}
+    <div class="modal fade" id="{{ slug }}BatchModal" tabindex="-1" aria-hidden="true"
+        data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content batch-action-modal">
+                <div class="modal-header">
+                    <div>
+                        <span class="zl-eyebrow">Confirmar</span>
+                        <h5 class="modal-title mb-0">Emitir {{ titulo }} em lote</h5>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="batch-modal-intro mb-3">Emita apenas a certidão de
+                        <strong id="{{ slug }}BatchEmpresaDisplay">---</strong>
+                        ou todas as {{ plural }} encontradas no lote:</p>
+                    <p class="text-muted small mb-3 d-none" id="{{ slug }}BatchScopeHint"></p>
+                    {# O fio de status na borda de cada linha é a cor desta tela: mesma
+                       escala da tabela de certidões, então "vencida" é vermelho aqui e
+                       lá. O total não é status, e por isso não ganha fio. #}
+                    <div class="zl-ficha">
+                        <div class="zl-ficha-row is-danger">
+                            <span class="zl-ficha-l" id="{{ slug }}BatchLabelVencidas">Vencidas</span>
+                            <span class="zl-ficha-v" id="{{ slug }}BatchVencidas">0</span>
+                        </div>
+                        <div class="zl-ficha-row is-warn">
+                            <span class="zl-ficha-l" id="{{ slug }}BatchLabelAVencer">A vencer</span>
+                            <span class="zl-ficha-v" id="{{ slug }}BatchAVencer">0</span>
+                        </div>
+                        <div class="zl-ficha-row is-total">
+                            <span class="zl-ficha-l" id="{{ slug }}BatchLabelTotal">Total do lote</span>
+                            <span class="zl-ficha-v" id="{{ slug }}BatchTotal">0</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer batch-modal-footer zl-modal-footer">
+                    <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-soft-primary" id="btn{{ Slug }}SingleEmit">Emitir apenas esta</button>
+                    <button type="button" class="btn btn-primary" id="btn{{ Slug }}BatchStart">Iniciar lote</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {%- endmacro %}
+
+    {#- Resumo do lote — componente A inteiro: a composição do desfecho, e
+        duração/taxa como meta inline do mesmo bloco (não são ficha; ficha é
+        para lista de fatos). Mesmo componente do painel de andamento, de
+        propósito: o operador acabou de olhar para ele. -#}
+    {% macro batch_summary_modal(slug, titulo) -%}
+    <div class="modal fade" id="{{ slug }}BatchSummaryModal" tabindex="-1" aria-hidden="true"
+        data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content batch-summary-modal">
+                <div class="modal-header border-0 pb-0">
+                    <div>
+                        <span class="zl-eyebrow">Lote concluído</span>
+                        <h5 class="modal-title mb-0">Resumo do lote {{ titulo }}</h5>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body pt-3">
+                    <div class="zl-comp-fig" aria-hidden="true">
+                        <span class="zl-comp-n" id="{{ slug }}BatchSummaryTotal">0</span>
+                        <span class="zl-comp-d">&nbsp;certidões</span>
+                        <span class="zl-comp-u">processadas</span>
+                    </div>
+
+                    {{ zl_comp_lote(slug ~ 'BatchSummary') }}
+
+                    {# Duração e taxa não entram na barra, mas são adendos deste mesmo
+                       bloco — inline atrás de um fio, não uma ficha à parte. #}
+                    <div class="zl-comp-meta">
+                        <div>Duração<b id="{{ slug }}BatchSummaryTempo">0s</b></div>
+                        <div>Taxa de sucesso<b id="{{ slug }}BatchSummaryTaxa">0%</b></div>
+                    </div>
+
+                    <p class="small text-muted mt-3 mb-0 d-none" id="{{ slug }}BatchSummaryNotice"></p>
+                </div>
+                <div class="modal-footer zl-modal-footer">
+                    <button type="button" class="btn btn-primary px-4" data-bs-dismiss="modal">Entendi</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {%- endmacro %}
+
+    {#- Painel de andamento do lote. Os 4 lotes (FGTS, Estadual RS, Municipal e
+        Trabalhista) usam markup idêntico: um macro só evita que a próxima
+        mudança de layout seja aplicada em 3 dos 4 overlays. Os IDs seguem o
+        padrão que o dashboard.js espera ({slug}BatchX / btn{Slug}BatchY). -#}
+    {% macro batch_progress_overlay(slug, titulo) -%}
+    {%- set Slug = slug | capitalize -%}
+    <div id="{{ slug }}-batch-overlay" class="loading-overlay d-none">
+        <div class="batch-progress-panel" role="dialog" aria-modal="true"
+            aria-labelledby="{{ slug }}BatchTitulo">
+            <div class="batch-progress-head d-flex justify-content-between align-items-start gap-3">
+                <div>
+                    <span class="zl-eyebrow">Emissão em lote</span>
+                    <h2 class="batch-progress-title" id="{{ slug }}BatchTitulo">{{ titulo }}</h2>
+                </div>
+                <span class="batch-progress-clock" id="{{ slug }}BatchElapsed">00:00</span>
+            </div>
+
+            <div class="batch-progress-body">
+                <div class="zl-comp-fig" aria-hidden="true">
+                    <span class="zl-comp-n" id="{{ slug }}BatchProgress">0</span>
+                    {# ...TotalItens e não ...Total: o modal de abertura do lote já usa
+                       o id "{{ slug }}BatchTotal" para o total previsto. #}
+                    <span class="zl-comp-d">/<span id="{{ slug }}BatchTotalItens">0</span></span>
+                    <span class="zl-comp-u">concluídas</span>
+                </div>
+
+                {{ zl_comp_lote(slug ~ 'Batch') }}
+
+                <div class="batch-progress-live" id="{{ slug }}BatchLive">
+                    <span class="batch-progress-live-dot"></span>
+                    <span class="batch-progress-live-text" id="{{ slug }}BatchLastMessage">Preparando o lote…</span>
+                </div>
+
+                {# Os números acima são desenho (mono, cor, barra); o leitor de
+                   tela recebe a frase inteira por aqui. #}
+                <p class="visually-hidden" role="status" aria-live="polite"
+                    id="{{ slug }}BatchAnuncio"></p>
+            </div>
+
+            {# "Parar" encerra o lote e perde o que falta: fica com a cor danger
+               e longe do canto direito, onde a mão vai por reflexo. #}
+            <div class="batch-progress-footer">
+                <button type="button" class="btn btn-outline-danger btn-sm me-auto" id="btn{{ Slug }}BatchStop">Parar</button>
+                <button type="button" class="btn btn-soft-primary btn-sm" id="btn{{ Slug }}BatchPause">Pausar</button>
+                <button type="button" class="btn btn-primary btn-sm d-none" id="btn{{ Slug }}BatchResume">Retomar</button>
+            </div>
+        </div>
+    </div>
+    {%- endmacro %}
+
     {% block content %}
 
 
@@ -349,6 +517,22 @@
                     </div>
                 </div>
                 <div class="d-flex align-items-center gap-2">
+                    {# Composição (A) das certidões desta empresa: as 5 categorias
+                       somam o total, então é barra + legenda, não contadores
+                       soltos. Server-side porque os números já vêm em `ct`. #}
+                    {% if ct['total'] %}
+                    <span class="zl-comp-bar is-mini" role="img"
+                        aria-label="{{ ct['validas'] }} válidas, {{ ct['a_vencer'] }} a vencer, {{ ct['vencidas'] }} vencidas, {{ ct['pendentes'] }} pendentes, {{ ct['nao_definida'] }} sem data"
+                        data-bs-tooltip="true" data-bs-placement="top"
+                        title="{{ ct['validas'] }} válidas · {{ ct['a_vencer'] }} a vencer · {{ ct['vencidas'] }} vencidas · {{ ct['pendentes'] }} pendentes · {{ ct['nao_definida'] }} sem data">
+                        {%- for chave, classe in [('validas','is-ok'), ('a_vencer','is-warn'),
+                                                  ('vencidas','is-danger'), ('pendentes','is-pend'),
+                                                  ('nao_definida','is-muted')] -%}
+                        <i class="zl-comp-seg {{ classe }}{{ ' is-vazio' if not ct[chave] }}"
+                            style="width: {{ (ct[chave] / ct['total'] * 100) | round(2) }}%"></i>
+                        {%- endfor -%}
+                    </span>
+                    {% endif %}
                     <button type="button" class="btn btn-soft-primary btn-sm btn-abrir-pasta"
                         data-empresa-id="{{ empresa.id }}"
                         title="Abrir pasta de certidões na rede"
@@ -478,7 +662,7 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h1 class="modal-title fs-5" id="editModalLabel">Editar Validade</h1>
+                    <h5 class="modal-title" id="editModalLabel">Editar Validade</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -678,462 +862,56 @@
         </div>
     </div>
 
-    <div class="modal fade" id="fgtsBatchModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
-        data-bs-keyboard="false">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content batch-action-modal">
-                <div class="modal-header">
-                    <h5 class="modal-title">Emitir FGTS em lote</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <p class="batch-modal-intro mb-3">Emita apenas a certidão de <strong id="fgtsBatchEmpresaDisplay">---</strong> ou todas as FGTS encontradas no lote:</p>
-                    <p class="text-muted small mb-3 d-none" id="fgtsBatchScopeHint"></p>
-                    <div class="batch-kpi-grid">
-                        <div class="batch-kpi-card is-danger">
-                            <span class="batch-kpi-label" id="fgtsBatchLabelVencidas">Vencidas</span>
-                            <strong class="batch-kpi-value" id="fgtsBatchVencidas">0</strong>
-                        </div>
-                        <div class="batch-kpi-card is-warning">
-                            <span class="batch-kpi-label" id="fgtsBatchLabelAVencer">A vencer</span>
-                            <strong class="batch-kpi-value" id="fgtsBatchAVencer">0</strong>
-                        </div>
-                        <div class="batch-kpi-card is-total">
-                            <span class="batch-kpi-label" id="fgtsBatchLabelTotal">Total do lote</span>
-                            <strong class="batch-kpi-value" id="fgtsBatchTotal">0</strong>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer batch-modal-footer">
-                    <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="button" class="btn btn-soft-primary" id="btnFgtsSingleEmit">Emitir apenas
-                        esta</button>
-                    <button type="button" class="btn btn-primary" id="btnFgtsBatchStart">Iniciar lote</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    {{ batch_confirm_modal('fgts', 'FGTS', 'FGTS') }}
 
-    <div class="modal fade" id="fgtsBatchSummaryModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
-        data-bs-keyboard="false">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content batch-summary-modal">
-                <div class="modal-header border-0 pb-0">
-                    <div>
-                        <h5 class="modal-title mb-1">Resumo do lote FGTS</h5>
-                        <p class="text-muted mb-0 small">
-                            Lote concluído: <strong id="fgtsBatchSummaryTotal">0</strong> processadas
-                        </p>
-                    </div>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body pt-3">
-                    <div class="batch-summary-grid">
-                        <div class="batch-summary-card is-success">
-                            <span class="batch-summary-label">Emitidas</span>
-                            <strong class="batch-summary-value" id="fgtsBatchSummaryEmitidas">0</strong>
-                        </div>
+    {{ batch_summary_modal('fgts', 'FGTS') }}
 
-                        <div class="batch-summary-card is-pending">
-                            <span class="batch-summary-label">Pendentes</span>
-                            <strong class="batch-summary-value" id="fgtsBatchSummaryPendentes">0</strong>
-                        </div>
+    {{ batch_confirm_modal('trabalhista', 'Trabalhista', 'Trabalhista') }}
 
-                        <div class="batch-summary-card is-danger" id="fgtsBatchSummaryOutcomeCard">
-                            <span class="batch-summary-label" id="fgtsBatchSummaryOutcomeLabel">Falhas</span>
-                            <strong class="batch-summary-value" id="fgtsBatchSummaryFalhas">0</strong>
-                        </div>
+    {{ batch_summary_modal('trabalhista', 'Trabalhista') }}
 
-                        <div class="batch-summary-card">
-                            <span class="batch-summary-label">Duração</span>
-                            <strong class="batch-summary-value" id="fgtsBatchSummaryTempo">0s</strong>
-                        </div>
+    {{ batch_confirm_modal('rs', 'Estadual RS', 'Estadual RS') }}
 
-                        <div class="batch-summary-card">
-                            <span class="batch-summary-label">Taxa de sucesso</span>
-                            <strong class="batch-summary-value" id="fgtsBatchSummaryTaxa">0%</strong>
-                        </div>
-                    </div>
-                    <p class="small text-muted mt-3 mb-0 d-none" id="fgtsBatchSummaryNotice"></p>
-                </div>
-                <div class="modal-footer border-0 pt-0">
-                    <button type="button" class="btn btn-primary px-4" data-bs-dismiss="modal">OK</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    {{ batch_summary_modal('rs', 'Estadual RS') }}
 
-    <div class="modal fade" id="trabalhistaBatchModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
-        data-bs-keyboard="false">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content batch-action-modal">
-                <div class="modal-header">
-                    <h5 class="modal-title">Emitir Trabalhista em lote</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <p class="batch-modal-intro mb-3">Emita apenas a certidão de <strong id="trabalhistaBatchEmpresaDisplay">---</strong> ou todas as Trabalhista encontradas no lote:</p>
-                    <p class="text-muted small mb-3 d-none" id="trabalhistaBatchScopeHint"></p>
-                    <div class="batch-kpi-grid">
-                        <div class="batch-kpi-card is-danger">
-                            <span class="batch-kpi-label" id="trabalhistaBatchLabelVencidas">Vencidas</span>
-                            <strong class="batch-kpi-value" id="trabalhistaBatchVencidas">0</strong>
-                        </div>
-                        <div class="batch-kpi-card is-warning">
-                            <span class="batch-kpi-label" id="trabalhistaBatchLabelAVencer">A vencer</span>
-                            <strong class="batch-kpi-value" id="trabalhistaBatchAVencer">0</strong>
-                        </div>
-                        <div class="batch-kpi-card is-total">
-                            <span class="batch-kpi-label" id="trabalhistaBatchLabelTotal">Total do lote</span>
-                            <strong class="batch-kpi-value" id="trabalhistaBatchTotal">0</strong>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer batch-modal-footer">
-                    <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="button" class="btn btn-soft-primary" id="btnTrabalhistaSingleEmit">Emitir apenas
-                        esta</button>
-                    <button type="button" class="btn btn-primary" id="btnTrabalhistaBatchStart">Iniciar lote</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    {{ batch_confirm_modal('municipal', 'Municipal', 'Municipais') }}
 
-    <div class="modal fade" id="trabalhistaBatchSummaryModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
-        data-bs-keyboard="false">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content batch-summary-modal">
-                <div class="modal-header border-0 pb-0">
-                    <div>
-                        <h5 class="modal-title mb-1">Resumo do lote Trabalhista</h5>
-                        <p class="text-muted mb-0 small">
-                            Lote concluído: <strong id="trabalhistaBatchSummaryTotal">0</strong> processadas
-                        </p>
-                    </div>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body pt-3">
-                    <div class="batch-summary-grid">
-                        <div class="batch-summary-card is-success">
-                            <span class="batch-summary-label">Emitidas</span>
-                            <strong class="batch-summary-value" id="trabalhistaBatchSummaryEmitidas">0</strong>
-                        </div>
+    {{ batch_summary_modal('municipal', 'Municipal') }}
 
-                        <div class="batch-summary-card is-pending">
-                            <span class="batch-summary-label">Pendentes</span>
-                            <strong class="batch-summary-value" id="trabalhistaBatchSummaryPendentes">0</strong>
-                        </div>
+    {{ batch_progress_overlay('rs', 'Estadual RS') }}
 
-                        <div class="batch-summary-card is-danger" id="trabalhistaBatchSummaryOutcomeCard">
-                            <span class="batch-summary-label" id="trabalhistaBatchSummaryOutcomeLabel">Falhas</span>
-                            <strong class="batch-summary-value" id="trabalhistaBatchSummaryFalhas">0</strong>
-                        </div>
+    {{ batch_progress_overlay('fgts', 'FGTS') }}
 
-                        <div class="batch-summary-card">
-                            <span class="batch-summary-label">Duração</span>
-                            <strong class="batch-summary-value" id="trabalhistaBatchSummaryTempo">0s</strong>
-                        </div>
+    {{ batch_progress_overlay('trabalhista', 'Trabalhista') }}
 
-                        <div class="batch-summary-card">
-                            <span class="batch-summary-label">Taxa de sucesso</span>
-                            <strong class="batch-summary-value" id="trabalhistaBatchSummaryTaxa">0%</strong>
-                        </div>
-                    </div>
-                    <p class="small text-muted mt-3 mb-0 d-none" id="trabalhistaBatchSummaryNotice"></p>
-                </div>
-                <div class="modal-footer border-0 pt-0">
-                    <button type="button" class="btn btn-primary px-4" data-bs-dismiss="modal">OK</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    {{ batch_progress_overlay('municipal', 'Municipal') }}
 
-    <div class="modal fade" id="rsBatchModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
-        data-bs-keyboard="false">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content batch-action-modal">
-                <div class="modal-header">
-                    <h5 class="modal-title">Emitir Estadual RS em lote</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <p class="batch-modal-intro mb-3">Emita apenas a certidão de <strong id="rsBatchEmpresaDisplay">---</strong> ou todas as Estadual RS encontradas no lote:</p>
-                    <p class="text-muted small mb-3 d-none" id="rsBatchScopeHint"></p>
-                    <div class="batch-kpi-grid">
-                        <div class="batch-kpi-card is-danger">
-                            <span class="batch-kpi-label" id="rsBatchLabelVencidas">Vencidas</span>
-                            <strong class="batch-kpi-value" id="rsBatchVencidas">0</strong>
-                        </div>
-                        <div class="batch-kpi-card is-warning">
-                            <span class="batch-kpi-label" id="rsBatchLabelAVencer">A vencer</span>
-                            <strong class="batch-kpi-value" id="rsBatchAVencer">0</strong>
-                        </div>
-                        <div class="batch-kpi-card is-total">
-                            <span class="batch-kpi-label" id="rsBatchLabelTotal">Total do lote</span>
-                            <strong class="batch-kpi-value" id="rsBatchTotal">0</strong>
-                        </div>
-                    </div>
-                    <p class="text-muted small mt-3 mb-0">No lote RS, o ALTCHA é resolvido automaticamente via 2captcha.
-                    </p>
-                </div>
-                <div class="modal-footer batch-modal-footer">
-                    <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="button" class="btn btn-soft-primary" id="btnRsSingleEmit">Emitir apenas
-                        esta</button>
-                    <button type="button" class="btn btn-primary" id="btnRsBatchStart">Iniciar lote</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal fade" id="rsBatchSummaryModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
-        data-bs-keyboard="false">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content batch-summary-modal">
-                <div class="modal-header border-0 pb-0">
-                    <div>
-                        <h5 class="modal-title mb-1">Resumo do lote Estadual RS</h5>
-                        <p class="text-muted mb-0 small">
-                            Lote concluído: <strong id="rsBatchSummaryTotal">0</strong> processadas
-                        </p>
-                    </div>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body pt-3">
-                    <div class="batch-summary-grid">
-                        <div class="batch-summary-card is-success">
-                            <span class="batch-summary-label">Emitidas</span>
-                            <strong class="batch-summary-value" id="rsBatchSummaryEmitidas">0</strong>
-                        </div>
-
-                        <div class="batch-summary-card is-pending">
-                            <span class="batch-summary-label">Pendentes</span>
-                            <strong class="batch-summary-value" id="rsBatchSummaryPendentes">0</strong>
-                        </div>
-
-                        <div class="batch-summary-card is-danger" id="rsBatchSummaryOutcomeCard">
-                            <span class="batch-summary-label" id="rsBatchSummaryOutcomeLabel">Falhas</span>
-                            <strong class="batch-summary-value" id="rsBatchSummaryFalhas">0</strong>
-                        </div>
-
-                        <div class="batch-summary-card">
-                            <span class="batch-summary-label">Positivas</span>
-                            <strong class="batch-summary-value" id="rsBatchSummaryPositivas">0</strong>
-                        </div>
-
-                        <div class="batch-summary-card">
-                            <span class="batch-summary-label">Negativas</span>
-                            <strong class="batch-summary-value" id="rsBatchSummaryNegativas">0</strong>
-                        </div>
-
-                        <div class="batch-summary-card">
-                            <span class="batch-summary-label">Efeito de negativa</span>
-                            <strong class="batch-summary-value" id="rsBatchSummaryEfeitoNegativas">0</strong>
-                        </div>
-
-                        <div class="batch-summary-card">
-                            <span class="batch-summary-label">Duração</span>
-                            <strong class="batch-summary-value" id="rsBatchSummaryTempo">0s</strong>
-                        </div>
-
-                        <div class="batch-summary-card">
-                            <span class="batch-summary-label">Taxa de sucesso</span>
-                            <strong class="batch-summary-value" id="rsBatchSummaryTaxa">0%</strong>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer border-0 pt-0">
-                    <button type="button" class="btn btn-primary px-4" data-bs-dismiss="modal">OK</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal fade" id="municipalBatchModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
-        data-bs-keyboard="false">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content batch-action-modal">
-                <div class="modal-header">
-                    <h5 class="modal-title">Emitir Municipal em lote</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <p class="batch-modal-intro mb-3">Emita apenas a certidão de <strong id="municipalBatchEmpresaDisplay">---</strong> ou todas as Municipais encontradas no lote:</p>
-                    <p class="text-muted small mb-3 d-none" id="municipalBatchScopeHint"></p>
-                    <div class="batch-kpi-grid">
-                        <div class="batch-kpi-card is-danger">
-                            <span class="batch-kpi-label" id="municipalBatchLabelVencidas">Vencidas</span>
-                            <strong class="batch-kpi-value" id="municipalBatchVencidas">0</strong>
-                        </div>
-                        <div class="batch-kpi-card is-warning">
-                            <span class="batch-kpi-label" id="municipalBatchLabelAVencer">A vencer</span>
-                            <strong class="batch-kpi-value" id="municipalBatchAVencer">0</strong>
-                        </div>
-                        <div class="batch-kpi-card is-total">
-                            <span class="batch-kpi-label" id="municipalBatchLabelTotal">Total do lote</span>
-                            <strong class="batch-kpi-value" id="municipalBatchTotal">0</strong>
-                        </div>
-                    </div>
-                    <p class="text-muted small mt-3 mb-0">
-                        Lote municipal disponível para Imbé e Tramandaí.
-                    </p>
-                </div>
-                <div class="modal-footer batch-modal-footer">
-                    <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="button" class="btn btn-soft-primary" id="btnMunicipalSingleEmit">Emitir apenas
-                        esta</button>
-                    <button type="button" class="btn btn-primary" id="btnMunicipalBatchStart">Iniciar lote</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal fade" id="municipalBatchSummaryModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
-        data-bs-keyboard="false">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content batch-summary-modal">
-                <div class="modal-header border-0 pb-0">
-                    <div>
-                        <h5 class="modal-title mb-1">Resumo do lote Municipal</h5>
-                        <p class="text-muted mb-0 small">
-                            Lote concluído: <strong id="municipalBatchSummaryTotal">0</strong> processadas
-                        </p>
-                    </div>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body pt-3">
-                    <div class="batch-summary-grid">
-                        <div class="batch-summary-card is-success">
-                            <span class="batch-summary-label">Emitidas</span>
-                            <strong class="batch-summary-value" id="municipalBatchSummaryEmitidas">0</strong>
-                        </div>
-
-                        <div class="batch-summary-card is-pending">
-                            <span class="batch-summary-label">Pendentes</span>
-                            <strong class="batch-summary-value" id="municipalBatchSummaryPendentes">0</strong>
-                        </div>
-
-                        <div class="batch-summary-card is-danger" id="municipalBatchSummaryOutcomeCard">
-                            <span class="batch-summary-label" id="municipalBatchSummaryOutcomeLabel">Falhas</span>
-                            <strong class="batch-summary-value" id="municipalBatchSummaryFalhas">0</strong>
-                        </div>
-
-                        <div class="batch-summary-card">
-                            <span class="batch-summary-label">Duração</span>
-                            <strong class="batch-summary-value" id="municipalBatchSummaryTempo">0s</strong>
-                        </div>
-
-                        <div class="batch-summary-card">
-                            <span class="batch-summary-label">Taxa de sucesso</span>
-                            <strong class="batch-summary-value" id="municipalBatchSummaryTaxa">0%</strong>
-                        </div>
-                    </div>
-                    <p class="small text-muted mt-3 mb-0 d-none" id="municipalBatchSummaryNotice"></p>
-                </div>
-                <div class="modal-footer border-0 pt-0">
-                    <button type="button" class="btn btn-primary px-4" data-bs-dismiss="modal">OK</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div id="rs-batch-overlay" class="loading-overlay d-none">
-        <div class="loading-box text-center">
-            <div class="spinner-border text-light" role="status">
-                <span class="visually-hidden">Carregando...</span>
-            </div>
-            <p class="mt-3 text-light fw-semibold mb-1" style='font-size: 1.37rem'>
-                Emissão Estadual RS em lote
-            </p>
-            <p class="text-light fw-semibold mb-2" id="rsBatchProgress" aria-live="polite">0/0 concluídas</p>
-            <p class="text-light fw-semibold mb-2" id="rsBatchFalhas">Falhas: 0</p>
-            <p class="text-light fw-semibold mb-2" id="rsBatchPendentes">Pendentes: 0</p>
-            <p class="text-light fw-semibold mb-2" id="rsBatchSuccess">Sucessos: 0</p>
-            <p class="text-light fw-semibold mb-2" id="rsBatchRemaining">Restantes: 0</p>
-            <p class="text-light small mb-2 d-none" id="rsBatchLastMessage" aria-live="polite"></p>
-            <div class="d-flex justify-content-center gap-2">
-                <button type="button" class="btn btn-outline-light" id="btnRsBatchPause">Pausar</button>
-                <button type="button" class="btn btn-outline-warning d-none" id="btnRsBatchResume">Retomar</button>
-                <button type="button" class="btn btn-outline-danger" id="btnRsBatchStop">Parar</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="fgts-batch-overlay" class="loading-overlay d-none">
-        <div class="loading-box text-center">
-            <div class="spinner-border text-light" role="status">
-                <span class="visually-hidden">Carregando...</span>
-            </div>
-            <p class="mt-3 text-light fw-semibold mb-1" style='font-size: 1.37rem'>
-                Emissão FGTS em lote
-            </p>
-            <p class="text-light fw-semibold mb-2" id="fgtsBatchProgress" aria-live="polite">0/0 concluídas</p>
-            <p class="text-light fw-semibold mb-2" id="fgtsBatchFalhas">Falhas: 0</p>
-            <p class="text-light fw-semibold mb-2" id="fgtsBatchPendentes">Pendentes: 0</p>
-            <p class="text-light fw-semibold mb-2" id="fgtsBatchSuccess">Sucessos: 0</p>
-            <p class="text-light fw-semibold mb-2" id="fgtsBatchRemaining">Restantes: 0</p>
-            <p class="text-light small mb-2 d-none" id="fgtsBatchLastMessage" aria-live="polite"></p>
-            <div class="d-flex justify-content-center gap-2">
-                <button type="button" class="btn btn-outline-light" id="btnFgtsBatchPause">Pausar</button>
-                <button type="button" class="btn btn-outline-warning d-none" id="btnFgtsBatchResume">Retomar</button>
-                <button type="button" class="btn btn-outline-danger" id="btnFgtsBatchStop">Parar</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="trabalhista-batch-overlay" class="loading-overlay d-none">
-        <div class="loading-box text-center">
-            <div class="spinner-border text-light" role="status">
-                <span class="visually-hidden">Carregando...</span>
-            </div>
-            <p class="mt-3 text-light fw-semibold mb-1" style='font-size: 1.37rem'>
-                Emissão Trabalhista em lote
-            </p>
-            <p class="text-light fw-semibold mb-2" id="trabalhistaBatchProgress" aria-live="polite">0/0 concluídas</p>
-            <p class="text-light fw-semibold mb-2" id="trabalhistaBatchFalhas">Falhas: 0</p>
-            <p class="text-light fw-semibold mb-2" id="trabalhistaBatchPendentes">Pendentes: 0</p>
-            <p class="text-light fw-semibold mb-2" id="trabalhistaBatchSuccess">Sucessos: 0</p>
-            <p class="text-light fw-semibold mb-2" id="trabalhistaBatchRemaining">Restantes: 0</p>
-            <p class="text-light small mb-2 d-none" id="trabalhistaBatchLastMessage" aria-live="polite"></p>
-            <div class="d-flex justify-content-center gap-2">
-                <button type="button" class="btn btn-outline-light" id="btnTrabalhistaBatchPause">Pausar</button>
-                <button type="button" class="btn btn-outline-warning d-none" id="btnTrabalhistaBatchResume">Retomar</button>
-                <button type="button" class="btn btn-outline-danger" id="btnTrabalhistaBatchStop">Parar</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="municipal-batch-overlay" class="loading-overlay d-none">
-        <div class="loading-box text-center">
-            <div class="spinner-border text-light" role="status">
-                <span class="visually-hidden">Carregando...</span>
-            </div>
-            <p class="mt-3 text-light fw-semibold mb-1" style='font-size: 1.37rem'>
-                Emissão Municipal em lote
-            </p>
-            <p class="text-light fw-semibold mb-2" id="municipalBatchProgress" aria-live="polite">0/0 concluídas</p>
-            <p class="text-light fw-semibold mb-2" id="municipalBatchFalhas">Falhas: 0</p>
-            <p class="text-light fw-semibold mb-2" id="municipalBatchPendentes">Pendentes: 0</p>
-            <p class="text-light fw-semibold mb-2" id="municipalBatchSuccess">Sucessos: 0</p>
-            <p class="text-light fw-semibold mb-2" id="municipalBatchRemaining">Restantes: 0</p>
-            <p class="text-light small mb-2 d-none" id="municipalBatchLastMessage" aria-live="polite"></p>
-            <div class="d-flex justify-content-center gap-2">
-                <button type="button" class="btn btn-outline-light" id="btnMunicipalBatchPause">Pausar</button>
-                <button type="button" class="btn btn-outline-warning d-none" id="btnMunicipalBatchResume">Retomar</button>
-                <button type="button" class="btn btn-outline-danger" id="btnMunicipalBatchStop">Parar</button>
-            </div>
-        </div>
-    </div>
-
+    {#- Emissão individual. Mesma moldura do painel de lote — os dois aparecem
+        no mesmo fluxo ("Emitir apenas esta" abre este logo depois daquele).
+        Sem barra: aqui nada soma e não há progresso mensurável; quem diz que
+        está vivo é o ponto pulsante e o relógio correndo. -#}
     <div id="loading-overlay" class="loading-overlay d-none">
-        <div class="loading-box text-center">
-            <div class="spinner-border text-light" role="status">
-                <span class="visually-hidden">Carregando...</span>
+        <div class="batch-progress-panel" role="dialog" aria-modal="true"
+            aria-labelledby="loadingTitulo">
+            <div class="batch-progress-head d-flex justify-content-between align-items-start gap-3">
+                <div>
+                    <span class="zl-eyebrow">Emissão individual</span>
+                    <h2 class="batch-progress-title" id="loadingTitulo">Executando automação</h2>
+                </div>
+                <span class="d-flex align-items-center gap-2">
+                    <span class="zl-spin" role="status" aria-label="Executando"></span>
+                    <span class="batch-progress-clock" id="loadingElapsed">00:00</span>
+                </span>
             </div>
-            <p class="mt-3 text-light fw-semibold mb-1" style='font-size: 1.37rem'>
-                Executando automação, aguarde...
-            </p>
-            <p class="text-light fw-semibold mb-0" id="loading-detalhes" aria-live="polite"></p>
+
+            <div class="batch-progress-body">
+                <div class="batch-progress-live is-solo">
+                    <span class="batch-progress-live-dot"></span>
+                    <span class="batch-progress-live-text" id="loading-detalhes"
+                        aria-live="polite">Abrindo o portal…</span>
+                </div>
+                <p class="zl-sub d-none" id="loadingCnpj"></p>
+            </div>
         </div>
     </div>
 
