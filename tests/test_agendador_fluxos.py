@@ -47,7 +47,9 @@ def test_rodar_lote_pula_se_lote_manual_em_andamento(app, ids, fluxos_registrado
 
 def test_rodar_lote_pula_se_emissao_individual_ativa(app, ids, fluxos_registrados, monkeypatch):
     """Não concorre com uma emissão individual em curso (guarda do lote manual)."""
-    monkeypatch.setattr(lotes, 'emissao_individual_ativa', lambda: True)
+    monkeypatch.setattr(lotes, 'automacao_em_curso',
+                        lambda: {'tipo': 'individual', 'rotulo': 'uma emissao individual',
+                                 'status': 'running'})
 
     def _emit_proibido(cid, drv, eid):
         raise AssertionError('nao deveria emitir com emissao individual ativa')

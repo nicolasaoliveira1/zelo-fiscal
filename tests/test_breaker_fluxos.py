@@ -106,7 +106,7 @@ def test_fluxo_agendador_municipal_usa_alvo_por_cidade(ctx, monkeypatch):
     """O lote municipal do agendador cobre varias cidades — e onde o alvo por
     municipio importa de verdade."""
     kw = _capturar_kwargs(monkeypatch)
-    monkeypatch.setattr(lotes, 'emissao_individual_ativa', lambda: False)
+    monkeypatch.setattr(lotes, 'automacao_em_curso', lambda: None)
     lotes._fluxo_municipal_rodar(ctx, [1], wrap_emit=lambda emit: emit,
                                  execution_id='e1')
     assert kw['alvo_fn'] is lotes._alvo_breaker_municipal
@@ -114,7 +114,7 @@ def test_fluxo_agendador_municipal_usa_alvo_por_cidade(ctx, monkeypatch):
 
 def test_fluxo_agendador_fgts_usa_alvo_fixo(ctx, monkeypatch):
     kw = _capturar_kwargs(monkeypatch)
-    monkeypatch.setattr(lotes, 'emissao_individual_ativa', lambda: False)
+    monkeypatch.setattr(lotes, 'automacao_em_curso', lambda: None)
     lotes._fluxo_fgts_rodar(ctx, [1], wrap_emit=lambda emit: emit, execution_id='e1')
     assert kw['alvo_lote'] == 'FGTS'
 
@@ -359,7 +359,7 @@ def test_agendador_roda_o_ciclo_seguinte_apos_pausa_vencida(ctx, monkeypatch):
         FGTS_BATCH_STATE.update(status='paused', pausado_por_breaker='FGTS')
 
     kw = _capturar_kwargs(monkeypatch)
-    monkeypatch.setattr(lotes, 'emissao_individual_ativa', lambda: False)
+    monkeypatch.setattr(lotes, 'automacao_em_curso', lambda: None)
 
     # noite seguinte, ja fora da janela do breaker
     monkeypatch.setattr(circuit_breaker, '_agora', lambda: agora + timedelta(hours=24))

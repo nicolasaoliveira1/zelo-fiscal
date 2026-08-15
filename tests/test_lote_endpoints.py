@@ -62,6 +62,57 @@ def test_iniciar_bloqueado_por_emissao_individual(client, ids):
         r = client.post('/fgts/lote/iniciar', json={'certidao_id': ids['fgts']})
     finally:
         batch_state.marcar_emissao_individual(False)
-    assert r.status_code == 400, r.status_code
+    assert r.status_code == 409, r.status_code
     assert r.get_json()['status'] == 'error'
     assert 'individual' in r.get_json()['message'].lower()
+
+
+# === guarda global de automacao ===========================================
+# Ate o lote poder ser minimizado, quem impedia duas automacoes ao mesmo tempo
+# era o overlay de tela cheia — a trava era a UI, por acidente. Estes testes
+# fixam a trava explicita que tomou o lugar dela.
+
+def test_iniciar_lote_bloqueado_por_lote_de_OUTRO_tipo(client, ids):
+    """O caso que o servidor NAO barrava: FGTS rodando, RS tentando iniciar."""
+    from app.automation import batch_state
+    original = batch_state.FGTS_BATCH_STATE.get('status')
+    batch_state.FGTS_BATCH_STATE['status'] = 'running'
+    try:
+        r = client.post('/estadual-rs/lote/iniciar', json={'certidao_id': ids['rs']})
+    finally:
+        batch_state.FGTS_BATCH_STATE['status'] = original
+    assert r.status_code == 409, r.status_code
+    # a mensagem precisa NOMEAR quem ocupa: com o lote minimizado o operador
+    # nao ve mais qual esta rodando
+    assert 'FGTS' in r.get_json()['message']
+
+
+def test_lote_pausado_continua_ocupando(client, ids):
+    """Pausado tem driver aberto e "Retomar" disponivel — ainda segura."""
+    from app.automation import batch_state
+    original = batch_state.FGTS_BATCH_STATE.get('status')
+    batch_state.FGTS_BATCH_STATE['status'] = 'paused'
+    try:
+        r = client.post('/estadual-rs/lote/iniciar', json={'certidao_id': ids['rs']})
+        em_curso = batch_state.automacao_em_curso()
+    finally:
+        batch_state.FGTS_BATCH_STATE['status'] = original
+    assert r.status_code == 409
+    assert em_curso['status'] == 'paused'
+    assert 'pausado' in r.get_json()['message'].lower()
+
+
+def test_automacao_em_curso_none_quando_tudo_parado():
+    from app.automation import batch_state
+    assert batch_state.automacao_em_curso() is None
+
+
+def test_automacao_em_curso_nomeia_o_lote():
+    from app.automation import batch_state
+    original = batch_state.MUNICIPAL_BATCH_STATE.get('status')
+    batch_state.MUNICIPAL_BATCH_STATE['status'] = 'running'
+    try:
+        em_curso = batch_state.automacao_em_curso()
+    finally:
+        batch_state.MUNICIPAL_BATCH_STATE['status'] = original
+    assert em_curso == {'tipo': 'lote', 'rotulo': 'Municipal', 'status': 'running'}

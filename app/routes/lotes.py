@@ -22,7 +22,8 @@ from app.automation.batch_state import (
     RS_BATCH_STATE,
     TRABALHISTA_BATCH_LOCK,
     TRABALHISTA_BATCH_STATE,
-    emissao_individual_ativa,
+    automacao_em_curso,
+    mensagem_automacao_em_curso,
 )
 from app.automation.driver import (
     _ativar_politica_autoselect_rs_temporaria,
@@ -475,11 +476,12 @@ def _register_batch_routes(prefix, endpoint_base, cfg):
         scope = _parse_batch_scope(dados.get('scope'))
         if not certidao_id:
             return _json_error('Certidão inválida.', 400)
-        if emissao_individual_ativa():
-            return _json_error(
-                'Há uma emissão individual em andamento. Aguarde concluir para iniciar o lote.',
-                400,
-            )
+        # Guarda global: qualquer automacao em curso (lote de OUTRO tipo, ou
+        # individual) impede iniciar. Antes so a individual barrava, e dois
+        # lotes de tipos diferentes rodavam juntos se a UI deixasse.
+        em_curso = automacao_em_curso()
+        if em_curso is not None:
+            return _json_error(mensagem_automacao_em_curso(em_curso), 409)
         if precondicao is not None:
             erro = precondicao()
             if erro is not None:
@@ -615,9 +617,12 @@ def _rodar_lote_agendado(app, ids, *, wrap_emit, execution_id, lock, state,
                          real_emit, nome_lote, **loop_kwargs):
     # Não concorre com uma emissão individual em curso (mesma guarda do lote
     # manual): dois drivers podem disputar o mesmo perfil Chrome (ex.: RS).
-    if emissao_individual_ativa():
-        log_event('agendador_lote_pulado_emissao_individual', lote=nome_lote,
-                  execution_id=execution_id)
+    em_curso = automacao_em_curso()
+    if em_curso is not None:
+        # O agendador roda sozinho e nao pode atropelar o operador — nem o
+        # contrario. Pula e tenta no proximo ciclo.
+        log_event('agendador_lote_pulado_automacao_em_curso', lote=nome_lote,
+                  ocupado_por=em_curso['rotulo'], execution_id=execution_id)
         return
     with lock:
         # Serialização com o lote manual: se já há um em andamento/pausado deste

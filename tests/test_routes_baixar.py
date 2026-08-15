@@ -81,7 +81,8 @@ def test_validar_baixar_rs_lote_ativo(app, ids):
             emissao_service.RS_BATCH_STATE['status'] = original
     assert resp is not None
     _body, code = resp  # _json_error -> (response, code)
-    assert code == 400
+    # 409: recurso ocupado — mesma convencao do lock da sessao NFSe
+    assert code == 409
 
 
 def test_validar_baixar_fgts_lote_ativo(app, ids):
@@ -95,7 +96,8 @@ def test_validar_baixar_fgts_lote_ativo(app, ids):
             emissao_service.FGTS_BATCH_STATE['status'] = original
     assert resp is not None
     _body, code = resp  # _json_error -> (response, code)
-    assert code == 400
+    # 409: recurso ocupado — mesma convencao do lock da sessao NFSe
+    assert code == 409
 
 
 def test_validar_baixar_municipal_lote_ativo(app, ids):
@@ -109,7 +111,8 @@ def test_validar_baixar_municipal_lote_ativo(app, ids):
             emissao_service.MUNICIPAL_BATCH_STATE['status'] = original
     assert resp is not None
     _body, code = resp
-    assert code == 400
+    # 409: recurso ocupado — mesma convencao do lock da sessao NFSe
+    assert code == 409
 
 
 def test_validar_baixar_segue_quando_ok(app, ids):
@@ -217,3 +220,36 @@ def test_resposta_erro_acionavel(app, ids):
         assert code == 409
         assert _body.get_json()['message'] == 'Preflight: dependencia ausente.'
         assert _body.get_json()['status'] == 'error'
+
+
+def test_validar_baixar_bloqueado_por_lote_de_outro_tipo(app, ids):
+    """Individual Municipal durante lote FGTS: o servidor nao barrava isso.
+
+    Era a UI (overlay de tela cheia) que impedia o clique. Com o lote
+    minimizavel, a trava precisa existir de verdade."""
+    original = emissao_service.FGTS_BATCH_STATE.get('status')
+    with app.app_context():
+        cert = Certidao.query.filter_by(tipo=TipoCertidao.MUNICIPAL).first()
+        emissao_service.FGTS_BATCH_STATE['status'] = 'running'
+        try:
+            resp = emissao_service._validar_baixar(cert)
+        finally:
+            emissao_service.FGTS_BATCH_STATE['status'] = original
+    assert resp is not None
+    _body, code = resp
+    assert code == 409
+
+
+def test_validar_baixar_bloqueado_por_outra_individual(app, ids):
+    """Duas emissoes individuais ao mesmo tempo tambem passavam."""
+    from app.automation import batch_state
+    with app.app_context():
+        cert = Certidao.query.filter_by(tipo=TipoCertidao.FGTS).first()
+        batch_state.marcar_emissao_individual(True)
+        try:
+            resp = emissao_service._validar_baixar(cert)
+        finally:
+            batch_state.marcar_emissao_individual(False)
+    assert resp is not None
+    _body, code = resp
+    assert code == 409

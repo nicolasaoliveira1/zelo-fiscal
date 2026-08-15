@@ -31,6 +31,8 @@ from app.automation.batch_state import (
     RS_BATCH_LOCK,
     RS_BATCH_STATE,
     marcar_emissao_individual,
+    automacao_em_curso,
+    mensagem_automacao_em_curso,
 )
 from app.automation.driver import (
     UcIndisponivelError,
@@ -93,6 +95,14 @@ def _validar_baixar(certidao):
     """
     tipo_certidao_chave = certidao.tipo.name
     estado = (certidao.empresa.estado or '').strip().upper()
+
+    # Guarda global: uma automacao por vez, seja qual for o tipo ou a origem.
+    # Ate o lote poder ser minimizado, quem impedia isso era o overlay de tela
+    # cheia; os guardas por tipo abaixo nunca barraram "individual Municipal
+    # durante lote FGTS" nem duas individuais ao mesmo tempo.
+    em_curso = automacao_em_curso()
+    if em_curso is not None:
+        return _json_error(mensagem_automacao_em_curso(em_curso), 409)
 
     if tipo_certidao_chave == 'ESTADUAL' and estado == 'RS':
         erro = _lote_bloqueia_emissao(
