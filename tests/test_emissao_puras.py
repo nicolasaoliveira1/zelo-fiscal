@@ -4,9 +4,11 @@ Cobre suporte de lote municipal, normalizacao de texto, deteccao de
 impedimento FGTS (driver falso) e o diff de downloads (snapshot/pick).
 """
 import os
+import shutil
 from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
+from app import file_manager
 from app.automation import emissao
 
 
@@ -95,21 +97,21 @@ def test_pick_changed_download_arquivo_novo(monkeypatch):
         '/dl/a.pdf': {'mtime': 100.0, 'size': 10},
         '/dl/b.pdf': {'mtime': 200.0, 'size': 20},
     }
-    monkeypatch.setattr(emissao, '_snapshot_downloads_pdf', lambda: agora)
+    monkeypatch.setattr(emissao, '_snapshot_downloads_pdf', lambda pasta=None: agora)
     assert emissao._pick_changed_download_pdf(antes) == '/dl/b.pdf'
 
 
 def test_pick_changed_download_modificado(monkeypatch):
     antes = {'/dl/a.pdf': {'mtime': 100.0, 'size': 10}}
     agora = {'/dl/a.pdf': {'mtime': 150.0, 'size': 10}}
-    monkeypatch.setattr(emissao, '_snapshot_downloads_pdf', lambda: agora)
+    monkeypatch.setattr(emissao, '_snapshot_downloads_pdf', lambda pasta=None: agora)
     assert emissao._pick_changed_download_pdf(antes) == '/dl/a.pdf'
 
 
 def test_pick_changed_download_sem_mudanca(monkeypatch):
     antes = {'/dl/a.pdf': {'mtime': 100.0, 'size': 10}}
     agora = {'/dl/a.pdf': {'mtime': 100.0, 'size': 10}}
-    monkeypatch.setattr(emissao, '_snapshot_downloads_pdf', lambda: agora)
+    monkeypatch.setattr(emissao, '_snapshot_downloads_pdf', lambda pasta=None: agora)
     assert emissao._pick_changed_download_pdf(antes) is None
 
 
@@ -120,7 +122,7 @@ def test_pick_changed_download_mais_recente(monkeypatch):
         '/dl/b.pdf': {'mtime': 300.0, 'size': 20},
         '/dl/c.pdf': {'mtime': 200.0, 'size': 30},
     }
-    monkeypatch.setattr(emissao, '_snapshot_downloads_pdf', lambda: agora)
+    monkeypatch.setattr(emissao, '_snapshot_downloads_pdf', lambda pasta=None: agora)
     assert emissao._pick_changed_download_pdf(antes) == '/dl/b.pdf'
 
 
@@ -307,3 +309,71 @@ def test_emitir_trabalhista_excecao_rollback_e_captura(app, ids):
     assert msg  # mensagem acionavel ao usuario
     assert validade is None
     cap.assert_called_once()
+
+
+# === isolamento da pasta de download ======================================
+# O bug: ~/Downloads era compartilhada por TODA automacao (e pelo Chrome do
+# operador), e o detector adota "o .pdf mais recente criado depois do inicio".
+# Duas coisas baixando junto casavam o arquivo errado com a certidao.
+
+def test_verificar_novo_arquivo_isola_por_pasta(tmp_path):
+    """Arquivo de outra execucao, ainda que mais recente, nao vaza para ca."""
+    minha = tmp_path / 'exec-a'
+    outra = tmp_path / 'exec-b'
+    minha.mkdir()
+    outra.mkdir()
+    inicio = 1000.0
+
+    meu_pdf = minha / 'certidao.pdf'
+    meu_pdf.write_bytes(b'%PDF meu')
+    os.utime(meu_pdf, (1100, 1100))
+
+    # o vizinho e MAIS recente: na pasta compartilhada ele venceria o max(ctime)
+    pdf_vizinho = outra / 'certidao_de_outra_empresa.pdf'
+    pdf_vizinho.write_bytes(b'%PDF vizinho')
+    os.utime(pdf_vizinho, (1200, 1200))
+
+    achado = file_manager.verificar_novo_arquivo(inicio, pasta=str(minha))
+    assert achado == str(meu_pdf)
+
+
+def test_snapshot_downloads_pdf_respeita_a_pasta(tmp_path):
+    minha = tmp_path / 'exec-a'
+    outra = tmp_path / 'exec-b'
+    minha.mkdir()
+    outra.mkdir()
+    (minha / 'meu.pdf').write_bytes(b'%PDF a')
+    (outra / 'alheio.pdf').write_bytes(b'%PDF b')
+
+    snap = emissao._snapshot_downloads_pdf(str(minha))
+    assert {os.path.basename(c) for c in snap} == {'meu.pdf'}
+
+
+def test_pasta_download_por_driver_e_exclusiva():
+    """Cada driver recebe a sua; sem atributo, cai no ~/Downloads historico."""
+    from app.automation import driver as driver_mod
+
+    a = driver_mod.criar_pasta_download()
+    b = driver_mod.criar_pasta_download()
+    try:
+        assert a != b
+        assert os.path.isdir(a) and os.path.isdir(b)
+
+        falso = MagicMock()
+        setattr(falso, 'zelo_pasta_download', a)
+        assert driver_mod.pasta_download(falso) == a
+
+        driver_mod.descartar_pasta_download(falso)
+        assert not os.path.exists(a)
+    finally:
+        for p in (a, b):
+            shutil.rmtree(p, ignore_errors=True)
+
+
+def test_pasta_download_sem_atributo_cai_no_padrao():
+    from app.automation import driver as driver_mod
+
+    class SemAtributo:
+        pass
+
+    assert driver_mod.pasta_download(SemAtributo()) == driver_mod._PASTA_DOWNLOADS_USUARIO
