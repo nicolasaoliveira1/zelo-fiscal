@@ -3,6 +3,9 @@
 Extraído de routes.py (C1). Sem dependência do estado de lote.
 """
 import os
+import shutil
+import tempfile
+import time
 
 try:
     import winreg
@@ -103,8 +106,75 @@ _FEATURES_DESLIGADAS = ("DownloadBubble", "DownloadBubbleV2")
 _FEATURES_DESLIGADAS_BACKGROUND = ("CalculateNativeWinOcclusion",)
 
 
+# === pasta de download por execucao ========================================
+# O Chrome de TODA automacao baixava em ~/Downloads, e `verificar_novo_arquivo`
+# adotava "o .pdf mais recente criado depois do inicio". Sem isolamento isso
+# casa o arquivo errado com a certidao sempre que duas coisas baixam ao mesmo
+# tempo — e o vizinho nao precisa nem ser outra automacao: um PDF que o operador
+# baixe no proprio Chrome durante um lote entra no funil e vira "a certidao
+# emitida", com o nome da empresa errado e a validade lida do arquivo errado.
+# Uma pasta por driver transforma "o mais recente numa pasta compartilhada" em
+# "o unico arquivo na minha pasta".
+_PREFIXO_PASTA_DOWNLOAD = 'zelo-download-'
+_ATRIBUTO_PASTA_DOWNLOAD = 'zelo_pasta_download'
+_PASTA_DOWNLOADS_USUARIO = os.path.join(os.path.expanduser("~"), "Downloads")
+# Sobra de execucao morta (processo derrubado antes do descarte) so e varrida
+# depois disso, para nunca competir com um lote em andamento.
+_IDADE_PASTA_ORFA_S = 12 * 3600
+
+
+def _varrer_pastas_orfas():
+    """Remove pastas de download de execucoes antigas. Best-effort.
+
+    Existe porque o descarte no fim do fluxo nao cobre queda de processo: sem
+    isso o %TEMP% acumularia uma pasta por emissao, para sempre."""
+    raiz = tempfile.gettempdir()
+    limite = time.time() - _IDADE_PASTA_ORFA_S
+    try:
+        nomes = os.listdir(raiz)
+    except OSError:
+        return
+    for nome in nomes:
+        if not nome.startswith(_PREFIXO_PASTA_DOWNLOAD):
+            continue
+        caminho = os.path.join(raiz, nome)
+        try:
+            if os.path.isdir(caminho) and os.path.getmtime(caminho) < limite:
+                shutil.rmtree(caminho, ignore_errors=True)
+        except OSError:
+            continue
+
+
+def criar_pasta_download():
+    """Pasta exclusiva de UMA execucao de automacao."""
+    _varrer_pastas_orfas()
+    return tempfile.mkdtemp(prefix=_PREFIXO_PASTA_DOWNLOAD)
+
+
+def pasta_download(driver):
+    """Onde ESTE driver baixa.
+
+    O fallback para ~/Downloads mantem funcionando qualquer fluxo que ainda crie
+    driver por fora; e o comportamento antigo, nao o desejado."""
+    return getattr(driver, _ATRIBUTO_PASTA_DOWNLOAD, None) or _PASTA_DOWNLOADS_USUARIO
+
+
+def descartar_pasta_download(driver):
+    """Apaga a pasta deste driver. Best-effort e idempotente — o PDF ja foi
+    movido para a rede por `file_manager.mover_e_renomear` quando chega aqui."""
+    caminho = getattr(driver, _ATRIBUTO_PASTA_DOWNLOAD, None)
+    if not caminho:
+        return
+    shutil.rmtree(caminho, ignore_errors=True)
+    try:
+        setattr(driver, _ATRIBUTO_PASTA_DOWNLOAD, None)
+    except Exception:
+        pass
+
+
 def _build_chrome_options(anonimo=True, usar_perfil=False, profile_dir=None,
-                          profile_name=None, background=False):
+                          profile_name=None, background=False,
+                          pasta_download=None):
     """Monta as opcoes do Chrome. `background=True` abre a janela fora da tela.
 
     Usado pelos lotes, que rodam sem operador junto: o chromedriver traz a
@@ -128,7 +198,7 @@ def _build_chrome_options(anonimo=True, usar_perfil=False, profile_dir=None,
     chrome_options.add_argument("--no-first-run")
     chrome_options.add_argument("--no-default-browser-check")
 
-    downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+    downloads_dir = pasta_download or _PASTA_DOWNLOADS_USUARIO
     chrome_options.add_experimental_option('prefs', {
         'download.default_directory': downloads_dir,
         'download.prompt_for_download': False,
@@ -153,7 +223,9 @@ def _build_chrome_options(anonimo=True, usar_perfil=False, profile_dir=None,
 
 
 def _configurar_download_automatico_chrome(driver):
-    downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+    # a pasta vem do proprio driver: esta funcao e rechamada a cada aba nova
+    # (FGTS, Imbe) e precisa reapontar para a MESMA pasta daquela execucao.
+    downloads_dir = pasta_download(driver)
 
     try:
         driver.execute_cdp_cmd('Page.setDownloadBehavior', {
@@ -188,10 +260,13 @@ def _configurar_download_automatico_chrome(driver):
 
 
 def _criar_driver_chrome(anonimo=True, usar_perfil=False, background=False):
+    pasta = criar_pasta_download()
     chrome_options = _build_chrome_options(
-        anonimo=anonimo, usar_perfil=usar_perfil, background=background)
+        anonimo=anonimo, usar_perfil=usar_perfil, background=background,
+        pasta_download=pasta)
     driver = webdriver.Chrome(service=ChromeService(
         ChromeDriverManager().install()), options=chrome_options)
+    setattr(driver, _ATRIBUTO_PASTA_DOWNLOAD, pasta)
 
     if background:
         # Com perfil persistente o Chrome restaura a ultima geometria e ignora
@@ -296,13 +371,16 @@ def _criar_driver_uc(profile_dir=None, profile_name=None):
     if profile_dir is None and profile_name is None:
         profile_dir, profile_name = _get_municipal_profile_settings()
 
+    pasta = criar_pasta_download()
     options = _build_chrome_options(
         anonimo=False, usar_perfil=True,
         profile_dir=profile_dir, profile_name=profile_name,
+        pasta_download=pasta,
     )
 
     try:
         driver = uc.Chrome(options=options, version_main=_detectar_chrome_version_main())
+        setattr(driver, _ATRIBUTO_PASTA_DOWNLOAD, pasta)
     except Exception as exc:
         log_event('uc_driver_start_failed', level='WARNING', error=str(exc))
         primeira_linha = (str(exc).strip().splitlines() or [''])[0]

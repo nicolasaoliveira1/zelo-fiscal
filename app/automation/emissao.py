@@ -31,6 +31,7 @@ from app.automation import capture, captcha_img, pdf, steps, trabalhista
 from app.automation.sites import SITES_CERTIDOES, VALIDADES_CERTIDOES
 from app.automation.driver import (
     _configurar_download_automatico_chrome,
+    pasta_download,
     _criar_driver_chrome,
 )
 from app.automation.batch_state import (
@@ -282,8 +283,13 @@ def _municipal_batch_suportado(cidade):
     return cidade_norm in {'IMBE', 'TRAMANDAI'}
 
 
-def _snapshot_downloads_pdf():
-    pasta_downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+def _snapshot_downloads_pdf(pasta=None):
+    """Foto dos PDFs na pasta de download.
+
+    `pasta` e a pasta exclusiva do driver (`driver.pasta_download`). Sem ela cai
+    em ~/Downloads, que e o caso do monitor da Federal: ali nao ha automacao, o
+    operador baixa no proprio navegador e e essa pasta que precisa ser vigiada."""
+    pasta_downloads = pasta or os.path.join(os.path.expanduser("~"), "Downloads")
     snapshot = {}
 
     try:
@@ -314,8 +320,8 @@ def _snapshot_downloads_pdf():
     return snapshot
 
 
-def _pick_changed_download_pdf(snapshot_before):
-    current = _snapshot_downloads_pdf()
+def _pick_changed_download_pdf(snapshot_before, pasta=None):
+    current = _snapshot_downloads_pdf(pasta)
     candidatos = []
 
     for caminho, info in current.items():
@@ -515,7 +521,7 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
 
             time.sleep(0.5)
             _log_etapa('Tentando clicar Enviar')
-            snapshot_downloads_antes_envio = _snapshot_downloads_pdf()
+            snapshot_downloads_antes_envio = _snapshot_downloads_pdf(pasta_download(driver))
             try:
                 handle_principal_rs = local_driver.current_window_handle
             except Exception:
@@ -567,9 +573,11 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
                 return False, False, 'Sessão RS expirada durante espera do download.'
 
             if usar_2captcha:
-                candidato = _pick_changed_download_pdf(snapshot_downloads_antes_envio)
+                candidato = _pick_changed_download_pdf(
+                    snapshot_downloads_antes_envio, pasta_download(driver))
             else:
-                candidato = file_manager.verificar_novo_arquivo(inicio_monitoramento)
+                candidato = file_manager.verificar_novo_arquivo(
+                    inicio_monitoramento, pasta=pasta_download(driver))
 
             if candidato:
                 if not _wait_file_stable(candidato, checks=4, interval=0.6):
@@ -861,7 +869,7 @@ def _emitir_municipal_certidao_lote(certidao_id, driver=None, execution_id=None)
                 certidao_id=certidao_id, error=str(exc),
             )
 
-        snapshot_before = _snapshot_downloads_pdf()
+        snapshot_before = _snapshot_downloads_pdf(pasta_download(local_driver))
 
         steps_before = config_municipal.get('before_cnpj', []) if config_municipal else []
         resultado_steps = steps.executar_municipio(
@@ -1004,9 +1012,11 @@ def _emitir_municipal_certidao_lote(certidao_id, driver=None, execution_id=None)
             if _municipal_batch_stop_requested():
                 return False, False, 'Lote interrompido.'
 
-            novo_arquivo = _pick_changed_download_pdf(snapshot_before)
+            novo_arquivo = _pick_changed_download_pdf(
+                snapshot_before, pasta_download(local_driver))
             if not novo_arquivo:
-                novo_arquivo = file_manager.verificar_novo_arquivo(tempo_inicio)
+                novo_arquivo = file_manager.verificar_novo_arquivo(
+                    tempo_inicio, pasta=pasta_download(local_driver))
 
             if novo_arquivo:
                 sucesso, msg = file_manager.mover_e_renomear(
@@ -1348,11 +1358,11 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
             except Exception:
                 pass
 
-        snapshot_before = _snapshot_downloads_pdf()
+        snapshot_before = _snapshot_downloads_pdf(pasta_download(local_driver))
         achado_pdf = {'path': None}
 
         def _houve_sucesso():
-            caminho = _pick_changed_download_pdf(snapshot_before)
+            caminho = _pick_changed_download_pdf(snapshot_before, pasta_download(local_driver))
             if caminho:
                 achado_pdf['path'] = caminho
                 return True
@@ -1364,7 +1374,8 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
         # O PDF baixado é a fonte de verdade: se chegou (mesmo que o helper tenha
         # esgotado a espera do submit), seguimos e reusamos o caminho já encontrado
         # no polling; só falha quando não há PDF nenhum.
-        novo_arquivo = achado_pdf['path'] or _pick_changed_download_pdf(snapshot_before)
+        novo_arquivo = achado_pdf['path'] or _pick_changed_download_pdf(
+            snapshot_before, pasta_download(local_driver))
         if not novo_arquivo:
             return False, False, msg or 'Trabalhista: submetido mas sem PDF detectado.'
         if not _wait_file_stable(novo_arquivo, checks=4, interval=0.6):
@@ -1733,7 +1744,9 @@ def _automatizar_fgts(contexto, driver, wait, certidao, detectar_impedimento=Fal
             return ''.join(random.choices(string.ascii_letters + string.digits, k=tamanho))
 
         def _caminho_pdf_downloads_unico() -> str:
-            pasta_downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+            # mesma pasta exclusiva do driver: este PDF e gerado por CDP e
+            # precisa cair onde o detector de download vai procurar.
+            pasta_downloads = pasta_download(driver)
             for _ in range(50):
                 nome = f"{_gerar_nome_pdf_aleatorio(10)}.pdf"
                 caminho = os.path.join(pasta_downloads, nome)

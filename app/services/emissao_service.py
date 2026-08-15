@@ -36,6 +36,7 @@ from app.automation.driver import (
     UcIndisponivelError,
     _ativar_politica_autoselect_rs_temporaria,
     _configurar_download_automatico_chrome,
+    pasta_download,
     _criar_driver_chrome,
     _criar_driver_uc,
     _desativar_politica_autoselect_rs_temporaria,
@@ -382,7 +383,8 @@ def _baixar_monitorar_download(driver, certidao, cfg, tempo_inicio, arquivo_salv
             break
 
         if not download_detectado:
-            novo_arquivo = file_manager.verificar_novo_arquivo(tempo_inicio)
+            novo_arquivo = file_manager.verificar_novo_arquivo(
+                tempo_inicio, pasta=pasta_download(driver))
 
             if novo_arquivo:
                 log_event('emit_file_detected', certidao_id=certidao.id, arquivo=str(novo_arquivo))

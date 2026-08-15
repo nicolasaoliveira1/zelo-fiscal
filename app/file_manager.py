@@ -272,8 +272,20 @@ def limpar_versoes_antigas(pasta_destino, novo_nome_padrao, tipo_certidao):
         log_event('limpar_versoes_erro', level='WARNING', error=str(e))
 
 
-def verificar_novo_arquivo(tempo_inicio, termos_ignorar=None, extensoes_permitidas=('.pdf',)):
-    pasta_downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+def verificar_novo_arquivo(tempo_inicio, termos_ignorar=None, extensoes_permitidas=('.pdf',),
+                           pasta=None):
+    """Acha o arquivo que a automacao acabou de baixar.
+
+    `pasta` e a pasta exclusiva daquele driver (`driver.pasta_download`). Ela
+    existe porque a regra abaixo — "o mais recente criado depois do inicio" — nao
+    distingue QUEM baixou: numa pasta compartilhada, o PDF de outra automacao (ou
+    o que o operador baixou no proprio Chrome) seria adotado como a certidao,
+    arquivado no nome da empresa errada e teria a validade lida dele. Com pasta
+    por execucao, "o mais recente" passa a ser "o unico".
+
+    Sem `pasta`, cai em ~/Downloads: e o comportamento antigo, mantido so para
+    nao quebrar chamada que ainda nao foi migrada."""
+    pasta_downloads = pasta or os.path.join(os.path.expanduser("~"), "Downloads")
     padrao_busca = os.path.join(pasta_downloads, "*")
 
     arquivos = glob.glob(padrao_busca)
