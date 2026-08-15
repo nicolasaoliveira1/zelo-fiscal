@@ -102,7 +102,8 @@ def _validar_baixar(certidao):
     # durante lote FGTS" nem duas individuais ao mesmo tempo.
     em_curso = automacao_em_curso()
     if em_curso is not None:
-        return _json_error(mensagem_automacao_em_curso(em_curso), 409)
+        return _json_error(mensagem_automacao_em_curso(em_curso), 409,
+                           motivo='automacao_em_curso')
 
     if tipo_certidao_chave == 'ESTADUAL' and estado == 'RS':
         erro = _lote_bloqueia_emissao(

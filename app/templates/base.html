@@ -544,13 +544,18 @@
             let scrollTimeout;
             let fadeTimeout;
 
+            // A classe no <body> existe para o dock do lote minimizado saber
+            // que este botao ocupa o canto e deslizar para o lado. Sao dois
+            // elementos fixos no mesmo ponto da tela: sem isso, um cobre o outro.
             function mostrarBotao() {
                 btnTopo.style.opacity = '1';
                 btnTopo.classList.add('visible');
+                document.body.classList.add('topo-visivel');
             }
 
             function esconderBotao() {
                 btnTopo.style.opacity = '0';
+                document.body.classList.remove('topo-visivel');
                 fadeTimeout = setTimeout(() => {
                     btnTopo.classList.remove('visible');
                 }, 200);

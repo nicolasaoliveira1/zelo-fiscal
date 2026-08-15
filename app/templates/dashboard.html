@@ -189,9 +189,14 @@
             </div>
 
             {# "Parar" encerra o lote e perde o que falta: fica com a cor danger
-               e longe do canto direito, onde a mão vai por reflexo. #}
+               e longe do canto direito, onde a mão vai por reflexo.
+               "Minimizar" é terciário: some com o painel, não muda o lote. #}
             <div class="batch-progress-footer">
-                <button type="button" class="btn btn-outline-danger btn-sm me-auto" id="btn{{ Slug }}BatchStop">Parar</button>
+                <button type="button" class="btn btn-outline-danger btn-sm" id="btn{{ Slug }}BatchStop">Parar</button>
+                <button type="button" class="btn btn-ghost btn-sm me-auto btn-minimizar-lote"
+                    data-slug="{{ slug }}" data-titulo="{{ titulo }}">
+                    <i class="bi bi-arrows-angle-contract me-1"></i>Minimizar
+                </button>
                 <button type="button" class="btn btn-soft-primary btn-sm" id="btn{{ Slug }}BatchPause">Pausar</button>
                 <button type="button" class="btn btn-primary btn-sm d-none" id="btn{{ Slug }}BatchResume">Retomar</button>
             </div>
@@ -885,6 +890,26 @@
     {{ batch_progress_overlay('trabalhista', 'Trabalhista') }}
 
     {{ batch_progress_overlay('municipal', 'Municipal') }}
+
+    {#- Dock do lote minimizado. UM só para os 4 lotes: o guarda global
+        (batch_state.automacao_em_curso) permite uma automação por vez, então
+        nunca há dois para mostrar. Pausar/Parar ficam de fora de propósito —
+        são decisões que merecem o painel inteiro à vista, não um alvo de canto. -#}
+    <div id="lote-dock" class="zl-dock d-none" role="status" aria-live="polite">
+        <span class="zl-dock-dot" aria-hidden="true"></span>
+        <span class="zl-dock-tipo" id="dockTipo">Lote</span>
+        <span class="zl-dock-frac" id="dockFracao">0/0</span>
+        <span class="zl-comp-bar" aria-hidden="true">
+            <i class="zl-comp-seg is-ok is-vazio" id="dockSegOk"></i>
+            <i class="zl-comp-seg is-pend is-vazio" id="dockSegPend"></i>
+            <i class="zl-comp-seg is-danger is-vazio" id="dockSegFalhas"></i>
+        </span>
+        <span class="zl-dock-relogio" id="dockRelogio">00:00</span>
+        <button type="button" class="btn btn-ghost btn-sm px-2" id="btnDockRestaurar"
+            title="Restaurar o painel do lote" aria-label="Restaurar o painel do lote">
+            <i class="bi bi-arrows-angle-expand"></i>
+        </button>
+    </div>
 
     {#- Emissão individual. Mesma moldura do painel de lote — os dois aparecem
         no mesmo fluxo ("Emitir apenas esta" abre este logo depois daquele).

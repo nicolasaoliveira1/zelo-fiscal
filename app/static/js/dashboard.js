@@ -598,6 +598,11 @@ window.showToast = showToast;
                 const manterLoading = data && statusesComModal.has(data.status);
                 cleanupUiLocks({ keepLoading: manterLoading });
 
+                // recusa por automação em curso: além do toast, o dock pisca —
+                // com o painel minimizado, o operador não tem outra pista de
+                // qual lote está segurando o navegador.
+                if (data && data.motivo === 'automacao_em_curso') sinalizarRecusaNoDock();
+
                 if (data.status === 'success_file_saved') {
                     if (displayData) displayData.textContent = data.data_formatada;
                     if (displayTipo) displayTipo.textContent = data.tipo_certidao;
@@ -1458,6 +1463,83 @@ window.showToast = showToast;
                     });
             }
 
+            // === dock do lote minimizado =============================
+            // Um só para os 4 lotes: o guarda global do servidor permite uma
+            // automação por vez, então nunca há dois para mostrar.
+            const dockEl = document.getElementById('lote-dock');
+            const dock = dockEl ? {
+                tipo: document.getElementById('dockTipo'),
+                fracao: document.getElementById('dockFracao'),
+                relogio: document.getElementById('dockRelogio'),
+                comp: elementosComp('dock'),
+            } : null;
+            // qual lote está minimizado agora (null = nenhum). Guarda o config
+            // para o botão restaurar saber qual overlay reabrir.
+            let loteMinimizado = null;
+            // slug -> config do lote, preenchido por startBatchPolling/registro.
+            // O botao Minimizar vive dentro do macro do painel e so conhece o
+            // slug; e aqui que ele vira o config correspondente.
+            const configPorSlug = {};
+
+            function minimizarLote(config, titulo) {
+                if (!dockEl || !config) return;
+                loteMinimizado = config;
+                if (config.overlayEl) config.overlayEl.classList.add('d-none');
+                if (dock.tipo) dock.tipo.textContent = titulo || 'Lote';
+                dockEl.classList.remove('d-none');
+                // o polling NÃO é interrompido: ele nunca dependeu do overlay
+                // estar visível, só escrevia nele.
+            }
+
+            function restaurarLote() {
+                if (!dockEl) return;
+                const config = loteMinimizado;
+                loteMinimizado = null;
+                dockEl.classList.add('d-none');
+                dockEl.classList.remove('is-paused');
+                if (config && config.overlayEl) config.overlayEl.classList.remove('d-none');
+            }
+
+            function esconderDock() {
+                if (!dockEl) return;
+                loteMinimizado = null;
+                dockEl.classList.add('d-none');
+                dockEl.classList.remove('is-paused', 'is-recusa');
+            }
+
+            // Pisca o dock quando o servidor recusa uma ação por automação em
+            // curso (409). Sem isto o operador vê só um toast e não liga a
+            // negativa ao lote que está rodando fora de vista.
+            function sinalizarRecusaNoDock() {
+                if (!dockEl || dockEl.classList.contains('d-none')) return;
+                dockEl.classList.remove('is-recusa');
+                void dockEl.offsetWidth;   // reinicia a animação
+                dockEl.classList.add('is-recusa');
+            }
+
+            function atualizarDock(data, total, concluidas, emitidas, pendentes, falhas) {
+                if (!dock || !dockEl || dockEl.classList.contains('d-none')) return;
+                if (dock.fracao) dock.fracao.textContent = `${concluidas}/${total}`;
+                if (dock.relogio) {
+                    dock.relogio.textContent = data.status === 'paused'
+                        ? 'pausado'
+                        : formatarRelogio(segundosDesde(data.started_at));
+                }
+                dockEl.classList.toggle('is-paused', data.status === 'paused');
+                atualizarComp(dock.comp, total, emitidas, pendentes, falhas);
+            }
+
+            if (dockEl) {
+                const btnRestaurar = document.getElementById('btnDockRestaurar');
+                if (btnRestaurar) btnRestaurar.addEventListener('click', restaurarLote);
+
+                document.querySelectorAll('.btn-minimizar-lote').forEach((btn) => {
+                    btn.addEventListener('click', () => {
+                        minimizarLote(configPorSlug[btn.dataset.slug], btn.dataset.titulo);
+                    });
+                });
+            }
+
             // Painel de andamento: o componente A mais o que só ele tem
             // (relógio, linha viva, fração e o anúncio para leitor de tela).
             function elementosPainelLote(slug) {
@@ -1598,6 +1680,7 @@ window.showToast = showToast;
                 if (painel.total) painel.total.textContent = total;
 
                 atualizarComp(painel.comp, total, sucessos, pendentes, falhas);
+                atualizarDock(data, total, concluidas, sucessos, pendentes, falhas);
 
                 if (painel.relogio && data.started_at) {
                     painel.relogio.textContent = formatarRelogio(segundosDesde(data.started_at));
@@ -1652,6 +1735,7 @@ window.showToast = showToast;
                                 clearInterval(config.getPoller());
                                 config.setPoller(null);
                                 if (config.overlayEl) config.overlayEl.classList.add('d-none');
+                                esconderDock();
                                 showToast(config.messages.completed, 'success');
 
                                 const success = Number(data.success || 0);
@@ -1694,6 +1778,7 @@ window.showToast = showToast;
                                 clearInterval(config.getPoller());
                                 config.setPoller(null);
                                 if (config.overlayEl) config.overlayEl.classList.add('d-none');
+                                esconderDock();
                                 showToast(buildErrorMessage(data, config.messages.error), 'error');
                                 return;
                             }
@@ -1702,6 +1787,7 @@ window.showToast = showToast;
                                 clearInterval(config.getPoller());
                                 config.setPoller(null);
                                 if (config.overlayEl) config.overlayEl.classList.add('d-none');
+                                esconderDock();
                                 showToast(config.messages.stopped, 'primary');
                             }
                         });
@@ -1711,6 +1797,7 @@ window.showToast = showToast;
             }
 
             function bindBatchControls(config) {
+                if (config.slug) configPorSlug[config.slug] = config;
                 if (config.startBtn) {
                     let iniciandoLote = false;
                     config.startBtn.addEventListener('click', function () {
@@ -1737,6 +1824,7 @@ window.showToast = showToast;
                             .then(r => r.json())
                             .then(data => {
                                 if (data.status !== 'ok') {
+                                    if (data.motivo === 'automacao_em_curso') sinalizarRecusaNoDock();
                                     showToast(buildErrorMessage(data, config.messages.startError), 'error');
                                     return;
                                 }
@@ -1813,6 +1901,7 @@ window.showToast = showToast;
                             .then(data => {
                                 showToast(data.message || config.messages.stopped, 'primary');
                                 if (config.overlayEl) config.overlayEl.classList.add('d-none');
+                                esconderDock();
                             });
                     });
                 }
@@ -1848,6 +1937,7 @@ window.showToast = showToast;
                 getEmpresaNome: () => fgtsBatchEmpresaNome,
                 getTipoCert: () => fgtsBatchTipoCert,
                 painel: fgtsPainel,
+                slug: 'fgts',
                 overlayEl: fgtsBatchOverlay,
                 resumeBtn: btnFgtsBatchResume,
                 pauseBtn: btnFgtsBatchPause,
@@ -1893,6 +1983,7 @@ window.showToast = showToast;
                 getEmpresaNome: () => trabalhistaBatchEmpresaNome,
                 getTipoCert: () => trabalhistaBatchTipoCert,
                 painel: trabalhistaPainel,
+                slug: 'trabalhista',
                 overlayEl: trabalhistaBatchOverlay,
                 resumeBtn: btnTrabalhistaBatchResume,
                 pauseBtn: btnTrabalhistaBatchPause,
@@ -1938,6 +2029,7 @@ window.showToast = showToast;
                 getEmpresaNome: () => rsBatchEmpresaNome,
                 getTipoCert: () => rsBatchTipoCert,
                 painel: rsPainel,
+                slug: 'rs',
                 overlayEl: rsBatchOverlay,
                 resumeBtn: btnRsBatchResume,
                 pauseBtn: btnRsBatchPause,
@@ -1987,6 +2079,7 @@ window.showToast = showToast;
                 getEmpresaNome: () => municipalBatchEmpresaNome,
                 getTipoCert: () => municipalBatchTipoCert,
                 painel: municipalPainel,
+                slug: 'municipal',
                 overlayEl: municipalBatchOverlay,
                 resumeBtn: btnMunicipalBatchResume,
                 pauseBtn: btnMunicipalBatchPause,

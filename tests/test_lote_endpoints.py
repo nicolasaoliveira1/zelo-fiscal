@@ -116,3 +116,20 @@ def test_automacao_em_curso_nomeia_o_lote():
     finally:
         batch_state.MUNICIPAL_BATCH_STATE['status'] = original
     assert em_curso == {'tipo': 'lote', 'rotulo': 'Municipal', 'status': 'running'}
+
+
+def test_recusa_traz_motivo_para_a_ui(client, ids):
+    """O dock minimizado pisca com base neste marcador.
+
+    Sem ele o front so teria a mensagem em texto para adivinhar o motivo, e o
+    operador veria um toast sem ligacao com o lote que esta fora de vista."""
+    from app.automation import batch_state
+    original = batch_state.FGTS_BATCH_STATE.get('status')
+    batch_state.FGTS_BATCH_STATE['status'] = 'running'
+    try:
+        r = client.post('/estadual-rs/lote/iniciar', json={'certidao_id': ids['rs']})
+    finally:
+        batch_state.FGTS_BATCH_STATE['status'] = original
+    corpo = r.get_json()
+    assert corpo['motivo'] == 'automacao_em_curso'
+    assert corpo['status'] == 'error'      # o envelope padrao nao muda

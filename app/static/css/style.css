@@ -953,6 +953,101 @@ footer {
     .zl-bars-row { grid-template-columns: 6.5rem 1fr 2.5rem; gap: 0.5rem; }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   Dock do lote minimizado.
+   Um só, e não um por tipo, porque o guarda global (batch_state.
+   automacao_em_curso) permite uma automação por vez.
+   Mora à ESQUERDA do "voltar ao topo", que é fixo no canto; quando aquele
+   aparece ou some, este desliza para não brigar pelo espaço.
+   ══════════════════════════════════════════════════════════════ */
+.zl-dock {
+    position: fixed;
+    bottom: clamp(10px, 2.5vw, 22px);
+    right: clamp(10px, 2.5vw, 22px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.55rem 0.7rem 0.55rem 0.85rem;
+    border: 1px solid var(--zelo-line);
+    border-radius: 0.75rem;
+    background: var(--bs-body-bg);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
+    font-size: 0.82rem;
+    transition: right .28s cubic-bezier(.4, 0, .2, 1);
+}
+
+/* `topo-visivel` é posto no <body> pelo mesmo par mostrar/esconder do botão em
+   base.html. Um seletor `:has()` evitaria tocar naquele JS, mas aqui o que está
+   em jogo é sobreposição de dois elementos fixos: a classe explícita não depende
+   de suporte a `:has()` para o dock não cobrir o botão. */
+body.topo-visivel .zl-dock {
+    right: calc(clamp(10px, 2.5vw, 22px) + clamp(32px, 4vw, 52px) + 0.6rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .zl-dock { transition: none; }
+}
+
+.zl-dock-tipo {
+    font-family: var(--zelo-font-display);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.zl-dock-frac,
+.zl-dock-relogio {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.zl-dock-frac { color: var(--bs-emphasis-color); }
+.zl-dock-relogio { color: var(--bs-secondary-color); }
+
+.zl-dock .zl-comp-bar {
+    width: 5.5rem;
+    height: 0.3rem;
+    margin: 0;
+    flex: 0 0 auto;
+}
+
+.zl-dock-dot {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 999px;
+    background: var(--zelo-ok);
+    flex: 0 0 auto;
+    animation: batchPulse 1.6s ease-in-out infinite;
+}
+
+/* Pausado ainda segura o navegador (driver aberto, "Retomar" disponível) e
+   segue bloqueando emissão — mas não pode parecer que está trabalhando. */
+.zl-dock.is-paused .zl-dock-dot {
+    background: var(--zelo-muted);
+    animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .zl-dock-dot { animation: none; }
+}
+
+/* Recusa (409): sem isto o operador recebe um toast e não liga a negativa ao
+   que está rodando — ainda mais com o painel minimizado e fora de vista. */
+.zl-dock.is-recusa { animation: zlDockRecusa 1.1s ease-out; }
+
+@keyframes zlDockRecusa {
+    0%, 100% {
+        box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
+        border-color: var(--zelo-line);
+    }
+    15%, 45% {
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--zelo-warn) 35%, transparent),
+                    0 6px 18px rgba(0, 0, 0, .12);
+        border-color: var(--zelo-warn);
+    }
+}
+
 /* Eyebrow compartilhado (painel, modais): rótulo pequeno e discreto que diz em
    que momento a tela está — "Emissão em lote", "Lote concluído", "Confirmar". */
 .zl-eyebrow {
