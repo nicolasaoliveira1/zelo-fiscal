@@ -825,8 +825,15 @@ footer {
 .zl-comp-seg.is-muted { background: var(--zelo-muted); }
 
 /* No escuro, pendente (laranja) e falha (salmão) encostam sem fronteira
-   nítida. is-vazio impede o fio de aparecer solto onde não há segmento. */
-.zl-comp-seg:not(.is-vazio) + .zl-comp-seg:not(.is-vazio) {
+   nítida. is-vazio impede o fio de aparecer solto onde não há segmento.
+
+   O combinador é `~` (qualquer irmão anterior) e NÃO `+` (irmão imediato):
+   segmentos de largura zero continuam no DOM, então com `+` bastava um zero no
+   meio para o fio sumir entre dois segmentos visualmente colados — o caso real
+   de uma empresa com 4 válidas, 1 vencida e 1 sem data, onde "a vencer" e
+   "pendentes" ficam zerados entre eles. Com `~`, ganha fio todo segmento que
+   tenha algum não-vazio antes; o primeiro visível continua sem. */
+.zl-comp-seg:not(.is-vazio) ~ .zl-comp-seg:not(.is-vazio) {
     box-shadow: inset 1px 0 0 var(--zelo-paper);
 }
 
