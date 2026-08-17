@@ -137,3 +137,143 @@ def extrair_chaves(texto):
     for linha in str(texto).splitlines():
         achadas.extend(_chaves_da_linha(linha))
     return achadas
+
+
+# --- importacao (MANIF-09, MANIF-11) ----------------------------------------
+
+ORIGEM_COLAGEM = 'colagem'
+ORIGEM_XML = 'xml'
+
+_COMPETENCIA = re.compile(r'^(20\d{2})-(0[1-9]|1[0-2])$')
+
+# Estados em que a chave ja "aconteceu": um conflito de empresa descoberto
+# depois nao pode desfaze-los. Manifestacao registrada e fato fiscal.
+_TERMINAIS = ('manifestada', 'rejeitada', 'indefinida')
+
+
+class Balanco:
+    """O que entrou e o que ficou de fora, com as chaves NOMEADAS.
+
+    Contar nao basta: "3 recusadas" manda o operador caçar quais; "estas 3" ele
+    resolve na hora."""
+
+    def __init__(self):
+        self.aceitas = []
+        self.dv_invalido = []
+        self.competencia_invalida = []
+        self.duplicatas = []
+        self.sem_empresa = []
+        self.total_lidas = 0
+
+    def __repr__(self):
+        return (f'<Balanco lidas={self.total_lidas} aceitas={len(self.aceitas)} '
+                f'dv={len(self.dv_invalido)} comp={len(self.competencia_invalida)} '
+                f'dup={len(self.duplicatas)} sem_empresa={len(self.sem_empresa)}>')
+
+    def como_dict(self):
+        return {
+            'total_lidas': self.total_lidas,
+            'aceitas': list(self.aceitas),
+            'dv_invalido': list(self.dv_invalido),
+            'competencia_invalida': list(self.competencia_invalida),
+            'duplicatas': list(self.duplicatas),
+            'sem_empresa': list(self.sem_empresa),
+        }
+
+
+def _registrar_duplicata(balanco, existente, empresa):
+    """Reporta a chave repetida e, havendo conflito de empresa, tira-a da fila.
+
+    O conflito — a mesma NF-e importada para duas empresas — e o caso perigoso:
+    manifestar sob a empresa errada usa o certificado errado e cria um evento
+    que nao tem desfazer. Entao a chave sai da fila (status DUPLICATA) e espera
+    o operador dizer de quem ela e.
+
+    Chave ja em estado terminal NAO e derrubada: a manifestacao ja aconteceu, e
+    reescrever o desfecho apagaria o registro do que de fato saiu."""
+    from app import db
+    from app.models import StatusManifestacao
+
+    conflito = bool(empresa is not None and existente.empresa_id != empresa.id)
+    if conflito and existente.status not in _TERMINAIS:
+        existente.status = StatusManifestacao.DUPLICATA
+        db.session.commit()
+
+    balanco.duplicatas.append({
+        'chave': existente.chave,
+        'status': existente.status,
+        'empresa': existente.empresa.nome if existente.empresa else None,
+        'conflito': conflito,
+    })
+
+
+def importar_colagem(empresa, texto, origem=ORIGEM_COLAGEM):
+    """Cola um bloco de texto na fila de uma empresa. Devolve o `Balanco`.
+
+    Nada de rede aqui: so extracao, validacao e persistencia."""
+    from app import db
+    from app.models import ChaveManifestacao
+
+    balanco = Balanco()
+
+    for chave in extrair_chaves(texto):
+        balanco.total_lidas += 1
+
+        if not dv_valido(chave):
+            balanco.dv_invalido.append(chave)
+            continue
+
+        competencia = competencia_da_chave(chave)
+        if competencia is None:
+            balanco.competencia_invalida.append(chave)
+            continue
+
+        # Cobre tambem a chave repetida DENTRO do mesmo bloco: o commit abaixo
+        # acontece antes da proxima volta, entao a segunda ocorrencia ja
+        # encontra a linha aqui.
+        existente = ChaveManifestacao.query.filter_by(chave=chave).first()
+        if existente is not None:
+            _registrar_duplicata(balanco, existente, empresa)
+            continue
+
+        partes = decompor(chave)
+        db.session.add(ChaveManifestacao(
+            chave=chave, empresa_id=empresa.id, competencia=competencia,
+            cnpj_emitente=partes.cnpj_emitente, origem=origem))
+        db.session.commit()
+        balanco.aceitas.append(chave)
+
+    return balanco
+
+
+def liberar_duplicata(chave_linha, empresa=None, ator_id=None, confirmar=False):
+    """Devolve uma chave a fila. False quando falta confirmacao.
+
+    Chave em estado terminal exige `confirmar=True`: reenviar e inofensivo (a
+    SEFAZ responde duplicidade de evento), mas devolver a fila uma nota que ja
+    saiu, sem ninguem pedir, esconderia do operador que ela ja foi manifestada."""
+    from app import db
+    from app.models import StatusManifestacao
+
+    if chave_linha.status in _TERMINAIS and not confirmar:
+        return False
+
+    if empresa is not None:
+        chave_linha.empresa_id = empresa.id
+    chave_linha.status = StatusManifestacao.PENDENTE
+    chave_linha.liberado_por_id = ator_id
+    db.session.commit()
+    return True
+
+
+def ajustar_competencia(chave_linha, valor):
+    """Sobrescreve a competencia derivada. False se o formato nao for AAAA-MM."""
+    from app import db
+
+    if not valor or not _COMPETENCIA.match(str(valor)):
+        return False
+
+    chave_linha.competencia = str(valor)
+    chave_linha.competencia_ajustada = True
+    db.session.commit()
+    return True
