@@ -43,6 +43,7 @@ from app.automation.emissao import (
     _normalizar_cnpj,
 )
 from app.automation.sites import is_ipm_atende
+from app.errors import ErrorType, falha_de_conexao_com_host, map_exception_to_error_type
 from app.services.execution_logger import log_event
 from app.utils import normalizar_cidade
 
@@ -52,6 +53,12 @@ QUEBRADO = 'quebrado'      # um seletor verificavel nao resolve -> drift real
 PARCIAL = 'parcial'        # interrompido por captcha/gate; sem garantia total
 PULADO = 'pulado'          # automacao_ativa=false (ex.: Sao Paulo)
 ERRO = 'erro'              # falha de infra (driver/rede), nao do municipio
+
+# Nome da etapa que abre a URL do portal. Constante porque o alerta precisa
+# reconhece-la para escolher o texto do e-mail (`falhou_ao_abrir`) — com a
+# string repetida nos dois lados, renomear a etapa aqui deixaria o e-mail
+# aconselhando "revise os seletores" para um portal que nem abriu.
+ETAPA_URL = 'url'
 
 # Ultimo resultado por municipio, em memoria de processo (mesmo modelo do
 # diagnostics/batch_state): responde "como esta agora", nao guarda historico.
@@ -183,6 +190,45 @@ def cnpj_para_teste(municipio):
     return CNPJ_TESTE
 
 
+def _falha_ao_abrir_e_do_portal(exc):
+    """A falha em `driver.get(url)` e veredito sobre o PORTAL (-> quebrado) ou
+    sobre o ambiente local (-> erro)?
+
+    Duas assinaturas contam como portal, e as duas sao necessarias:
+
+    - `falha_de_conexao_com_host` (o mesmo criterio do breaker, em vez de uma
+      segunda lista): `ERR_CONNECTION_REFUSED`, `ERR_NAME_NOT_RESOLVED` e afins;
+    - TIMEOUT: um endereco que **pendura** ate o teto de page-load nao levanta
+      erro de conexao — o Chrome devolve "Timed out receiving message from
+      renderer", que nao casa com nenhum marcador de conexao. Foi exatamente o
+      caso de Xangri-La (porta 8443 desativada): o dry-run falhava todo dia como
+      `erro`, e `erro` nao alerta, entao o portal ficou meses inalcançavel em
+      silencio.
+
+    O resto segue `erro` de proposito: driver morto ou sessao invalida e ambiente
+    local, e chamar isso de drift mandaria o operador revisar seletores intactos.
+    Problemas de perfil/driver nem chegam aqui — falham antes, em
+    `_executar_dry_run`."""
+    if falha_de_conexao_com_host(exc):
+        return True
+    return map_exception_to_error_type(exc) == ErrorType.TIMEOUT
+
+
+def falhou_ao_abrir(relatorio):
+    """True quando o passo que nao resolveu foi ABRIR a URL do portal.
+
+    O alerta usa isto para escolher o texto: "o portal nao abriu" e "o seletor
+    mudou" pedem acoes diferentes (conferir endereco/ar do site x revisar
+    `config_automacao`). Le as checagens porque `_mesclar` concatena as passadas
+    — a etapa vem prefixada pelo rotulo da variante ("geral/url")."""
+    for checagem in (relatorio or {}).get('checagens') or []:
+        if checagem.get('status') != QUEBRADO:
+            continue
+        if str(checagem.get('etapa') or '').split('/')[-1] == ETAPA_URL:
+            return True
+    return False
+
+
 def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None, rotulo=''):
     """Roda o dry-run de UMA passada (uma variante) e devolve um relatorio.
 
@@ -194,6 +240,21 @@ def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None, r
     {'municipio', 'resultado', 'checagens': [{'etapa','alvo','status','detalhe'}],
      'quebrados': [str], 'mensagem': str|None}
     """
+    relatorio = _verificar(municipio, driver, config=config, timeout=timeout,
+                           cnpj=cnpj, rotulo=rotulo)
+    # O log sai AQUI, e nao no fim de `_verificar`: aquela funcao tem sete
+    # `return` de saida antecipada (drift, captcha, portal fora) e o log ficava
+    # so no ultimo — justamente os municipios com problema sumiam do jsonl, e a
+    # unica pista era o `erro: 1` no resumo do dia.
+    log_event('municipio_dryrun', municipio=relatorio.get('municipio') or '?',
+              variante=rotulo or '-', resultado=relatorio.get('resultado'),
+              quebrados=len(relatorio.get('quebrados') or []))
+    return relatorio
+
+
+def _verificar(municipio, driver, config=None, timeout=20, cnpj=None, rotulo=''):
+    """Corpo do dry-run de uma passada. Ver `verificar_municipio`, que e a porta
+    publica e faz o log do desfecho."""
     nome = getattr(municipio, 'nome', None) or '?'
     relatorio = {'municipio': nome, 'resultado': OK, 'checagens': [],
                  'quebrados': [], 'mensagem': None, 'variante': rotulo}
@@ -215,18 +276,25 @@ def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None, r
     if not url:
         relatorio['resultado'] = QUEBRADO
         relatorio['mensagem'] = 'Município sem URL de certidão cadastrada.'
-        _registrar('url', '(vazia)', QUEBRADO, 'url_certidao ausente')
+        _registrar(ETAPA_URL, '(vazia)', QUEBRADO, 'url_certidao ausente')
         return relatorio
 
     config = config or {}
     try:
         driver.get(url)
         _esperar_pagina(driver, timeout)   # portais municipais demoram a renderizar
-        _registrar('url', url, OK)
+        _registrar(ETAPA_URL, url, OK)
     except Exception as exc:
-        relatorio['resultado'] = ERRO
-        relatorio['mensagem'] = f'Não foi possível abrir o portal: {exc}'
-        _registrar('url', url, ERRO, str(exc))
+        # Portal inalcançável e drift tanto quanto um seletor que sumiu: a
+        # automacao nao roda mais. `erro` fica so para o ambiente local, que nao
+        # diz nada sobre o municipio (e por isso nao alerta).
+        do_portal = _falha_ao_abrir_e_do_portal(exc)
+        relatorio['resultado'] = QUEBRADO if do_portal else ERRO
+        relatorio['mensagem'] = (
+            f'O portal não respondeu em {url} — o endereço pode ter mudado ou o '
+            f'site está fora do ar. Detalhe: {exc}'
+            if do_portal else f'Não foi possível abrir o portal: {exc}')
+        _registrar(ETAPA_URL, url, relatorio['resultado'], str(exc))
         return relatorio
 
     wait = WebDriverWait(driver, timeout)
@@ -339,8 +407,6 @@ def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None, r
         relatorio['resultado'] = PARCIAL
         relatorio['mensagem'] = 'Verificação parcial: alguns passos dependem da emissão/captcha.'
 
-    log_event('municipio_dryrun', municipio=nome, variante=rotulo or '-',
-              resultado=relatorio['resultado'], quebrados=len(relatorio['quebrados']))
     return relatorio
 
 

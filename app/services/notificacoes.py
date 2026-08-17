@@ -326,7 +326,7 @@ def alertar_municipios_quebrados(app, relatorios):
     silencie os demais dentro da janela. So `quebrado` alerta: `erro` e infra
     (driver/perfil ocupado) e `parcial` e captcha — nenhum dos dois e drift.
     Retorna quantos alertas foram enviados agora."""
-    from app.services.dryrun_municipio import QUEBRADO
+    from app.services.dryrun_municipio import QUEBRADO, falhou_ao_abrir
 
     cfg = _config()
     destinatarios = _destinatarios(cfg)
@@ -344,15 +344,31 @@ def alertar_municipios_quebrados(app, relatorios):
         nome = relatorio.get('municipio') or '?'
         quebrados = relatorio.get('quebrados') or []
         detalhe = '; '.join(quebrados) or 'seletor nao identificado'
-        assunto = f'[Certidoes] Alerta: automacao do municipio {nome} pode ter quebrado'
+        # Mesma chave anti-spam nos dois textos (um alerta por municipio por
+        # janela), mas o conselho muda com a causa: "portal nao abriu" se
+        # resolve conferindo endereco/ar do site, "seletor mudou" se resolve no
+        # config_automacao. Mandar revisar seletor de um portal inalcançavel faz
+        # o operador depurar o lugar errado (mesma razao do alerta_solver).
+        if falhou_ao_abrir(relatorio):
+            assunto = f'[Certidoes] Alerta: portal do municipio {nome} nao respondeu'
+            fecho = [
+                'O portal nao chegou a abrir: o endereco pode ter mudado ou o site',
+                'esta fora do ar. Confira a URL do municipio (tabela municipio,',
+                'coluna url_certidao) abrindo-a no navegador e rode a verificacao',
+                'novamente. Enquanto isso a emissao deste municipio nao funciona.',
+            ]
+        else:
+            assunto = f'[Certidoes] Alerta: automacao do municipio {nome} pode ter quebrado'
+            fecho = [
+                'Provavel mudanca de layout do portal. Revise os seletores do municipio',
+                '(tabela municipio / config_automacao) e rode a verificacao novamente.',
+            ]
         corpo = '\n'.join([
             f'A verificacao diaria (sem emitir) falhou em {nome}.',
             f'Passos que nao resolveram: {detalhe}',
             f'Detalhe: {relatorio.get("mensagem") or "-"}',
             '',
-            'Provavel mudanca de layout do portal. Revise os seletores do municipio',
-            '(tabela municipio / config_automacao) e rode a verificacao novamente.',
-        ])
+        ] + fecho)
         if _enviar_alerta(app, destinatarios, f'municipio_quebrado:{nome}',
                           'alerta_municipio', assunto, corpo, janela, detalhe=detalhe):
             enviados += 1

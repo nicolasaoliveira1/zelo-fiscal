@@ -57,12 +57,59 @@ def test_sem_url_e_quebrado():
     assert 'URL' in rel['mensagem']
 
 
-def test_portal_inacessivel_e_erro_nao_quebrado():
-    # Falha de infra/rede nao deve ser reportada como drift do municipio.
-    drv = _FakeDriver(erro_get=RuntimeError('sem rede'))
+def test_falha_local_ao_abrir_e_erro_nao_quebrado():
+    # Sessao/driver quebrado nao diz nada sobre o municipio: segue `erro`, que
+    # nao alerta (alertar aqui mandaria revisar seletores intactos).
+    drv = _FakeDriver(erro_get=RuntimeError('invalid session id'))
     rel = dr.verificar_municipio(_municipio(), drv)
     assert rel['resultado'] == dr.ERRO
     assert rel['quebrados'] == []
+    assert not dr.falhou_ao_abrir(rel)
+
+
+def test_portal_recusa_conexao_e_quebrado():
+    # Portal inalcançavel e drift tanto quanto seletor sumido: a automacao nao
+    # roda mais. Precisa virar `quebrado` para o alerta diario sair.
+    drv = _FakeDriver(erro_get=RuntimeError(
+        'unknown error: net::ERR_CONNECTION_REFUSED'))
+    rel = dr.verificar_municipio(_municipio(), drv)
+    assert rel['resultado'] == dr.QUEBRADO
+    assert rel['quebrados'] == ['url: https://portal.exemplo/cnd']
+    assert dr.falhou_ao_abrir(rel)
+
+
+def test_url_que_pendura_ate_o_timeout_e_quebrado():
+    # O caso do Xangri-La (porta 8443 desativada): o endereco nao recusa a
+    # conexao, pendura ate o teto de page-load. A mensagem do Chrome nao casa com
+    # marcador de conexao nenhum, entao sem a regra de TIMEOUT isso voltaria a
+    # ser `erro` — silencioso, como foi por meses.
+    drv = _FakeDriver(erro_get=TimeoutException(
+        'timeout: Timed out receiving message from renderer: 300.000'))
+    rel = dr.verificar_municipio(_municipio(), drv)
+    assert rel['resultado'] == dr.QUEBRADO
+    assert dr.falhou_ao_abrir(rel)
+    assert 'endereço pode ter mudado' in rel['mensagem']
+
+
+def test_dryrun_loga_desfecho_mesmo_saindo_cedo():
+    # Todo `return` antecipado passa pelo log: era assim que o municipio com
+    # problema sumia do jsonl (o log vivia so no fim do caminho feliz).
+    drv = _FakeDriver(erro_get=RuntimeError('net::ERR_NAME_NOT_RESOLVED'))
+    with patch.object(dr, 'log_event') as log:
+        dr.verificar_municipio(_municipio(), drv)
+    eventos = [c for c in log.call_args_list if c.args and c.args[0] == 'municipio_dryrun']
+    assert len(eventos) == 1
+    assert eventos[0].kwargs['resultado'] == dr.QUEBRADO
+    assert eventos[0].kwargs['municipio'] == 'Vila Teste'
+
+
+def test_falhou_ao_abrir_ignora_quebra_de_seletor():
+    # So a etapa `url` conta: um seletor quebrado precisa do outro texto de e-mail.
+    rel = {'checagens': [{'etapa': 'geral/cnpj', 'status': dr.QUEBRADO}]}
+    assert not dr.falhou_ao_abrir(rel)
+    # ... e o rotulo da variante nao pode esconder a etapa (`_mesclar` prefixa).
+    rel = {'checagens': [{'etapa': 'geral/url', 'status': dr.QUEBRADO}]}
+    assert dr.falhou_ao_abrir(rel)
 
 
 def test_fluxo_simples_ok():
@@ -714,6 +761,31 @@ def test_alerta_so_para_quebrados(app):
     assert tipo == 'alerta_municipio'
     assert 'Imbé' in assunto
     assert 'cnpj: id=campoCnpj' in corpo
+    # Seletor quebrado -> conselho de seletor.
+    assert 'config_automacao' in corpo
+
+
+def test_alerta_de_portal_que_nao_abriu_manda_conferir_a_url(app):
+    # Mesma chave anti-spam, texto outro: mandar revisar seletor de um portal
+    # inalcançavel manda o operador depurar o lugar errado.
+    from contextlib import ExitStack
+
+    from app.services import notificacoes as nt
+    relatorio = {
+        'municipio': 'Xangri-Lá', 'resultado': dr.QUEBRADO,
+        'quebrados': ['url: https://portal.exemplo/cnd'],
+        'checagens': [{'etapa': 'url', 'status': dr.QUEBRADO}],
+        'mensagem': 'O portal não respondeu',
+    }
+    with ExitStack() as pilha:
+        enviar = _mocks_alerta(pilha)
+        enviados = nt.alertar_municipios_quebrados(app, [relatorio])
+    assert enviados == 1
+    (_app, _dest, chave, _tipo, assunto, corpo, _janela), _kw = enviar.call_args
+    assert chave == 'municipio_quebrado:Xangri-Lá'
+    assert 'nao respondeu' in assunto
+    assert 'url_certidao' in corpo
+    assert 'config_automacao' not in corpo
 
 
 def test_alerta_um_por_municipio(app):
