@@ -20,12 +20,15 @@ A cifra usa Fernet com a chave em `MANIF_VAULT_KEY` (env, fora do banco e fora
 do git). Sem ela o cofre recusa ler e gravar senha com mensagem acionavel — o
 inventario continua funcionando, porque metadado de certificado nao e segredo.
 """
+import os
 import re
 from datetime import datetime
+from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.serialization import pkcs12
 
+from app.file_manager import encontrar_pasta_empresa, get_caminho_rede
 from app.services.execution_logger import log_event
 from app.utils import get_config_value
 
@@ -215,3 +218,271 @@ def decifrar_senha(token):
             f'Nao consegui abrir a senha guardada: ela foi cifrada com outra '
             f'chave. Se {VAULT_KEY_ENV} mudou, as senhas precisam ser '
             f'informadas de novo no pre-voo do cofre.') from exc
+
+
+# --- inventario do drive ----------------------------------------------------
+
+EXTENSOES_PFX = ('.pfx', '.p12')
+# Fundo suficiente para `EMPRESA\DOC. EMPRESA\CERTIFICADO A-1 SENHA X\a.pfx`, e
+# raso o bastante para a varredura nao custar minutos por empresa: a medida real
+# foi ~135 s para 93 empresas com este limite.
+PROFUNDIDADE_MAX = 4
+
+# A senha as vezes esta escrita no caminho ('CERTIFICADO A-1 SENHA 17022013').
+# Isso vira SUGESTAO para o operador confirmar, nunca aplicacao automatica:
+# deduzir credencial de nome de pasta e adivinhacao, e errar em silencio aqui
+# deixaria o pre-voo dizendo PRONTO para uma empresa que falha no lote.
+# `[^\s\\/]+` e nao `\S+`: a senha esta num SEGMENTO do caminho, e `\S+`
+# atravessaria a barra capturando o proximo nivel junto.
+_SENHA_NO_CAMINHO = re.compile(r'\bSENHA\s+([^\s\\/]+)', re.IGNORECASE)
+# Senha de certificado nao tem 70 caracteres. Acima disso o que veio depois da
+# palavra e nome de arquivo, nao credencial — melhor nao sugerir nada.
+TAMANHO_MAX_SUGESTAO = 30
+
+
+def rede_disponivel():
+    """O drive base responde? Separado para o teste poder simular o `Z:` fora."""
+    try:
+        return os.path.isdir(get_caminho_rede())
+    except OSError:
+        return False
+
+
+def sugerir_senha(caminho):
+    """Trecho apos a palavra SENHA no caminho, ou None. Apenas sugestao."""
+    achado = _SENHA_NO_CAMINHO.search(str(caminho or ''))
+    if not achado:
+        return None
+    candidato = achado.group(1).strip()
+    for extensao in EXTENSOES_PFX:
+        if candidato.lower().endswith(extensao):
+            candidato = candidato[:-len(extensao)]
+    if not candidato or len(candidato) > TAMANHO_MAX_SUGESTAO:
+        return None
+    return candidato
+
+
+def _achar_pfx(raiz):
+    """Todo .pfx/.p12 sob a pasta, ate PROFUNDIDADE_MAX niveis.
+
+    Nome de pasta e de arquivo sao IGNORADOS de proposito: na carteira real as
+    pastas variam (CERTIFICADO, CERTIFIC, DOCUMENTOS, solto) e o arquivo
+    costuma ter o nome do dono da empresa, nao dela."""
+    base = Path(raiz)
+    achados = []
+    try:
+        for caminho in base.rglob('*'):
+            try:
+                if len(caminho.relative_to(base).parts) > PROFUNDIDADE_MAX:
+                    continue
+                if caminho.suffix.lower() in EXTENSOES_PFX and caminho.is_file():
+                    achados.append(caminho)
+            except OSError:
+                continue
+    except OSError as exc:
+        log_event('manifestador_cofre_varredura_falhou', level='WARNING',
+                  pasta=str(raiz), error=str(exc))
+    return achados
+
+
+def _senhas_a_tentar(certificado_atual):
+    """A senha ja guardada primeiro, depois as padrao.
+
+    Sem a guardada na frente, reinventariar jogaria de volta para
+    SENHA_PENDENTE justamente as empresas cuja senha o operador ja informou."""
+    senhas = []
+    if certificado_atual is not None and certificado_atual.senha_cifrada:
+        try:
+            senhas.append(decifrar_senha(certificado_atual.senha_cifrada).encode())
+        except CofreError:
+            # chave do cofre trocou: segue com as padrao e o estado cai em
+            # senha_pendente, que e a verdade
+            pass
+    senhas.extend(SENHAS_PADRAO)
+    return tuple(senhas)
+
+
+def _classificar(empresa, pasta, certificado_atual):
+    """(estado, InfoCertificado|None, senha|None, detalhe) para uma empresa."""
+    from app.models import EstadoCertificado
+
+    if not pasta:
+        return EstadoCertificado.SEM_PASTA, None, None, ''
+
+    arquivos = _achar_pfx(pasta)
+    if not arquivos:
+        return EstadoCertificado.SEM_ARQUIVO, None, None, ''
+
+    senhas = _senhas_a_tentar(certificado_atual)
+    abertos = []
+    for caminho in arquivos:
+        senha, info = abrir_com_senhas_conhecidas(caminho, senhas)
+        if info is not None:
+            abertos.append((senha, info))
+
+    if not abertos:
+        detalhe = '; '.join(str(c) for c in arquivos)[:500]
+        return EstadoCertificado.SENHA_PENDENTE, None, None, detalhe
+
+    cnpj_cadastro = re.sub(r'\D', '', empresa.cnpj or '')
+    casados = [(s, i) for s, i in abertos if i.cnpj == cnpj_cadastro]
+    if not casados:
+        detalhe = '; '.join(i.subject_cn for _s, i in abertos)[:500]
+        return EstadoCertificado.CNPJ_DIVERGENTE, None, None, detalhe
+
+    melhor = escolher_melhor([i for _s, i in casados])
+    senha = next(s for s, i in casados if i is melhor)
+    estado = (EstadoCertificado.VENCIDO if melhor.vencido
+              else EstadoCertificado.PRONTO)
+    return estado, melhor, senha, ''
+
+
+def _aplicar(empresa, estado, info, senha, detalhe):
+    """Grava o resultado da classificacao, criando a linha se preciso."""
+    from app import db
+    from app.models import CertificadoEmpresa
+
+    cert = empresa.certificado
+    if cert is None:
+        cert = CertificadoEmpresa(empresa_id=empresa.id)
+        db.session.add(cert)
+
+    cert.estado = estado
+    cert.detalhe = detalhe or None
+    cert.verificado_em = datetime.now()
+
+    if info is not None:
+        cert.caminho = info.caminho
+        cert.subject_cn = info.subject_cn
+        cert.issuer_cn = info.issuer_cn
+        cert.cnpj_certificado = info.cnpj
+        cert.not_after = info.not_after
+        # So regrava a senha quando ela NAO e uma das padrao: guardar `123456`
+        # cifrado nao protege nada e cria dependencia da chave do cofre para 69
+        # das 93 empresas.
+        if senha and senha.encode() not in SENHAS_PADRAO:
+            try:
+                cert.senha_cifrada = cifrar_senha(senha)
+            except CofreError:
+                pass
+    else:
+        cert.caminho = (detalhe.split('; ')[0] if estado ==
+                        _ESTADO_SENHA_PENDENTE else None)
+        cert.subject_cn = None
+        cert.issuer_cn = None
+        cert.cnpj_certificado = None
+        cert.not_after = None
+        cert.senha_cifrada = None
+
+    return cert
+
+
+_ESTADO_SENHA_PENDENTE = 'senha_pendente'
+
+
+def inventariar(empresas=None):
+    """Varre o drive e grava o estado do certificado de cada empresa ativa.
+
+    Custa rede: a medida real foi ~135 s para 93 empresas. Por isso roda fora da
+    requisicao e o resultado fica no banco — a tela le `estado_da_carteira()`.
+
+    Levanta `CofreError` quando o drive base nao responde: marcar todo mundo
+    como `sem_pasta` apagaria um inventario bom e mandaria o operador procurar
+    defeito onde nao ha (o defeito e o `Z:`, nao o cadastro)."""
+    from app import db
+    from app.models import Empresa
+    from app.services.receita_service import empresa_ativa
+
+    if not rede_disponivel():
+        raise CofreError(
+            'Nao consegui ler o drive de rede das empresas. O inventario '
+            'anterior do cofre continua valendo; refaca quando o drive voltar.')
+
+    alvos = empresas if empresas is not None else Empresa.query.order_by(
+        Empresa.nome).all()
+
+    resumo = {}
+    for empresa in alvos:
+        if not empresa_ativa(empresa):
+            continue
+        try:
+            pasta = encontrar_pasta_empresa(empresa.nome)
+        except OSError as exc:
+            # empresa isolada com problema de leitura: preserva o que ja havia
+            log_event('manifestador_cofre_pasta_falhou', level='WARNING',
+                      empresa=empresa.nome, error=str(exc))
+            continue
+
+        estado, info, senha, detalhe = _classificar(empresa, pasta,
+                                                    empresa.certificado)
+        _aplicar(empresa, estado, info, senha, detalhe)
+        resumo[estado] = resumo.get(estado, 0) + 1
+
+    db.session.commit()
+    log_event('manifestador_cofre_inventario', **{k: v for k, v in resumo.items()})
+    return resumo
+
+
+def estado_da_carteira():
+    """Contagem por estado, lida do BANCO — nunca da rede (o pre-voo abre a
+    cada carregamento da pagina e nao pode custar a varredura)."""
+    from app import db
+    from app.models import CertificadoEmpresa
+
+    linhas = db.session.query(
+        CertificadoEmpresa.estado, db.func.count(CertificadoEmpresa.id)
+    ).group_by(CertificadoEmpresa.estado).all()
+    return {estado: total for estado, total in linhas}
+
+
+def gravar_senha(empresa, senha):
+    """Confere a senha contra o arquivo e so entao a guarda cifrada.
+
+    Devolve False sem gravar quando a senha nao abre: gravar sem conferir
+    deixaria o pre-voo dizendo PRONTO para uma empresa que falharia no meio do
+    lote — que e exatamente o que o pre-voo existe para evitar."""
+    from app import db
+    from app.models import EstadoCertificado
+
+    cert = empresa.certificado
+    if cert is None or not cert.caminho:
+        return False
+
+    info = carregar_pfx(cert.caminho, (senha or '').encode() or None)
+    if info is None:
+        return False
+
+    cnpj_cadastro = re.sub(r'\D', '', empresa.cnpj or '')
+    if info.cnpj != cnpj_cadastro:
+        cert.estado = EstadoCertificado.CNPJ_DIVERGENTE
+        cert.detalhe = info.subject_cn
+        db.session.commit()
+        return False
+
+    cert.senha_cifrada = cifrar_senha(senha)
+    cert.subject_cn = info.subject_cn
+    cert.issuer_cn = info.issuer_cn
+    cert.cnpj_certificado = info.cnpj
+    cert.not_after = info.not_after
+    cert.detalhe = None
+    cert.estado = (EstadoCertificado.VENCIDO if info.vencido
+                   else EstadoCertificado.PRONTO)
+    cert.verificado_em = datetime.now()
+    db.session.commit()
+    log_event('manifestador_cofre_senha_gravada', empresa=empresa.nome)
+    return True
+
+
+def credencial(empresa):
+    """(caminho, senha em claro) para uso imediato, ou None.
+
+    So devolve para empresa com certificado PRONTO — o pre-voo e a fronteira, e
+    quem chama nao deve reimplementar a regra."""
+    from app.models import EstadoCertificado
+
+    cert = getattr(empresa, 'certificado', None)
+    if cert is None or cert.estado != EstadoCertificado.PRONTO or not cert.caminho:
+        return None
+
+    senha = decifrar_senha(cert.senha_cifrada) if cert.senha_cifrada else '123456'
+    return cert.caminho, senha

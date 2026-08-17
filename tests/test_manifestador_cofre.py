@@ -23,6 +23,11 @@ def _fazer_pfx(cn, senha=b'123456', dias_validade=365, emissor='AC DE TESTE'):
     """Um .pfx real (bytes), autoassinado, para exercitar o caminho de verdade."""
     chave = rsa.generate_private_key(public_exponent=65537, key_size=1024)
     agora = dt.datetime.now(dt.timezone.utc)
+    vence = agora + dt.timedelta(days=dias_validade)
+    # `dias_validade` negativo pede um certificado JA VENCIDO; nesse caso o
+    # inicio da validade tem de recuar antes do vencimento, senao o proprio
+    # builder recusa.
+    inicia = min(agora, vence) - dt.timedelta(days=1)
     nome = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
     emissor_nome = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, emissor)])
     cert = (
@@ -31,8 +36,8 @@ def _fazer_pfx(cn, senha=b'123456', dias_validade=365, emissor='AC DE TESTE'):
         .issuer_name(emissor_nome)
         .public_key(chave.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(agora - dt.timedelta(days=1))
-        .not_valid_after(agora + dt.timedelta(days=dias_validade))
+        .not_valid_before(inicia)
+        .not_valid_after(vence)
         .sign(chave, hashes.SHA256())
     )
     cifra = (serialization.BestAvailableEncryption(senha) if senha
