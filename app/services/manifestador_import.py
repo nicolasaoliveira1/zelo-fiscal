@@ -144,6 +144,8 @@ def extrair_chaves(texto):
 ORIGEM_COLAGEM = 'colagem'
 ORIGEM_XML = 'xml'
 
+NS_NFE = 'http://www.portalfiscal.inf.br/nfe'
+
 _COMPETENCIA = re.compile(r'^(20\d{2})-(0[1-9]|1[0-2])$')
 
 # Estados em que a chave ja "aconteceu": um conflito de empresa descoberto
@@ -240,6 +242,82 @@ def importar_colagem(empresa, texto, origem=ORIGEM_COLAGEM):
         db.session.add(ChaveManifestacao(
             chave=chave, empresa_id=empresa.id, competencia=competencia,
             cnpj_emitente=partes.cnpj_emitente, origem=origem))
+        db.session.commit()
+        balanco.aceitas.append(chave)
+
+    return balanco
+
+
+def _chave_e_destinatario(conteudo):
+    """(chave, cnpj do destinatario) lidos do XML, ou (None, None).
+
+    O `Id` do `infNFe` vem prefixado com 'NFe'. O destinatario e `dest/CNPJ`:
+    `dest/CPF` (pessoa fisica) e a ausencia de `dest` (NFC-e modelo 65, venda no
+    balcao) significam a mesma coisa aqui — nao ha empresa da carteira para
+    manifestar."""
+    import xml.etree.ElementTree as ET
+
+    try:
+        raiz = ET.fromstring(conteudo)
+    except (ET.ParseError, ValueError, TypeError):
+        return None, None
+
+    inf = raiz.find(f'.//{{{NS_NFE}}}infNFe')
+    if inf is None:
+        return None, None
+
+    chave = re.sub(r'\D', '', inf.get('Id') or '')
+    cnpj_no = inf.find(f'{{{NS_NFE}}}dest/{{{NS_NFE}}}CNPJ')
+    destinatario = (cnpj_no.text or '').strip() if cnpj_no is not None else None
+    return (chave or None), (destinatario or None)
+
+
+def importar_xmls(arquivos):
+    """Importa a partir dos XML das NF-e. `arquivos` = [(nome, bytes)].
+
+    Cada recusa nomeia o ARQUIVO, nao a chave: no XML o operador nao viu a chave
+    — ele viu um arquivo, e e por ele que vai procurar o problema."""
+    from app import db
+    from app.models import ChaveManifestacao, Empresa
+
+    balanco = Balanco()
+
+    for nome, conteudo in arquivos:
+        balanco.total_lidas += 1
+
+        chave, destinatario = _chave_e_destinatario(conteudo)
+        if not chave:
+            balanco.sem_empresa.append(nome)
+            continue
+
+        if not dv_valido(chave):
+            balanco.dv_invalido.append(chave)
+            continue
+
+        competencia = competencia_da_chave(chave)
+        if competencia is None:
+            balanco.competencia_invalida.append(chave)
+            continue
+
+        empresa = None
+        if destinatario:
+            empresa = Empresa.query.filter(
+                db.func.replace(db.func.replace(db.func.replace(
+                    Empresa.cnpj, '.', ''), '/', ''), '-', '') == destinatario
+            ).first()
+        if empresa is None:
+            balanco.sem_empresa.append(nome)
+            continue
+
+        existente = ChaveManifestacao.query.filter_by(chave=chave).first()
+        if existente is not None:
+            _registrar_duplicata(balanco, existente, empresa)
+            continue
+
+        partes = decompor(chave)
+        db.session.add(ChaveManifestacao(
+            chave=chave, empresa_id=empresa.id, competencia=competencia,
+            cnpj_emitente=partes.cnpj_emitente, origem=ORIGEM_XML))
         db.session.commit()
         balanco.aceitas.append(chave)
 

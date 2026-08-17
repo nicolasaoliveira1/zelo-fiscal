@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  NFC-e modelo 65 SEM <dest> — reducao fiel de uma nota real do drive
+  (`43170107461248000107650010000045391000045390-nfe.xml`), com os valores
+  comerciais removidos e o emitente preservado.
+
+  E o caso que o import precisa RECUSAR nomeando o arquivo: venda ao consumidor
+  no balcao nao tem destinatario identificado, entao nao ha o que manifestar.
+  Descobri isso varrendo o drive: TODAS as notas guardadas la sao deste tipo.
+-->
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
+    <infNFe versao="4.00" Id="NFe43170107461248000107650010000045391000045390">
+      <ide>
+        <cUF>43</cUF>
+        <cNF>00004539</cNF>
+        <natOp>VENDA</natOp>
+        <mod>65</mod>
+        <serie>1</serie>
+        <nNF>4539</nNF>
+        <tpNF>1</tpNF>
+        <tpEmis>1</tpEmis>
+        <cDV>0</cDV>
+        <tpAmb>1</tpAmb>
+      </ide>
+      <emit>
+        <CNPJ>07461248000107</CNPJ>
+        <xNome>DA TRIBO BURGUER</xNome>
+        <enderEmit>
+          <xLgr>AV RIO GRANDE, 420 - SL.08</xLgr>
+          <nro>420</nro>
+          <xBairro>CENTRO</xBairro>
+          <cMun>4310330</cMun>
+          <xMun>IMBE</xMun>
+          <UF>RS</UF>
+          <CEP>95625000</CEP>
+        </enderEmit>
+        <CRT>1</CRT>
+      </emit>
+      <total>
+        <ICMSTot>
+          <vNF>45.00</vNF>
+        </ICMSTot>
+      </total>
+    </infNFe>
+  </NFe>
+</nfeProc>
