@@ -29,3 +29,10 @@ fpdf2==2.8.7
 # Ja vinha instalado como dependencia TRANSITIVA do 2captcha-python; declarado
 # explicitamente porque depender disso quebraria o app numa atualizacao daquele.
 requests==2.32.5
+# Manifestador de NF-e (AD-027): assinatura XMLDSig do evento (RSA-SHA1 sobre o
+# C14N da stdlib), leitura dos .pfx do cofre e cifra Fernet das senhas.
+# Ja vinha instalado como dependencia TRANSITIVA; declarado explicitamente pelo
+# mesmo motivo do `requests`: depender disso quebraria numa atualizacao de quem
+# o traz. NAO ha lxml/signxml/zeep — a stdlib reproduz o digest e valida a
+# assinatura de NF-e reais (medido; ver .specs/features/manifestador-nfe/recon.md).
+cryptography==46.0.3

@@ -13,6 +13,16 @@ CHAVE_C = '43170107461248000107650010000045751000045752'
 DV_ERRADO = CHAVE_A[:43] + str((int(CHAVE_A[43]) + 1) % 10)
 
 
+def _ator_id():
+    """Id de um usuario que EXISTE.
+
+    `liberado_por_id` e foreign key para `usuario.id`: o SQLite nao impoe FK por
+    padrao e aceitava um id inventado, mas o InnoDB recusa com erro 1452. Um id
+    solto no teste afirmava um estado que o banco de producao nunca permitiria."""
+    from app.models import Usuario
+    return Usuario.query.filter_by(username='op_test').first().id
+
+
 def _empresa(nome='EMPRESA A', cnpj='11.222.333/0001-81'):
     emp = Empresa(nome=nome, cnpj=cnpj, estado='RS', cidade='Imbé')
     db.session.add(emp)
@@ -185,12 +195,12 @@ def test_liberar_conflito_define_a_empresa_e_devolve_a_fila(app, ids):
         imp.importar_colagem(emp_b, CHAVE_A)
         linha = ChaveManifestacao.query.filter_by(chave=CHAVE_A).first()
 
-        assert imp.liberar_duplicata(linha, empresa=emp_b, ator_id=7) is True
+        assert imp.liberar_duplicata(linha, empresa=emp_b, ator_id=_ator_id()) is True
 
         recarregada = db.session.get(ChaveManifestacao, linha.id)
         assert recarregada.status == StatusManifestacao.PENDENTE
         assert recarregada.empresa_id == emp_b.id
-        assert recarregada.liberado_por_id == 7
+        assert recarregada.liberado_por_id == _ator_id()
 
 
 def test_liberar_chave_ja_manifestada_exige_confirmacao(app, ids):
@@ -203,11 +213,11 @@ def test_liberar_chave_ja_manifestada_exige_confirmacao(app, ids):
         linha.status = StatusManifestacao.MANIFESTADA
         db.session.commit()
 
-        assert imp.liberar_duplicata(linha, ator_id=7) is False
+        assert imp.liberar_duplicata(linha, ator_id=_ator_id()) is False
         assert db.session.get(ChaveManifestacao, linha.id).status == \
             StatusManifestacao.MANIFESTADA
 
-        assert imp.liberar_duplicata(linha, ator_id=7, confirmar=True) is True
+        assert imp.liberar_duplicata(linha, ator_id=_ator_id(), confirmar=True) is True
         assert db.session.get(ChaveManifestacao, linha.id).status == \
             StatusManifestacao.PENDENTE
 
@@ -220,9 +230,10 @@ def test_liberar_registra_quem_liberou(app, ids):
         linha.status = StatusManifestacao.MANIFESTADA
         db.session.commit()
 
-        imp.liberar_duplicata(linha, ator_id=42, confirmar=True)
+        imp.liberar_duplicata(linha, ator_id=_ator_id(), confirmar=True)
 
-        assert db.session.get(ChaveManifestacao, linha.id).liberado_por_id == 42
+        recarregada = db.session.get(ChaveManifestacao, linha.id)
+        assert recarregada.liberado_por_id == _ator_id()
 
 
 # --- competencia editavel (MANIF-09) ----------------------------------------
