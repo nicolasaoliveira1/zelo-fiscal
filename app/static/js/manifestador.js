@@ -37,6 +37,14 @@ const COR_CHAVE = {
   enviando: 'muted',
 };
 
+/* `ja_existia` distingue "manifestamos agora" de "a SEFAZ disse que já
+ * constava" (cStat 573). Os dois são desfecho BOM e ficam verdes — mas sem essa
+ * distinção a linha mostrava a pílula "Manifestada" com "Rejeição: Duplicidade
+ * de evento" logo abaixo, que lê como duas afirmações opostas.
+ *
+ * Cuidado com a palavra: o estado `duplicata` daqui é OUTRA coisa — a mesma
+ * chave importada para duas empresas da carteira (conflito local, "Duas
+ * empresas"), sem relação com a duplicidade de evento da SEFAZ. */
 const ROTULO_CHAVE = {
   manifestada: 'Manifestada',
   indefinida: 'Sem desfecho',
@@ -207,10 +215,18 @@ function pintarLista() {
 
   corpo.innerHTML = linhas.map((c) => {
     const cor = COR_CHAVE[c.status] || 'muted';
+    const rotulo = (c.status === 'manifestada' && c.ja_existia)
+      ? 'Já estava manifestada'
+      : (ROTULO_CHAVE[c.status] || c.status);
     const marcavel = ['pendente', 'rejeitada', 'indefinida'].includes(c.status);
-    const motivo = c.status === 'indefinida'
-      ? 'Enviei e não recebi resposta. Confira no portal antes de repetir.'
-      : (c.cstat ? `${c.cstat} — ${c.xmotivo || ''}` : '');
+    /* O texto da SEFAZ vai cru (é o registro oficial que o operador pesquisa),
+     * mas quando ele contradiz a pílula a linha diz por quê. */
+    let motivo = c.cstat ? `${c.cstat} — ${c.xmotivo || ''}` : '';
+    if (c.status === 'indefinida') {
+      motivo = 'Enviei e não recebi resposta. Confira no portal antes de repetir.';
+    } else if (c.status === 'manifestada' && c.ja_existia) {
+      motivo = `A SEFAZ respondeu que o evento já constava — ${motivo}`;
+    }
     const legenda = c.competencia
       ? `<div class="manif-chave-leg"><span>UF</span>
            <span><b>competência ${escapar(c.competencia)}</b></span>
@@ -225,7 +241,7 @@ function pintarLista() {
         ${legenda}
         ${motivo ? `<div class="manif-motivo">${escapar(motivo)}</div>` : ''}
       </td>
-      <td><span class="manif-st is-${cor}">${escapar(ROTULO_CHAVE[c.status] || c.status)}</span></td>
+      <td><span class="manif-st is-${cor}">${escapar(rotulo)}</span></td>
     </tr>`;
   }).join('');
 

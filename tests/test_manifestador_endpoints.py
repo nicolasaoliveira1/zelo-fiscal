@@ -268,6 +268,42 @@ def test_rotas_de_chave_inexistente_devolvem_404(client):
     assert client.post('/manifestador/chave/999999/reprocessar').status_code == 404
 
 
+def test_lista_expoe_ja_existia_para_a_tela_distinguir(app, ids, client):
+    """cStat 573 fecha como `manifestada` — a nota JA estava manifestada na
+    SEFAZ, e isso e desfecho bom. Mas sem `ja_existia` na resposta a tela
+    mostrava a pilula verde "Manifestada" com "Rejeicao: Duplicidade de evento"
+    logo abaixo, dizendo duas coisas opostas na mesma linha."""
+    with app.app_context():
+        emp = _empresa()
+        linha = _chave(emp, status=StatusManifestacao.MANIFESTADA)
+        linha.ja_existia = True
+        linha.cstat = '573'
+        linha.xmotivo = 'Rejeicao: Duplicidade de evento'
+        db.session.commit()
+
+    chave = client.get('/manifestador/chaves').get_json()['chaves'][0]
+
+    assert chave['status'] == 'manifestada'
+    assert chave['ja_existia'] is True
+    assert chave['cstat'] == '573'
+
+
+def test_manifestada_por_nos_nao_marca_ja_existia(app, ids, client):
+    """O contrario do teste acima: sem a distincao, as duas situacoes ficariam
+    indistinguiveis na tela."""
+    with app.app_context():
+        emp = _empresa()
+        linha = _chave(emp, status=StatusManifestacao.MANIFESTADA)
+        linha.cstat = '135'
+        linha.protocolo = '143210000123456'
+        db.session.commit()
+
+    chave = client.get('/manifestador/chaves').get_json()['chaves'][0]
+
+    assert chave['ja_existia'] is False
+    assert chave['protocolo'] == '143210000123456'
+
+
 # --- lote (MANIF-14) --------------------------------------------------------
 
 def test_iniciar_exige_tipo_de_evento(app, ids, client):
