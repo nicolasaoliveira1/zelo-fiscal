@@ -13,12 +13,14 @@ RS_BATCH_LOCK = Lock()
 MUNICIPAL_BATCH_LOCK = Lock()
 TRABALHISTA_BATCH_LOCK = Lock()
 NFSE_BATCH_LOCK = Lock()
+MANIF_BATCH_LOCK = Lock()
 
 FGTS_BATCH_STATE = batch_engine.batch_state_defaults()
 RS_BATCH_STATE = batch_engine.batch_state_defaults()
 MUNICIPAL_BATCH_STATE = batch_engine.batch_state_defaults()
 TRABALHISTA_BATCH_STATE = batch_engine.batch_state_defaults()
 NFSE_BATCH_STATE = batch_engine.batch_state_defaults()
+MANIF_BATCH_STATE = batch_engine.batch_state_defaults()
 
 EMISSAO_INDIVIDUAL_LOCK = Lock()
 _EMISSAO_INDIVIDUAL_STATE = {'ativa': False}
@@ -130,3 +132,31 @@ def municipal_batch_stop_requested():
 
 def trabalhista_batch_stop_requested():
     return TRABALHISTA_BATCH_STATE.get('stop_requested')
+
+
+# Opcoes do lote de manifestacao. Ficam FORA de MANIF_BATCH_STATE pela mesma
+# razao das opcoes da NFSe: `init_batch_run` chama `reset_batch_state` e dispara
+# o worker dentro do mesmo lock, entao qualquer chave escrita no estado antes de
+# iniciar seria apagada, e escrever depois correria com o worker ja lendo.
+#
+# `tipo_evento` nao tem valor "esperto" de default: ele e escolhido a cada lote
+# na tela, porque Confirmacao da Operacao e irreversivel e nao deve sair por
+# omissao.
+MANIF_OPCOES_LOCK = Lock()
+_MANIF_BATCH_OPCOES = {'modo': 'empresa', 'tipo_evento': '210200',
+                       'empresa_id': None, 'competencia': None,
+                       'chave_id': None}
+
+
+def manif_batch_opcoes():
+    with MANIF_OPCOES_LOCK:
+        return dict(_MANIF_BATCH_OPCOES)
+
+
+def definir_manif_opcoes(**valores):
+    """Grava as opcoes do proximo lote. Chaves desconhecidas sao ignoradas."""
+    with MANIF_OPCOES_LOCK:
+        for chave, valor in valores.items():
+            if chave in _MANIF_BATCH_OPCOES:
+                _MANIF_BATCH_OPCOES[chave] = valor
+        return dict(_MANIF_BATCH_OPCOES)
