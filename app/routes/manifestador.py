@@ -59,7 +59,12 @@ def _chave_para_json(linha):
 @bp.route('/manifestador')
 @requer_papel('operador')
 def manifestador_painel():
-    return render_template('manifestador.html')
+    # A lista de empresas vai no proprio HTML (mesmo padrao da NFSe): muda
+    # raramente e nao merece uma rota nem uma ida a rede a cada carregamento.
+    return render_template(
+        'manifestador.html',
+        empresas=[{'id': e.id, 'nome': e.nome}
+                  for e in Empresa.query.order_by(Empresa.nome).all()])
 
 
 # --- cofre de certificados (MANIF-21) ---------------------------------------

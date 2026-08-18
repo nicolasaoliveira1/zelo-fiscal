@@ -2382,3 +2382,225 @@ body.navbar-hidden .sidebar-header {
         transform: none;
     }
 }
+/* ══════════════════════════════════════════════════════════════
+   Manifestador de NF-e — "a fila é a página"
+   O cofre é conferido uma vez por mês e a fila todo dia, então o
+   cofre vive numa régua de uma linha e a entrada sobe num painel.
+   As BARRAS reusam .zl-comp-* (composição): os estados do cofre
+   somam as empresas, e os do lote somam as chaves.
+   ══════════════════════════════════════════════════════════════ */
+
+.manif-num {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--bs-emphasis-color);
+}
+
+.manif-eyebrow {
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--bs-secondary-color);
+    font-weight: 600;
+}
+
+/* ── régua do cofre ──────────────────────────────────────────── */
+.manif-regua {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--zelo-line);
+    border-radius: 0.55rem;
+    background: var(--zelo-mist);
+    font-size: 0.86rem;
+}
+
+.manif-regua-bar {
+    width: 11rem;
+}
+
+.manif-regua-btn {
+    margin-left: auto;
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--bs-emphasis-color);
+    font-size: 0.82rem;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+/* ── barra de trabalho ───────────────────────────────────────── */
+.manif-barra {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    padding: 0.75rem 0;
+}
+
+.manif-busca {
+    flex: 1 1 14rem;
+    min-width: 11rem;
+    max-width: 22rem;
+}
+
+.manif-barra-acao {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* ── a mesa ──────────────────────────────────────────────────── */
+.manif-mesa {
+    overflow: hidden;
+}
+
+.manif-tbl th {
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--bs-secondary-color);
+    font-weight: 600;
+}
+
+.manif-col-sel { width: 2.6rem; }
+.manif-col-estado { width: 9.5rem; }
+
+.manif-emp { font-weight: 500; }
+
+.manif-motivo {
+    color: var(--bs-secondary-color);
+    font-size: 0.78rem;
+    margin-top: 0.15rem;
+}
+
+/* ── A ASSINATURA: a chave segmentada pelo significado ───────────
+   Os 44 dígitos não são um número: são 9 campos. Agrupar de 4 em 4
+   é convenção de impressão do DANFE, feita para humano transcrever
+   — e aqui o sistema é que lê. A segmentação semântica EXPLICA a
+   competência derivada: o operador vê o AAMM de onde ela saiu.
+   Nenhuma cor é gasta: a cor é do status (design language). */
+.manif-chave {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.82rem;
+    color: var(--bs-secondary-color);
+    white-space: nowrap;
+}
+
+.manif-chave span { padding: 0 0.06em; }
+
+/* os campos que o operador de fato usa ficam em tinta cheia */
+.manif-chave .f-aamm,
+.manif-chave .f-nnf { color: var(--bs-emphasis-color); }
+
+/* a competência sai daqui — o fio embaixo é a explicação */
+.manif-chave .f-aamm {
+    border-bottom: 2px solid var(--bs-emphasis-color);
+    font-weight: 500;
+}
+
+.manif-chave .f-cnpj { color: var(--zelo-graphite); }
+.manif-chave .f-dv { color: var(--zelo-muted); }
+
+.manif-chave-leg {
+    font-size: 0.68rem;
+    color: var(--bs-secondary-color);
+    display: flex;
+    gap: 1.1rem;
+    margin-top: 0.15rem;
+}
+
+.manif-chave-leg b { font-weight: 500; color: var(--bs-emphasis-color); }
+
+/* ── andamento do lote ───────────────────────────────────────── */
+.manif-andamento {
+    border: 1px solid var(--zelo-line);
+    border-radius: 0.55rem;
+    background: var(--zelo-paper);
+    padding: 0.8rem 0.95rem;
+    margin-bottom: 0.75rem;
+}
+
+.manif-andamento-linha { font-size: 0.88rem; font-weight: 500; }
+.manif-andamento-linha.is-warning { color: var(--zelo-warn); }
+.manif-andamento-linha.is-error { color: var(--zelo-danger); }
+
+/* ── painel de entrada ───────────────────────────────────────── */
+.manif-entrada {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 1040;
+    background: var(--zelo-paper);
+    border-top: 1px solid var(--zelo-line);
+    box-shadow: 0 -10px 30px -20px var(--zelo-ink);
+    padding: 1rem 1.25rem 1.25rem;
+}
+
+.manif-entrada-in {
+    max-width: 76rem;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.manif-ta {
+    font-family: var(--zelo-font-mono);
+    font-size: 0.78rem;
+}
+
+.manif-solta {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    text-align: center;
+    padding: 1.2rem;
+    border: 1px dashed var(--zelo-line);
+    border-radius: 0.5rem;
+    color: var(--bs-secondary-color);
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+
+.manif-solta i { font-size: 1.6rem; }
+.manif-solta:hover { border-color: var(--zelo-graphite); }
+
+.manif-balanco { font-size: 0.8rem; }
+.manif-balanco div { margin-top: 0.15rem; }
+
+@media (max-width: 820px) {
+    .manif-entrada-in { grid-template-columns: 1fr; }
+    .manif-chave { white-space: normal; font-size: 0.74rem; }
+    .manif-barra-acao { margin-left: 0; width: 100%; }
+}
+
+/* Pílula de estado do manifestador. A escala de cor é a MESMA da tabela de
+   certidões — o operador acabou de olhar para ela. */
+.manif-st {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 0.12rem 0.5rem;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.manif-st.is-ok { background: var(--zelo-ok-soft); color: var(--zelo-ok); }
+.manif-st.is-warn { background: var(--zelo-warn-soft); color: var(--zelo-warn); }
+.manif-st.is-danger { background: var(--zelo-danger-soft); color: var(--zelo-danger); }
+.manif-st.is-muted { background: var(--zelo-muted-soft); color: var(--bs-secondary-color); }
+.manif-st.is-pend {
+    background: color-mix(in srgb, var(--zelo-pend) 16%, var(--zelo-paper));
+    color: var(--zelo-pend);
+}

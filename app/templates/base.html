@@ -238,6 +238,10 @@
                 <i class="bi bi-receipt"></i>
                 <span>NFSe</span>
             </a>
+            <a class="sidebar-link {% if current_endpoint == 'main.manifestador_painel' %}active{% endif %}" href="{{ url_for('main.manifestador_painel') }}" title="Manifestador">
+                <i class="bi bi-patch-check"></i>
+                <span>Manifestador</span>
+            </a>
             <a class="sidebar-link {% if current_endpoint == 'main.produtividade' %}active{% endif %}" href="{{ url_for('main.produtividade') }}" title="Produtividade">
                 <i class="bi bi-graph-up-arrow"></i>
                 <span>Produtividade</span>
