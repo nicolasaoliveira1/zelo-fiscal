@@ -198,6 +198,13 @@ class Balanco:
         self.competencia_invalida = []
         self.duplicatas = []
         self.sem_empresa = []
+        # Arquivo que NAO e NF-e: evento (cancelamento, carta de correcao, a
+        # propria manifestacao), XML de outro assunto, arquivo corrompido. Grupo
+        # separado do `sem_empresa` porque com a importacao por PASTA ele deixou
+        # de ser excecao — a pasta do mes vem cheia deles — e os dois dizem
+        # coisas opostas: aqui nao ha nada a fazer, ali falta cadastrar uma
+        # empresa. Juntos, o segundo se perdia no meio do primeiro.
+        self.nao_e_nfe = []
         # AVISO, nao recusa: entram na fila, mas com o prazo estourado a SEFAZ
         # provavelmente ja registrou Confirmacao automatica.
         self.fora_do_prazo = []
@@ -206,7 +213,8 @@ class Balanco:
     def __repr__(self):
         return (f'<Balanco lidas={self.total_lidas} aceitas={len(self.aceitas)} '
                 f'dv={len(self.dv_invalido)} comp={len(self.competencia_invalida)} '
-                f'dup={len(self.duplicatas)} sem_empresa={len(self.sem_empresa)}>')
+                f'dup={len(self.duplicatas)} sem_empresa={len(self.sem_empresa)} '
+                f'nao_nfe={len(self.nao_e_nfe)}>')
 
     def como_dict(self):
         return {
@@ -216,6 +224,7 @@ class Balanco:
             'competencia_invalida': list(self.competencia_invalida),
             'duplicatas': list(self.duplicatas),
             'sem_empresa': list(self.sem_empresa),
+            'nao_e_nfe': list(self.nao_e_nfe),
             'fora_do_prazo': list(self.fora_do_prazo),
         }
 
@@ -355,7 +364,10 @@ def importar_xmls(arquivos):
 
         chave, destinatario, competencia_xml = _dados_do_xml(conteudo)
         if not chave:
-            balanco.sem_empresa.append(nome)
+            # Sem `infNFe` legivel nao ha NF-e nenhuma aqui: e um evento, outro
+            # documento ou um arquivo quebrado. Dizer "sem empresa da carteira"
+            # sobre isso seria afirmar algo falso.
+            balanco.nao_e_nfe.append(nome)
             continue
 
         if not dv_valido(chave):

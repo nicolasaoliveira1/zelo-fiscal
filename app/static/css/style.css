@@ -2569,11 +2569,67 @@ body.navbar-hidden .sidebar-header {
     border-radius: 0.5rem;
     color: var(--bs-secondary-color);
     font-size: 0.82rem;
-    cursor: pointer;
 }
 
 .manif-solta i { font-size: 1.6rem; }
 .manif-solta:hover { border-color: var(--zelo-graphite); }
+
+/* Arrastando por cima: o traço fecha e o fundo levanta um degrau. Sem cor —
+   soltar arquivo não é status. */
+.manif-solta.is-sobre {
+    border-style: solid;
+    border-color: var(--zelo-graphite);
+    background: var(--zelo-mist);
+}
+
+.manif-solta-acoes {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.2rem;
+}
+
+/* As fontes escolhidas. Uma linha por pasta, com a contagem à direita: é ela
+   que responde "peguei a pasta certa?" antes de o operador importar. */
+.manif-fontes {
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    border: 1px solid var(--zelo-line);
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+.manif-fontes li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.4rem 0.3rem 0.6rem;
+    font-size: 0.8rem;
+    border-top: 1px solid var(--zelo-line);
+}
+
+.manif-fontes li:first-child { border-top: 0; }
+.manif-fontes i { color: var(--bs-secondary-color); }
+
+.manif-fonte-nome {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.manif-fonte-num {
+    font-family: var(--zelo-font-mono);
+    font-size: 0.74rem;
+    color: var(--bs-secondary-color);
+    white-space: nowrap;
+}
+
+.manif-progresso {
+    font-size: 0.78rem;
+    color: var(--bs-secondary-color);
+}
 
 .manif-balanco { font-size: 0.8rem; }
 .manif-balanco div { margin-top: 0.15rem; }

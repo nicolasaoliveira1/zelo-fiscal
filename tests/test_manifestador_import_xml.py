@@ -98,7 +98,7 @@ def test_xml_malformado_e_recusado_sem_derrubar_o_lote(app, ids):
         ])
 
         assert balanco.aceitas == [CHAVE_55]
-        assert 'quebrado.xml' in balanco.sem_empresa
+        assert 'quebrado.xml' in balanco.nao_e_nfe
 
 
 def test_arquivo_vazio_e_recusado(app, ids):
@@ -107,7 +107,7 @@ def test_arquivo_vazio_e_recusado(app, ids):
         balanco = imp.importar_xmls([('vazio.xml', b'')])
 
         assert balanco.aceitas == []
-        assert balanco.sem_empresa == ['vazio.xml']
+        assert balanco.nao_e_nfe == ['vazio.xml']
 
 
 def test_xml_sem_id_no_infnfe_e_recusado(app, ids):
@@ -121,7 +121,7 @@ def test_xml_sem_id_no_infnfe_e_recusado(app, ids):
         balanco = imp.importar_xmls([('sem_id.xml', sem_id)])
 
         assert balanco.aceitas == []
-        assert balanco.sem_empresa == ['sem_id.xml']
+        assert balanco.nao_e_nfe == ['sem_id.xml']
 
 
 def test_id_com_dv_invalido_cai_no_grupo_de_dv(app, ids):
@@ -143,6 +143,34 @@ def test_id_com_dv_invalido_cai_no_grupo_de_dv(app, ids):
 
 
 # --- destinatario pessoa fisica e duplicata ---------------------------------
+
+def test_evento_e_nfe_de_terceiro_caem_em_grupos_DIFERENTES(app, ids):
+    """A pasta do mes vem com evento (cancelamento, CC-e, a propria
+    manifestacao) misturado as notas. Ele nao e NF-e e nao ha o que fazer com
+    ele; ja uma NF-e cujo destinatario nao esta na carteira significa que falta
+    cadastrar a empresa. Contados juntos, o segundo — que pede acao — sumiria no
+    meio do primeiro, que so cresce."""
+    with app.app_context():
+        _empresa()
+        evento = (b'<?xml version="1.0"?>'
+                  b'<procEventoNFe xmlns="http://www.portalfiscal.inf.br/nfe">'
+                  b'<evento versao="1.00"><infEvento Id="ID2102004325...01">'
+                  b'<tpEvento>210200</tpEvento></infEvento></evento>'
+                  b'</procEventoNFe>')
+        de_terceiro = (f'<?xml version="1.0"?>'
+                       f'<NFe xmlns="http://www.portalfiscal.inf.br/nfe">'
+                       f'<infNFe versao="4.00" Id="NFe{CHAVE_55}">'
+                       f'<dest><CNPJ>99888777000166</CNPJ></dest>'
+                       f'</infNFe></NFe>').encode()
+
+        balanco = imp.importar_xmls([
+            ('Julho/evento.xml', evento),
+            ('Julho/de_terceiro.xml', de_terceiro),
+        ])
+
+        assert balanco.nao_e_nfe == ['Julho/evento.xml']
+        assert balanco.sem_empresa == ['Julho/de_terceiro.xml']
+
 
 def test_destinatario_com_cpf_e_recusado(app, ids):
     """`<dest>` com CPF: o destinatario e pessoa fisica, nao empresa da
@@ -186,7 +214,8 @@ def test_balanco_soma_todos_os_grupos_no_xml(app, ids):
         assert balanco.total_lidas == 3
         assert (len(balanco.aceitas) + len(balanco.dv_invalido)
                 + len(balanco.duplicatas) + len(balanco.competencia_invalida)
-                + len(balanco.sem_empresa)) == balanco.total_lidas
+                + len(balanco.sem_empresa)
+                + len(balanco.nao_e_nfe)) == balanco.total_lidas
 
 
 # --- competencia = ENTRADA, nao emissao (achado na validacao manual) --------

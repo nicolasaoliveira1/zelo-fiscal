@@ -62,6 +62,11 @@ const ORDEM_COFRE = ['pronto', 'vencido', 'sem_arquivo', 'sem_pasta',
 let chaves = [];
 let empresas = [];
 let pollLote = null;
+/* Pastas e arquivos escolhidos para importar, acumulados ate o operador clicar
+ * em Importar. Guardamos `{nome, itens:[{caminho, arquivo}]}` em vez de uma
+ * FileList porque a FileList e imutavel: nao da para somar a segunda pasta nem
+ * tirar a que entrou por engano. */
+let fontes = [];
 
 // --- rede -------------------------------------------------------------------
 
@@ -103,7 +108,11 @@ function chaveSegmentada(chave) {
 function escapar(texto) {
   const no = document.createElement('span');
   no.textContent = texto ?? '';
-  return no.innerHTML;
+  /* `innerHTML` escapa `<`, `>` e `&`, mas NAO as aspas — e desde a lista de
+   * pastas isto tambem entra dentro de atributo (`title`, `aria-label`), onde
+   * uma aspa no nome fecharia o atributo. Nome de pasta do Windows nao aceita
+   * aspa, mas um vindo de compartilhamento Linux/Mac aceita. */
+  return no.innerHTML.replace(/"/g, '&quot;');
 }
 
 // --- barra de composição (reusa .zl-comp-*) ---------------------------------
@@ -388,6 +397,10 @@ function mostrarBalanco(balanco) {
     ['competencia_invalida', 'com competência impossível'],
     ['sem_empresa', 'sem empresa da carteira'],
     ['fora_do_prazo', 'com mais de 90 dias — a SEFAZ já pode ter confirmado sozinha'],
+    /* Por último de propósito: numa pasta do mês este é o grupo mais numeroso
+     * e o único sem nada a fazer. Some com ele e um arquivo de fato quebrado
+     * sumiria junto; ponha-o em cima e ele empurra para baixo o que importa. */
+    ['nao_e_nfe', 'ignorados — não são NF-e (evento, cancelamento, outro arquivo)'],
   ];
   $('manifBalanco').innerHTML = grupos.map(([campo, texto]) => {
     const itens = balanco[campo] || [];
@@ -416,19 +429,193 @@ async function importarTexto() {
   }
 }
 
+// --- pastas de XML ----------------------------------------------------------
+
+const EH_XML = /\.xml$/i;
+
+/* Nome da fonte para o que nao veio dentro de pasta nenhuma. */
+const AVULSOS = 'Arquivos avulsos';
+
+/* O servidor recusa mais de 1.000 partes por requisicao (limite do Werkzeug), e
+ * a pasta de um mes passa disso com folga. Enviar em blocos tambem e o que
+ * permite mostrar progresso: com 1.200 notas, uma tela parada por dois minutos
+ * parece travamento. */
+const POR_ENVIO = 200;
+
+const totalArquivos = () => fontes.reduce((soma, f) => soma + f.itens.length, 0);
+
+const chaveDoItem = (item) => `${item.caminho}|${item.arquivo.size}`;
+
+function adicionarFonte(nome, itens) {
+  /* Mesma fonte escolhida de novo SOMA sem repetir: quem clica duas vezes na
+   * mesma pasta quer conferir, nao importar tudo em dobro. E os avulsos, que
+   * caem todos sob um nome so, precisam justamente acumular. */
+  if (!itens.length) return;
+  let fonte = fontes.find((f) => f.nome === nome);
+  if (!fonte) {
+    fonte = { nome, itens: [] };
+    fontes.push(fonte);
+  }
+  const vistos = new Set(fonte.itens.map(chaveDoItem));
+  itens.forEach((item) => {
+    if (vistos.has(chaveDoItem(item))) return;
+    vistos.add(chaveDoItem(item));
+    fonte.itens.push(item);
+  });
+}
+
+function pintarFontes() {
+  const lista = $('manifFontes');
+  lista.hidden = !fontes.length;
+  lista.innerHTML = fontes.map((f, i) => `
+    <li>
+      <i class="bi bi-folder2" aria-hidden="true"></i>
+      <span class="manif-fonte-nome" title="${escapar(f.nome)}">${escapar(f.nome)}</span>
+      <span class="manif-fonte-num">${f.itens.length} XML</span>
+      <button type="button" class="btn btn-ghost btn-sm py-0 px-1" data-fonte="${i}"
+              aria-label="Tirar ${escapar(f.nome)} da lista">
+        <i class="bi bi-x-lg" aria-hidden="true"></i>
+      </button>
+    </li>`).join('');
+
+  const total = totalArquivos();
+  const botao = $('manifImportarXml');
+  botao.disabled = !total;
+  botao.textContent = total
+    ? `Importar ${total.toLocaleString('pt-BR')} XML`
+    : 'Importar XML';
+}
+
+function daEntradaDeArquivos(lista) {
+  /* `webkitRelativePath` vem como "PastaEscolhida/sub/nota.xml". O primeiro
+   * segmento e a pasta que o operador escolheu, e e por esse nome que ele
+   * reconhece a fonte na lista — mostrar "nota.xml" nao diz de onde veio. */
+  const grupos = new Map();
+  [...lista].forEach((arquivo) => {
+    if (!EH_XML.test(arquivo.name)) return;
+    const caminho = arquivo.webkitRelativePath || arquivo.name;
+    const raiz = caminho.includes('/') ? caminho.split('/')[0] : AVULSOS;
+    if (!grupos.has(raiz)) grupos.set(raiz, []);
+    grupos.get(raiz).push({ caminho, arquivo });
+  });
+  return grupos;
+}
+
+async function lerEntrada(entrada, prefixo, saida) {
+  /* Percurso recursivo do que foi ARRASTADO. Arrastar e o unico caminho que
+   * aceita varias pastas de uma vez — o seletor do sistema abre uma so. */
+  if (entrada.isFile) {
+    if (!EH_XML.test(entrada.name)) return;
+    const arquivo = await new Promise((ok, falhou) => entrada.file(ok, falhou));
+    saida.push({ caminho: `${prefixo}${entrada.name}`, arquivo });
+    return;
+  }
+  if (!entrada.isDirectory) return;
+  const leitor = entrada.createReader();
+  /* `readEntries` devolve no MAXIMO 100 por chamada e nao avisa que truncou:
+   * sem repetir ate vir vazio, uma pasta de 400 notas entraria com 100. */
+  for (;;) {
+    // eslint-disable-next-line no-await-in-loop
+    const bloco = await new Promise((ok, falhou) => leitor.readEntries(ok, falhou));
+    if (!bloco.length) break;
+    for (const filho of bloco) {
+      // eslint-disable-next-line no-await-in-loop
+      await lerEntrada(filho, `${prefixo}${entrada.name}/`, saida);
+    }
+  }
+}
+
+async function receberSoltos(evento) {
+  evento.preventDefault();
+  $('manifSolta').classList.remove('is-sobre');
+  /* As entradas tem de sair do DataTransfer AGORA, sincronamente: depois que o
+   * handler devolve o controle o navegador esvazia o objeto, e o `await` de
+   * baixo encontraria a lista vazia. */
+  const entradas = [...evento.dataTransfer.items]
+    .map((item) => (item.webkitGetAsEntry ? item.webkitGetAsEntry() : null))
+    .filter(Boolean);
+  if (!entradas.length) return;
+
+  const antes = totalArquivos();
+  for (const entrada of entradas) {
+    const achados = [];
+    // eslint-disable-next-line no-await-in-loop
+    await lerEntrada(entrada, '', achados);
+    adicionarFonte(entrada.isDirectory ? entrada.name : AVULSOS, achados);
+  }
+  pintarFontes();
+  if (totalArquivos() === antes) toast('Nenhum XML dentro do que você soltou.', 'warning');
+}
+
+const balancoVazio = () => ({
+  total_lidas: 0, aceitas: [], dv_invalido: [], competencia_invalida: [],
+  duplicatas: [], sem_empresa: [], nao_e_nfe: [], fora_do_prazo: [],
+});
+
+function somarBalanco(acumulado, parcial) {
+  acumulado.total_lidas += (parcial || {}).total_lidas || 0;
+  Object.keys(acumulado).forEach((campo) => {
+    if (Array.isArray(acumulado[campo])) acumulado[campo].push(...((parcial || {})[campo] || []));
+  });
+}
+
+function progresso(texto) {
+  const linha = $('manifProgresso');
+  linha.textContent = texto;
+  linha.hidden = !texto;
+}
+
+function descartarEnviados(quantos) {
+  /* Tira da fila os que ja foram, na MESMA ordem em que foram achatados. Depois
+   * de um erro no meio, e isso que faz o botao reenviar so o que falta: sem
+   * isso, tentar de novo devolveria "184 ja estavam no sistema" e esconderia o
+   * que realmente ficou de fora. */
+  let restam = quantos;
+  fontes.forEach((fonte) => {
+    const corta = Math.min(restam, fonte.itens.length);
+    fonte.itens = fonte.itens.slice(corta);
+    restam -= corta;
+  });
+  fontes = fontes.filter((fonte) => fonte.itens.length);
+}
+
 async function importarXml() {
-  const arquivos = $('manifXml').files;
-  if (!arquivos.length) return;
-  const corpo = new FormData();
-  [...arquivos].forEach((a) => corpo.append('arquivo', a));
+  const itens = fontes.flatMap((f) => f.itens);
+  if (!itens.length) return;
+  $('manifImportarXml').disabled = true;
+  /* Cada arquivo ja e gravado individualmente no servidor, entao um bloco que
+   * falha no meio nao desfaz os anteriores: mostramos o que ENTROU junto com o
+   * erro, em vez de deixar o operador achando que nada aconteceu. */
+  const acumulado = balancoVazio();
+  let enviados = 0;
   try {
-    const dados = await pedir('/manifestador/importar/xml', { method: 'POST', body: corpo });
-    mostrarBalanco(dados.balanco);
+    for (let i = 0; i < itens.length; i += POR_ENVIO) {
+      const bloco = itens.slice(i, i + POR_ENVIO);
+      progresso(`Lendo ${i + bloco.length} de ${itens.length} arquivos…`);
+      const corpo = new FormData();
+      /* O caminho vai como nome do arquivo: recusa que diz "Julho/nota.xml" se
+       * acha na pasta; uma que diz so "nota.xml" nao. */
+      bloco.forEach(({ caminho, arquivo }) => corpo.append('arquivo', arquivo, caminho));
+      // eslint-disable-next-line no-await-in-loop
+      const dados = await pedir('/manifestador/importar/xml',
+        { method: 'POST', body: corpo });
+      somarBalanco(acumulado, dados.balanco);
+      enviados += bloco.length;
+    }
     $('manifXml').value = '';
-    $('manifImportarXml').disabled = true;
-    carregarChaves();
+    $('manifPasta').value = '';
   } catch (erro) {
     toast(erro.message, 'error');
+  } finally {
+    progresso('');
+    descartarEnviados(enviados);
+    /* Balanco zerado nao e balanco: com a falha logo no primeiro bloco, exibi-lo
+     * imprimiria "nenhuma chave encontrada" ao lado do aviso de erro, duas
+     * afirmacoes diferentes sobre a mesma coisa. */
+    if (acumulado.total_lidas) mostrarBalanco(acumulado);
+    else $('manifBalanco').innerHTML = '';
+    pintarFontes();
+    carregarChaves();
   }
 }
 
@@ -503,9 +690,40 @@ function ligar() {
   $('manifFecharEntrada').addEventListener('click', () => { $('manifEntrada').hidden = true; });
   $('manifImportar').addEventListener('click', importarTexto);
   $('manifImportarXml').addEventListener('click', importarXml);
-  $('manifXml').addEventListener('change', (e) => {
-    $('manifImportarXml').disabled = !e.target.files.length;
+  $('manifEscolherPasta').addEventListener('click', () => $('manifPasta').click());
+  $('manifEscolherArquivos').addEventListener('click', () => $('manifXml').click());
+
+  ['manifPasta', 'manifXml'].forEach((id) => {
+    $(id).addEventListener('change', (e) => {
+      daEntradaDeArquivos(e.target.files).forEach((itens, nome) => {
+        adicionarFonte(nome, itens);
+      });
+      pintarFontes();
+      /* Zerar o input e o que faz escolher a MESMA pasta de novo disparar
+       * `change` outra vez — sem isso, tirar a pasta da lista e reescolhe-la
+       * nao teria efeito nenhum. */
+      e.target.value = '';
+    });
   });
+
+  $('manifFontes').addEventListener('click', (e) => {
+    const botao = e.target.closest('[data-fonte]');
+    if (!botao) return;
+    fontes.splice(Number(botao.dataset.fonte), 1);
+    pintarFontes();
+  });
+
+  const solta = $('manifSolta');
+  ['dragenter', 'dragover'].forEach((evento) => {
+    solta.addEventListener(evento, (e) => {
+      e.preventDefault();
+      solta.classList.add('is-sobre');
+    });
+  });
+  solta.addEventListener('dragleave', (e) => {
+    if (!solta.contains(e.relatedTarget)) solta.classList.remove('is-sobre');
+  });
+  solta.addEventListener('drop', receberSoltos);
 }
 
 function carregarEmpresas() {

@@ -150,14 +150,31 @@
     </div>
     <div>
       <span class="manif-eyebrow d-block mb-2">Ou os XML do mês</span>
-      <label class="manif-solta" for="manifXml">
-        <i class="bi bi-filetype-xml" aria-hidden="true"></i>
-        <span>Escolha os arquivos.<br>A empresa sai de dentro de cada nota.</span>
+      {#- Arrastar é o único caminho que aceita várias pastas de uma vez: o
+          seletor do sistema abre uma pasta por vez. Por isso os dois botões
+          ACUMULAM em vez de substituir — clicar três vezes soma três pastas. -#}
+      <div class="manif-solta" id="manifSolta">
+        <i class="bi bi-folder2-open" aria-hidden="true"></i>
+        <span>Arraste as pastas aqui — várias de uma vez, subpastas incluídas.<br>
+          A empresa sai de dentro de cada nota.</span>
+        <div class="manif-solta-acoes">
+          <button type="button" class="btn btn-ghost btn-sm py-0" id="manifEscolherPasta">
+            Escolher pasta
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm py-0" id="manifEscolherArquivos">
+            Escolher arquivos
+          </button>
+        </div>
+        <input type="file" id="manifPasta" webkitdirectory directory multiple hidden>
         <input type="file" id="manifXml" accept=".xml" multiple hidden>
-      </label>
+      </div>
+
+      <ul class="manif-fontes" id="manifFontes" hidden></ul>
+
       <button type="button" class="btn btn-soft-primary btn-sm w-100 mt-2" id="manifImportarXml" disabled>
         Importar XML
       </button>
+      <p class="manif-progresso mt-2 mb-0" id="manifProgresso" hidden aria-live="polite"></p>
       <div class="manif-balanco mt-2" id="manifBalanco"></div>
     </div>
   </div>
