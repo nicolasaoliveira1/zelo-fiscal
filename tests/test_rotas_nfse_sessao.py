@@ -317,7 +317,12 @@ def test_status_traz_o_modo_e_a_nota_atual(client, sessao_falsa):
                              'ids': [42], 'total': 1})
     dados = client.get('/nfse/lote/status').get_json()['lote']
     assert dados['nota_id'] == 42
-    assert dados['modo'] in ('individual', 'lote')
+    # Derivado de `nfse_lote.MODOS` e nao escrito aqui: quando o modo
+    # `automatico` foi criado (03f2329) esta tupla nao foi atualizada, e o
+    # teste passou a falhar de forma intermitente — as OPCOES do lote sao
+    # globais do processo, entao bastava `test_modo_automatico_...` rodar
+    # antes deste no mesmo worker do xdist.
+    assert dados['modo'] in nfse_lote.MODOS
 
 
 def test_lista_de_notas_reflete_o_banco_durante_a_fila(client, app, sessao_falsa):
