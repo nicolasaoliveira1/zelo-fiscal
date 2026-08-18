@@ -5,13 +5,19 @@ aqui. E o que torna barata a contingencia do portal — trocar webservice por
 Selenium substitui a implementacao de `manifestar` e mais nada; modelo, import,
 cofre, UI, lote e auditoria continuam iguais.
 
-Neste passo (T9) mora so a montagem do XML do evento.
+Duas responsabilidades: montar o XML do evento e conduzir uma manifestacao
+do banco ate o desfecho gravado.
 """
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
+from app.services.execution_logger import log_event
 from app.services.manifestador_import import dv_valido
+# Importados por NOME de modulo para o teste poder substituir o envio sem
+# tocar a rede — e para a costura ficar visivel num lugar so.
+from app.services.nfe_assinatura import AssinaturaError, assinar
+from app.services.nfe_sefaz import enviar_evento
 
 NS_NFE = 'http://www.portalfiscal.inf.br/nfe'
 
@@ -118,3 +124,163 @@ def montar_evento(chave, cnpj_destinatario, tipo_evento=CONFIRMACAO,
         ET.SubElement(det, f'{{{NS_NFE}}}xJust').text = justificativa.strip()
 
     return raiz
+
+
+# --- a costura: manifestar UMA chave (MANIF-16..19) -------------------------
+
+STATUS_MANIFESTAVEIS = ('pendente', 'rejeitada', 'indefinida')
+
+
+class Resultado:
+    """Desfecho de uma manifestacao, do ponto de vista de quem chamou."""
+
+    def __init__(self, sucesso, mensagem, resposta=None):
+        self.sucesso = sucesso
+        self.mensagem = mensagem
+        self.cstat = getattr(resposta, 'cstat', None)
+        self.xmotivo = getattr(resposta, 'xmotivo', None)
+        self.protocolo = getattr(resposta, 'protocolo', None)
+        self.ja_existia = bool(getattr(resposta, 'duplicidade', False))
+        self.indefinido = bool(getattr(resposta, 'indefinido', False))
+
+    def __repr__(self):
+        return (f'<Resultado sucesso={self.sucesso} cstat={self.cstat} '
+                f'indefinido={self.indefinido}>')
+
+
+def manifestavel(chave_linha):
+    """A chave pode ser manifestada agora? **Regra unica** do fluxo.
+
+    Consumida pela rota individual E pela fila do lote. Duas copias
+    divergiriam, e a divergencia apareceria como fila que enfileira o que o
+    servico recusa — travando sem explicacao."""
+    if chave_linha is None:
+        return False
+    return chave_linha.status in STATUS_MANIFESTAVEIS
+
+
+def _gravar_desfecho(linha, resposta):
+    """Traduz a resposta da SEFAZ em estado persistido. Devolve (sucesso, msg).
+
+    A ordem dos ramos importa: `indefinido` e testado ANTES de qualquer
+    conclusao sobre `cStat`, porque nele nao ha cStat nenhum para interpretar —
+    e concluir alguma coisa ali seria justamente o chute que o desenho evita."""
+    from app import db
+    from app.models import StatusManifestacao
+
+    linha.cstat = resposta.cstat
+    linha.xmotivo = (resposta.xmotivo or resposta.erro or '')[:255] or None
+
+    if resposta.indefinido:
+        linha.status = StatusManifestacao.INDEFINIDA
+        mensagem = (f'Enviei a manifestacao da chave {linha.chave} e nao recebi '
+                    f'a resposta. Confira no portal da NF-e se ela saiu antes de '
+                    f'tentar de novo.')
+    elif resposta.registrado or resposta.duplicidade:
+        linha.status = StatusManifestacao.MANIFESTADA
+        linha.ja_existia = resposta.duplicidade
+        linha.protocolo = resposta.protocolo
+        linha.manifestado_em = datetime.now()
+        mensagem = ('Ja estava manifestada na SEFAZ.' if resposta.duplicidade
+                    else f'Manifestada. Protocolo {resposta.protocolo}.')
+    elif resposta.cstat:
+        linha.status = StatusManifestacao.REJEITADA
+        mensagem = f'Recusada pela SEFAZ ({resposta.cstat}): {resposta.xmotivo}'
+    else:
+        # nao houve resposta e nao houve envio: o pedido nao chegou a sair
+        linha.status = StatusManifestacao.PENDENTE
+        mensagem = f'Nao consegui falar com a SEFAZ: {resposta.erro}'
+
+    db.session.commit()
+    sucesso = linha.status == StatusManifestacao.MANIFESTADA
+    return sucesso, mensagem
+
+
+def manifestar(chave_id, tipo_evento=CONFIRMACAO, justificativa=None,
+               ambiente=None, execution_id=None):
+    """Manifesta UMA chave e grava o desfecho. Nunca levanta.
+
+    E a unica porta entre o sistema e a SEFAZ (a costura do design). Trocar o
+    webservice pelo portal — a contingencia da spec — substituiria o miolo desta
+    funcao e nada mais."""
+    from app import db
+    from app.models import ChaveManifestacao, StatusManifestacao
+    from app.services import auditoria, manifestador_cofre
+    from app.services.nfe_sefaz import Credencial, SefazError, ambiente_atual
+
+    linha = db.session.get(ChaveManifestacao, chave_id)
+    if linha is None:
+        return Resultado(False, f'Chave {chave_id} nao existe mais.')
+
+    if not manifestavel(linha):
+        return Resultado(
+            False, f'A chave {linha.chave} esta como "{linha.status}" e nao '
+                   f'entra na fila. Libere-a antes de manifestar de novo.')
+
+    empresa = linha.empresa
+    credencial_bruta = manifestador_cofre.credencial(empresa)
+    if credencial_bruta is None:
+        # Recusa ANTES de qualquer rede: certificado ausente ou vencido e
+        # estado de negocio, e o pre-voo existe justamente para isso nao
+        # aparecer no meio de um lote.
+        estado = getattr(empresa.certificado, 'estado', 'sem_arquivo')
+        return Resultado(
+            False, f'{empresa.nome} esta com o certificado "{estado}". '
+                   f'Resolva no pre-voo do cofre antes de manifestar.')
+
+    caminho, senha = credencial_bruta
+    ambiente = ambiente or ambiente_atual()
+
+    # Monta e assina. Falha aqui e ANTES do envio: nada saiu, a chave continua
+    # na fila e repetir e seguro.
+    try:
+        info = manifestador_cofre.carregar_pfx(caminho, senha.encode() or None)
+        if info is None or info.chave_privada is None:
+            raise SefazError(
+                f'Nao consegui abrir o certificado de {empresa.nome}. Confira a '
+                f'senha no cofre.')
+        evento = montar_evento(
+            chave=linha.chave, cnpj_destinatario=empresa.cnpj,
+            tipo_evento=tipo_evento, ambiente=ambiente,
+            justificativa=justificativa)
+        assinar(evento, evento.find(f'{{{NS_NFE}}}infEvento'),
+                info.chave_privada, info.certificado)
+    except (EventoError, SefazError, AssinaturaError) as exc:
+        log_event('manifestador_preparo_falhou', level='ERROR',
+                  chave=linha.chave, error=str(exc), execution_id=execution_id)
+        return Resultado(False, str(exc))
+
+    linha.status = StatusManifestacao.ENVIANDO
+    linha.tipo_evento = tipo_evento
+    db.session.commit()
+
+    try:
+        resposta = enviar_evento(
+            evento, credencial=Credencial(caminho=caminho, senha=senha),
+            ambiente=ambiente)
+    except Exception as exc:
+        # `enviar_evento` nao deveria levantar por rede; se levantou, e defeito
+        # nosso — e nao da para saber se o evento saiu. INDEFINIDA em vez de
+        # PENDENTE porque um falso "pendente" reenviaria um evento protocolado,
+        # e o preco de um falso "indefinida" e uma conferencia manual.
+        linha.status = StatusManifestacao.INDEFINIDA
+        linha.xmotivo = str(exc)[:255]
+        db.session.commit()
+        log_event('manifestador_envio_estourou', level='ERROR',
+                  chave=linha.chave, error=str(exc), execution_id=execution_id)
+        return Resultado(
+            False, f'Erro inesperado ao enviar a chave {linha.chave}. Confira '
+                   f'no portal se a manifestacao saiu.')
+
+    sucesso, mensagem = _gravar_desfecho(linha, resposta)
+
+    auditoria.registrar(
+        'manifestacao', alvo_tipo='chave_manifestacao', alvo_id=linha.id,
+        resultado='ok' if sucesso else 'erro',
+        detalhe=(f'chave={linha.chave} evento={tipo_evento} '
+                 f'cStat={resposta.cstat} prot={resposta.protocolo} '
+                 f'empresa={empresa.nome}'))
+    log_event('manifestador_desfecho', chave=linha.chave, cstat=resposta.cstat,
+              status=linha.status, execution_id=execution_id)
+
+    return Resultado(sucesso, mensagem, resposta)
