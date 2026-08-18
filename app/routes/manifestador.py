@@ -51,6 +51,12 @@ def _chave_para_json(linha):
         'xmotivo': linha.xmotivo,
         'protocolo': linha.protocolo,
         'ja_existia': linha.ja_existia,
+        'tentativas': linha.tentativas,
+        # Aviso de prazo (Ajuste SINIEF 14/2026: 90 dias). Calculado na leitura
+        # porque depende de HOJE — guardar em coluna congelaria a resposta.
+        'fora_do_prazo': manifestador_import.fora_do_prazo(linha.chave),
+        'no_teto': not manifestador_service.manifestavel(linha)
+                   and linha.status in manifestador_service.STATUS_MANIFESTAVEIS,
     }
 
 

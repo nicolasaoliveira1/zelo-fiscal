@@ -130,6 +130,13 @@ def montar_evento(chave, cnpj_destinatario, tipo_evento=CONFIRMACAO,
 
 STATUS_MANIFESTAVEIS = ('pendente', 'rejeitada', 'indefinida')
 
+# Teto de reenvios com a MESMA rejeicao. A SEFAZ bloqueia o CNPJ por 1 hora a
+# partir de 20 (NT 2018.002); paramos MUITO antes porque insistir 20 vezes na
+# mesma recusa nunca foi util — se a rejeicao nao mudou, o proximo envio tambem
+# nao vai mudar. O teto protege sobretudo o botao "reprocessar", que antes nao
+# tinha limite nenhum.
+TETO_REENVIOS = 3
+
 
 class Resultado:
     """Desfecho de uma manifestacao, do ponto de vista de quem chamou."""
@@ -142,6 +149,7 @@ class Resultado:
         self.protocolo = getattr(resposta, 'protocolo', None)
         self.ja_existia = bool(getattr(resposta, 'duplicidade', False))
         self.indefinido = bool(getattr(resposta, 'indefinido', False))
+        self.consumo_indevido = bool(getattr(resposta, 'consumo_indevido', False))
 
     def __repr__(self):
         return (f'<Resultado sucesso={self.sucesso} cstat={self.cstat} '
@@ -153,10 +161,15 @@ def manifestavel(chave_linha):
 
     Consumida pela rota individual E pela fila do lote. Duas copias
     divergiriam, e a divergencia apareceria como fila que enfileira o que o
-    servico recusa — travando sem explicacao."""
+    servico recusa — travando sem explicacao.
+
+    Chave que ja bateu no `TETO_REENVIOS` sai da fila: insistir na mesma recusa
+    caminha para o bloqueio do CNPJ e nunca produziu desfecho diferente."""
     if chave_linha is None:
         return False
-    return chave_linha.status in STATUS_MANIFESTAVEIS
+    if chave_linha.status not in STATUS_MANIFESTAVEIS:
+        return False
+    return (chave_linha.tentativas or 0) < TETO_REENVIOS
 
 
 def _gravar_desfecho(linha, resposta):
@@ -168,8 +181,20 @@ def _gravar_desfecho(linha, resposta):
     from app import db
     from app.models import StatusManifestacao
 
+    cstat_anterior = linha.cstat
     linha.cstat = resposta.cstat
     linha.xmotivo = (resposta.xmotivo or resposta.erro or '')[:255] or None
+
+    if resposta.consumo_indevido:
+        # O evento NAO foi avaliado: a SEFAZ recusou a requisicao. A chave volta
+        # a fila intacta — mas quem chamou tem de parar o lote (ver
+        # `manifestador_lote`), porque insistir prolonga o bloqueio.
+        linha.status = StatusManifestacao.PENDENTE
+        db.session.commit()
+        return False, (
+            'A SEFAZ bloqueou este CNPJ por consumo indevido (656). O bloqueio '
+            'dura 1 hora e INSISTIR REINICIA a contagem. A chave continua na '
+            'fila; retome depois.')
 
     if resposta.indefinido:
         linha.status = StatusManifestacao.INDEFINIDA
@@ -178,6 +203,7 @@ def _gravar_desfecho(linha, resposta):
                     f'tentar de novo.')
     elif resposta.registrado or resposta.duplicidade:
         linha.status = StatusManifestacao.MANIFESTADA
+        linha.tentativas = 0
         linha.ja_existia = resposta.duplicidade
         linha.protocolo = resposta.protocolo
         linha.manifestado_em = datetime.now()
@@ -185,6 +211,10 @@ def _gravar_desfecho(linha, resposta):
                     else f'Manifestada. Protocolo {resposta.protocolo}.')
     elif resposta.cstat:
         linha.status = StatusManifestacao.REJEITADA
+        # Conta reenvios com a MESMA rejeicao; rejeicao diferente zera, porque o
+        # problema passou a ser outro e a contagem velha nao diz nada sobre ele.
+        linha.tentativas = (linha.tentativas + 1
+                            if resposta.cstat == cstat_anterior else 1)
         mensagem = f'Recusada pela SEFAZ ({resposta.cstat}): {resposta.xmotivo}'
     else:
         # nao houve resposta e nao houve envio: o pedido nao chegou a sair

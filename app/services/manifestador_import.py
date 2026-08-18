@@ -80,6 +80,36 @@ def competencia_da_chave(chave):
     return f'20{ano:02d}-{mes:02d}'
 
 
+# Prazo para manifestacao conclusiva, contado da AUTORIZACAO da NF-e. Caiu de
+# 180 para 90 dias pelo Ajuste SINIEF 14/2026, em vigor desde 01/06/2026 —
+# passado o prazo a SEFAZ registra Confirmacao automatica, entao manifestar
+# nota velha e rejeicao certa.
+DIAS_PRAZO_MANIFESTACAO = 90
+
+
+def fora_do_prazo(chave, hoje=None):
+    """A chave ja passou dos 90 dias de prazo? Aproximacao DELIBERADA.
+
+    O prazo conta da autorizacao, e a chave so carrega o `AAMM` de emissao —
+    entao mede-se do FIM daquele mes, que e o ponto mais tardio em que a nota
+    pode ter sido autorizada. Assim o aviso erra para o lado seguro: pode deixar
+    passar uma nota ja vencida, nunca acusa uma que ainda esta no prazo.
+
+    E aviso, nao bloqueio: recusar com base numa aproximacao impediria
+    manifestacao legitima."""
+    from datetime import date
+
+    competencia = competencia_da_chave(chave)
+    if competencia is None:
+        return False
+
+    hoje = hoje or date.today()
+    ano, mes = int(competencia[:4]), int(competencia[5:])
+    # primeiro dia do mes seguinte = limite superior da autorizacao
+    fim = date(ano + (mes == 12), 1 if mes == 12 else mes + 1, 1)
+    return (hoje - fim).days > DIAS_PRAZO_MANIFESTACAO
+
+
 def _fatiar(digitos):
     """Divide um bloco de 44*n digitos em n chaves."""
     return [digitos[i:i + TAMANHO_CHAVE]
@@ -168,6 +198,9 @@ class Balanco:
         self.competencia_invalida = []
         self.duplicatas = []
         self.sem_empresa = []
+        # AVISO, nao recusa: entram na fila, mas com o prazo estourado a SEFAZ
+        # provavelmente ja registrou Confirmacao automatica.
+        self.fora_do_prazo = []
         self.total_lidas = 0
 
     def __repr__(self):
@@ -183,6 +216,7 @@ class Balanco:
             'competencia_invalida': list(self.competencia_invalida),
             'duplicatas': list(self.duplicatas),
             'sem_empresa': list(self.sem_empresa),
+            'fora_do_prazo': list(self.fora_do_prazo),
         }
 
 
@@ -258,6 +292,8 @@ def importar_colagem(empresa, texto, competencia=None, origem=ORIGEM_COLAGEM):
             cnpj_emitente=partes.cnpj_emitente, origem=origem))
         db.session.commit()
         balanco.aceitas.append(chave)
+        if fora_do_prazo(chave):
+            balanco.fora_do_prazo.append(chave)
 
     return balanco
 
@@ -354,6 +390,8 @@ def importar_xmls(arquivos):
             cnpj_emitente=partes.cnpj_emitente, origem=ORIGEM_XML))
         db.session.commit()
         balanco.aceitas.append(chave)
+        if fora_do_prazo(chave):
+            balanco.fora_do_prazo.append(chave)
 
     return balanco
 

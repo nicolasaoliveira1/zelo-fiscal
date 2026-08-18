@@ -109,10 +109,14 @@ def _alimentar_breaker(resultado):
 
     Rejeicao da SEFAZ (`cStat` presente) significa que ela respondeu — ela esta
     no ar, e a nota e que tem problema. Contar isso como portal fora pararia o
-    lote inteiro por causa de uma nota invalida."""
+    lote inteiro por causa de uma nota invalida.
+
+    A EXCECAO e o consumo indevido (656): ali a SEFAZ respondeu, mas para dizer
+    que o nosso acesso esta bloqueado. Isso e exatamente o que o breaker existe
+    para representar, e nao tem nada a ver com a nota."""
     if resultado.sucesso:
         circuit_breaker.registrar_sucesso(ALVO_BREAKER)
-    elif not resultado.cstat:
+    elif resultado.consumo_indevido or not resultado.cstat:
         circuit_breaker.registrar_falha(ALVO_BREAKER, mensagem=resultado.mensagem)
 
 
@@ -128,6 +132,18 @@ def _manifestar_item(chave_id, _driver, execution_id):
         execution_id=execution_id)
 
     _alimentar_breaker(resultado)
+
+    if resultado.consumo_indevido:
+        # PARA o lote, nao passa para a proxima chave. A SEFAZ bloqueou o CNPJ
+        # por 1 hora e continuar enviando REINICIA o cronometro — com 200 chaves
+        # na fila seriam 200 requisicoes prolongando o bloqueio, e 50 bloqueios
+        # consecutivos viram bloqueio PERMANENTE (NT 2018.002). Pausa e
+        # retomavel: a fila fica intacta para depois.
+        batch_engine.request_pause(MANIF_BATCH_LOCK, MANIF_BATCH_STATE)
+        log_event('manifestador_consumo_indevido', level='ERROR',
+                  chave_id=chave_id, execution_id=execution_id)
+        return False, None, resultado.mensagem
+
     return resultado.sucesso, None, resultado.mensagem
 
 

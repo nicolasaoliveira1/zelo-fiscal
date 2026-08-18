@@ -226,6 +226,11 @@ function pintarLista() {
       motivo = 'Enviei e não recebi resposta. Confira no portal antes de repetir.';
     } else if (c.status === 'manifestada' && c.ja_existia) {
       motivo = `A SEFAZ respondeu que o evento já constava — ${motivo}`;
+    } else if (c.no_teto) {
+      /* A SEFAZ bloqueia o CNPJ por 1h quando a mesma rejeição volta 20 vezes;
+       * paramos em 3 porque insistir na mesma recusa nunca mudou nada. */
+      motivo = `${motivo} · Saiu da fila após ${c.tentativas} tentativas com a `
+        + 'mesma recusa. Insistir arrisca bloquear o CNPJ na SEFAZ.';
     }
     /* O `AAMM` sublinhado e o mes de EMISSAO — rotula-lo "competência" era
      * mentira, porque a competencia e a da ENTRADA e vem do XML ou do operador.
@@ -234,6 +239,10 @@ function pintarLista() {
     const emissao = c.chave && c.chave.length === 44
       ? `20${c.chave.slice(2, 4)}-${c.chave.slice(4, 6)}` : null;
     const divergiu = c.competencia && emissao && c.competencia !== emissao;
+    /* Prazo de 90 dias contados da autorização (Ajuste SINIEF 14/2026). Passado
+     * ele a SEFAZ registra Confirmação automática, e manifestar vira rejeição. */
+    const prazo = c.fora_do_prazo && c.status === 'pendente'
+      ? '<span class="manif-st is-warn ms-2">Fora do prazo</span>' : '';
     const legenda = `<div class="manif-chave-leg"><span>UF</span>
          <span><b>emissão ${escapar(emissao || '—')}</b></span>
          <span>emitente</span><span>nº</span>
@@ -249,7 +258,7 @@ function pintarLista() {
         ${legenda}
         ${motivo ? `<div class="manif-motivo">${escapar(motivo)}</div>` : ''}
       </td>
-      <td><span class="manif-st is-${cor}">${escapar(rotulo)}</span></td>
+      <td><span class="manif-st is-${cor}">${escapar(rotulo)}</span>${prazo}</td>
     </tr>`;
   }).join('');
 
@@ -378,6 +387,7 @@ function mostrarBalanco(balanco) {
     ['dv_invalido', 'com dígito verificador errado'],
     ['competencia_invalida', 'com competência impossível'],
     ['sem_empresa', 'sem empresa da carteira'],
+    ['fora_do_prazo', 'com mais de 90 dias — a SEFAZ já pode ter confirmado sozinha'],
   ];
   $('manifBalanco').innerHTML = grupos.map(([campo, texto]) => {
     const itens = balanco[campo] || [];

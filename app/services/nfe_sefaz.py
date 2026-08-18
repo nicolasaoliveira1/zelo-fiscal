@@ -192,6 +192,12 @@ VERSAO_LOTE = '1.00'
 # rejeicao e vai para a tela com o texto oficial, sem parafrase.
 CSTAT_REGISTRADO = ('135', '136')
 CSTAT_DUPLICIDADE = ('573',)
+# Consumo indevido (NT 2018.002): a SEFAZ bloqueou ESTE CNPJ por 1 hora. Nao e
+# problema da nota — e do nosso acesso ao servico. Continuar enviando durante o
+# bloqueio REINICIA o cronometro, e 50 bloqueios consecutivos viram bloqueio
+# PERMANENTE, que so a SEFAZ destrava. Por isso este codigo para o lote em vez
+# de virar mais uma linha vermelha na lista.
+CSTAT_CONSUMO_INDEVIDO = ('656',)
 
 # Excecoes que acontecem DEPOIS de o pedido sair. Nelas nao da para saber se a
 # SEFAZ processou o evento — e os dois chutes erram em direcoes opostas (perder
@@ -223,6 +229,11 @@ class RespostaSefaz:
     @property
     def duplicidade(self):
         return self.cstat in CSTAT_DUPLICIDADE
+
+    @property
+    def consumo_indevido(self):
+        """A SEFAZ bloqueou o CNPJ. Quem le isto tem de PARAR, nao retentar."""
+        return self.cstat in CSTAT_CONSUMO_INDEVIDO
 
     def __repr__(self):
         return (f'<RespostaSefaz cstat={self.cstat} prot={self.protocolo} '

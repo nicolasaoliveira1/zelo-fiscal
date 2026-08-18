@@ -948,6 +948,14 @@ class ChaveManifestacao(db.Model):
     ja_existia = db.Column(db.Boolean, nullable=False, default=False)
     manifestado_em = db.Column(db.DateTime, nullable=True)
 
+    # Reenvios CONSECUTIVOS com a MESMA rejeicao. A SEFAZ bloqueia o CNPJ por 1h
+    # quando o mesmo evento volta com a mesma rejeicao mais de 20 vezes
+    # (NT 2018.002, consumo indevido / cStat 656) — e continuar enviando durante
+    # o bloqueio REINICIA o cronometro, com 50 bloqueios seguidos virando
+    # bloqueio permanente. O contador zera quando a rejeicao muda: ai o problema
+    # e outro, e a contagem antiga nao diz nada sobre ele.
+    tentativas = db.Column(db.Integer, nullable=False, default=0)
+
     importado_em = db.Column(db.DateTime, nullable=False, default=datetime.now,
                              index=True)
     atualizado_em = db.Column(db.DateTime, nullable=False, default=datetime.now,
