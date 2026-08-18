@@ -169,7 +169,13 @@ def manifestador_importar():
     if empresa is None:
         return json_error('Escolha a empresa dona destas notas.', 400)
 
-    balanco = manifestador_import.importar_colagem(empresa, texto)
+    # A competencia vem do OPERADOR: a chave so tem o mes de EMISSAO, e uma nota
+    # emitida dia 30 e recebida dia 1o pertence ao mes seguinte.
+    try:
+        balanco = manifestador_import.importar_colagem(
+            empresa, texto, competencia=dados.get('competencia'))
+    except ValueError as exc:
+        return json_error(str(exc), 400)
     return {'status': 'ok', 'balanco': balanco.como_dict()}
 
 

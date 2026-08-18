@@ -227,11 +227,19 @@ function pintarLista() {
     } else if (c.status === 'manifestada' && c.ja_existia) {
       motivo = `A SEFAZ respondeu que o evento já constava — ${motivo}`;
     }
-    const legenda = c.competencia
-      ? `<div class="manif-chave-leg"><span>UF</span>
-           <span><b>competência ${escapar(c.competencia)}</b></span>
-           <span>emitente</span><span>nº</span></div>`
-      : '';
+    /* O `AAMM` sublinhado e o mes de EMISSAO — rotula-lo "competência" era
+     * mentira, porque a competencia e a da ENTRADA e vem do XML ou do operador.
+     * Quando as duas divergem a linha diz as duas, que e onde o operador
+     * percebe a nota que virou o mes. */
+    const emissao = c.chave && c.chave.length === 44
+      ? `20${c.chave.slice(2, 4)}-${c.chave.slice(4, 6)}` : null;
+    const divergiu = c.competencia && emissao && c.competencia !== emissao;
+    const legenda = `<div class="manif-chave-leg"><span>UF</span>
+         <span><b>emissão ${escapar(emissao || '—')}</b></span>
+         <span>emitente</span><span>nº</span>
+         ${c.competencia ? `<span>competência <b>${escapar(c.competencia)}</b>`
+           + `${divergiu ? ' (entrada em outro mês)' : ''}</span>` : ''}
+       </div>`;
     return `<tr data-id="${c.id}">
       <td>${marcavel ? `<input type="checkbox" class="manif-check" value="${c.id}"
               aria-label="Marcar ${escapar(c.empresa || '')}">` : ''}</td>
@@ -386,7 +394,9 @@ async function importarTexto() {
   if (!empresaId) return toast('Escolha a empresa dona destas notas.', 'warning');
   try {
     const dados = await pedir('/manifestador/importar', comoJson({
-      empresa_id: Number(empresaId), texto: $('manifTexto').value,
+      empresa_id: Number(empresaId),
+      texto: $('manifTexto').value,
+      competencia: $('manifEntradaCompetencia').value || null,
     }));
     mostrarBalanco(dados.balanco);
     $('manifTexto').value = '';
@@ -468,7 +478,18 @@ function ligar() {
     iniciarPoll();
   });
 
-  $('manifAbrirEntrada').addEventListener('click', () => { $('manifEntrada').hidden = false; });
+  $('manifAbrirEntrada').addEventListener('click', () => {
+    $('manifEntrada').hidden = false;
+    /* Padrao = mes anterior, que e o ritmo do escritorio ("no mes 08 a
+     * competencia e 07"). E so um ponto de partida: o campo fica editavel. */
+    if (!$('manifEntradaCompetencia').value) {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - 1);
+      $('manifEntradaCompetencia').value =
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+  });
   $('manifFecharEntrada').addEventListener('click', () => { $('manifEntrada').hidden = true; });
   $('manifImportar').addEventListener('click', importarTexto);
   $('manifImportarXml').addEventListener('click', importarXml);

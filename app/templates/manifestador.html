@@ -137,6 +137,13 @@
               aria-label="Empresa dona destas notas">
         <option value="">Escolha a empresa…</option>
       </select>
+      {#- A chave só carrega o mês de EMISSÃO; a competência é a da ENTRADA e as
+          duas divergem em toda virada de mês. Por isso o operador informa. -#}
+      <label class="manif-eyebrow d-block mb-1" for="manifEntradaCompetencia">
+        Competência destas notas
+      </label>
+      <input type="month" class="form-control form-control-sm mb-2"
+             id="manifEntradaCompetencia">
       <textarea class="form-control manif-ta" id="manifTexto" rows="4"
                 placeholder="Cole aqui — do scanner ou do PDF. Espaço, quebra de linha e rótulo em volta não atrapalham."></textarea>
       <button type="button" class="btn btn-primary btn-sm w-100 mt-2" id="manifImportar">Importar</button>

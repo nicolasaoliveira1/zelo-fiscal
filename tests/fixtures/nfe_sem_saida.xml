@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- `dhSaiEnt` e OPCIONAL na NF-e: sem ela, `dhEmi` e o que resta. -->
+<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
+  <infNFe versao="4.00" Id="NFe43260661186888022405550020000794101064148812">
+    <ide><mod>55</mod><dhEmi>2026-06-30T18:27:00-03:00</dhEmi></ide>
+    <dest><CNPJ>46256812000101</CNPJ></dest>
+  </infNFe>
+</NFe>

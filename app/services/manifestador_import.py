@@ -10,8 +10,11 @@ Layout da chave de 44 digitos:
 
 Duas consequencias que mandam no desenho:
 
-1. A **competencia** sai de `AAMM` — e o mes de emissao da NF-e, que e o que o
-   escritorio chama de competencia ("no mes 08 a competencia e 07").
+1. `AAMM` e o mes de **EMISSAO**, e NAO a competencia do escritorio, que e a da
+   **ENTRADA**. Os dois divergem toda virada de mes: medido numa nota real,
+   `dhEmi` 30/06 e `dhSaiEnt` 01/07 — a chave dizia junho e o certo era julho.
+   Por isso a competencia vem do `dhSaiEnt` no XML e do OPERADOR na colagem; o
+   AAMM so entra como ultimo recurso.
 2. O CNPJ ali dentro e do **emitente**, nao do destinatario. Por isso a chave
    sozinha NAO diz de qual empresa da carteira ela e: a colagem e por empresa, e
    so o XML (que traz `dest/CNPJ`) resolve isso sozinho.
@@ -209,12 +212,23 @@ def _registrar_duplicata(balanco, existente, empresa):
     })
 
 
-def importar_colagem(empresa, texto, origem=ORIGEM_COLAGEM):
+def importar_colagem(empresa, texto, competencia=None, origem=ORIGEM_COLAGEM):
     """Cola um bloco de texto na fila de uma empresa. Devolve o `Balanco`.
+
+    `competencia` e informada pelo OPERADOR para o bloco inteiro. A chave de
+    acesso NAO carrega a data de entrada — os 44 digitos so tem o `AAMM` de
+    **emissao** —, entao deriva-la dali seria adivinhar a partir de um dado
+    que o documento nao tem: uma nota emitida dia 30 e recebida dia 1o cairia
+    no mes errado, em silencio. Sem competencia informada cai-se no AAMM, que
+    e a melhor aproximacao restante.
 
     Nada de rede aqui: so extracao, validacao e persistencia."""
     from app import db
     from app.models import ChaveManifestacao
+
+    informada = str(competencia).strip() if competencia else None
+    if informada and not _COMPETENCIA.match(informada):
+        raise ValueError('Competencia invalida. Use o formato AAAA-MM.')
 
     balanco = Balanco()
 
@@ -225,7 +239,7 @@ def importar_colagem(empresa, texto, origem=ORIGEM_COLAGEM):
             balanco.dv_invalido.append(chave)
             continue
 
-        competencia = competencia_da_chave(chave)
+        competencia = informada or competencia_da_chave(chave)
         if competencia is None:
             balanco.competencia_invalida.append(chave)
             continue
@@ -248,8 +262,26 @@ def importar_colagem(empresa, texto, origem=ORIGEM_COLAGEM):
     return balanco
 
 
-def _chave_e_destinatario(conteudo):
-    """(chave, cnpj do destinatario) lidos do XML, ou (None, None).
+def _competencia_do_xml(inf):
+    """'AAAA-MM' da ENTRADA — a competencia que o escritorio usa.
+
+    `dhSaiEnt` (saida do emitente / entrada no destinatario), NAO `dhEmi`: nota
+    emitida dia 30 e entregue dia 1o pertence ao mes seguinte, e a diferenca
+    aparece justamente na virada do mes. `dhSaiEnt` e opcional na NF-e, entao a
+    ausencia dela cai em `dhEmi`, a melhor aproximacao restante no documento.
+
+    Medido num caso real: chave 4326**06**..., `dhEmi` 30/06 e `dhSaiEnt` 01/07 —
+    o AAMM da chave dizia junho e a competencia correta era julho."""
+    for tag in ('dhSaiEnt', 'dhEmi'):
+        no = inf.find(f'{{{NS_NFE}}}ide/{{{NS_NFE}}}{tag}')
+        conteudo = (no.text or '').strip() if no is not None else ''
+        if len(conteudo) >= 7 and conteudo[4] == '-':
+            return conteudo[:7]
+    return None
+
+
+def _dados_do_xml(conteudo):
+    """(chave, cnpj do destinatario, competencia) lidos do XML.
 
     O `Id` do `infNFe` vem prefixado com 'NFe'. O destinatario e `dest/CNPJ`:
     `dest/CPF` (pessoa fisica) e a ausencia de `dest` (NFC-e modelo 65, venda no
@@ -260,16 +292,16 @@ def _chave_e_destinatario(conteudo):
     try:
         raiz = ET.fromstring(conteudo)
     except (ET.ParseError, ValueError, TypeError):
-        return None, None
+        return None, None, None
 
     inf = raiz.find(f'.//{{{NS_NFE}}}infNFe')
     if inf is None:
-        return None, None
+        return None, None, None
 
     chave = re.sub(r'\D', '', inf.get('Id') or '')
     cnpj_no = inf.find(f'{{{NS_NFE}}}dest/{{{NS_NFE}}}CNPJ')
     destinatario = (cnpj_no.text or '').strip() if cnpj_no is not None else None
-    return (chave or None), (destinatario or None)
+    return (chave or None), (destinatario or None), _competencia_do_xml(inf)
 
 
 def importar_xmls(arquivos):
@@ -285,7 +317,7 @@ def importar_xmls(arquivos):
     for nome, conteudo in arquivos:
         balanco.total_lidas += 1
 
-        chave, destinatario = _chave_e_destinatario(conteudo)
+        chave, destinatario, competencia_xml = _dados_do_xml(conteudo)
         if not chave:
             balanco.sem_empresa.append(nome)
             continue
@@ -294,7 +326,9 @@ def importar_xmls(arquivos):
             balanco.dv_invalido.append(chave)
             continue
 
-        competencia = competencia_da_chave(chave)
+        # A competencia vem do DOCUMENTO (entrada), nao do AAMM da chave, que
+        # e o mes de emissao. Sem data legivel no XML, o AAMM e o que resta.
+        competencia = competencia_xml or competencia_da_chave(chave)
         if competencia is None:
             balanco.competencia_invalida.append(chave)
             continue

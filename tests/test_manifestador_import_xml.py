@@ -187,3 +187,37 @@ def test_balanco_soma_todos_os_grupos_no_xml(app, ids):
         assert (len(balanco.aceitas) + len(balanco.dv_invalido)
                 + len(balanco.duplicatas) + len(balanco.competencia_invalida)
                 + len(balanco.sem_empresa)) == balanco.total_lidas
+
+
+# --- competencia = ENTRADA, nao emissao (achado na validacao manual) --------
+
+XML_VIRADA = FIXTURES / 'nfe_virada_de_mes.xml'
+XML_SEM_SAIDA = FIXTURES / 'nfe_sem_saida.xml'
+CHAVE_VIRADA = '43260661186888022405550020000794101064148812'
+
+
+def test_competencia_vem_da_entrada_e_nao_da_emissao(app, ids):
+    """O caso que quebrou a premissa: nota emitida em 30/06 e entregue em 01/07.
+
+    O `AAMM` da chave e 2606 e diria junho; a competencia do escritorio e a da
+    ENTRADA (`dhSaiEnt`), julho. Derivar da chave erra em TODA virada de mes, e
+    erra em silencio."""
+    with app.app_context():
+        _empresa('I ARAUJO FELTRIN', '46.256.812/0001-01')
+
+        imp.importar_xmls([(XML_VIRADA.name, _bytes(XML_VIRADA))])
+
+        linha = ChaveManifestacao.query.filter_by(chave=CHAVE_VIRADA).first()
+        assert linha.competencia == '2026-07'
+        assert imp.competencia_da_chave(CHAVE_VIRADA) == '2026-06'
+
+
+def test_sem_dhsaient_cai_para_dhemi(app, ids):
+    """`dhSaiEnt` e opcional na NF-e; sem ela, a emissao e o que resta."""
+    with app.app_context():
+        _empresa('I ARAUJO FELTRIN', '46.256.812/0001-01')
+
+        imp.importar_xmls([(XML_SEM_SAIDA.name, _bytes(XML_SEM_SAIDA))])
+
+        linha = ChaveManifestacao.query.filter_by(chave=CHAVE_VIRADA).first()
+        assert linha.competencia == '2026-06'

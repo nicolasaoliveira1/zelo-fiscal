@@ -278,3 +278,40 @@ def test_balanco_soma_todos_os_grupos(app, ids):
         assert (len(balanco.aceitas) + len(balanco.dv_invalido)
                 + len(balanco.duplicatas) + len(balanco.competencia_invalida)
                 + len(balanco.sem_empresa)) == balanco.total_lidas
+
+
+# --- competencia informada na colagem (achado na validacao manual) ----------
+
+def test_colagem_usa_a_competencia_informada_pelo_operador(app, ids):
+    """A chave so carrega o mes de EMISSAO. Quando a nota vira o mes, so o
+    operador sabe a competencia — e ele informa para o bloco inteiro."""
+    with app.app_context():
+        emp = _empresa()
+        imp.importar_colagem(emp, CHAVE_A, competencia='2017-02')
+
+        linha = ChaveManifestacao.query.filter_by(chave=CHAVE_A).first()
+        assert linha.competencia == '2017-02'
+        assert imp.competencia_da_chave(CHAVE_A) == '2017-01'
+
+
+def test_colagem_sem_competencia_cai_no_aamm_da_chave(app, ids):
+    """Ultimo recurso: melhor aproximacao disponivel, nao verdade."""
+    with app.app_context():
+        emp = _empresa()
+        imp.importar_colagem(emp, CHAVE_A)
+
+        assert ChaveManifestacao.query.filter_by(
+            chave=CHAVE_A).first().competencia == '2017-01'
+
+
+def test_colagem_com_competencia_malformada_e_recusada(app, ids):
+    """Formato errado nao pode virar competencia gravada em nota nenhuma."""
+    import pytest
+
+    with app.app_context():
+        emp = _empresa()
+        for ruim in ('2017-13', '02/2017', 'julho'):
+            with pytest.raises(ValueError):
+                imp.importar_colagem(emp, CHAVE_A, competencia=ruim)
+
+        assert ChaveManifestacao.query.count() == 0
