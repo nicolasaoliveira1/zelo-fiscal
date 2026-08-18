@@ -2542,6 +2542,13 @@ body.navbar-hidden .sidebar-header {
     border-top: 1px solid var(--zelo-line);
     box-shadow: 0 -10px 30px -20px var(--zelo-ink);
     padding: 1rem 1.25rem 1.25rem;
+    /* Ancorado no rodapé, o painel cresce para CIMA: sem teto, uma lista de 26
+       pastas empurrou o topo — e o botão de importar — para fora da tela, sem
+       jeito de alcançá-los. A rolagem aqui é a rede de segurança; quem segura a
+       altura no dia a dia é o teto da própria lista. */
+    max-height: 85vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .manif-entrada-in {
@@ -2549,6 +2556,7 @@ body.navbar-hidden .sidebar-header {
     margin: 0 auto;
     display: grid;
     grid-template-columns: 1fr 1fr;
+    align-items: start;
     gap: 1rem;
 }
 
@@ -2592,11 +2600,15 @@ body.navbar-hidden .sidebar-header {
    que responde "peguei a pasta certa?" antes de o operador importar. */
 .manif-fontes {
     list-style: none;
-    margin: 0.5rem 0 0;
+    margin: 0.35rem 0 0;
     padding: 0;
     border: 1px solid var(--zelo-line);
     border-radius: 0.5rem;
-    overflow: hidden;
+    /* Rola dentro da própria caixa: são 26 pastas num mês normal, e o botão de
+       importar tem de continuar visível logo abaixo delas. */
+    max-height: 13.5rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .manif-fontes li {
@@ -2624,6 +2636,13 @@ body.navbar-hidden .sidebar-header {
     font-size: 0.74rem;
     color: var(--bs-secondary-color);
     white-space: nowrap;
+}
+
+/* Quantas pastas — o número que a lista rolada esconde. O total de XML já está
+   no botão; repeti-lo aqui seria dizer a mesma coisa duas vezes. */
+.manif-fontes-resumo {
+    font-size: 0.78rem;
+    color: var(--bs-secondary-color);
 }
 
 .manif-progresso {

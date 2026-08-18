@@ -478,6 +478,11 @@ function pintarFontes() {
       </button>
     </li>`).join('');
 
+  const resumo = $('manifFontesResumo');
+  resumo.hidden = !fontes.length;
+  resumo.textContent = fontes.length === 1
+    ? '1 pasta escolhida' : `${fontes.length} pastas escolhidas`;
+
   const total = totalArquivos();
   const botao = $('manifImportarXml');
   botao.disabled = !total;
