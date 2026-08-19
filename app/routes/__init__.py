@@ -470,6 +470,7 @@ def dashboard():
 from app.routes import certidoes as _mod_certidoes  # noqa: E402,F401
 from app.routes import empresas as _mod_empresas  # noqa: E402,F401
 from app.routes import lotes as _mod_lotes  # noqa: E402,F401
+from app.routes import manifestador as _mod_manifestador  # noqa: E402,F401
 from app.routes import nfse as _mod_nfse  # noqa: E402,F401
 from app.routes import relatorios as _mod_relatorios  # noqa: E402,F401
 

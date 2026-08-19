@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block titulo %}Manifestador{% endblock %}
+
+{% block content %}
+{#- Direção "a fila é a página": o cofre é conferido uma vez por mês e a fila
+    todo dia, então o cofre vive numa régua de uma linha que só se abre quando
+    há o que resolver, e a entrada de chaves sobe num painel em vez de ocupar
+    espaço permanente. Ver DESIGN_LANGUAGE.md → Histórico de decisões. -#}
+<div class="manif-pagina" id="manifDados" data-empresas='{{ empresas | tojson }}'>
+
+  <header class="d-flex justify-content-between align-items-end flex-wrap gap-2 mb-3">
+    <div>
+      <h1 class="h4 mb-1">Manifestador</h1>
+      <p class="text-secondary small mb-0">
+        Confirmação da operação das NF-e recebidas pelos clientes, direto na SEFAZ.
+      </p>
+    </div>
+    <button type="button" class="btn btn-soft-primary btn-sm" id="manifAbrirEntrada">
+      <i class="bi bi-plus-lg" aria-hidden="true"></i> Adicionar chaves
+    </button>
+  </header>
+
+  {# ── régua do cofre ─────────────────────────────────────────────────── #}
+  <div class="manif-regua" id="manifRegua">
+    <span class="manif-regua-txt">
+      <strong class="manif-num" id="manifCofrePronto">—</strong> de
+      <strong class="manif-num" id="manifCofreTotal">—</strong> empresas prontas
+    </span>
+    <div class="zl-comp-bar is-mini manif-regua-bar" id="manifCofreBarra" aria-hidden="true"></div>
+    <span class="manif-st is-warn" id="manifCofreAviso" hidden></span>
+    <button type="button" class="manif-regua-btn" id="manifCofreToggle"
+            aria-expanded="false" aria-controls="manifCofreDetalhe">
+      Abrir <i class="bi bi-chevron-down" aria-hidden="true"></i>
+    </button>
+  </div>
+
+  <section class="card border-0 shadow-sm rounded-3 mt-2 d-none" id="manifCofreDetalhe">
+    <div class="card-body">
+      <div class="zl-comp-leg mt-0 mb-3" id="manifCofreLegenda"></div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-2 manif-tbl">
+          <tbody id="manifCofreLista"></tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" id="manifReler">
+        <i class="bi bi-arrow-repeat" aria-hidden="true"></i> Reler o drive
+      </button>
+      <span class="text-secondary small ms-2" id="manifRelerAviso"></span>
+    </div>
+  </section>
+
+  {# ── barra de trabalho ──────────────────────────────────────────────── #}
+  <div class="manif-barra">
+    <input type="search" class="form-control form-control-sm manif-busca"
+           id="manifBusca" placeholder="Empresa ou chave" aria-label="Buscar">
+    <select class="form-select form-select-sm w-auto" id="manifEmpresa" aria-label="Empresa">
+      <option value="">Todas as empresas</option>
+    </select>
+    <select class="form-select form-select-sm w-auto" id="manifCompetencia" aria-label="Competência">
+      <option value="">Todas as competências</option>
+    </select>
+    <select class="form-select form-select-sm w-auto" id="manifEstado" aria-label="Estado">
+      <option value="">Todos os estados</option>
+      <option value="pendente">Pendente</option>
+      <option value="manifestada">Manifestada</option>
+      <option value="rejeitada">Rejeitada</option>
+      <option value="indefinida">Sem desfecho</option>
+      <option value="duplicata">Duas empresas</option>
+    </select>
+    <span class="text-secondary small" id="manifContagem"></span>
+
+    <span class="manif-barra-acao">
+      {#- O tipo de evento não tem valor pré-escolhido: Confirmação é
+          irreversível e não deve sair por omissão (MANIF-14). -#}
+      <select class="form-select form-select-sm w-auto" id="manifEvento" aria-label="Tipo de evento">
+        <option value="">Escolha o evento…</option>
+        <option value="210200">Confirmação da Operação</option>
+        <option value="210210">Ciência da Operação</option>
+        <option value="210220">Desconhecimento da Operação</option>
+        <option value="210240">Operação não Realizada</option>
+      </select>
+      <button type="button" class="btn btn-primary btn-sm" id="manifManifestar" disabled>
+        Manifestar
+      </button>
+    </span>
+  </div>
+
+  {# ── andamento (mesmo vocabulário e cores do painel de lote) ────────── #}
+  <section class="manif-andamento d-none" id="manifAndamento" aria-live="polite">
+    <div class="d-flex justify-content-between align-items-baseline gap-3 flex-wrap">
+      <span class="manif-andamento-linha" id="manifAndamentoLinha">Manifestando…</span>
+      <span class="text-secondary small">
+        <strong class="manif-num" id="manifFeitas">0</strong> de
+        <strong class="manif-num" id="manifTotalLote">0</strong>
+      </span>
+    </div>
+    <div class="zl-comp-bar" id="manifBarraLote" aria-hidden="true"></div>
+    <div class="zl-comp-leg" id="manifLoteLegenda"></div>
+    <div class="d-flex gap-2 mt-2">
+      <button type="button" class="btn btn-outline-danger btn-sm me-auto" id="manifParar">Parar</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="manifPausar">Pausar</button>
+      <button type="button" class="btn btn-soft-primary btn-sm d-none" id="manifRetomar">Retomar</button>
+    </div>
+  </section>
+
+  {# ── a mesa ─────────────────────────────────────────────────────────── #}
+  <div class="card border-0 shadow-sm rounded-3 manif-mesa">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0 manif-tbl">
+        <thead>
+          <tr>
+            <th class="manif-col-sel"><input type="checkbox" id="manifMarcarTudo" aria-label="Marcar todas"></th>
+            <th>Empresa</th>
+            <th>Chave de acesso</th>
+            <th class="manif-col-estado">Estado</th>
+          </tr>
+        </thead>
+        <tbody id="manifLista"></tbody>
+      </table>
+    </div>
+    <p class="text-secondary small text-center py-4 mb-0 d-none" id="manifVazio">
+      Nenhuma chave por aqui. Use <strong>Adicionar chaves</strong> para colar as do scanner
+      ou soltar os XML do mês.
+    </p>
+  </div>
+</div>
+
+{# ── painel de entrada ────────────────────────────────────────────────── #}
+<section class="manif-entrada" id="manifEntrada" hidden aria-label="Adicionar chaves">
+  <div class="manif-entrada-in">
+    <div>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <span class="manif-eyebrow">Colar chaves</span>
+        <button type="button" class="btn btn-ghost btn-sm py-0" id="manifFecharEntrada">Fechar</button>
+      </div>
+      <select class="form-select form-select-sm mb-2" id="manifEntradaEmpresa"
+              aria-label="Empresa dona destas notas">
+        <option value="">Escolha a empresa…</option>
+      </select>
+      {#- A chave só carrega o mês de EMISSÃO; a competência é a da ENTRADA e as
+          duas divergem em toda virada de mês. Por isso o operador informa. -#}
+      <label class="manif-eyebrow d-block mb-1" for="manifEntradaCompetencia">
+        Competência destas notas
+      </label>
+      <input type="month" class="form-control form-control-sm mb-2"
+             id="manifEntradaCompetencia">
+      <textarea class="form-control manif-ta" id="manifTexto" rows="4"
+                placeholder="Cole aqui — do scanner ou do PDF. Espaço, quebra de linha e rótulo em volta não atrapalham."></textarea>
+      <button type="button" class="btn btn-primary btn-sm w-100 mt-2" id="manifImportar">Importar</button>
+    </div>
+    <div>
+      <span class="manif-eyebrow d-block mb-2">Ou os XML do mês</span>
+      {#- Arrastar é o único caminho que aceita várias pastas de uma vez: o
+          seletor do sistema abre uma pasta por vez. Por isso os dois botões
+          ACUMULAM em vez de substituir — clicar três vezes soma três pastas. -#}
+      <div class="manif-solta" id="manifSolta">
+        <i class="bi bi-folder2-open" aria-hidden="true"></i>
+        <span>Arraste as pastas aqui — várias de uma vez, subpastas incluídas.<br>
+          A empresa sai de dentro de cada nota.</span>
+        <div class="manif-solta-acoes">
+          <button type="button" class="btn btn-ghost btn-sm py-0" id="manifEscolherPasta">
+            Escolher pasta
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm py-0" id="manifEscolherArquivos">
+            Escolher arquivos
+          </button>
+        </div>
+        <input type="file" id="manifPasta" webkitdirectory directory multiple hidden>
+        <input type="file" id="manifXml" accept=".xml" multiple hidden>
+      </div>
+
+      <p class="manif-fontes-resumo mt-2 mb-0" id="manifFontesResumo" hidden></p>
+      <ul class="manif-fontes" id="manifFontes" hidden></ul>
+
+      <button type="button" class="btn btn-soft-primary btn-sm w-100 mt-2" id="manifImportarXml" disabled>
+        Importar XML
+      </button>
+      <p class="manif-progresso mt-2 mb-0" id="manifProgresso" hidden aria-live="polite"></p>
+      <div class="manif-balanco mt-2" id="manifBalanco"></div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ static_versionado('js/manifestador.js') }}"></script>
+{% endblock %}

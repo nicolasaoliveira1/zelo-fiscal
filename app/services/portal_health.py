@@ -23,6 +23,7 @@ import requests
 
 from app.automation import SITES_CERTIDOES
 from app.services import circuit_breaker, dryrun_municipio
+from app.services.nfe_sefaz import URLS as NFE_SEFAZ_URLS
 from app.utils import normalizar_cidade
 
 TTL_MINUTOS_PADRAO = 5
@@ -67,6 +68,12 @@ def _portais_fixos():
          estadual_rs.get('url')),
         (circuit_breaker.ALVO_TRABALHISTA, 'Trabalhista (CNDT/TST)',
          (SITES_CERTIDOES.get('TRABALHISTA') or {}).get('url')),
+        # Manifestacao de NF-e. A URL vem do mapa do proprio cliente SOAP, pelo
+        # mesmo motivo das demais: nenhuma URL hardcodada aqui. Sem certificado
+        # o servico responde 403, que `_pingar` ja trata como "esta no ar" —
+        # justamente a distincao que o 403 x 404 do recon estabeleceu.
+        (circuit_breaker.ALVO_SEFAZ_AN, 'SEFAZ NF-e (Ambiente Nacional)',
+         (NFE_SEFAZ_URLS.get('producao') or {}).get('evento')),
     ]
 
 

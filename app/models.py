@@ -40,6 +40,18 @@ class Empresa(db.Model):
     dados_receita = db.relationship(
         'DadosReceita', backref='empresa', uselist=False, lazy='selectin',
         cascade='all, delete-orphan')
+    # 1:1 com o certificado achado no drive (manifestador). selectin como
+    # `dados_receita`: o pre-voo do cofre le o estado de todas as empresas de uma
+    # vez, e lazy='select' viraria uma query por linha.
+    certificado = db.relationship(
+        'CertificadoEmpresa', backref='empresa', uselist=False, lazy='selectin',
+        cascade='all, delete-orphan')
+    # lazy PADRAO de proposito, ao contrario dos dois acima: a listagem de
+    # empresas nao mostra chave de NF-e, e sao centenas por empresa — carregar
+    # junto traria milhares de linhas para uma tela que nao as usa. Quem precisa
+    # delas consulta `ChaveManifestacao` direto, com filtro.
+    chaves_manifestacao = db.relationship(
+        'ChaveManifestacao', backref='empresa', cascade='all, delete-orphan')
 
     def __repr__(self):
         return f'<Empresa {self.nome}>'
@@ -808,6 +820,151 @@ class ServicoNfse(db.Model):
 
     def __repr__(self):
         return f'<ServicoNfse {self.termo_norm} -> {self.descricao}>'
+
+
+# --- Manifestador de NF-e (MANIF-03, MANIF-16) ------------------------------
+
+class EstadoCertificado:
+    """Em que pe esta o certificado da empresa no drive de rede.
+
+    Os seis valores nao foram imaginados: sairam do inventario real das 93
+    empresas ativas (`.specs/features/manifestador-nfe/recon.md`), que produziu
+    exatamente estas situacoes. String, nunca db.Enum nativo (AD-016/AD-020).
+    """
+    # abre com a senha guardada, o CNPJ de dentro bate com o cadastro, e esta
+    # dentro da validade — o unico estado que autoriza manifestar
+    PRONTO = 'pronto'
+    # o .pfx existe mas nenhuma senha conhecida o abre
+    SENHA_PENDENTE = 'senha_pendente'
+    VENCIDO = 'vencido'
+    # abre, mas o titular nao e a empresa: tipicamente so ha e-CPF de socios na
+    # pasta, e manifestar por e-CPF exigiria procuracao eletronica
+    CNPJ_DIVERGENTE = 'cnpj_divergente'
+    SEM_ARQUIVO = 'sem_arquivo'
+    SEM_PASTA = 'sem_pasta'
+
+
+class StatusManifestacao:
+    """Ciclo de vida de uma chave na fila.
+
+    PENDENTE -> ENVIANDO -> MANIFESTADA (terminal) | REJEITADA (reprocessavel)
+                         -> INDEFINIDA (so acao humana resolve)
+    DUPLICATA sai por liberacao explicita e volta para PENDENTE.
+    """
+    PENDENTE = 'pendente'
+    ENVIANDO = 'enviando'
+    # a SEFAZ registrou o evento. Terminal: manifestacao e irreversivel la.
+    MANIFESTADA = 'manifestada'
+    REJEITADA = 'rejeitada'
+    # o evento saiu e a resposta nao chegou. NAO vira MANIFESTADA nem volta a
+    # PENDENTE: os dois chutes erram em direcoes opostas — um perde um evento
+    # que existe, o outro reenvia um ja protocolado (AD-027).
+    INDEFINIDA = 'indefinida'
+    DUPLICATA = 'duplicata'
+
+
+class CertificadoEmpresa(db.Model):
+    """O certificado A1 da empresa, como o DRIVE o mostra (AD-027).
+
+    Tabela propria e 1:1 com `Empresa`, pelo mesmo motivo da `DadosReceita`
+    (AD-024): `Empresa` guarda o que o escritorio cadastrou, esta guarda o que
+    foi achado no `Z:` — e a divergencia entre os dois e justamente o que o
+    operador precisa ver no pre-voo.
+
+    **Nao guarda o .pfx.** Guarda o caminho e a senha cifrada; o arquivo e lido
+    do drive no momento do uso. Assim nao se duplica chave privada, e a
+    renovacao anual na pasta e herdada sem recadastro.
+    """
+    __tablename__ = 'certificado_empresa'
+
+    id = db.Column(db.Integer, primary_key=True)
+    empresa_id = db.Column(db.Integer, db.ForeignKey('empresa.id'),
+                           unique=True, nullable=False)
+
+    caminho = db.Column(db.String(500), nullable=True)
+    # Fernet; NULL enquanto nenhuma senha conhecida abriu o arquivo. Nunca vai
+    # para log, mensagem de erro ou resposta JSON.
+    senha_cifrada = db.Column(db.String(500), nullable=True)
+
+    # O CN tem a forma `RAZAO SOCIAL:CNPJ`. E o CNPJ dali — nao o nome do
+    # arquivo, nem o da pasta, nem a razao social — que casa com a empresa: na
+    # carteira real ha certificado chamado `CONSULTA RFB A REALIZAR NA HORA DA
+    # VALIDACAO`, grafias `SOARES & LEAL` x `SOARES E LEAL`, e uma razao social
+    # repetida em 5 CNPJs (AD-027).
+    subject_cn = db.Column(db.String(200), nullable=True)
+    issuer_cn = db.Column(db.String(200), nullable=True)
+    cnpj_certificado = db.Column(db.String(14), nullable=True, index=True)
+    not_after = db.Column(db.DateTime, nullable=True)
+
+    estado = db.Column(db.String(20), nullable=False,
+                       default=EstadoCertificado.SEM_ARQUIVO, index=True)
+    # contexto do estado quando ele sozinho nao explica: no cnpj_divergente,
+    # quais CNs foram achados
+    detalhe = db.Column(db.String(500), nullable=True)
+    verificado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+    def __repr__(self):
+        return f'<CertificadoEmpresa {self.empresa_id} {self.estado}>'
+
+
+class ChaveManifestacao(db.Model):
+    """Uma NF-e a manifestar — e a fila duravel por item (AD-010).
+
+    Nao se cria `TarefaEmissao` aqui: aquela exige `certidao_id`. Esta linha ja
+    carrega status, tentativa e desfecho, entao uma segunda tabela de estado
+    seria estado paralelo.
+
+    A chave e unica no sistema inteiro porque identifica a NF-e globalmente.
+    Reimportar uma existente produz DUPLICATA liberavel, nunca erro (o mesmo
+    desenho da ND-004 da NFSe).
+    """
+    __tablename__ = 'chave_manifestacao'
+
+    id = db.Column(db.Integer, primary_key=True)
+    chave = db.Column(db.String(44), unique=True, nullable=False, index=True)
+    empresa_id = db.Column(db.Integer, db.ForeignKey('empresa.id'),
+                           nullable=False, index=True)
+
+    # 'AAAA-MM', derivada dos digitos 3-6 da chave (AAMM = mes de emissao da
+    # NF-e). `competencia_ajustada` marca quando o operador sobrescreveu.
+    competencia = db.Column(db.String(7), nullable=True, index=True)
+    competencia_ajustada = db.Column(db.Boolean, nullable=False, default=False)
+    # digitos 7-20 da chave. E o EMITENTE, nao o destinatario — por isso a chave
+    # sozinha nao diz de qual empresa da carteira ela e.
+    cnpj_emitente = db.Column(db.String(14), nullable=True)
+    origem = db.Column(db.String(10), nullable=True)
+
+    status = db.Column(db.String(20), nullable=False,
+                       default=StatusManifestacao.PENDENTE, index=True)
+    tipo_evento = db.Column(db.String(6), nullable=True)
+
+    # o que a SEFAZ respondeu, cru: parafrasear esconderia o codigo que o
+    # operador usa para procurar o motivo
+    cstat = db.Column(db.String(3), nullable=True)
+    xmotivo = db.Column(db.String(255), nullable=True)
+    protocolo = db.Column(db.String(20), nullable=True)
+    # fechou por duplicidade de evento: a nota ja estava manifestada. E desfecho
+    # de sucesso, nao falha.
+    ja_existia = db.Column(db.Boolean, nullable=False, default=False)
+    manifestado_em = db.Column(db.DateTime, nullable=True)
+
+    # Reenvios CONSECUTIVOS com a MESMA rejeicao. A SEFAZ bloqueia o CNPJ por 1h
+    # quando o mesmo evento volta com a mesma rejeicao mais de 20 vezes
+    # (NT 2018.002, consumo indevido / cStat 656) — e continuar enviando durante
+    # o bloqueio REINICIA o cronometro, com 50 bloqueios seguidos virando
+    # bloqueio permanente. O contador zera quando a rejeicao muda: ai o problema
+    # e outro, e a contagem antiga nao diz nada sobre ele.
+    tentativas = db.Column(db.Integer, nullable=False, default=0)
+
+    importado_em = db.Column(db.DateTime, nullable=False, default=datetime.now,
+                             index=True)
+    atualizado_em = db.Column(db.DateTime, nullable=False, default=datetime.now,
+                              onupdate=datetime.now)
+    liberado_por_id = db.Column(db.Integer, db.ForeignKey('usuario.id'),
+                                nullable=True)
+
+    def __repr__(self):
+        return f'<ChaveManifestacao {self.chave} {self.status}>'
 
 
 _COLUNA_POR_TIPO = {

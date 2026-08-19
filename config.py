@@ -91,6 +91,12 @@ class Config:
     NFSE_CERT_AUTOSELECT_ISSUER_CN = os.environ.get('NFSE_CERT_AUTOSELECT_ISSUER_CN') or ''
     NFSE_CERT_AUTOSELECT_SUBJECT_CN = os.environ.get('NFSE_CERT_AUTOSELECT_SUBJECT_CN') or ''
 
+    # Chave Fernet que cifra as senhas dos .pfx no cofre do manifestador
+    # (AD-027). Fica so aqui, vinda do .env: nunca no banco, nunca no git. Sem
+    # ela o inventario do cofre continua rodando — metadado de certificado nao e
+    # segredo —, mas gravar e ler senha e recusado com mensagem acionavel.
+    MANIF_VAULT_KEY = os.environ.get('MANIF_VAULT_KEY') or ''
+
     RS_ALTCHA_AUTOSOLVE_ENABLED = _env_bool('RS_ALTCHA_AUTOSOLVE_ENABLED', False)
     RS_ALTCHA_MANUAL_FALLBACK = _env_bool('RS_ALTCHA_MANUAL_FALLBACK', True)
 

@@ -1,0 +1,208 @@
+/* Estilos das TRÊS direções do Manifestador (mockup — não faz parte do app).
+   Tudo lê de tokens --zelo-*; nenhum hex fixo. Cor só para status. */
+
+body {
+    background: var(--zelo-paper);
+    color: var(--zelo-ink);
+    font-family: var(--zelo-font-body);
+}
+
+.mk-wrap { max-width: 1320px; margin: 0 auto; padding: 1.5rem 1.25rem 6rem; }
+
+.mk-h1 {
+    font-family: var(--zelo-font-display);
+    font-weight: 600;
+    font-size: 1.75rem;
+    letter-spacing: -.01em;
+    margin: 0;
+}
+.mk-sub { color: var(--zelo-slate); font-size: .9rem; margin: .15rem 0 0; }
+
+.mk-h2 {
+    font-family: var(--zelo-font-display);
+    font-weight: 600;
+    font-size: 1.05rem;
+    margin: 0;
+}
+
+.mk-eyebrow {
+    font-size: .68rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--zelo-slate);
+    font-weight: 600;
+}
+
+.mk-card {
+    background: var(--zelo-paper);
+    border: 1px solid var(--zelo-line);
+    border-radius: .65rem;
+}
+.mk-card-b { padding: 1rem 1.1rem; }
+
+.mk-rule { border: 0; border-top: 1px solid var(--zelo-line); margin: 0; }
+
+/* --- números (mono + tabular, regra geral do design language) ------------ */
+.mk-num, .mk-chave, td.mk-num {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+/* --- componente A: composição (os números somam) ------------------------- */
+.mk-comp-fig { display: flex; align-items: baseline; gap: .4rem; }
+.mk-comp-n {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 2rem;
+    font-weight: 500;
+    line-height: 1;
+}
+.mk-comp-d { color: var(--zelo-slate); font-size: 1.05rem; }
+.mk-comp-u { color: var(--zelo-slate); font-size: .85rem; }
+
+.mk-bar {
+    display: flex;
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--zelo-line);
+    margin: .7rem 0 .6rem;
+}
+.mk-bar.is-mini { height: 6px; margin: .35rem 0; }
+.mk-seg { height: 100%; }
+.mk-seg.is-ok { background: var(--zelo-ok); }
+.mk-seg.is-warn { background: var(--zelo-warn); }
+.mk-seg.is-danger { background: var(--zelo-danger); }
+.mk-seg.is-pend { background: var(--zelo-pend); }
+.mk-seg.is-muted { background: var(--zelo-muted); }
+
+.mk-leg { display: flex; flex-wrap: wrap; gap: .25rem 1.4rem; }
+.mk-leg-i { display: flex; align-items: center; gap: .4rem; font-size: .82rem; }
+.mk-leg-i[data-zero="1"] { opacity: .45; }
+.mk-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.mk-dot.is-ok { background: var(--zelo-ok); }
+.mk-dot.is-warn { background: var(--zelo-warn); }
+.mk-dot.is-danger { background: var(--zelo-danger); }
+.mk-dot.is-pend { background: var(--zelo-pend); }
+.mk-dot.is-muted { background: var(--zelo-muted); }
+.mk-leg-n { font-family: var(--zelo-font-mono); font-variant-numeric: tabular-nums; font-weight: 500; }
+.mk-leg-l { color: var(--zelo-slate); }
+
+/* --- A ASSINATURA: chave de acesso segmentada pelo significado ----------- */
+/* Os 44 dígitos não são um número: são 9 campos. Mostrar as juntas explica de
+   onde vem a competência derivada — e não gasta cor, que é do status. */
+.mk-chave {
+    font-size: .82rem;
+    letter-spacing: .01em;
+    white-space: nowrap;
+    color: var(--zelo-slate);
+}
+.mk-chave span { padding: 0 .06em; }
+/* os campos que o operador de fato usa ficam em tinta cheia */
+.mk-chave .f-aamm,
+.mk-chave .f-nnf { color: var(--zelo-ink); }
+/* a competência sai daqui — o fio embaixo é a explicação */
+.mk-chave .f-aamm {
+    border-bottom: 2px solid var(--zelo-ink);
+    font-weight: 500;
+}
+.mk-chave .f-cnpj { color: var(--zelo-graphite); }
+.mk-chave .f-dv { color: var(--zelo-muted); }
+
+.mk-chave-leg {
+    font-size: .68rem;
+    color: var(--zelo-slate);
+    display: flex;
+    gap: 1.1rem;
+    margin-top: .2rem;
+}
+.mk-chave-leg b { font-weight: 500; color: var(--zelo-ink); }
+
+/* --- status --------------------------------------------------------------- */
+.mk-st {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    font-size: .78rem;
+    font-weight: 500;
+    padding: .12rem .5rem;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+.mk-st.is-ok { background: var(--zelo-ok-soft); color: var(--zelo-ok); }
+.mk-st.is-warn { background: var(--zelo-warn-soft); color: var(--zelo-warn); }
+.mk-st.is-danger { background: var(--zelo-danger-soft); color: var(--zelo-danger); }
+.mk-st.is-pend { background: color-mix(in srgb, var(--zelo-pend) 16%, var(--zelo-paper)); color: var(--zelo-pend); }
+.mk-st.is-muted { background: var(--zelo-muted-soft); color: var(--zelo-slate); }
+
+/* --- tabela --------------------------------------------------------------- */
+.mk-tbl { width: 100%; border-collapse: collapse; }
+.mk-tbl th {
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--zelo-slate);
+    font-weight: 600;
+    text-align: left;
+    padding: .5rem .75rem;
+    border-bottom: 1px solid var(--zelo-line);
+}
+.mk-tbl td {
+    padding: .6rem .75rem;
+    border-bottom: 1px solid var(--zelo-line);
+    font-size: .88rem;
+    vertical-align: middle;
+}
+.mk-tbl tbody tr:hover { background: var(--zelo-mist); }
+.mk-emp { font-weight: 500; }
+.mk-motivo { color: var(--zelo-slate); font-size: .78rem; }
+
+/* --- barra de ação -------------------------------------------------------- */
+.mk-acao {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    flex-wrap: wrap;
+    background: var(--zelo-mist);
+    border: 1px solid var(--zelo-line);
+    border-radius: .65rem;
+    padding: .7rem .9rem;
+}
+.mk-acao-fixa {
+    position: sticky;
+    bottom: 0;
+    margin-top: 1rem;
+    box-shadow: 0 -6px 18px -14px var(--zelo-ink);
+}
+.mk-sel {
+    font-family: var(--zelo-font-body);
+    font-size: .85rem;
+    padding: .3rem .55rem;
+    border: 1px solid var(--zelo-line);
+    border-radius: .4rem;
+    background: var(--zelo-paper);
+    color: var(--zelo-ink);
+}
+
+/* --- alternador de tema (só do mockup) ----------------------------------- */
+.mk-tema {
+    position: fixed; top: .75rem; right: .75rem; z-index: 20;
+    font-size: .78rem; padding: .3rem .7rem;
+    border: 1px solid var(--zelo-line); border-radius: 999px;
+    background: var(--zelo-paper); color: var(--zelo-ink); cursor: pointer;
+}
+.mk-nav {
+    position: fixed; top: .75rem; left: .75rem; z-index: 20;
+    display: flex; gap: .3rem; font-size: .75rem;
+}
+.mk-nav a {
+    padding: .3rem .6rem; border: 1px solid var(--zelo-line);
+    border-radius: 999px; background: var(--zelo-paper);
+    color: var(--zelo-slate); text-decoration: none;
+}
+.mk-nav a.on { background: var(--zelo-ink); color: var(--zelo-paper); border-color: var(--zelo-ink); }
+
+@media (max-width: 820px) {
+    .mk-chave { font-size: .72rem; white-space: normal; }
+    .mk-wrap { padding: 4.5rem .75rem 6rem; }
+}

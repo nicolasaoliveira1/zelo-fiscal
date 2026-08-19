@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  NF-e emitida em 30/06 e com saida/entrada em 01/07 — reducao de uma nota
+  REAL (Spal -> I ARAUJO FELTRIN) que expos o erro: o AAMM da chave diz 2606
+  (junho), e a competencia do escritorio e a da ENTRADA, julho.
+-->
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
+    <infNFe versao="4.00" Id="NFe43260661186888022405550020000794101064148812">
+      <ide>
+        <cUF>43</cUF><mod>55</mod><serie>2</serie><nNF>79410</nNF>
+        <dhEmi>2026-06-30T18:27:00-03:00</dhEmi>
+        <dhSaiEnt>2026-07-01T07:00:00-03:00</dhSaiEnt>
+        <tpNF>1</tpNF>
+      </ide>
+      <emit><CNPJ>61186888022405</CNPJ>
+        <xNome>Spal Industria Brasileira de Bebidas S/A</xNome></emit>
+      <dest><CNPJ>46256812000101</CNPJ><xNome>I ARAUJO FELTRIN</xNome></dest>
+    </infNFe>
+  </NFe>
+</nfeProc>

@@ -346,18 +346,25 @@ def test_medicoes_concorrentes_fazem_uma_rodada_so(app, monkeypatch):
     t2.join(timeout=5)
 
     assert len(resultados) == 2
-    # 4 portais fixos = uma rodada; duas rodadas dariam 8
-    assert len(chamadas) == 4, chamadas
+    # uma rodada = um ping por portal fixo; duas rodadas dariam o dobro.
+    # A contagem vem de `_portais_fixos()` e nao de um numero escrito aqui:
+    # o que este teste prova e a DEDUPLICACAO, nao quantos portais existem.
+    assert len(chamadas) == len(portal_health._portais_fixos()), chamadas
 
 
 def test_pings_sao_paralelos(app, monkeypatch):
-    """Em serie, com todos os portais fora, a requisicao do painel duraria 4x o
-    timeout (~24s) e os outros admins ficariam na fila — justamente durante o
-    incidente. Prova deterministica: os 4 pings so terminam se os 4 estiverem
-    acontecendo ao mesmo tempo (barreira), sem depender de cronometro."""
+    """Em serie, com todos os portais fora, a requisicao do painel duraria
+    N x timeout e os outros admins ficariam na fila — justamente durante o
+    incidente. Prova deterministica: os pings so terminam se TODOS estiverem
+    acontecendo ao mesmo tempo (barreira), sem depender de cronometro.
+
+    O tamanho da barreira vem de `_portais_fixos()`: se fosse um numero escrito
+    aqui, adicionar um portal transformaria este teste num deadlock de 5s em vez
+    de numa falha legivel."""
     import threading
 
-    barreira = threading.Barrier(4, timeout=5)
+    total = len(portal_health._portais_fixos())
+    barreira = threading.Barrier(total, timeout=5)
 
     def _get(url, **kwargs):
         barreira.wait()          # so passa quando os 4 chegarem juntos
@@ -370,5 +377,5 @@ def test_pings_sao_paralelos(app, monkeypatch):
         snap = portal_health.snapshot(app.config)
 
     medidos = [p for p in snap['portais'] if p['fonte'] == 'ping']
-    assert len(medidos) == 4
+    assert len(medidos) == total
     assert all(p['estado'] == 'ok' for p in medidos)

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  NF-e modelo 55 reduzida, para o import de XML (MANIF-10).
+
+  Estrutura fiel a uma NF-e real (namespace, aninhamento e ordem dos elementos
+  copiados de uma nota do drive), com os valores trocados. E sintetica de
+  proposito: as notas que o escritorio guarda sao NFC-e modelo 65, que NAO tem
+  <dest> e por isso nunca sao manifestaveis — esse caso tem fixture propria.
+
+  A chave carrega DV valido (modulo 11) e AAMM=2507 -> competencia 2025-07.
+  O <dest><CNPJ> e quem identifica a empresa da carteira; o <emit><CNPJ> e
+  quem emitiu, e e ele que aparece dentro da chave.
+-->
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
+    <infNFe versao="4.00" Id="NFe43250707461248000107550010000012341000012340">
+      <ide>
+        <cUF>43</cUF>
+        <cNF>00001234</cNF>
+        <natOp>VENDA DE MERCADORIA</natOp>
+        <mod>55</mod>
+        <serie>1</serie>
+        <nNF>1234</nNF>
+        <dhEmi>2025-07-15T10:30:00-03:00</dhEmi>
+        <tpNF>1</tpNF>
+        <idDest>1</idDest>
+        <cMunFG>4310330</cMunFG>
+        <tpImp>1</tpImp>
+        <tpEmis>1</tpEmis>
+        <cDV>0</cDV>
+        <tpAmb>1</tpAmb>
+        <finNFe>1</finNFe>
+      </ide>
+      <emit>
+        <CNPJ>07461248000107</CNPJ>
+        <xNome>FORNECEDOR EXEMPLO LTDA</xNome>
+        <enderEmit>
+          <xLgr>AV RIO GRANDE</xLgr>
+          <nro>420</nro>
+          <xBairro>CENTRO</xBairro>
+          <cMun>4310330</cMun>
+          <xMun>IMBE</xMun>
+          <UF>RS</UF>
+          <CEP>95625000</CEP>
+        </enderEmit>
+        <IE>1234567890</IE>
+        <CRT>3</CRT>
+      </emit>
+      <dest>
+        <CNPJ>11222333000181</CNPJ>
+        <xNome>EMPRESA DESTINATARIA LTDA</xNome>
+        <enderDest>
+          <xLgr>RUA DO COMERCIO</xLgr>
+          <nro>100</nro>
+          <xBairro>CENTRO</xBairro>
+          <cMun>4310330</cMun>
+          <xMun>IMBE</xMun>
+          <UF>RS</UF>
+          <CEP>95625000</CEP>
+        </enderDest>
+        <indIEDest>1</indIEDest>
+        <IE>0987654321</IE>
+      </dest>
+      <total>
+        <ICMSTot>
+          <vNF>1500.00</vNF>
+        </ICMSTot>
+      </total>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00">
+    <infProt>
+      <chNFe>43250707461248000107550010000012341000012340</chNFe>
+      <nProt>143250000123456</nProt>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso da NF-e</xMotivo>
+    </infProt>
+  </protNFe>
+</nfeProc>

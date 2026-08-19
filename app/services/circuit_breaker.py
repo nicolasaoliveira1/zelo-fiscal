@@ -36,6 +36,10 @@ ALVO_FGTS = 'FGTS'
 ALVO_ESTADUAL_RS = 'Estadual RS'
 ALVO_TRABALHISTA = 'Trabalhista'
 ALVO_FEDERAL = 'Federal'
+# Webservice da SEFAZ no Ambiente Nacional (manifestacao do destinatario).
+# Nao e um portal de certidao, mas a regra e a mesma: N falhas seguidas do
+# servico param o lote em vez de queimar requisicao contra algo fora do ar.
+ALVO_SEFAZ_AN = 'SEFAZ (Ambiente Nacional)'
 # Municipio nao tem rotulo fixo: o alvo e a chave canonica da cidade
 # (`utils.normalizar_cidade`), a mesma dos dois lados.
 ALVO_MUNICIPAL_GENERICO = 'Municipal'
