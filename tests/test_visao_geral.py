@@ -308,3 +308,101 @@ def test_montar_nao_inventaria_nem_verifica_rede_do_cofre(monkeypatch):
                         'inventariar', chamada_de_rede)
 
     assert visao_geral.montar(_usuario())['certificados']['inventariado'] is False
+
+
+# --- T3: a faixa "o que trava", derivada dos blocos -------------------------
+
+def _blocos(**kw):
+    """Blocos ja montados, em memoria — a derivacao nao consulta nada."""
+    base = {
+        'certidoes': {'vencidas': 0, 'a_vencer': 0, 'pendentes': 0, 'vazio': True},
+        'certificados': {'itens': [], 'inventariado': True, 'vazio': True},
+        'nfse': {'prontas': 0, 'pendentes': 0, 'grupos_pendentes': 0, 'vazio': True},
+        'fila': {'falhas': 0, 'motivo': None, 'grupos': [], 'breakers': [],
+                 'vazio': True},
+    }
+    base.update(kw)
+    return base
+
+
+def test_certificado_vencido_trava_e_vencendo_nao():
+    """Vencido e parede: a manifestacao daquela empresa nao roda ate renovar.
+    Vencendo e aviso — ele aparece no cartao, com os dias restantes."""
+    blocos = _blocos(certificados={'inventariado': True, 'vazio': False, 'itens': [
+        {'empresa_nome': 'ACME', 'causa': 'vencido'},
+        {'empresa_nome': 'BETA', 'causa': 'vencendo', 'dias_restantes': 4},
+    ]})
+
+    itens = visao_geral.itens_que_travam(blocos)
+
+    assert len(itens) == 1
+    assert 'ACME' in itens[0]['titulo']
+
+
+def test_breaker_aberto_trava():
+    blocos = _blocos(fila={'falhas': 0, 'breakers': [{'alvo': 'FGTS'}], 'vazio': False})
+
+    itens = visao_geral.itens_que_travam(blocos)
+
+    assert len(itens) == 1
+    assert 'FGTS' in itens[0]['titulo']
+
+
+def test_grupo_aguardando_confirmacao_trava():
+    blocos = _blocos(nfse={'prontas': 0, 'pendentes': 0, 'grupos_pendentes': 2,
+                           'vazio': False})
+
+    itens = visao_geral.itens_que_travam(blocos)
+
+    assert len(itens) == 1
+    assert '2 grupos' in itens[0]['titulo']
+
+
+def test_trabalho_pendente_nao_e_trava():
+    """Certidao vencida, nota a emitir e tarefa em falha sao TRABALHO — e
+    trabalho e o que a tela toda ja mostra. Se tudo virasse trava, a faixa
+    perderia a unica funcao que tem: dizer que num dia calmo nao ha nada."""
+    blocos = _blocos(
+        certidoes={'vencidas': 18, 'a_vencer': 42, 'pendentes': 7, 'vazio': False},
+        nfse={'prontas': 12, 'pendentes': 4, 'grupos_pendentes': 0, 'vazio': False},
+        fila={'falhas': 5, 'motivo': 'CAPTCHA', 'breakers': [], 'vazio': False},
+    )
+
+    assert visao_geral.itens_que_travam(blocos) == []
+
+
+def test_dia_calmo_nao_tem_trava():
+    assert visao_geral.itens_que_travam(_blocos()) == []
+
+
+def test_bloco_com_erro_nao_gera_trava_nem_quebra():
+    """Nao saber se ha trava e diferente de nao haver trava — quem diz isso e o
+    proprio bloco, na sua area da tela."""
+    blocos = _blocos(certificados={'erro': True, 'nome': 'certificados'},
+                     fila={'erro': True, 'nome': 'fila'},
+                     nfse={'erro': True, 'nome': 'nfse'})
+
+    assert visao_geral.itens_que_travam(blocos) == []
+
+
+def test_travas_de_frentes_diferentes_somam_na_mesma_faixa():
+    blocos = _blocos(
+        certificados={'inventariado': True, 'vazio': False,
+                      'itens': [{'empresa_nome': 'ACME', 'causa': 'vencido'}]},
+        fila={'falhas': 0, 'breakers': [{'alvo': 'FGTS'}], 'vazio': False},
+        nfse={'prontas': 0, 'pendentes': 0, 'grupos_pendentes': 1, 'vazio': False},
+    )
+
+    itens = visao_geral.itens_que_travam(blocos)
+
+    assert len(itens) == 3
+    assert {i['destino'] for i in itens} == {
+        'main.manifestador_painel', 'main.diagnostico', 'main.nfse_painel'}
+
+
+def test_derivacao_nao_consulta_banco(monkeypatch):
+    """Sem app context nenhum: se a funcao tocasse o banco, estouraria aqui."""
+    blocos = _blocos(certificados={'inventariado': True, 'vazio': False,
+                                   'itens': [{'empresa_nome': 'X', 'causa': 'vencido'}]})
+
+    assert len(visao_geral.itens_que_travam(blocos)) == 1
