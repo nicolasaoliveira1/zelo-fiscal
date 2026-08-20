@@ -202,7 +202,7 @@
 
     <div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true"></div>
 
-    <aside class="app-sidebar" id="appSidebar" aria-hidden="true">
+    <aside class="app-sidebar" id="appSidebar">
         <div class="sidebar-header">
             <div class="sidebar-logo" aria-hidden="true">
                 <img src="{{ url_for('static', filename='images/assecon_preto.png') }}"
@@ -370,7 +370,7 @@
             function applySidebarState(open, persist = true) {
                 bodyEl.classList.toggle('sidebar-open', open);
                 const hidden = isMobile() ? !open : false;
-                sidebarEl.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+                sidebarEl.toggleAttribute('inert', hidden);
                 toggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
                 if (toggleButtonMenu) {
                     toggleButtonMenu.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -419,6 +419,7 @@
 
             window.addEventListener('resize', function () {
                 syncNavbarHeight();
+                applySidebarState(isSidebarOpen(), false);
             });
 
             let lastScrollY = window.scrollY;
