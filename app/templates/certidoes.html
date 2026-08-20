@@ -582,7 +582,7 @@
 
                                 <td class="text-end pe-4" style="white-space: nowrap; width: 1%;">
                                     <div class="d-flex justify-content-end gap-2">
-                                        <button type="button" class="btn btn-sm btn-outline-info border-0 btn-abrir-site"
+                                        <button type="button" class="btn btn-sm btn-outline-secondary border-0 btn-abrir-site"
                                             title="Abrir Site"
                                             data-bs-tooltip="true" data-bs-placement="top"
                                             aria-label="Abrir site da certidao {{ tipo_exibicao }} de {{ empresa.nome }}"
@@ -602,7 +602,7 @@
                                         </button>
 
                                         {% if current_user.papel in ['operador', 'admin'] %}
-                                        <button type="button" class="btn btn-sm btn-outline-warning border-0" title="Editar"
+                                        <button type="button" class="btn btn-sm btn-outline-secondary border-0" title="Editar"
                                             data-bs-tooltip="true" data-bs-placement="top"
                                             aria-label="Editar validade da certidao {{ tipo_exibicao }} de {{ empresa.nome }}"
                                             data-bs-toggle="modal" data-bs-target="#editModal"
@@ -614,7 +614,7 @@
                                         {% if certidao.tipo.name == 'FEDERAL' %}
                                         {# Federal e assistido/upload: no lugar de "Emitir" (que so redirecionava
                                            para "Abrir Site"), a acao util e registrar o PDF baixado/em maos. #}
-                                        <button type="button" class="btn btn-sm btn-outline-primary border-0 btn-registrar-federal"
+                                        <button type="button" class="btn btn-sm btn-outline-secondary border-0 btn-registrar-federal"
                                             title="Registrar PDF"
                                             data-bs-tooltip="true" data-bs-placement="top"
                                             aria-label="Registrar PDF da certidao Federal de {{ empresa.nome }}"
@@ -623,7 +623,7 @@
                                             <i class="bi bi-file-earmark-arrow-up fs-5"></i>
                                         </button>
                                         {% else %}
-                                        <button type="button" class="btn btn-sm btn-outline-primary border-0 btn-baixar-certidao"
+                                        <button type="button" class="btn btn-sm btn-outline-secondary border-0 btn-baixar-certidao"
                                             title="Emitir"
                                             data-bs-tooltip="true" data-bs-placement="top"
                                             aria-label="Emitir certidao {{ tipo_exibicao }} de {{ empresa.nome }}"
