@@ -1,6 +1,6 @@
 // Painel de emissao de NFSe (NFSE-17).
 //
-// Sem framework, no padrao do dashboard.js (AD-015): modulo ES nativo,
+// Sem framework, no padrão do certidoes.js (AD-015): módulo ES nativo,
 // versionado por static_versionado. O CSRF vai no wrapper global de fetch
 // definido no base.html.
 

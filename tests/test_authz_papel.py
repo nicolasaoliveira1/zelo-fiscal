@@ -27,7 +27,7 @@ def test_leitura_nao_adiciona_empresa(login_as):
     assert resp.status_code == 403
 
 
-def test_leitura_ve_dashboard(login_as):
+def test_leitura_ve_certidoes(login_as):
     # leitura tem acesso de leitura ao painel
     assert login_as('leitura').get('/').status_code == 200
 

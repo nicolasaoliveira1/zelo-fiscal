@@ -1,5 +1,5 @@
-// Sistema de toasts empilhados do dashboard.
-// Extraido de dashboard.js (spec 05, REFA-03) como modulo ES autocontido:
+// Sistema de toasts empilhados de Certidões.
+// Extraído de certidoes.js (spec 05, REFA-03) como módulo ES autocontido:
 // mantem seu proprio estado/DOM e expoe apenas showToast. Carrega o elemento
 // #toastStack no import (modulo deferido: DOM ja parseado).
 

@@ -62,7 +62,7 @@ def test_dossie_sem_validas_avisa_e_redireciona(login_as, ids):
     # as 5 certidoes semeadas nao tem validade/PDF -> nenhuma valida
     resp = login_as('operador').get(f'/exportar/dossie/{ids["empresa"]}.pdf')
     assert resp.status_code == 302
-    assert resp.headers['Location'].endswith('/') or 'dashboard' in resp.headers['Location'] or resp.headers['Location'] == '/'
+    assert resp.headers['Location'].endswith('/certidoes')
 
 
 def test_dossie_sucesso_baixa_pdf(login_as, ids, app, tmp_path):

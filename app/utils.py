@@ -37,7 +37,7 @@ def normalizar_cidade(valor):
     """Chave canonica de cidade: remove acentos, maiusculiza e descarta tudo que
     nao for letra/digito (hifen, espaco, ponto); '' se vazio.
 
-    Fonte unica compartilhada pelo filtro do dashboard, pela exportacao da
+    Fonte única compartilhada pelo filtro de Certidões, pela exportação da
     carteira e pela busca de municipio da automacao. Descartar separadores faz
     'Xangri-La', 'Xangri La' e 'Xangrila' caírem na MESMA chave — antes o hifen
     gerava chaves distintas e o cadastro precisava de linhas-espelho por grafia

@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% from "_zelo.html" import zl_comp, zl_ficha %}
+{% block titulo %}Visão geral{% endblock %}
+
+{#- Um cartão por frente. O cabeçalho nomeia a frente, o corpo vem de quem
+    chama, e o rodapé leva para a tela onde a coisa se resolve: a Visão Geral
+    APONTA, quem executa é a tela do pilar. -#}
+{% macro vg_card(area, icone, titulo, destino, rotulo_destino, extra='', largo=False) %}
+<section class="card border-0 shadow-sm rounded-3 vg-a-{{ area }}">
+    <div class="vg-card-h">
+        <i class="bi bi-{{ icone }}"></i>
+        <h2 class="h6 mb-0">{{ titulo }}</h2>
+        {%- if extra %}<span class="vg-card-h-extra">{{ extra }}</span>{% endif %}
+    </div>
+    <div class="vg-card-b{{ ' vg-larga' if largo }}">
+        {{ caller() }}
+    </div>
+    <div class="vg-card-f">
+        <a href="{{ destino }}">{{ rotulo_destino }} <i class="bi bi-arrow-right"></i></a>
+    </div>
+</section>
+{% endmacro %}
+
+{#- Os dois estados terminais de um bloco. Vazio e erro NÃO são a mesma coisa:
+    "nada a fazer aqui" é boa notícia, "não consegui ler" é uma lacuna que o
+    operador precisa saber que existe antes de concluir que está tudo em dia. -#}
+{% macro vg_estado(bloco, texto_vazio) %}
+{%- if bloco.erro %}
+<p class="vg-falha">
+    <i class="bi bi-exclamation-triangle"></i>
+    Não consegui ler este bloco agora. O resto da página continua válido.
+</p>
+{%- else %}
+<p class="vg-vazio"><i class="bi bi-check2"></i> {{ texto_vazio }}</p>
+{%- endif %}
+{% endmacro %}
+
+{% block content %}
+<div class="container-fluid px-0">
+
+    {#- Saudação pela hora do servidor. Sem subtítulo com contagem: quem conta é
+        a faixa logo abaixo, e o mesmo número em duas alturas da tela é a
+        duplicação que já tirou "Certidões por status" de Relatórios. -#}
+    <header class="d-flex align-items-end flex-wrap gap-3 mb-3">
+        <h1 class="h3 mb-0">{{ saudacao }}, {{ current_user.username }}</h1>
+        <span class="ms-auto small text-secondary zl-num">{{ hoje_extenso }}</span>
+    </header>
+
+    {#- A FAIXA: UM componente que muda de estado, não dois blocos alternativos.
+        É a diferença entre a página dizer "está tudo bem" e a página apenas
+        deixar de dizer que está mal. -#}
+    <section class="vg-faixa">
+        {%- if travas %}
+        {%- set total = travas | sum(attribute='quantidade') %}
+        <div class="vg-faixa-h">
+            <i class="bi bi-exclamation-octagon"></i>
+            <span>{{ total }} coisa{{ 's' if total != 1 }}
+                trava{{ 'm' if total != 1 }} trabalho hoje</span>
+        </div>
+        {#- Uma linha por TIPO de problema, não por caso: dez certificados
+            vencidos são um problema com dez casos — mesma ação, mesmo destino,
+            uma decisão só. Os nomes ficam na própria linha, para o operador
+            saber QUEM sem precisar clicar. -#}
+        {%- for grupo in travas %}
+        <a class="vg-faixa-item" href="{{ url_for(grupo.destino) }}">
+            <span class="vg-faixa-n cert-status-{{ grupo.tom }}">{{ grupo.quantidade }}</span>
+            <span class="vg-faixa-txt">
+                <span class="vg-faixa-t">{{ grupo.titulo }}</span>
+                <span class="vg-faixa-s">{{ grupo.detalhe }}</span>
+                {%- if grupo.nomes %}
+                <span class="vg-faixa-nomes">
+                    {%- for nome in grupo.nomes %}<span class="vg-faixa-nome">{{ nome }}</span>{% endfor %}
+                    {%- if grupo.restantes %}<span class="vg-faixa-mais">+{{ grupo.restantes }}</span>{% endif %}
+                </span>
+                {%- endif %}
+            </span>
+            <i class="bi bi-chevron-right vg-faixa-ir"></i>
+        </a>
+        {%- endfor %}
+        {%- else %}
+        <div class="vg-faixa-h is-calmo">
+            <i class="bi bi-check2-circle"></i>
+            <span>Nada trava trabalho hoje</span>
+        </div>
+        <div class="vg-faixa-item text-secondary small">
+            Certificados em dia, portais respondendo, nenhuma decisão pendurada.
+        </div>
+        {%- endif %}
+    </section>
+
+    {#- O MOSAICO: cada cartão na forma que lhe cabe (ver .vg-mosaico no CSS). -#}
+    <div class="vg-mosaico">
+
+        {#- CERTIDÕES: componente A — os números somam a carteira. -#}
+        {% set bloco = blocos.certidoes %}
+        {% call vg_card('cert', 'file-earmark-check', 'Certidões',
+                        url_for('main.certidoes'), 'Abrir Certidões',
+                        largo=(not bloco.erro and not bloco.vazio)) %}
+        {%- if bloco.erro or bloco.vazio %}
+        {{ vg_estado(bloco, 'Nenhuma certidão pede atenção hoje.') }}
+        {%- else %}
+        {%- set atencao = bloco.vencidas + bloco.a_vencer + bloco.pendentes %}
+        {{ zl_comp(atencao, 'pedem atenção', '', [
+            ('vencidas', bloco.vencidas, 'danger'),
+            ('a vencer', bloco.a_vencer, 'warn'),
+            ('pendentes', bloco.pendentes, 'pend')]) }}
+        {%- endif %}
+        {% endcall %}
+
+        {#- CERTIFICADOS A1: componente B — fatos independentes. A lista rola
+            dentro da caixa para uma safra grande de vencimentos não empurrar o
+            cartão vizinho para fora da tela. -#}
+        {% set bloco = blocos.certificados %}
+        {% call vg_card('a1', 'patch-check', 'Certificados A1',
+                        url_for('main.manifestador_painel'), 'Abrir Manifestador') %}
+        {%- if bloco.erro or not bloco.itens %}
+        {%- if not bloco.erro and not bloco.inventariado %}
+        {#- cofre nunca inventariado NAO e "0 vencendo": sao coisas diferentes e
+            a segunda mente. Aqui a acao e inventariar, nao relaxar. -#}
+        <p class="vg-falha">
+            <i class="bi bi-question-circle"></i>
+            O cofre ainda não foi inventariado — não sei quais certificados vencem.
+        </p>
+        {%- else %}
+        {{ vg_estado(bloco, 'Nenhum vencendo na janela.') }}
+        {%- endif %}
+        {%- else %}
+        <div class="vg-lista zl-ficha">
+            {%- for item in bloco.itens %}
+            <div class="zl-ficha-row">
+                <span class="zl-ficha-l">
+                    <span class="vg-cert-quando cert-status-{{ 'danger' if item.causa == 'vencido' else 'warn' }}">
+                        {{ 'vencido' if item.causa == 'vencido' else ('vence em ' ~ item.dias_restantes ~ ' dias') }}
+                    </span>
+                    <span class="vg-cert-nome" title="{{ item.empresa_nome }}">{{ item.empresa_nome }}</span>
+                </span>
+                <span class="zl-ficha-v">{{ item.not_after.strftime('%d/%m') }}</span>
+            </div>
+            {%- endfor %}
+        </div>
+        {%- endif %}
+        {% endcall %}
+
+        {#- NFSe: componente B. Só para quem pode abrir a tela de destino. -#}
+        {% if 'nfse' in blocos %}
+        {% set bloco = blocos.nfse %}
+        {% call vg_card('nfse', 'receipt', 'NFSe',
+                        url_for('main.nfse_painel'), 'Abrir NFSe') %}
+        {%- if bloco.erro or bloco.vazio %}
+        {{ vg_estado(bloco, 'Nada a fazer aqui hoje.') }}
+        {%- else %}
+        {{ zl_ficha([
+            ('Prontas para emitir', bloco.prontas),
+            ('Com pendência de documento ou descrição', bloco.pendentes),
+            ('Grupos aguardando confirmação', bloco.grupos_pendentes)]) }}
+        {%- endif %}
+        {% endcall %}
+        {% endif %}
+
+        {#- FILA: o que a emissão automática não conseguiu sozinha. -#}
+        {% if 'fila' in blocos %}
+        {% set bloco = blocos.fila %}
+        {% call vg_card('fila', 'activity', 'Fila',
+                        url_for('main.diagnostico'), 'Abrir Diagnóstico') %}
+        {%- if bloco.erro or bloco.vazio %}
+        {{ vg_estado(bloco, 'Tudo rodando.') }}
+        {%- else %}
+        {#- O motivo NÃO é uma linha própria: ele qualifica as falhas da linha de
+            cima. Como valor da ficha ele quebrava a regra do componente (rótulo
+            à esquerda, NÚMERO à direita) e ainda quebrava linha no meio. -#}
+        <div class="zl-ficha">
+            <div class="zl-ficha-row">
+                <span class="zl-ficha-l">
+                    Tarefas em falha
+                    {%- if bloco.motivo %}
+                    <span class="vg-ficha-sub">na maioria: {{ bloco.motivo }}</span>
+                    {%- endif %}
+                </span>
+                <span class="zl-ficha-v">{{ bloco.falhas }}</span>
+            </div>
+            <div class="zl-ficha-row">
+                <span class="zl-ficha-l">Portais pausados</span>
+                <span class="zl-ficha-v">{{ bloco.breakers | length }}</span>
+            </div>
+        </div>
+        {%- endif %}
+        {% endcall %}
+        {% endif %}
+
+    </div>
+</div>
+{% endblock %}

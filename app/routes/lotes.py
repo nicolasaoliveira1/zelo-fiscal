@@ -544,7 +544,7 @@ def _register_batch_routes(prefix, endpoint_base, cfg):
     def status_view():
         return jsonify(batch_engine.status_payload_locked(lock, state))
 
-    # info/status sao leitura (dashboard poll); iniciar/pausar/parar/retomar mutam -> operador
+    # info/status sao leitura (poll de Certidões); iniciar/pausar/parar/retomar mutam -> operador
     op = requer_papel('operador')
     bp.add_url_rule(f'{prefix}/lote/info/<int:certidao_id>', f'{endpoint_base}_info', info)
     bp.add_url_rule(f'{prefix}/lote/iniciar', f'{endpoint_base}_iniciar', op(iniciar), methods=['POST'])

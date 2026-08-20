@@ -391,7 +391,7 @@ def exportar_dossie(empresa_id):
     buffer, avisos = dossie_service.gerar_dossie(empresa)
     if buffer is None:
         flash(f'Não foi possível gerar o dossiê de {empresa.nome}: {"; ".join(avisos)}.', 'warning')
-        return redirect(url_for('main.dashboard'))
+        return redirect(url_for('main.certidoes'))
     nome = f'dossie-{_slug_arquivo(empresa.nome)}.pdf'
     return send_file(buffer, mimetype='application/pdf', as_attachment=True, download_name=nome)
 

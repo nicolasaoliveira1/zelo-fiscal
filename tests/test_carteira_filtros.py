@@ -1,7 +1,7 @@
 """Testes de `carteira_filtros` (spec 04, EXPORT-02).
 
 Prova que o recorte server-side reproduz a semantica do filtro do painel
-(`aplicarFiltros` em dashboard.html): estado/cidade filtram a empresa inteira;
+(`aplicarFiltros` em certidoes.html): estado/cidade filtram a empresa inteira;
 tipo/status filtram a certidao; vazio/'todas' = sem filtro. Se este servico
 divergir do painel, a planilha exportada nao "sai igual a tela".
 """

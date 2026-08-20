@@ -32,6 +32,7 @@ from app.services import (
     dryrun_municipio,
     fila_emissao,
     portal_health,
+    visao_geral,
 )
 from app.services.correlation import CorrelationContext
 from app.services.execution_logger import log_event
@@ -235,19 +236,19 @@ def visualizar_token(certidao_id):
     return _gerar_visualizar_token(certidao_id)
 
 
-def _normalizar_cidade_dashboard(valor):
+def _normalizar_cidade_certidoes(valor):
     # Alias fino para a fonte unica em utils (reuso painel/export — spec 04).
     return normalizar_cidade(valor)
 
 
-def _escolher_cidade_canonica_dashboard(variantes):
+def _escolher_cidade_canonica_certidoes(variantes):
     def _ordenacao(item):
         nome, frequencia = item
         tem_acento = file_manager.remover_acentos(nome) != nome
         return (
             -frequencia,
             -int(tem_acento),
-            _normalizar_cidade_dashboard(nome),
+            _normalizar_cidade_certidoes(nome),
             nome.upper(),
         )
 
@@ -294,8 +295,41 @@ def api_pendencias():
     """Total de pendências para o polling do title da aba (base.html)."""
     return jsonify({'total': _contar_pendencias()})
 
+# Dias da semana em portugues, escritos aqui de proposito: `strftime('%A')`
+# depende do locale do SO, e no Windows do escritorio ele volta em ingles.
+_DIAS_SEMANA = ('segunda-feira', 'terca-feira', 'quarta-feira', 'quinta-feira',
+                'sexta-feira', 'sabado', 'domingo')
+
+
+def _saudacao(agora=None):
+    """Bom dia / Boa tarde / Boa noite pela hora LOCAL do servidor (AD-004)."""
+    hora = (agora or datetime.now()).hour
+    if hora < 12:
+        return 'Bom dia'
+    return 'Boa tarde' if hora < 18 else 'Boa noite'
+
+
 @bp.route('/')
-def dashboard():
+def visao_geral_painel():
+    """A pagina inicial: por onde comecar hoje.
+
+    Nao tem fonte de dados propria — `visao_geral.montar` compoe o que cada
+    pilar ja responde, e a faixa e DERIVADA dos blocos montados, para a contagem
+    dela ser verdadeira por construcao (OVER-11).
+    """
+    blocos = visao_geral.montar(current_user)
+    hoje = date.today()
+    return render_template(
+        'visao_geral.html',
+        blocos=blocos,
+        travas=visao_geral.itens_que_travam(blocos),
+        saudacao=_saudacao(),
+        hoje_extenso=f'{_DIAS_SEMANA[hoje.weekday()]}, {hoje:%d/%m/%Y}',
+    )
+
+
+@bp.route('/certidoes', endpoint='certidoes')
+def certidoes_painel():
     status_filtros = request.args.getlist('status')
     tipo_filtros = request.args.getlist('tipo')
     # Estado e cidade são multi-seleção e filtrados no cliente (chips com
@@ -303,7 +337,7 @@ def dashboard():
     estado_filtros = [e.strip().upper() for e in request.args.getlist('estado') if e and e.strip()]
     cidade_filtros = []
     for c in request.args.getlist('cidade'):
-        chave = _normalizar_cidade_dashboard(c or '')
+        chave = _normalizar_cidade_certidoes(c or '')
         if chave and chave not in cidade_filtros:
             cidade_filtros.append(chave)
     ordem = (request.args.get('ordem') or 'urgencia').strip().lower()
@@ -345,7 +379,7 @@ def dashboard():
         cidade = (cidade or '').strip()
         if not cidade:
             continue
-        chave_normalizada = _normalizar_cidade_dashboard(cidade)
+        chave_normalizada = _normalizar_cidade_certidoes(cidade)
         if not chave_normalizada:
             continue
         variantes = cidades_variantes.setdefault(chave_normalizada, {})
@@ -356,7 +390,7 @@ def dashboard():
     estados_disponiveis = sorted(estados_set)
 
     cidades_por_chave = {
-        chave: _escolher_cidade_canonica_dashboard(variantes)
+        chave: _escolher_cidade_canonica_certidoes(variantes)
         for chave, variantes in cidades_variantes.items()
     }
 
@@ -370,14 +404,14 @@ def dashboard():
         }
         for chave in cidades_por_chave
     ]
-    cidades_chips.sort(key=lambda c: _normalizar_cidade_dashboard(c['label']))
+    cidades_chips.sort(key=lambda c: _normalizar_cidade_certidoes(c['label']))
 
     empresas = query.order_by(Empresa.id).all()
 
     # Chave canônica de cidade por empresa: agrupa variações ("Imbé"/"IMBE")
     # e alimenta o data-cidade-key de cada card para a contagem client-side.
     cidade_key_por_empresa = {
-        emp.id: _normalizar_cidade_dashboard(emp.cidade or '')
+        emp.id: _normalizar_cidade_certidoes(emp.cidade or '')
         for emp in empresas
     }
 
@@ -446,7 +480,7 @@ def dashboard():
                 urls_municipais[nome_sem + '_GERAL'] = url_geral
 
     return render_template(
-        'dashboard.html',
+        'certidoes.html',
         empresas=empresas,
         contadores_por_empresa=contadores_por_empresa,
         status_por_cert=status_por_cert,

@@ -368,7 +368,7 @@ async function atualizarAndamento() {
 
   /* O nivel vem da ULTIMA mensagem do lote — o payload nao tem `level` no
    * topo. Quando ela e aviso ou erro, a linha viva toma a cor (mesma regra do
-   * painel de andamento do dashboard). */
+   * painel de andamento de Certidões). */
   const ultima = (lote.last_messages || []).slice(-1)[0] || {};
   const linha = $('manifAndamentoLinha');
   linha.textContent = lote.message || 'Manifestando…';

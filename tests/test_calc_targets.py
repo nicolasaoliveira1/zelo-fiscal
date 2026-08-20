@@ -71,7 +71,7 @@ def test_calc_targets_pendentes(app, ids):
 
 def test_pendente_com_data_vencida_excluido_do_escopo_default(app, ids):
     # Certidao PENDENTE com data_validade no passado deve ser EXCLUIDA do escopo
-    # 'default' (assim como o dashboard a classifica como 'pendentes', nao 'vencidas').
+    # 'default' (assim como Certidões a classifica como 'pendentes', não 'vencidas').
     with app.app_context():
         fgts = Certidao.query.filter_by(tipo=TipoCertidao.FGTS).first()
         fgts.status_especial = StatusEspecial.PENDENTE

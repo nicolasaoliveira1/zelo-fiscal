@@ -4,7 +4,7 @@
       os números somam num total?  SIM -> zl_comp   ·  NÃO -> zl_ficha
 
     Estes macros renderizam no servidor (valores fixos). O lote tem versão
-    própria em dashboard.html (`zl_comp_lote`), com ids para o dashboard.js
+    própria em certidoes.html (`zl_comp_lote`), com ids para o certidoes.js
     reescrever a cada poll — mesmo desenho, fonte de dados diferente. -#}
 
 {#- Componente A: composição de partes sobre um todo.
@@ -14,7 +14,7 @@
 {%- set total = total or 0 -%}
 <div class="zl-comp-fig" aria-hidden="true">
     <span class="zl-comp-n">{{ total }}</span>
-    <span class="zl-comp-d">&nbsp;{{ unidade }}</span>
+    <span class="zl-comp-d">{{ unidade }}</span>
     {%- if complemento %}<span class="zl-comp-u">{{ complemento }}</span>{% endif %}
 </div>
 <div class="zl-comp-bar" aria-hidden="true">
