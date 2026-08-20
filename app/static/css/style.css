@@ -110,6 +110,11 @@
     background-color: var(--bs-danger);
 }
 
+.toast-stack .stk-toast.bg-warning {
+    background-color: var(--zelo-warn);
+    color: var(--zelo-ink);
+}
+
 .toast-stack .stk-toast.bg-primary {
     background-color: var(--bs-primary);
 }
@@ -117,7 +122,7 @@
 /* No escuro, --bs-primary inverte para cinza claro; o texto branco fixo do
    .stk-toast some. Usa texto escuro (mesmo token da acao primaria no dark). */
 [data-bs-theme="dark"] .toast-stack .stk-toast.bg-primary,
-[data-bs-theme="dark"] .toast-stack .stk-toast.bg-primary .stk-close {
+[data-bs-theme="dark"] .toast-stack .stk-toast.bg-warning {
     color: var(--zelo-action-fg);
 }
 
@@ -134,7 +139,7 @@
     padding: .1rem .4rem;
     border: 0;
     background: transparent;
-    color: var(--bs-white);
+    color: inherit;
     opacity: .75;
     font-size: 1.15rem;
     line-height: 1;

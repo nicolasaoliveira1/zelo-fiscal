@@ -16,9 +16,13 @@ const MAX_TOASTS = 6;      // limite na pilha
 const TOAST_DELAY = 6000;
 
 function bgClass(type) {
-    if (type === 'success') return 'bg-success';
-    if (type === 'error') return 'bg-danger';
-    return 'bg-primary';
+    const classes = {
+        success: 'bg-success',
+        error: 'bg-danger',
+        warning: 'bg-warning',
+        info: 'bg-primary',
+    };
+    return classes[type] || classes.info;
 }
 
 function reflow() {
