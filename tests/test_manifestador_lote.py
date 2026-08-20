@@ -129,7 +129,7 @@ def test_fila_vazia_devolve_zero_sem_erro(app, ids):
 
 def test_empresa_sem_certificado_pronto_tem_o_grupo_inteiro_pulado(app, ids,
                                                                    monkeypatch):
-    """E o lote segue: com 24 das 93 empresas sem certificado utilizavel,
+    """E o lote segue: com uma parte da carteira sem certificado utilizavel,
     abortar no primeiro grupo faria o modo carteira nunca terminar."""
     with app.app_context():
         ruim = _empresa('SEM CERT', '11.222.333/0001-81', pronta=False)
@@ -148,14 +148,14 @@ def test_empresa_sem_certificado_pronto_tem_o_grupo_inteiro_pulado(app, ids,
 def test_grupos_sem_certificado_nomeia_a_empresa(app, ids):
     """"2 empresas puladas" manda o operador caçar quais; o nome ele resolve."""
     with app.app_context():
-        ruim = _empresa('BOLL REPRESENTACOES', '11.222.333/0001-81',
+        ruim = _empresa('REPRESENTACOES LITORAL', '11.222.333/0001-81',
                         pronta=False)
         c = _chave(ruim, CHAVES[0])
 
         pulados = lote.grupos_sem_certificado([c.id])
 
-        assert list(pulados) == ['BOLL REPRESENTACOES']
-        assert 'vencido' in pulados['BOLL REPRESENTACOES']
+        assert list(pulados) == ['REPRESENTACOES LITORAL']
+        assert 'vencido' in pulados['REPRESENTACOES LITORAL']
 
 
 # --- emissao de um item -----------------------------------------------------

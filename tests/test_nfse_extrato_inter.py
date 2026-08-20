@@ -147,8 +147,8 @@ def test_e_pdf_olha_o_conteudo_e_nao_a_extensao(pdf_bytes):
 # Todos os casos abaixo sao descricoes REAIS do extrato de julho/2026.
 
 @pytest.mark.parametrize('descricao,nome,competencia', [
-    ('Pix - Valeria Cabreira Brust - honor. 06/2026',
-     'VALERIA CABREIRA BRUST', '06/2026'),
+    ('Pix - Valeria Moura Brust - honor. 06/2026',
+     'VALERIA MOURA BRUST', '06/2026'),
     ('Pix - Fl Up Produtora Multimidia Ltda - 06/2026',
      'FL UP PRODUTORA MULTIMIDIA LTDA', '06/2026'),
     # sem espaco antes da competencia

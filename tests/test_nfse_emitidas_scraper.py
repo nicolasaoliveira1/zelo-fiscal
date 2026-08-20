@@ -86,9 +86,9 @@ def test_pessoa_fisica_tem_o_cpf_separado_do_nome():
     tomador aparecia nos DOIS lados da conferencia (ND-028). O formato batido
     aqui e o mesmo que `utils.formatar_documento` produz."""
     linhas, _, _ = ne.interpretar_pagina(_pagina([_linha(
-        documento='113.411.570-91', nome_tomador='MARIO BOLL')]))
-    assert linhas[0].documento == '113.411.570-91'
-    assert linhas[0].nome_tomador == 'MARIO BOLL'
+        documento='390.533.447-05', nome_tomador='MARIO ALVES')]))
+    assert linhas[0].documento == '390.533.447-05'
+    assert linhas[0].nome_tomador == 'MARIO ALVES'
 
 
 def test_valor_com_separador_de_milhar():

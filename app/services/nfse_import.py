@@ -368,8 +368,8 @@ def resolver_empresa(nome, empresas, apelidos=None):
     importacao, nao uma por linha).
 
     O scorer e `token_set_ratio` porque o cadastro guarda apelido curto
-    ('ALUMAP') enquanto o banco manda a razao social truncada em 35 caracteres
-    ('ALUMAP COMERCIO DE ALUMINIOS LTDA'): token_set_ratio pontua 100 quando um
+    ('VIDROMAX') enquanto o banco manda a razao social truncada em 35 caracteres
+    ('VIDROMAX COMERCIO DE VIDROS LTDA'): token_set_ratio pontua 100 quando um
     conjunto de tokens e subconjunto do outro. Mesmo scorer de file_manager.
     """
     from thefuzz import fuzz, process

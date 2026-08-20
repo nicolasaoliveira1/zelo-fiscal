@@ -55,29 +55,29 @@ def _gravar_pfx(tmp_path, nome_arquivo, **kwargs):
 # --- cnpj_do_cn: a chave do casamento (MANIF-02) ----------------------------
 
 def test_cnpj_sai_do_final_do_cn():
-    assert cofre.cnpj_do_cn('LOURDES M PESCE LTDA:54214676000107') == '54214676000107'
+    assert cofre.cnpj_do_cn('MARTINS & FILHOS LTDA:11222333000181') == '11222333000181'
 
 
 def test_cn_que_nao_e_o_nome_da_empresa_ainda_casa():
     """Achado real: existe certificado cujo CN e um aviso, nao a razao social.
     Casar por nome perderia este; casar por CNPJ acerta."""
-    cn = 'CONSULTA RFB A REALIZAR NA HORA DA VALIDACAO:54214676000107'
-    assert cofre.cnpj_do_cn(cn) == '54214676000107'
+    cn = 'CERTIFICADO A VALIDAR NA EMISSAO:11222333000181'
+    assert cofre.cnpj_do_cn(cn) == '11222333000181'
 
 
 def test_grafias_diferentes_do_mesmo_cnpj_casam_igual():
-    """Achado real: 'SOARES & LEAL' e 'SOARES E LEAL' sao o mesmo CNPJ."""
-    a = cofre.cnpj_do_cn('SOARES & LEAL LTDA:07210971000105')
-    b = cofre.cnpj_do_cn('SOARES E LEAL LTDA:07210971000105')
-    assert a == b == '07210971000105'
+    """Achado real: 'MARTINS & FILHOS' e 'MARTINS E FILHOS' sao o mesmo CNPJ."""
+    a = cofre.cnpj_do_cn('MARTINS & FILHOS LTDA:11222333000181')
+    b = cofre.cnpj_do_cn('MARTINS E FILHOS LTDA:11222333000181')
+    assert a == b == '11222333000181'
 
 
 def test_mesma_razao_social_em_cnpjs_diferentes_nao_se_confunde():
-    """Achado real: 'E E C PEREIRA' aparece em 5 CNPJs (matriz + filiais).
+    """Achado real: 'A B C COMERCIO' aparece em 5 CNPJs (matriz + filiais).
     Por nome seriam indistinguiveis; por CNPJ sao 5 empresas distintas."""
-    cnpjs = {cofre.cnpj_do_cn(f'E E C PEREIRA:{doc}')
-             for doc in ('09041741000195', '09041741000276', '09041741000438',
-                         '09041741000519', '09041741000608')}
+    cnpjs = {cofre.cnpj_do_cn(f'A B C COMERCIO:{doc}')
+             for doc in ('11222333000181', '11222333000262', '11222333000343',
+                         '11222333000424', '11222333000505')}
     assert len(cnpjs) == 5
 
 

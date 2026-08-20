@@ -47,7 +47,7 @@ def test_cpf_valido_vira_pessoa_fisica(client, app):
 
 
 def test_cpf_invalido_e_recusado_citando_cpf(client, app):
-    _importar(client, 'MARIO BOLL PRODUTOR RURAL')
+    _importar(client, 'MARIO ALVES PRODUTOR RURAL')
     nota_id = _ultima_nota(app)
     resposta = client.post(f'/nfse/nota/{nota_id}/resolver',
                            json={'documento': '529.982.247-26'})
