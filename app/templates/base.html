@@ -486,10 +486,13 @@
                 const modalForm = editModal.querySelector('#editForm');
                 const pendenteForm = editModal.querySelector('#pendenteForm')
 
-                modalTitle.textContent = `Editar Validade: ${certidaoInfo}`;
-
-                modalForm.action = `/certidao/atualizar/${certidaoId}`;
-                pendenteForm.action = `/certidao/marcar_pendente/${certidaoId}`;
+                if (modalTitle) modalTitle.textContent = `Editar Validade: ${certidaoInfo}`;
+                if (modalForm) modalForm.action = `/certidao/atualizar/${certidaoId}`;
+                // #pendenteForm nao existe em nenhum template: "marcar pendente"
+                // roda por fetch (btnConfirmarPendente), nao por POST de form.
+                // Sem a guarda, abrir o modal lancava "Cannot set properties of
+                // null (setting 'action')" e abortava o resto do handler.
+                if (pendenteForm) pendenteForm.action = `/certidao/marcar_pendente/${certidaoId}`;
             });
         }
 
