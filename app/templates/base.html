@@ -137,6 +137,7 @@
 </head>
 
 <body>
+    <a class="visually-hidden-focusable skip-link" href="#conteudo-principal">Pular para o conteúdo</a>
     <script>
         (function () {
             const bodyEl = document.body;
@@ -281,7 +282,7 @@
             <i class="bi bi-arrow-up"></i>
         </button>
         
-        <main class="container-fluid app-main mt-4">
+        <main class="container-fluid app-main mt-4" id="conteudo-principal">
             {% block content %}{% endblock %}
         </main>
         <footer class="bg-body-secondary border-top mt-auto py-2">

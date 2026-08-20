@@ -312,6 +312,26 @@ h1, h2, .h1, .h2 {
     letter-spacing: -0.01em;
 }
 
+.skip-link {
+    position: fixed;
+    inset-block-start: 0.75rem;
+    inset-inline-start: 0.75rem;
+    z-index: 1100;
+    padding: 0.65rem 0.9rem;
+    border: 2px solid var(--zelo-graphite);
+    border-radius: 0.5rem;
+    background: var(--zelo-paper);
+    color: var(--zelo-ink);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.skip-link:focus-visible {
+    outline: 2px solid var(--zelo-paper);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 0.25rem rgba(var(--zelo-graphite-rgb), 0.45);
+}
+
 /* Título de diálogo é cabeçalho e vai em display, independente da tag. A regra
    acima só alcança h1/h2, e os modais do sistema são h5 — o painel de andamento
    do lote (h2, serif) abria o resumo do lote (h5, sans) logo em seguida, com
