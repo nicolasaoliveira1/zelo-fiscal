@@ -38,11 +38,11 @@
         <table class="table table-sm table-hover mb-0 align-middle">
             <thead>
                 <tr>
-                    <th style="width: 230px;">Portal</th>
-                    <th style="width: 120px;">Situação</th>
-                    <th style="width: 110px;">Resposta</th>
-                    <th>Detalhe</th>
-                    <th style="width: 150px;">Medido em</th>
+                            <th scope="col" style="width: 230px;">Portal</th>
+                            <th scope="col" style="width: 120px;">Situação</th>
+                            <th scope="col" style="width: 110px;">Resposta</th>
+                            <th scope="col">Detalhe</th>
+                            <th scope="col" style="width: 150px;">Medido em</th>
                 </tr>
             </thead>
             <tbody id="diag-portais">
@@ -79,12 +79,12 @@
         <table class="table table-sm table-hover mb-0 align-middle">
             <thead>
                 <tr>
-                    <th style="width: 150px;">Quando</th>
-                    <th style="width: 70px;">Nível</th>
-                    <th style="width: 120px;">Tipo</th>
-                    <th style="width: 110px;">Alvo</th>
-                    <th>Mensagem</th>
-                    <th style="width: 110px;">req_id</th>
+                            <th scope="col" style="width: 150px;">Quando</th>
+                            <th scope="col" style="width: 70px;">Nível</th>
+                            <th scope="col" style="width: 120px;">Tipo</th>
+                            <th scope="col" style="width: 110px;">Alvo</th>
+                            <th scope="col">Mensagem</th>
+                            <th scope="col" style="width: 110px;">req_id</th>
                 </tr>
             </thead>
             <tbody id="diag-eventos">
@@ -103,10 +103,10 @@
         <table class="table table-sm table-hover mb-0 align-middle">
             <thead>
                 <tr>
-                    <th style="width: 180px;">Município</th>
-                    <th style="width: 110px;">Situação</th>
-                    <th>Resultado da verificação</th>
-                    <th style="width: 110px;"></th>
+                            <th scope="col" style="width: 180px;">Município</th>
+                            <th scope="col" style="width: 110px;">Situação</th>
+                            <th scope="col">Resultado da verificação</th>
+                            <th scope="col" style="width: 110px;"></th>
                 </tr>
             </thead>
             <tbody id="diag-municipios">
@@ -323,9 +323,9 @@
                 + ' data-devolver-motivo="' + esc(g.error_type) + '">Devolver o grupo à fila</button>'
                 + '</div>'
                 + '<div class="table-responsive"><table class="table table-sm mb-0 align-middle">'
-                + '<thead><tr><th>Empresa</th><th style="width:110px;">Tipo</th><th>Último erro</th>'
-                + '<th style="width:90px;">Tentativas</th><th style="width:150px;">Quando</th>'
-                + '<th style="width:110px;"></th></tr></thead>'
+                + '<thead><tr><th scope="col">Empresa</th><th scope="col" style="width:110px;">Tipo</th><th scope="col">Último erro</th>'
+                + '<th scope="col" style="width:90px;">Tentativas</th><th scope="col" style="width:150px;">Quando</th>'
+                + '<th scope="col" style="width:110px;"></th></tr></thead>'
                 + '<tbody>' + g.itens.map(item).join('') + '</tbody></table></div>'
                 + '</div>';
         }
