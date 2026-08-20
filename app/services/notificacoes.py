@@ -258,6 +258,72 @@ def alertar_empresas_baixadas(app, baixadas):
     return enviados
 
 
+_ALERTA_CERTIFICADO_POR_CAUSA = {
+    'vencido': {
+        'chave': 'certificado_vencido:{empresa_id}',
+        'assunto': '[Certidoes] Alerta: certificado vencido de {empresa_nome}',
+        'linhas': [
+            'O certificado da empresa {empresa_nome} venceu em {data_vencimento}.',
+            '',
+            'A manifestacao dessa empresa esta parada ate renovar o certificado.',
+            'Renove o certificado e atualize o inventario do cofre antes de retomar.',
+        ],
+    },
+    'vencendo': {
+        'chave': 'certificado_vencendo:{empresa_id}',
+        'assunto': '[Certidoes] Alerta: certificado vencendo de {empresa_nome}',
+        'linhas': [
+            'O certificado da empresa {empresa_nome} vence em {data_vencimento}.',
+            'Faltam {dias_restantes} dia(s) para o vencimento.',
+            '',
+            'Providencie a renovacao para evitar a interrupcao da manifestacao.',
+        ],
+    },
+}
+
+
+def alertar_certificados_vencendo(app, itens):
+    """Alerta certificados vencidos ou proximos de vencer, um por empresa/causa.
+
+    Recebe a selecao ja pronta de ``manifestador_cofre.certificados_a_vencer``:
+    consultar o banco e responsabilidade do chamador. A chave separa vencido de
+    vencendo porque a transicao entre os estados pede novo alerta, mas mantem o
+    anti-spam duravel para cada empresa dentro da mesma causa.
+    """
+    cfg = _config()
+    destinatarios = _destinatarios(cfg)
+    tem_smtp = email_sender.smtp_configurado(app.config)
+    if not tem_smtp or not destinatarios:
+        log_event('notif_certificados_sem_smtp', level='WARNING',
+                  tem_smtp=tem_smtp, destinatarios=len(destinatarios))
+        return 0
+
+    janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
+    enviados = 0
+    for item in itens or []:
+        modelo = _ALERTA_CERTIFICADO_POR_CAUSA.get(item.get('causa'))
+        if modelo is None:
+            continue
+
+        not_after = item.get('not_after')
+        if not_after is None:
+            continue
+        dados = {
+            'empresa_id': item.get('empresa_id'),
+            'empresa_nome': item.get('empresa_nome') or '?',
+            'data_vencimento': not_after.strftime('%d/%m/%Y'),
+            'dias_restantes': item.get('dias_restantes'),
+        }
+        corpo = '\n'.join(linha.format(**dados) for linha in modelo['linhas'])
+        if _enviar_alerta(
+                app, destinatarios, modelo['chave'].format(**dados),
+                'alerta_certificado', modelo['assunto'].format(**dados), corpo,
+                janela, detalhe=item['causa']):
+            enviados += 1
+
+    return enviados
+
+
 # Causas de abertura do breaker que geram mensagens DIFERENTES. O breaker e o
 # mesmo (parar de gastar em cima de falha repetida), mas o que o operador faz e
 # outro: portal fora se resolve esperando; solver falhando se resolve na conta

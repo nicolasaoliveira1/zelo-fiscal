@@ -1,9 +1,12 @@
-"""Selecao dos certificados que precisam de alerta (MANIF-26, T1)."""
+"""Selecao e alerta dos certificados que precisam de atencao (MANIF-26)."""
 from datetime import datetime, timedelta
 
+import pytest
+
 from app import db
-from app.models import CertificadoEmpresa, DadosReceita, Empresa, EstadoCertificado
-from app.services import manifestador_cofre
+from app.models import (CertificadoEmpresa, ConfiguracaoSistema, DadosReceita,
+                        Empresa, EstadoCertificado, NotificacaoLog)
+from app.services import manifestador_cofre, notificacoes
 
 
 def _empresa(nome, cnpj, situacao=None):
@@ -107,3 +110,123 @@ def test_ordena_do_mais_critico_para_o_menos(app, ids):
 
         assert [item['empresa_id'] for item in selecionados] == [
             mais_critica.id, proxima.id]
+
+
+# --- alerta por e-mail (T2) -----------------------------------------------
+
+@pytest.fixture()
+def ctx_alerta(app):
+    with app.app_context():
+        db.create_all()
+        db.session.add(ConfiguracaoSistema(id=1, notif_destinatarios='op@x.com'))
+        db.session.commit()
+        app.config.update(SMTP_HOST='smtp', SMTP_FROM='f@x.com',
+                          NOTIF_ALERTA_JANELA_HORAS=24)
+        yield app
+        db.session.rollback()
+        db.session.remove()
+        db.drop_all()
+
+
+def _item_alerta(empresa_id, causa='vencendo', dias_restantes=10):
+    return {
+        'empresa_id': empresa_id,
+        'empresa_nome': f'EMPRESA {empresa_id}',
+        'not_after': datetime.now() + timedelta(days=dias_restantes),
+        'estado': EstadoCertificado.PRONTO,
+        'dias_restantes': dias_restantes,
+        'causa': causa,
+    }
+
+
+def _mock_envio(monkeypatch):
+    enviados = []
+    monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
+    monkeypatch.setattr(notificacoes.email_sender, 'enviar',
+                        lambda cfg, dest, assunto, corpo: enviados.append((assunto, corpo))
+                        or True)
+    return enviados
+
+
+def test_alerta_certificado_envia_um_por_empresa_e_causa(ctx_alerta, monkeypatch):
+    enviados = _mock_envio(monkeypatch)
+    item = _item_alerta(101)
+
+    assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
+    assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 0
+    assert len(enviados) == 1
+    assert NotificacaoLog.query.filter_by(
+        chave='certificado_vencendo:101', tipo='alerta_certificado').count() == 1
+
+
+def test_alerta_certificado_uma_empresa_nao_silencia_outra(ctx_alerta, monkeypatch):
+    enviados = _mock_envio(monkeypatch)
+
+    assert notificacoes.alertar_certificados_vencendo(
+        ctx_alerta, [_item_alerta(101), _item_alerta(202)]) == 2
+
+    assert len(enviados) == 2
+    assert {registro.chave for registro in NotificacaoLog.query.all()} == {
+        'certificado_vencendo:101', 'certificado_vencendo:202'}
+
+
+def test_transicao_para_vencido_realerta_com_chave_propria(ctx_alerta, monkeypatch):
+    enviados = _mock_envio(monkeypatch)
+    vencendo = _item_alerta(101)
+    vencido = _item_alerta(101, causa='vencido', dias_restantes=-1)
+    vencido['not_after'] = datetime.now() - timedelta(days=1)
+
+    assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [vencendo]) == 1
+    assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [vencido]) == 1
+    assert len(enviados) == 2
+    assert {registro.chave for registro in NotificacaoLog.query.all()} == {
+        'certificado_vencendo:101', 'certificado_vencido:101'}
+
+
+def test_texto_de_vencido_diz_que_manifestacao_esta_parada(ctx_alerta, monkeypatch):
+    enviados = _mock_envio(monkeypatch)
+    item = _item_alerta(101, causa='vencido', dias_restantes=-2)
+    item['not_after'] = datetime.now() - timedelta(days=2)
+
+    notificacoes.alertar_certificados_vencendo(ctx_alerta, [item])
+
+    assunto, corpo = enviados[0]
+    assert 'vencido' in assunto.lower()
+    assert 'manifestacao dessa empresa esta parada' in corpo
+
+
+def test_texto_de_vencendo_tem_data_e_dias_restantes(ctx_alerta, monkeypatch):
+    enviados = _mock_envio(monkeypatch)
+    item = _item_alerta(101, dias_restantes=7)
+
+    notificacoes.alertar_certificados_vencendo(ctx_alerta, [item])
+
+    _, corpo = enviados[0]
+    assert item['not_after'].strftime('%d/%m/%Y') in corpo
+    assert 'Faltam 7 dia(s)' in corpo
+
+
+def test_sem_smtp_nao_envia_nem_levanta(ctx_alerta, monkeypatch):
+    chamou = []
+    monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: False)
+    monkeypatch.setattr(notificacoes.email_sender, 'enviar',
+                        lambda *args: chamou.append(args) or True)
+
+    assert notificacoes.alertar_certificados_vencendo(
+        ctx_alerta, [_item_alerta(101)]) == 0
+    assert chamou == []
+    assert NotificacaoLog.query.count() == 0
+
+
+def test_sem_destinatario_nao_envia_nem_levanta(ctx_alerta, monkeypatch):
+    db.session.get(ConfiguracaoSistema, 1).notif_destinatarios = None
+    db.session.commit()
+    chamou = []
+    monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
+    monkeypatch.setattr(notificacoes.email_sender, 'enviar',
+                        lambda *args: chamou.append(args) or True)
+
+    assert notificacoes.alertar_certificados_vencendo(
+        ctx_alerta, [_item_alerta(101)]) == 0
+    assert chamou == []
+    assert NotificacaoLog.query.count() == 0
