@@ -26,6 +26,25 @@ def classificar_status_certidao(certidao, hoje):
     return 'validas'
 
 
+def contagem_carteira(hoje=None):
+    """Quantas certidoes estao a vencer, vencidas e pendentes HOJE.
+
+    Nucleo compartilhado: o digest por e-mail e a Visao Geral fazem a mesma
+    pergunta, e faziam por caminhos diferentes. Um numero que diverge entre a
+    tela e o e-mail nao tem como o operador saber qual dos dois acreditar.
+
+    Uma consulta so, classificada em Python pela MESMA
+    `classificar_status_certidao` do painel — nenhuma copia da regra em SQL.
+    """
+    hoje = hoje or date.today()
+    contagem = {'a_vencer': 0, 'vencidas': 0, 'pendentes': 0}
+    for certidao in Certidao.query.all():
+        chave = classificar_status_certidao(certidao, hoje)
+        if chave in contagem:
+            contagem[chave] += 1
+    return contagem
+
+
 _ULTIMO_SNAPSHOT_DIA = None
 
 

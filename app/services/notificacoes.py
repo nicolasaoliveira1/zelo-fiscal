@@ -10,10 +10,9 @@ Este modulo NAO importa `agendador` (evita ciclo): os jobs e que chamam este.
 from datetime import date, datetime, timedelta
 
 from app import captcha_solver, db
-from app.models import Certidao, ConfiguracaoSistema, NotificacaoLog
-from app.services import diagnostics, email_sender
+from app.models import ConfiguracaoSistema, NotificacaoLog
+from app.services import diagnostics, email_sender, snapshot_service
 from app.services.execution_logger import log_event
-from app.services.snapshot_service import classificar_status_certidao
 
 # Cadencia do digest -> intervalo minimo entre envios (dias).
 _CADENCIA_DIAS = {'semanal': 7, 'diaria': 1}
@@ -75,21 +74,9 @@ def _registrar_envio(chave, tipo, detalhe=None):
 
 # --- digest ----------------------------------------------------------------
 
-def _contagem_carteira():
-    """Conta a_vencer/vencidas/pendentes pela MESMA classificacao do painel
-    (snapshot_service), para os numeros baterem com o que o operador ve."""
-    hoje = date.today()
-    contagem = {'a_vencer': 0, 'vencidas': 0, 'pendentes': 0}
-    for certidao in Certidao.query.all():
-        chave = classificar_status_certidao(certidao, hoje)
-        if chave in contagem:
-            contagem[chave] += 1
-    return contagem
-
-
 def montar_digest():
     """(assunto, corpo, resumo) do digest a partir da contagem da carteira."""
-    resumo = _contagem_carteira()
+    resumo = snapshot_service.contagem_carteira()
     a_vencer, vencidas, pendentes = (
         resumo['a_vencer'], resumo['vencidas'], resumo['pendentes'])
     vazio = (a_vencer == 0 and vencidas == 0 and pendentes == 0)
