@@ -51,19 +51,28 @@
         deixar de dizer que está mal. -#}
     <section class="vg-faixa">
         {%- if travas %}
+        {%- set total = travas | sum(attribute='quantidade') %}
         <div class="vg-faixa-h">
             <i class="bi bi-exclamation-octagon"></i>
-            <span>{{ travas | length }} coisa{{ 's' if travas | length != 1 }}
-                trava{{ 'm' if travas | length != 1 }} trabalho hoje</span>
+            <span>{{ total }} coisa{{ 's' if total != 1 }}
+                trava{{ 'm' if total != 1 }} trabalho hoje</span>
         </div>
-        {%- for item in travas %}
-        <a class="vg-faixa-item" href="{{ url_for(item.destino) }}">
-            <span class="cert-status-{{ item.tom }} fw-semibold small text-nowrap">
-                {{ item.rotulo }}
-            </span>
+        {#- Uma linha por TIPO de problema, não por caso: dez certificados
+            vencidos são um problema com dez casos — mesma ação, mesmo destino,
+            uma decisão só. Os nomes ficam na própria linha, para o operador
+            saber QUEM sem precisar clicar. -#}
+        {%- for grupo in travas %}
+        <a class="vg-faixa-item" href="{{ url_for(grupo.destino) }}">
+            <span class="vg-faixa-n cert-status-{{ grupo.tom }}">{{ grupo.quantidade }}</span>
             <span class="vg-faixa-txt">
-                <span class="vg-faixa-t">{{ item.titulo }}</span><br>
-                <span class="vg-faixa-s">{{ item.detalhe }}</span>
+                <span class="vg-faixa-t">{{ grupo.titulo }}</span>
+                <span class="vg-faixa-s">{{ grupo.detalhe }}</span>
+                {%- if grupo.nomes %}
+                <span class="vg-faixa-nomes">
+                    {%- for nome in grupo.nomes %}<span class="vg-faixa-nome">{{ nome }}</span>{% endfor %}
+                    {%- if grupo.restantes %}<span class="vg-faixa-mais">+{{ grupo.restantes }}</span>{% endif %}
+                </span>
+                {%- endif %}
             </span>
             <i class="bi bi-chevron-right vg-faixa-ir"></i>
         </a>
@@ -120,10 +129,10 @@
             {%- for item in bloco.itens %}
             <div class="zl-ficha-row">
                 <span class="zl-ficha-l">
-                    <span class="cert-status-{{ 'danger' if item.causa == 'vencido' else 'warn' }} fw-semibold small">
-                        {{ 'vencido' if item.causa == 'vencido' else (item.dias_restantes ~ ' d') }}
+                    <span class="vg-cert-quando cert-status-{{ 'danger' if item.causa == 'vencido' else 'warn' }}">
+                        {{ 'vencido' if item.causa == 'vencido' else ('vence em ' ~ item.dias_restantes ~ ' dias') }}
                     </span>
-                    {{ item.empresa_nome }}
+                    <span class="vg-cert-nome" title="{{ item.empresa_nome }}">{{ item.empresa_nome }}</span>
                 </span>
                 <span class="zl-ficha-v">{{ item.not_after.strftime('%d/%m') }}</span>
             </div>
@@ -156,10 +165,24 @@
         {%- if bloco.erro or bloco.vazio %}
         {{ vg_estado(bloco, 'Tudo rodando.') }}
         {%- else %}
-        {{ zl_ficha([
-            ('Tarefas em falha', bloco.falhas),
-            ('Motivo mais frequente', bloco.motivo or '—'),
-            ('Portais pausados', bloco.breakers | length)]) }}
+        {#- O motivo NÃO é uma linha própria: ele qualifica as falhas da linha de
+            cima. Como valor da ficha ele quebrava a regra do componente (rótulo
+            à esquerda, NÚMERO à direita) e ainda quebrava linha no meio. -#}
+        <div class="zl-ficha">
+            <div class="zl-ficha-row">
+                <span class="zl-ficha-l">
+                    Tarefas em falha
+                    {%- if bloco.motivo %}
+                    <span class="vg-ficha-sub">na maioria: {{ bloco.motivo }}</span>
+                    {%- endif %}
+                </span>
+                <span class="zl-ficha-v">{{ bloco.falhas }}</span>
+            </div>
+            <div class="zl-ficha-row">
+                <span class="zl-ficha-l">Portais pausados</span>
+                <span class="zl-ficha-v">{{ bloco.breakers | length }}</span>
+            </div>
+        </div>
         {%- endif %}
         {% endcall %}
         {% endif %}

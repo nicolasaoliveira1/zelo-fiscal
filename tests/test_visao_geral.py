@@ -336,7 +336,8 @@ def test_certificado_vencido_trava_e_vencendo_nao():
     itens = visao_geral.itens_que_travam(blocos)
 
     assert len(itens) == 1
-    assert 'ACME' in itens[0]['titulo']
+    assert itens[0]['quantidade'] == 1
+    assert itens[0]['nomes'] == ['ACME']
 
 
 def test_breaker_aberto_trava():
@@ -345,7 +346,7 @@ def test_breaker_aberto_trava():
     itens = visao_geral.itens_que_travam(blocos)
 
     assert len(itens) == 1
-    assert 'FGTS' in itens[0]['titulo']
+    assert itens[0]['nomes'] == ['FGTS']
 
 
 def test_grupo_aguardando_confirmacao_trava():
@@ -355,7 +356,8 @@ def test_grupo_aguardando_confirmacao_trava():
     itens = visao_geral.itens_que_travam(blocos)
 
     assert len(itens) == 1
-    assert '2 grupos' in itens[0]['titulo']
+    assert itens[0]['quantidade'] == 2
+    assert 'Grupos de notas' in itens[0]['titulo']
 
 
 def test_trabalho_pendente_nao_e_trava():
@@ -406,3 +408,65 @@ def test_derivacao_nao_consulta_banco(monkeypatch):
                                    'itens': [{'empresa_nome': 'X', 'causa': 'vencido'}]})
 
     assert len(visao_geral.itens_que_travam(blocos)) == 1
+
+
+def test_dez_certificados_vencidos_sao_UMA_linha_da_faixa():
+    """Dez vencidos são um problema com dez casos, não dez problemas: mesma
+    ação (renovar), mesmo destino, uma decisão só. Uma linha por caso fazia a
+    faixa tomar a tela e empurrar para fora os cartões que dizem o que fazer."""
+    blocos = _blocos(certificados={'inventariado': True, 'vazio': False, 'itens': [
+        {'empresa_nome': f'EMPRESA {i}', 'causa': 'vencido'} for i in range(10)
+    ]})
+
+    itens = visao_geral.itens_que_travam(blocos)
+
+    assert len(itens) == 1
+    assert itens[0]['quantidade'] == 10
+    assert visao_geral.total_de_travas(itens) == 10
+
+
+def test_faixa_cita_alguns_nomes_e_resume_o_resto():
+    """Com 30 casos a faixa continua com uma linha: cita os primeiros e diz
+    quantos sobraram. Quem precisa da lista inteira clica e vai para a tela."""
+    blocos = _blocos(certificados={'inventariado': True, 'vazio': False, 'itens': [
+        {'empresa_nome': f'EMPRESA {i}', 'causa': 'vencido'} for i in range(30)
+    ]})
+
+    grupo = visao_geral.itens_que_travam(blocos)[0]
+
+    assert grupo['quantidade'] == 30
+    assert len(grupo['nomes']) == 8
+    assert grupo['restantes'] == 22
+
+
+def test_total_da_faixa_e_a_soma_do_que_esta_listado():
+    """O número do cabeçalho e os números das linhas não podem discordar: um é
+    a soma dos outros, por construção."""
+    blocos = _blocos(
+        certificados={'inventariado': True, 'vazio': False, 'itens': [
+            {'empresa_nome': 'A', 'causa': 'vencido'},
+            {'empresa_nome': 'B', 'causa': 'vencido'}]},
+        fila={'falhas': 0, 'breakers': [{'alvo': 'FGTS'}], 'vazio': False},
+        nfse={'prontas': 0, 'pendentes': 0, 'grupos_pendentes': 3, 'vazio': False},
+    )
+
+    grupos = visao_geral.itens_que_travam(blocos)
+
+    assert len(grupos) == 3                      # três tipos de problema
+    assert visao_geral.total_de_travas(grupos) == 6   # 2 + 1 + 3 casos
+    assert sum(g['quantidade'] for g in grupos) == visao_geral.total_de_travas(grupos)
+
+
+def test_um_caso_so_fala_no_singular():
+    blocos = _blocos(certificados={'inventariado': True, 'vazio': False, 'itens': [
+        {'empresa_nome': 'ACME', 'causa': 'vencido'}]})
+
+    grupo = visao_geral.itens_que_travam(blocos)[0]
+
+    assert grupo['titulo'] == 'Certificado A1 vencido'
+    assert 'dessa empresa' in grupo['detalhe']
+
+
+def test_total_de_travas_com_lista_vazia():
+    assert visao_geral.total_de_travas([]) == 0
+    assert visao_geral.total_de_travas(None) == 0

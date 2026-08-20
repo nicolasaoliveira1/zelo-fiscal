@@ -80,70 +80,116 @@ def montar(usuario):
     return blocos
 
 
-# O que conta como "trava" — e o que NAO conta.
+# O que conta como "trava" — e o que NÃO conta.
 #
-# Trava = o sistema (ou uma frente inteira) parou e so uma acao humana destrava:
-# certificado VENCIDO (a manifestacao daquela empresa nao roda ate renovar),
-# portal aberto no breaker (a emissao naquele alvo esta pausada) e grupo de
-# notas esperando confirmacao (as notas do grupo ficam FORA da fila enquanto a
+# Trava = o sistema (ou uma frente inteira) parou e só uma ação humana destrava:
+# certificado VENCIDO (a manifestação daquela empresa não roda até renovar),
+# portal aberto no breaker (a emissão naquele alvo está pausada) e grupo de
+# notas esperando confirmação (as notas do grupo ficam FORA da fila enquanto a
 # proposta espera, ND-005).
 #
-# NAO travam: certidao vencida, nota a emitir, tarefa em falha. Isso e TRABALHO,
-# e trabalho e o que a tela toda ja mostra. Se tudo virasse "trava", a faixa
-# viraria um segundo resumo e perderia a unica funcao que tem — dizer, no dia
-# calmo, que nao ha nada.
+# NÃO travam: certidão vencida, nota a emitir, tarefa em falha. Isso é TRABALHO,
+# e trabalho é o que a tela toda já mostra. Se tudo virasse "trava", a faixa
+# viraria um segundo resumo e perderia a única função que tem — dizer, no dia
+# calmo, que não há nada.
 #
-# Certificado VENCENDO tambem nao entra: e aviso, nao parede. Ele aparece no
-# cartao dos certificados, com os dias restantes.
+# Certificado VENCENDO também não entra: é aviso, não parede. Ele aparece no
+# cartão dos certificados, com os dias restantes.
+#
+# A SAÍDA É AGRUPADA POR TIPO, e isso não é economia de pixel: dez certificados
+# vencidos são UM problema com dez casos, não dez problemas. A ação é a mesma
+# (renovar), o destino é o mesmo (o Manifestador) e a decisão do operador é uma
+# só. Uma linha por caso fazia a faixa crescer sem limite — com 30 casos ela
+# tomava a tela inteira e empurrava para fora justamente os cartões que dizem o
+# que fazer.
+
+# Quantos nomes a faixa cita antes de resumir o resto em "+N". Oito cabe em duas
+# linhas mesmo em tela estreita; o resto o operador vê na tela de destino, que é
+# onde ele vai agir de qualquer forma.
+_NOMES_NA_FAIXA = 8
+
+
+def _grupo(tipo, tom, rotulo, titulo, detalhe, destino, nomes):
+    """Uma linha da faixa: um TIPO de problema, com quantos casos e quais."""
+    nomes = [n for n in nomes if n]
+    return {
+        'tipo': tipo,
+        'tom': tom,
+        'rotulo': rotulo,
+        'quantidade': len(nomes),
+        'titulo': titulo,
+        'detalhe': detalhe,
+        'destino': destino,
+        'nomes': nomes[:_NOMES_NA_FAIXA],
+        'restantes': max(0, len(nomes) - _NOMES_NA_FAIXA),
+    }
+
 
 def itens_que_travam(blocos):
-    """O que impede trabalho hoje, DERIVADO dos blocos ja montados.
+    """O que impede trabalho hoje, DERIVADO dos blocos já montados.
 
-    Nao consulta nada: recebe o que `montar` produziu. E o que faz a contagem da
-    faixa ser verdadeira por construcao — ela e o `len()` desta lista, nunca um
-    contador proprio que possa divergir do que esta listado logo abaixo.
+    Não consulta nada: recebe o que `montar` produziu. É o que faz a contagem da
+    faixa ser verdadeira por construção — o total é a soma das quantidades dos
+    grupos, e cada grupo mostra a sua, então o número do cabeçalho sempre bate
+    com o que está listado logo abaixo.
 
-    Bloco com `erro` nao contribui e nao quebra a derivacao: nao saber se ha
-    trava e diferente de nao haver trava, e quem diz isso e o proprio bloco, na
-    sua area da tela.
+    Bloco com `erro` não contribui e não quebra a derivação: não saber se há
+    trava é diferente de não haver trava, e quem diz isso é o próprio bloco, na
+    sua área da tela.
     """
-    itens = []
+    grupos = []
 
     certificados = blocos.get('certificados') or {}
     if not certificados.get('erro'):
-        for cert in certificados.get('itens') or []:
-            if cert.get('causa') != 'vencido':
-                continue
-            itens.append({
-                'tom': 'danger',
-                'rotulo': 'vencido',
-                'titulo': f"Certificado A1 de {cert.get('empresa_nome') or '?'}",
-                'detalhe': 'A manifestacao dessa empresa nao roda ate renovar.',
-                'destino': 'main.manifestador_painel',
-            })
+        vencidos = [c.get('empresa_nome') for c in certificados.get('itens') or []
+                    if c.get('causa') == 'vencido']
+        if vencidos:
+            um = len(vencidos) == 1
+            grupos.append(_grupo(
+                'certificado_vencido', 'danger', 'vencido' if um else 'vencidos',
+                'Certificado A1 vencido' if um else 'Certificados A1 vencidos',
+                'A manifestação dessa empresa não roda até renovar.' if um else
+                'A manifestação dessas empresas não roda até renovar.',
+                'main.manifestador_painel', vencidos))
 
     fila = blocos.get('fila') or {}
     if not fila.get('erro'):
-        for breaker in fila.get('breakers') or []:
-            itens.append({
-                'tom': 'danger',
-                'rotulo': 'pausado',
-                'titulo': f"{breaker.get('alvo')} pausado pelo circuit breaker",
-                'detalhe': 'A emissao nesse portal esta parada. O bloqueio expira '
-                           'sozinho; nada precisa ser religado.',
-                'destino': 'main.diagnostico',
-            })
+        alvos = [b.get('alvo') for b in fila.get('breakers') or []]
+        if alvos:
+            um = len(alvos) == 1
+            grupos.append(_grupo(
+                'portal_pausado', 'danger', 'pausado' if um else 'pausados',
+                'Portal pausado pelo circuit breaker' if um else
+                'Portais pausados pelo circuit breaker',
+                'A emissão está parada nele. O bloqueio expira sozinho; nada '
+                'precisa ser religado.' if um else
+                'A emissão está parada neles. O bloqueio expira sozinho; nada '
+                'precisa ser religado.',
+                'main.diagnostico', alvos))
 
     nfse = blocos.get('nfse') or {}
     if not nfse.get('erro') and nfse.get('grupos_pendentes'):
         total = nfse['grupos_pendentes']
-        itens.append({
-            'tom': 'pend',
-            'rotulo': 'aguarda voce',
-            'titulo': f"{total} grupo{'s' if total != 1 else ''} de notas "
-                      f"esperando confirmacao",
-            'detalhe': 'As notas do grupo ficam fora da fila ate voce decidir.',
-            'destino': 'main.nfse_painel',
-        })
+        um = total == 1
+        grupo = _grupo(
+            'grupo_nfse', 'pend', 'aguarda você',
+            'Grupo de notas esperando confirmação' if um else
+            'Grupos de notas esperando confirmação',
+            'As notas do grupo ficam fora da fila até você decidir.' if um else
+            'As notas desses grupos ficam fora da fila até você decidir.',
+            'main.nfse_painel', [])
+        # aqui não há nomes a citar: a proposta é identificada na tela da NFSe,
+        # e o que importa na faixa é que existem N decisões penduradas
+        grupo['quantidade'] = total
+        grupos.append(grupo)
 
-    return itens
+    return grupos
+
+
+def total_de_travas(grupos):
+    """Quantos CASOS travam trabalho — a soma das quantidades dos grupos.
+
+    O cabeçalho da faixa mostra este número e cada grupo mostra o seu, então os
+    dois nunca podem discordar do que está na tela.
+    """
+    return sum(grupo.get('quantidade') or 0 for grupo in grupos or [])

@@ -1208,6 +1208,9 @@ body.topo-visivel .zl-dock {
 .vg-faixa-txt {
     flex: 1 1 auto;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
 }
 
 .vg-faixa-t {
@@ -1217,6 +1220,47 @@ body.topo-visivel .zl-dock {
 .vg-faixa-s {
     font-size: 0.78rem;
     color: var(--bs-secondary-color);
+}
+
+/* A quantidade de casos do grupo. Mono e tabular como todo número da tela, e
+   grande porque é a primeira coisa que o olho procura na linha. */
+.vg-faixa-n {
+    flex: none;
+    min-width: 2.2ch;
+    text-align: right;
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.1;
+}
+
+/* Quem são os casos. Quebram linha em vez de empilhar uma linha por caso: com
+   30 nomes isso é um parágrafo de duas linhas, não 30 linhas de tela. */
+.vg-faixa-nomes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.4rem;
+    margin-top: 0.15rem;
+}
+
+.vg-faixa-nome,
+.vg-faixa-mais {
+    font-size: 0.72rem;
+    line-height: 1.5;
+    padding: 0 0.4rem;
+    border: 1px solid var(--zelo-line);
+    border-radius: 999px;
+    color: var(--bs-secondary-color);
+    white-space: nowrap;
+    max-width: 22ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vg-faixa-mais {
+    border-style: dashed;
+    font-variant-numeric: tabular-nums;
 }
 
 .vg-faixa-ir {
@@ -1245,27 +1289,63 @@ body.topo-visivel .zl-dock {
 .vg-mosaico > .vg-a-fila { grid-area: fila; }
 
 /* O cartão largo usa a largura que ganhou em vez de empilhar — e faz isso
-   REPOSICIONANDO a saída do macro `zl_comp`, sem forkar o macro: a figura
-   ocupa a coluna da esquerda e a barra com a legenda ocupam a direita.
-   Duplicar o macro para mudar arranjo é como nascem as famílias paralelas de
-   tile que a regra "soma? A : B" já eliminou uma vez. */
+   REPOSICIONANDO a saída do macro `zl_comp`, sem forkar o macro: duplicar um
+   componente para mudar arranjo é como nascem as famílias paralelas de tile que
+   a regra "soma? A : B" já eliminou uma vez.
+
+   É uma grade 2x2 de verdade, e não uma figura ao lado de um gráfico:
+
+       [  89  ]   [ ▓▓▓░░░░░░ ]      <- o número e a barra
+       [ pedem ]  [ ● 5  ● 3  ● 81 ] <- o rótulo e a legenda
+
+   `display: contents` na `.zl-comp-fig` promove o número e o rótulo a itens da
+   grade, que é o que permite cada um cair na sua linha. Sem isso a figura seria
+   um item só e o rótulo não teria como se alinhar com a legenda ao lado. */
 .vg-larga {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     column-gap: 1.6rem;
+    row-gap: 0.3rem;
     align-items: center;
 }
 
-.vg-larga .zl-comp-fig {
+.vg-larga .zl-comp-fig { display: contents; }
+
+.vg-larga .zl-comp-n {
     grid-column: 1;
-    grid-row: 1 / span 2;
-    flex-direction: column;
-    align-items: flex-start;
+    grid-row: 1;
+    align-self: end;
+    line-height: 1;
 }
 
-.vg-larga .zl-comp-bar,
-.vg-larga .zl-comp-leg { grid-column: 2; }
-.vg-larga .zl-comp-bar { margin-top: 0; }
+.vg-larga .zl-comp-d {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: start;
+    font-size: 0.82rem;
+    color: var(--bs-secondary-color);
+    line-height: 1.2;
+}
+
+.vg-larga .zl-comp-bar {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0;
+    align-self: center;
+}
+
+.vg-larga .zl-comp-leg {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+    /* O `margin-top: .8rem` do componente separa a legenda da barra no arranjo
+       EMPILHADO original. Aqui a separação é o `row-gap` da grade, e a margem
+       herdada empurrava a legenda para baixo do rótulo em vez de emparelhá-la.
+       Zerada só dentro do cartão largo — o arranjo empilhado segue intacto nas
+       outras telas que usam o macro. */
+    margin-top: 0;
+}
+
 .vg-larga .visually-hidden { grid-column: 1 / -1; }
 
 @media (max-width: 480px) {
@@ -1273,13 +1353,11 @@ body.topo-visivel .zl-dock {
         grid-template-columns: minmax(0, 1fr);
     }
 
-    .vg-larga .zl-comp-fig {
+    .vg-larga .zl-comp-bar,
+    .vg-larga .zl-comp-leg {
         grid-column: 1;
         grid-row: auto;
     }
-
-    .vg-larga .zl-comp-bar,
-    .vg-larga .zl-comp-leg { grid-column: 1; }
 }
 
 /* A lista alta rola dentro da própria caixa. Sem teto, uma carteira com
@@ -1289,6 +1367,44 @@ body.topo-visivel .zl-dock {
 .vg-lista {
     max-height: 15rem;
     overflow-y: auto;
+    /* respiro para a barra de rolagem não encostar na data: sem isto o valor
+       fica colado no trilho, que é justamente a coluna que o operador lê */
+    padding-right: 0.6rem;
+    scrollbar-gutter: stable;
+}
+
+/* Nome de empresa é longo e imprevisível. Sem isto, um nome comprido espremia
+   o chip de status e a data contra a borda — e a data é o dado que o operador
+   compara entre as linhas. O chip vai para CIMA do nome, em linha própria e
+   pequena, em vez de disputar a horizontal com ele. */
+.vg-lista .zl-ficha-row {
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.vg-lista .zl-ficha-l {
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+    min-width: 0;
+}
+
+.vg-cert-nome {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vg-cert-quando {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.vg-lista .zl-ficha-v {
+    flex: none;
+    white-space: nowrap;
 }
 
 @media (max-width: 1199px) {
@@ -1353,6 +1469,15 @@ body.topo-visivel .zl-dock {
 
 .vg-card-f a:hover {
     text-decoration: underline;
+}
+
+/* Anotação de uma linha da ficha: qualifica o número ao lado em vez de virar
+   uma linha própria com texto no lugar do valor. */
+.vg-ficha-sub {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--bs-secondary-color);
+    line-height: 1.3;
 }
 
 /* estado vazio × fonte fora: dizer "nada a fazer" e "não consegui ler"
