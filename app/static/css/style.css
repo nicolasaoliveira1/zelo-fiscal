@@ -78,6 +78,73 @@
 .text-danger { color: var(--zelo-danger) !important; }
 .text-warning { color: var(--zelo-warn) !important; }
 
+/* Pilha de toasts: recolhidos (deck) por padrao, expandem no hover */
+.toast-stack {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    width: 420px;
+    max-width: calc(100vw - 2rem);
+    z-index: 1090;
+}
+
+.toast-stack .stk-toast {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    box-sizing: border-box;
+    border-radius: .55rem;
+    color: var(--bs-white);
+    box-shadow: 0 .6rem 1.4rem rgba(0, 0, 0, .28);
+    transform-origin: bottom right;
+    transition: transform .35s cubic-bezier(.22, 1, .36, 1), opacity .3s ease;
+    will-change: transform, opacity;
+}
+
+.toast-stack .stk-toast.bg-success {
+    background-color: var(--bs-success);
+}
+
+.toast-stack .stk-toast.bg-danger {
+    background-color: var(--bs-danger);
+}
+
+.toast-stack .stk-toast.bg-primary {
+    background-color: var(--bs-primary);
+}
+
+/* No escuro, --bs-primary inverte para cinza claro; o texto branco fixo do
+   .stk-toast some. Usa texto escuro (mesmo token da acao primaria no dark). */
+[data-bs-theme="dark"] .toast-stack .stk-toast.bg-primary,
+[data-bs-theme="dark"] .toast-stack .stk-toast.bg-primary .stk-close {
+    color: var(--zelo-action-fg);
+}
+
+.toast-stack .stk-body {
+    padding: .85rem 2.3rem .85rem 1rem;
+    font-size: 1rem;
+    line-height: 1.3;
+}
+
+.toast-stack .stk-close {
+    position: absolute;
+    top: .3rem;
+    right: .4rem;
+    padding: .1rem .4rem;
+    border: 0;
+    background: transparent;
+    color: var(--bs-white);
+    opacity: .75;
+    font-size: 1.15rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.toast-stack .stk-close:hover {
+    opacity: 1;
+}
+
 [data-bs-theme="dark"] {
     --zelo-ink: #F2F4F7;
     --zelo-graphite: #E2E5EA;
