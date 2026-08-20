@@ -63,14 +63,15 @@
         Antes eram 3 cartões irmãos, com a soma parecendo mais uma parcela. -#}
     {% macro batch_confirm_modal(slug, titulo, plural) -%}
     {%- set Slug = slug | capitalize -%}
-    <div class="modal fade" id="{{ slug }}BatchModal" tabindex="-1" aria-hidden="true"
+    <div class="modal fade" id="{{ slug }}BatchModal" tabindex="-1"
+        aria-labelledby="{{ slug }}BatchModalTitulo" aria-hidden="true"
         data-bs-backdrop="static" data-bs-keyboard="false">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content batch-action-modal">
                 <div class="modal-header">
                     <div>
                         <span class="zl-eyebrow">Confirmar</span>
-                        <h5 class="modal-title mb-0">Emitir {{ titulo }} em lote</h5>
+                        <h5 class="modal-title mb-0" id="{{ slug }}BatchModalTitulo">Emitir {{ titulo }} em lote</h5>
                     </div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
                 </div>
@@ -112,14 +113,15 @@
         para lista de fatos). Mesmo componente do painel de andamento, de
         propósito: o operador acabou de olhar para ele. -#}
     {% macro batch_summary_modal(slug, titulo) -%}
-    <div class="modal fade" id="{{ slug }}BatchSummaryModal" tabindex="-1" aria-hidden="true"
+    <div class="modal fade" id="{{ slug }}BatchSummaryModal" tabindex="-1"
+        aria-labelledby="{{ slug }}BatchSummaryModalTitulo" aria-hidden="true"
         data-bs-backdrop="static" data-bs-keyboard="false">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content batch-summary-modal">
                 <div class="modal-header border-0 pb-0">
                     <div>
                         <span class="zl-eyebrow">Lote concluído</span>
-                        <h5 class="modal-title mb-0">Resumo do lote {{ titulo }}</h5>
+                        <h5 class="modal-title mb-0" id="{{ slug }}BatchSummaryModalTitulo">Resumo do lote {{ titulo }}</h5>
                     </div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
                 </div>
@@ -689,12 +691,13 @@
         </div>
     </div>
 
-    <div class="modal fade" id="confirmarDataModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
+    <div class="modal fade" id="confirmarDataModal" tabindex="-1" aria-labelledby="confirmarDataModalTitulo"
+        aria-hidden="true" data-bs-backdrop="static"
         data-bs-keyboard="false">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Confirmar Atualização</h5>
+                    <h5 class="modal-title" id="confirmarDataModalTitulo">Confirmar Atualização</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -715,12 +718,13 @@
         </div>
     </div>
 
-    <div class="modal fade" id="marcarPendenteModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
+    <div class="modal fade" id="marcarPendenteModal" tabindex="-1" aria-labelledby="marcarPendenteModalTitulo"
+        aria-hidden="true" data-bs-backdrop="static"
         data-bs-keyboard="false">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Nenhum arquivo baixado</h5>
+                    <h5 class="modal-title" id="marcarPendenteModalTitulo">Nenhum arquivo baixado</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -738,12 +742,13 @@
         </div>
     </div>
 
-    <div class="modal fade" id="estadualRsPositivaModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
+    <div class="modal fade" id="estadualRsPositivaModal" tabindex="-1"
+        aria-labelledby="estadualRsPositivaModalTitulo" aria-hidden="true" data-bs-backdrop="static"
         data-bs-keyboard="false">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title text-danger">Certidão Positiva Detectada</h5>
+                    <h5 class="modal-title text-danger" id="estadualRsPositivaModalTitulo">Certidão Positiva Detectada</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -757,12 +762,13 @@
         </div>
     </div>
 
-    <div class="modal fade" id="infoModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
+    <div class="modal fade" id="infoModal" tabindex="-1" aria-labelledby="infoModalTitulo"
+        aria-hidden="true" data-bs-backdrop="static"
         data-bs-keyboard="false">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Pronto para emitir</h5>
+                    <h5 class="modal-title" id="infoModalTitulo">Pronto para emitir</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body" id="infoModalBody">
@@ -774,11 +780,12 @@
         </div>
     </div>
 
-    <div class="modal fade" id="registrarFederalModal" tabindex="-1" aria-hidden="true">
+    <div class="modal fade" id="registrarFederalModal" tabindex="-1"
+        aria-labelledby="registrarFederalModalTitulo" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Registrar certidão Federal</h5>
+                    <h5 class="modal-title" id="registrarFederalModalTitulo">Registrar certidão Federal</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
                 </div>
                 <div class="modal-body">
