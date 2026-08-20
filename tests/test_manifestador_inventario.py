@@ -5,6 +5,8 @@ empresas produziu (`.specs/features/manifestador-nfe/recon.md`):
 69 prontas, 10 vencidas, 9 sem arquivo, 4 com senha diferente e 1 so com e-CPF
 de socios (REPRESENTACOES LITORAL).
 """
+from datetime import datetime
+
 from app import db
 from app.models import CertificadoEmpresa, Empresa, EstadoCertificado
 from app.services import manifestador_cofre as cofre
@@ -361,3 +363,52 @@ def test_inventario_pula_empresa_nao_ativa_na_receita(app, ids, tmp_path,
 
         assert db.session.get(Empresa, viva.id).certificado is not None
         assert db.session.get(Empresa, morta.id).certificado is None
+
+
+def test_senha_pendente_preserva_o_vencimento_ja_conhecido(app, ids, tmp_path,
+                                                           monkeypatch):
+    """O certificado trocado na pasta com senha nova nao pode APAGAR o alerta.
+
+    Zerar `not_after` em `senha_pendente` fazia o aviso de vencimento sumir em
+    silencio justo no caso em que o operador mais precisa dele. O arquivo
+    continua la; o que se perdeu foi a capacidade de abri-lo."""
+    with app.app_context():
+        emp = _empresa('EMPRESA TROCOU SENHA', '11.222.333/0001-81')
+        pasta = tmp_path / 'D'
+        pasta.mkdir()
+        (pasta / 'd.pfx').write_bytes(
+            _fazer_pfx(cn='X:11222333000181', senha=b'senha-que-ninguem-sabe'))
+        _montar_drive(tmp_path, monkeypatch, {'EMPRESA TROCOU SENHA': pasta})
+
+        vencimento = datetime(2026, 9, 10, 8, 0)
+        db.session.add(CertificadoEmpresa(
+            empresa_id=emp.id, estado=EstadoCertificado.PRONTO,
+            not_after=vencimento))
+        db.session.commit()
+
+        cofre.inventariar()
+
+        cert = db.session.get(Empresa, emp.id).certificado
+        assert cert.estado == EstadoCertificado.SENHA_PENDENTE
+        assert cert.not_after == vencimento
+
+
+def test_sem_arquivo_zera_o_vencimento(app, ids, tmp_path, monkeypatch):
+    """O oposto do caso acima: sem arquivo nenhum, afirmar um vencimento seria
+    inventar dado sobre um certificado que nao esta mais la."""
+    with app.app_context():
+        emp = _empresa('EMPRESA SEM PFX', '11.222.333/0001-81')
+        pasta = tmp_path / 'E'
+        pasta.mkdir()
+        _montar_drive(tmp_path, monkeypatch, {'EMPRESA SEM PFX': pasta})
+
+        db.session.add(CertificadoEmpresa(
+            empresa_id=emp.id, estado=EstadoCertificado.PRONTO,
+            not_after=datetime(2026, 9, 10, 8, 0)))
+        db.session.commit()
+
+        cofre.inventariar()
+
+        cert = db.session.get(Empresa, emp.id).certificado
+        assert cert.estado == EstadoCertificado.SEM_ARQUIVO
+        assert cert.not_after is None

@@ -22,7 +22,8 @@ inventario continua funcionando, porque metadado de certificado nao e segredo.
 """
 import os
 import re
-from datetime import datetime
+from threading import Lock
+from datetime import date, datetime
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -366,18 +367,51 @@ def _aplicar(empresa, estado, info, senha, detalhe):
             except CofreError:
                 pass
     else:
-        cert.caminho = (detalhe.split('; ')[0] if estado ==
-                        _ESTADO_SENHA_PENDENTE else None)
+        senha_pendente = estado == _ESTADO_SENHA_PENDENTE
+        cert.caminho = detalhe.split('; ')[0] if senha_pendente else None
         cert.subject_cn = None
         cert.issuer_cn = None
         cert.cnpj_certificado = None
-        cert.not_after = None
+        # `senha_pendente` PRESERVA o vencimento ja conhecido: o arquivo continua
+        # la, o que se perdeu foi a capacidade de abri-lo. Zerar aqui fazia o
+        # alerta de vencimento SUMIR EM SILENCIO justo quando o certificado e
+        # trocado na pasta com senha nova — o caso em que o operador mais precisa
+        # do aviso. Nos demais estados o certificado nao existe (ou nunca foi
+        # desta empresa), e afirmar um vencimento seria inventar dado.
+        if not senha_pendente:
+            cert.not_after = None
         cert.senha_cifrada = None
 
     return cert
 
 
 _ESTADO_SENHA_PENDENTE = 'senha_pendente'
+
+
+_INVENTARIO_LOCK = Lock()
+
+
+def inventario_em_curso():
+    """True quando uma varredura ja esta rodando (job diario ou rota)."""
+    return _INVENTARIO_LOCK.locked()
+
+
+def _inventario_acquire(blocking=False):
+    """Adquire o lock da varredura. False se ja ha uma em curso.
+
+    Mesmo padrao nao-bloqueante da `NfseSession` e do perfil municipal: a
+    varredura leva minutos e grava a linha de TODA empresa, entao duas em
+    paralelo disputam o mesmo `empresa_id` (`unique`) e a que perder leva o
+    commit unico do fim junto — a varredura inteira se perde por um clique."""
+    return _INVENTARIO_LOCK.acquire(blocking=blocking)
+
+
+def _inventario_release():
+    """Idempotente: liberar sem ter adquirido nao lanca."""
+    try:
+        _INVENTARIO_LOCK.release()
+    except RuntimeError:
+        pass
 
 
 def inventariar(empresas=None):
@@ -433,6 +467,53 @@ def estado_da_carteira():
         CertificadoEmpresa.estado, db.func.count(CertificadoEmpresa.id)
     ).group_by(CertificadoEmpresa.estado).all()
     return {estado: total for estado, total in linhas}
+
+
+def certificados_a_vencer(dias=30):
+    """Certificados vencidos ou dentro da janela, lidos somente do banco.
+
+    O estado gravado pelo inventario e apenas informativo para este alerta: a
+    data de vencimento e a fonte de verdade. Assim um certificado vencido entra
+    mesmo se uma linha antiga ainda disser ``pronto``.
+
+    A `Empresa` vem no MESMO select, nao pelo backref: `CertificadoEmpresa.empresa`
+    e lazy padrao, e uma query por linha traria a carteira inteira de volta ao
+    banco so para ler o nome e a situacao (o mesmo N+1 que o `calc_targets` evita).
+    """
+    from app import db
+    from app.models import CertificadoEmpresa, Empresa
+    from app.services.receita_service import empresa_ativa
+
+    linhas = (db.session.query(CertificadoEmpresa, Empresa)
+              .join(Empresa, Empresa.id == CertificadoEmpresa.empresa_id)
+              .filter(CertificadoEmpresa.not_after.isnot(None))
+              .all())
+
+    itens = []
+    for certificado, empresa in linhas:
+        if not empresa_ativa(empresa):
+            continue
+
+        dias_restantes = (certificado.not_after.date() - date.today()).days
+        if dias_restantes > dias:
+            continue
+
+        # A CAUSA sai da comparacao de datetime, como `InfoCertificado.vencido`
+        # e como o `inventariar` que grava o estado; so a CONTAGEM de dias e por
+        # data. Decidir a causa por dia deixava o dia do vencimento dizendo
+        # "faltam 0 dia(s), providencie a renovacao" para um certificado que o
+        # inventario ja gravou como VENCIDO — a tela e o e-mail discordando.
+        causa = 'vencido' if certificado.not_after <= datetime.now() else 'vencendo'
+        itens.append({
+            'empresa_id': certificado.empresa_id,
+            'empresa_nome': empresa.nome,
+            'not_after': certificado.not_after,
+            'estado': certificado.estado,
+            'dias_restantes': dias_restantes,
+            'causa': causa,
+        })
+
+    return sorted(itens, key=lambda item: item['dias_restantes'])
 
 
 def gravar_senha(empresa, senha):

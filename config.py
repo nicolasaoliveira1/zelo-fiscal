@@ -96,6 +96,9 @@ class Config:
     # ela o inventario do cofre continua rodando — metadado de certificado nao e
     # segredo —, mas gravar e ler senha e recusado com mensagem acionavel.
     MANIF_VAULT_KEY = os.environ.get('MANIF_VAULT_KEY') or ''
+    # Janela em dias para alertar certificados do cofre que ja venceram ou estao
+    # proximos do vencimento. Fica em config, sem dado novo no dominio.
+    MANIF_CERT_ALERTA_DIAS = _env_int('MANIF_CERT_ALERTA_DIAS', 30)
 
     RS_ALTCHA_AUTOSOLVE_ENABLED = _env_bool('RS_ALTCHA_AUTOSOLVE_ENABLED', False)
     RS_ALTCHA_MANUAL_FALLBACK = _env_bool('RS_ALTCHA_MANUAL_FALLBACK', True)

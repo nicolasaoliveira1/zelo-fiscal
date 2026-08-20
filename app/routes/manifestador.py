@@ -117,11 +117,22 @@ def manifestador_cofre_estado():
 @bp.route('/manifestador/cofre/inventariar', methods=['POST'])
 @requer_papel('operador')
 def manifestador_cofre_inventariar():
-    """Varre o drive e reclassifica todas as empresas ativas."""
+    """Varre o drive e reclassifica todas as empresas ativas.
+
+    409 imediato quando ja ha varredura em curso (o job diario, ou outro clique):
+    duas varreduras gravam a linha da MESMA empresa e a perdedora derruba o
+    commit unico do fim. Lock nao-bloqueante, como a `NfseSession`.
+    """
+    if not manifestador_cofre._inventario_acquire():
+        return json_error(
+            'Ja existe um inventario do cofre em andamento. Aguarde ele '
+            'terminar e tente de novo.', 409)
     try:
         resumo = manifestador_cofre.inventariar()
     except manifestador_cofre.CofreError as exc:
         return json_error(str(exc), 503)
+    finally:
+        manifestador_cofre._inventario_release()
 
     log_event('manifestador_inventario_pedido', **resumo)
     return {'status': 'ok', 'resumo': resumo}
