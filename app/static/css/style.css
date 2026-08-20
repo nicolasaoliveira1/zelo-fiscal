@@ -1152,6 +1152,226 @@ body.topo-visivel .zl-dock {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   Visão Geral (`/`) — três padrões que a página inicial acrescenta.
+   O RESTO da tela sai dos macros que já existem: `zl_comp` para
+   Certidões (os números somam a carteira) e `zl_ficha` para NFSe e
+   Fila (fatos independentes). Nada de família nova de tile.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── 1. A faixa "o que trava" ─────────────────────────────────
+   UM componente que muda de estado, não dois blocos alternativos:
+   com itens abre em alerta, sem itens vira "nada trava hoje". É a
+   diferença entre a página dizer "está tudo bem" e a página só
+   deixar de dizer que está mal. */
+.vg-faixa {
+    border: 1px solid var(--zelo-line);
+    border-radius: 0.65rem;
+    overflow: hidden;
+    background: var(--bs-body-bg);
+    margin-bottom: 1.1rem;
+}
+
+.vg-faixa-h {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.6rem 0.95rem;
+    background: var(--zelo-danger-soft);
+    color: var(--zelo-danger);
+    font-weight: 600;
+    font-size: 0.86rem;
+}
+
+.vg-faixa-h.is-calmo {
+    background: var(--zelo-ok-soft);
+    color: var(--zelo-ok);
+}
+
+.vg-faixa-item {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    padding: 0.6rem 0.95rem;
+    color: inherit;
+    text-decoration: none;
+}
+
+.vg-faixa-item + .vg-faixa-item {
+    border-top: 1px solid var(--zelo-line);
+}
+
+.vg-faixa-item:hover {
+    background: var(--bs-tertiary-bg);
+    color: inherit;
+}
+
+.vg-faixa-txt {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.vg-faixa-t {
+    font-size: 0.92rem;
+}
+
+.vg-faixa-s {
+    font-size: 0.78rem;
+    color: var(--bs-secondary-color);
+}
+
+.vg-faixa-ir {
+    flex: none;
+    color: var(--bs-secondary-color);
+    font-size: 0.8rem;
+}
+
+/* ── 2. O mosaico ─────────────────────────────────────────────
+   A grade é desigual DE PROPÓSITO: a carteira de certidões é larga
+   (figura + barra + legenda numa linha) e a lista de certificados é
+   alta (uma linha por empresa). Grade uniforme desperdiça as duas. */
+.vg-mosaico {
+    display: grid;
+    gap: 0.9rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-areas:
+        "cert cert cert a1"
+        "nfse nfse fila a1";
+    align-items: start;
+}
+
+.vg-mosaico > .vg-a-cert { grid-area: cert; }
+.vg-mosaico > .vg-a-a1   { grid-area: a1; }
+.vg-mosaico > .vg-a-nfse { grid-area: nfse; }
+.vg-mosaico > .vg-a-fila { grid-area: fila; }
+
+/* O cartão largo usa a largura que ganhou em vez de empilhar — e faz isso
+   REPOSICIONANDO a saída do macro `zl_comp`, sem forkar o macro: a figura
+   ocupa a coluna da esquerda e a barra com a legenda ocupam a direita.
+   Duplicar o macro para mudar arranjo é como nascem as famílias paralelas de
+   tile que a regra "soma? A : B" já eliminou uma vez. */
+.vg-larga {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 1.6rem;
+    align-items: center;
+}
+
+.vg-larga .zl-comp-fig {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.vg-larga .zl-comp-bar,
+.vg-larga .zl-comp-leg { grid-column: 2; }
+.vg-larga .zl-comp-bar { margin-top: 0; }
+.vg-larga .visually-hidden { grid-column: 1 / -1; }
+
+@media (max-width: 480px) {
+    .vg-larga {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .vg-larga .zl-comp-fig {
+        grid-column: 1;
+        grid-row: auto;
+    }
+
+    .vg-larga .zl-comp-bar,
+    .vg-larga .zl-comp-leg { grid-column: 1; }
+}
+
+/* A lista alta rola dentro da própria caixa. Sem teto, uma carteira com
+   muitos certificados vencendo empurra o cartão vizinho para fora da
+   tela — a mesma lição do painel ancorado do manifestador, onde o
+   "Fechar" foi parar em −252px. */
+.vg-lista {
+    max-height: 15rem;
+    overflow-y: auto;
+}
+
+@media (max-width: 1199px) {
+    .vg-mosaico {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-areas:
+            "cert a1"
+            "nfse a1"
+            "fila a1";
+    }
+}
+
+@media (max-width: 767px) {
+    .vg-mosaico {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas: "cert" "a1" "nfse" "fila";
+    }
+
+    .vg-lista {
+        max-height: none;
+    }
+}
+
+/* ── 3. Cartão que aponta para outra tela ─────────────────────
+   Cabeçalho com o nome da frente e rodapé com o link para onde a
+   coisa se resolve. A Visão Geral aponta; quem executa é a tela do
+   pilar. */
+.vg-card-h {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.7rem 0.95rem;
+    border-bottom: 1px solid var(--zelo-line);
+}
+
+.vg-card-h .bi {
+    color: var(--bs-secondary-color);
+}
+
+.vg-card-h-extra {
+    margin-left: auto;
+    font-size: 0.8rem;
+    color: var(--bs-secondary-color);
+}
+
+.vg-card-b {
+    padding: 0.9rem 0.95rem;
+}
+
+.vg-card-f {
+    padding: 0.5rem 0.95rem;
+    border-top: 1px solid var(--zelo-line);
+    background: var(--bs-tertiary-bg);
+    font-size: 0.8rem;
+}
+
+.vg-card-f a {
+    color: var(--bs-emphasis-color);
+    font-weight: 500;
+    text-decoration: none;
+}
+
+.vg-card-f a:hover {
+    text-decoration: underline;
+}
+
+/* estado vazio × fonte fora: dizer "nada a fazer" e "não consegui ler"
+   com a mesma cara faria o segundo passar por bom dia */
+.vg-vazio,
+.vg-falha {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.84rem;
+    color: var(--bs-secondary-color);
+    margin: 0;
+}
+
+.vg-falha .bi {
+    color: var(--zelo-warn);
+}
+
+/* ══════════════════════════════════════════════════════════════
    Painel de andamento do lote (overlay durante a emissão) — só a
    moldura. O miolo é o .zl-comp compartilhado, o mesmo que o resumo
    e o rendimento do lote usam: os três momentos do lote (antes,

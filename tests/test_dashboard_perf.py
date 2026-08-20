@@ -96,19 +96,19 @@ class TestGetConfigCached:
 
 class TestDashboard:
     def test_dashboard_renderiza_ok(self, client, ids):
-        r = client.get('/')
+        r = client.get('/certidoes')
         assert r.status_code == 200
         assert b'Empresa Teste' in r.data
 
     def test_dashboard_filtro_cidade_existente(self, client, ids):
-        r = client.get('/?cidade=Tramandai')
+        r = client.get('/certidoes?cidade=Tramandai')
         assert r.status_code == 200
         assert b'Empresa Teste' in r.data
 
     def test_dashboard_cidade_deeplink_renderiza_todas_e_marca_chip(self, client, ids, empresa_sp):
         """Estado/cidade agora filtram no cliente: todas as empresas continuam no
         HTML (o filtro efetivo é no navegador) e o chip da cidade vem pré-marcado."""
-        r = client.get('/?cidade=S%C3%A3o+Paulo')
+        r = client.get('/certidoes?cidade=S%C3%A3o+Paulo')
         assert r.status_code == 200
         assert b'Empresa SP' in r.data
         assert b'Empresa Teste' in r.data  # não é mais removida no servidor
@@ -117,12 +117,12 @@ class TestDashboard:
 
     def test_dashboard_filtro_cidade_inexistente_nao_quebra(self, client, ids):
         """Cidade inexistente: sem chip para pré-marcar, a página renderiza tudo."""
-        r = client.get('/?cidade=CidadeQueNaoExiste')
+        r = client.get('/certidoes?cidade=CidadeQueNaoExiste')
         assert r.status_code == 200
         assert b'Empresa Teste' in r.data
 
     def test_dashboard_estado_deeplink_renderiza_todas_e_marca_chip(self, client, ids, empresa_sp):
-        r = client.get('/?estado=SP')
+        r = client.get('/certidoes?estado=SP')
         assert r.status_code == 200
         assert b'Empresa SP' in r.data
         assert b'Empresa Teste' in r.data  # filtro é client-side, não remove no servidor
@@ -141,7 +141,7 @@ class TestDashboard:
                 db.session.add(Certidao(tipo=TipoCertidao.MUNICIPAL, empresa=emp))
             db.session.commit()
         try:
-            r = client.get('/')
+            r = client.get('/certidoes')
             assert r.status_code == 200
             html = r.data.decode('utf-8')
             # ambas as empresas renderizam (filtro client-side)
@@ -161,7 +161,7 @@ class TestDashboard:
 
     def test_dashboard_data_attributes_presentes(self, client, ids):
         """Os data-* de contadores devem aparecer no HTML."""
-        r = client.get('/')
+        r = client.get('/certidoes')
         assert b'data-count-total=' in r.data
         assert b'data-menor-validade=' in r.data
         assert b'data-status-cert=' in r.data
@@ -172,7 +172,7 @@ class TestDashboard:
             cert = Certidao.query.get(ids['trabalhista'])
             cert.status_especial = StatusEspecial.PENDENTE
             db.session.commit()
-        r = client.get('/')
+        r = client.get('/certidoes')
         assert b"data-status-cert=\"pendentes\"" in r.data
         with app.app_context():
             cert = Certidao.query.get(ids['trabalhista'])
@@ -184,7 +184,7 @@ class TestDashboard:
             cert = Certidao.query.get(ids['trabalhista'])
             cert.data_validade = date.today() - timedelta(days=1)
             db.session.commit()
-        r = client.get('/')
+        r = client.get('/certidoes')
         assert b"data-status-cert=\"vencidas\"" in r.data
         with app.app_context():
             cert = Certidao.query.get(ids['trabalhista'])
@@ -216,7 +216,7 @@ class TestDashboard:
                                .values(atualizado_em=None))
             db.session.commit()
         try:
-            html = client.get('/').data.decode('utf-8')
+            html = client.get('/certidoes').data.decode('utf-8')
             m = re.search(r'data-nome-empresa="Aggr SA"[\s\S]*?data-ultima-atualizacao="([^"]*)"', html)
             assert m, 'card Aggr SA nao encontrado'
             assert m.group(1) == '2025-06-15T14:30:00'
@@ -240,7 +240,7 @@ class TestDashboard:
                                .values(atualizado_em=None))
             db.session.commit()
         try:
-            html = client.get('/').data.decode('utf-8')
+            html = client.get('/certidoes').data.decode('utf-8')
             m = re.search(r'data-nome-empresa="SemData SA"[\s\S]*?data-ultima-atualizacao="([^"]*)"', html)
             assert m, 'card SemData SA nao encontrado'
             assert m.group(1) == ''

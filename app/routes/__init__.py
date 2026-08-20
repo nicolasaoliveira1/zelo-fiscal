@@ -32,6 +32,7 @@ from app.services import (
     dryrun_municipio,
     fila_emissao,
     portal_health,
+    visao_geral,
 )
 from app.services.correlation import CorrelationContext
 from app.services.execution_logger import log_event
@@ -294,7 +295,40 @@ def api_pendencias():
     """Total de pendências para o polling do title da aba (base.html)."""
     return jsonify({'total': _contar_pendencias()})
 
+# Dias da semana em portugues, escritos aqui de proposito: `strftime('%A')`
+# depende do locale do SO, e no Windows do escritorio ele volta em ingles.
+_DIAS_SEMANA = ('segunda-feira', 'terca-feira', 'quarta-feira', 'quinta-feira',
+                'sexta-feira', 'sabado', 'domingo')
+
+
+def _saudacao(agora=None):
+    """Bom dia / Boa tarde / Boa noite pela hora LOCAL do servidor (AD-004)."""
+    hora = (agora or datetime.now()).hour
+    if hora < 12:
+        return 'Bom dia'
+    return 'Boa tarde' if hora < 18 else 'Boa noite'
+
+
 @bp.route('/')
+def visao_geral_painel():
+    """A pagina inicial: por onde comecar hoje.
+
+    Nao tem fonte de dados propria — `visao_geral.montar` compoe o que cada
+    pilar ja responde, e a faixa e DERIVADA dos blocos montados, para a contagem
+    dela ser verdadeira por construcao (OVER-11).
+    """
+    blocos = visao_geral.montar(current_user)
+    hoje = date.today()
+    return render_template(
+        'visao_geral.html',
+        blocos=blocos,
+        travas=visao_geral.itens_que_travam(blocos),
+        saudacao=_saudacao(),
+        hoje_extenso=f'{_DIAS_SEMANA[hoje.weekday()]}, {hoje:%d/%m/%Y}',
+    )
+
+
+@bp.route('/certidoes')
 def dashboard():
     status_filtros = request.args.getlist('status')
     tipo_filtros = request.args.getlist('tipo')
