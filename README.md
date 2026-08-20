@@ -1,11 +1,14 @@
+<img src="app/static/images/zelo-mark-512.png" width="92" align="left" alt="Zelo" />
+
+# Zelo
+
+**Regularidade sob controle.**
+
+<br clear="left" />
+
 <div align="center">
 
-  <img src="app/static/images/zelo-mark-512.png" width="104" height="104" alt="Zelo" />
-
-  <h1>Zelo</h1>
-
   <p>
-    <b>Regularidade sob controle.</b><br />
     Automação das rotinas fiscais que se repetem todo mês e têm prazo:<br />
     certidões dos clientes, NFS-e de honorários e manifestação de NF-e.
   </p>
