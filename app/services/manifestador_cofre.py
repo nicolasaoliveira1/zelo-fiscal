@@ -22,7 +22,7 @@ inventario continua funcionando, porque metadado de certificado nao e segredo.
 """
 import os
 import re
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -433,6 +433,39 @@ def estado_da_carteira():
         CertificadoEmpresa.estado, db.func.count(CertificadoEmpresa.id)
     ).group_by(CertificadoEmpresa.estado).all()
     return {estado: total for estado, total in linhas}
+
+
+def certificados_a_vencer(dias=30):
+    """Certificados vencidos ou dentro da janela, lidos somente do banco.
+
+    O estado gravado pelo inventario e apenas informativo para este alerta: a
+    data de vencimento e a fonte de verdade. Assim um certificado vencido entra
+    mesmo se uma linha antiga ainda disser ``pronto``.
+    """
+    from app.models import CertificadoEmpresa
+    from app.services.receita_service import empresa_ativa
+
+    itens = []
+    for certificado in CertificadoEmpresa.query.filter(
+            CertificadoEmpresa.not_after.isnot(None)).all():
+        if not empresa_ativa(certificado.empresa):
+            continue
+
+        dias_restantes = (certificado.not_after.date() - date.today()).days
+        if dias_restantes > dias:
+            continue
+
+        causa = 'vencido' if dias_restantes < 0 else 'vencendo'
+        itens.append({
+            'empresa_id': certificado.empresa_id,
+            'empresa_nome': certificado.empresa.nome,
+            'not_after': certificado.not_after,
+            'estado': certificado.estado,
+            'dias_restantes': dias_restantes,
+            'causa': causa,
+        })
+
+    return sorted(itens, key=lambda item: item['dias_restantes'])
 
 
 def gravar_senha(empresa, senha):
