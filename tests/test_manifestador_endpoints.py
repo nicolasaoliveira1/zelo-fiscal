@@ -106,6 +106,33 @@ def test_cofre_sem_inventario_diz_que_nao_foi_inventariado(app, ids, client):
     assert client.get('/manifestador/cofre').get_json()['inventariado'] is False
 
 
+def test_inventariar_com_varredura_em_curso_devolve_409(app, ids, client):
+    """Lock nao-bloqueante, como a `NfseSession`: duas varreduras gravam a linha
+    da MESMA empresa e a perdedora derruba o commit unico do fim."""
+    from app.services import manifestador_cofre
+
+    assert manifestador_cofre._inventario_acquire() is True
+    try:
+        resposta = client.post('/manifestador/cofre/inventariar')
+    finally:
+        manifestador_cofre._inventario_release()
+
+    assert resposta.status_code == 409
+    assert 'andamento' in resposta.get_json()['message'].lower()
+
+
+def test_inventariar_libera_o_lock_mesmo_com_drive_fora(app, ids, client,
+                                                        monkeypatch):
+    """Sem o `finally`, um drive fora deixaria o lock preso e o job diario
+    nunca mais varreria — ate reiniciar o processo."""
+    from app.services import manifestador_cofre
+
+    monkeypatch.setattr(manifestador_cofre, 'rede_disponivel', lambda: False)
+    client.post('/manifestador/cofre/inventariar')
+
+    assert manifestador_cofre.inventario_em_curso() is False
+
+
 def test_inventariar_com_drive_fora_devolve_503(app, ids, client, monkeypatch):
     from app.services import manifestador_cofre
 

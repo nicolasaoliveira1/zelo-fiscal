@@ -258,8 +258,21 @@ def alertar_empresas_baixadas(app, baixadas):
     return enviados
 
 
+# A JANELA anti-spam deste alerta e propria, e nao a global de 24h: quem o
+# alimenta e um job DIARIO, entao uma janela de 24h nunca segura nada — cada
+# certificado renderia ~30 e-mails ao longo da janela de 30 dias, e um vencido
+# nao renovado renderia um por dia para sempre. O alerta de empresa baixada nao
+# tem esse problema porque recebe so TRANSICOES; aqui a condicao persiste por
+# semanas, entao quem espaca e a janela.
+#
+# Vencendo repete por semana (ha tempo de agir); vencido repete a cada 3 dias,
+# porque ali a manifestacao da empresa esta parada e o silencio custa caro.
+_JANELA_VENCENDO_H = 24 * 7
+_JANELA_VENCIDO_H = 24 * 3
+
 _ALERTA_CERTIFICADO_POR_CAUSA = {
     'vencido': {
+        'janela': _JANELA_VENCIDO_H,
         'chave': 'certificado_vencido:{empresa_id}',
         'assunto': '[Zelo] Alerta: certificado vencido de {empresa_nome}',
         'linhas': [
@@ -270,6 +283,7 @@ _ALERTA_CERTIFICADO_POR_CAUSA = {
         ],
     },
     'vencendo': {
+        'janela': _JANELA_VENCENDO_H,
         'chave': 'certificado_vencendo:{empresa_id}',
         'assunto': '[Zelo] Alerta: certificado vencendo de {empresa_nome}',
         'linhas': [
@@ -298,7 +312,6 @@ def alertar_certificados_vencendo(app, itens):
                   tem_smtp=tem_smtp, destinatarios=len(destinatarios))
         return 0
 
-    janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
     enviados = 0
     for item in itens or []:
         modelo = _ALERTA_CERTIFICADO_POR_CAUSA.get(item.get('causa'))
@@ -318,7 +331,7 @@ def alertar_certificados_vencendo(app, itens):
         if _enviar_alerta(
                 app, destinatarios, modelo['chave'].format(**dados),
                 'alerta_certificado', modelo['assunto'].format(**dados), corpo,
-                janela, detalhe=item['causa']):
+                modelo['janela'], detalhe=item['causa']):
             enviados += 1
 
     return enviados

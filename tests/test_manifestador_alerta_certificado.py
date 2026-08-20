@@ -230,3 +230,72 @@ def test_sem_destinatario_nao_envia_nem_levanta(ctx_alerta, monkeypatch):
         ctx_alerta, [_item_alerta(101)]) == 0
     assert chamou == []
     assert NotificacaoLog.query.count() == 0
+
+
+# --- correcoes vindas do code-review ---------------------------------------
+
+def test_vencendo_hoje_no_limite_do_dia_ja_conta_como_vencido(app, ids):
+    """A causa sai da comparacao de datetime, como o `inventariar` que grava o
+    estado. Decidir por DIA fazia o dia do vencimento dizer "faltam 0 dia(s),
+    providencie a renovacao" para um certificado ja gravado como VENCIDO."""
+    with app.app_context():
+        empresa = _empresa('EMPRESA VENCE HOJE', '22.222.222/2222-40')
+        _certificado(empresa, datetime.now() - timedelta(minutes=5))
+        db.session.commit()
+
+        item = next(i for i in manifestador_cofre.certificados_a_vencer()
+                    if i['empresa_id'] == empresa.id)
+        assert item['causa'] == 'vencido'
+        assert item['dias_restantes'] == 0      # ainda e hoje
+
+
+def test_janela_do_alerta_e_maior_que_o_intervalo_do_job_diario(ctx_alerta,
+                                                                monkeypatch):
+    """Quem alimenta este alerta e um job DIARIO: com a janela global de 24h o
+    anti-spam nunca segura, e um certificado renderia ~30 e-mails ao longo da
+    janela de 30 dias."""
+    enviados = []
+    monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
+    monkeypatch.setattr(notificacoes.email_sender, 'enviar',
+                        lambda cfg, dest, assunto, corpo: enviados.append(assunto) or True)
+
+    item = _item_alerta(201)
+    assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
+
+    # um dia depois (a janela global de 24h ja teria expirado)
+    registro = NotificacaoLog.query.filter_by(
+        chave='certificado_vencendo:201').first()
+    registro.enviada_em = datetime.now() - timedelta(hours=25)
+    db.session.commit()
+
+    assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 0
+    assert len(enviados) == 1
+
+    # uma semana depois, volta a avisar
+    registro = NotificacaoLog.query.filter_by(
+        chave='certificado_vencendo:201').first()
+    registro.enviada_em = datetime.now() - timedelta(hours=24 * 7 + 1)
+    db.session.commit()
+
+    assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
+    assert len(enviados) == 2
+
+
+def test_vencido_repete_antes_de_vencendo(ctx_alerta, monkeypatch):
+    """Vencido tem janela mais curta: ali a manifestacao esta parada."""
+    enviados = []
+    monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
+    monkeypatch.setattr(notificacoes.email_sender, 'enviar',
+                        lambda cfg, dest, assunto, corpo: enviados.append(assunto) or True)
+
+    item = _item_alerta(202, causa='vencido', dias_restantes=-2)
+    assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
+
+    registro = NotificacaoLog.query.filter_by(
+        chave='certificado_vencido:202').first()
+    registro.enviada_em = datetime.now() - timedelta(hours=24 * 3 + 1)
+    db.session.commit()
+
+    # 3 dias bastam para o vencido; para o vencendo ainda nao bastariam
+    assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
+    assert len(enviados) == 2

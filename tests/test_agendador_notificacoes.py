@@ -109,18 +109,53 @@ def test_inventario_cofre_job_usa_janela_padrao_de_30_dias(app, ids, monkeypatch
     assert recebeu == [30]
 
 
-def test_inventario_cofre_job_drive_fora_nao_alerta(app, ids, monkeypatch):
+def test_inventario_cofre_job_drive_fora_ainda_alerta_pelo_espelho(
+        app, ids, monkeypatch):
+    """Drive fora e ambiente, nao motivo para calar sobre um vencimento.
+
+    `certificados_a_vencer` le so o BANCO: com o drive fora por alguns dias, o
+    espelho anterior segue valido e um certificado vencendo continua vencendo.
+    Calar aqui seria deixar de avisar por um motivo que nao tem relacao com o
+    aviso."""
+    itens = [{'empresa_id': 1, 'causa': 'vencido'}]
     chamou = []
     monkeypatch.setattr(manifestador_cofre, 'inventariar',
                         lambda: (_ for _ in ()).throw(
                             manifestador_cofre.CofreError('drive indisponivel')))
     monkeypatch.setattr(manifestador_cofre, 'certificados_a_vencer',
-                        lambda dias: chamou.append(('selecao', dias)) or [])
+                        lambda dias: itens)
     monkeypatch.setattr(notificacoes, 'alertar_certificados_vencendo',
-                        lambda contexto, itens: chamou.append(('alerta', itens)) or 0)
+                        lambda contexto, recebidos: chamou.append(recebidos) or 1)
 
+    # sem resumo (a varredura falhou), mas o alerta saiu
     assert agendador.job_inventario_cofre(app) is None
-    assert chamou == []
+    assert chamou == [itens]
+
+
+def test_inventario_cofre_job_nao_roda_com_varredura_em_curso(
+        app, ids, monkeypatch):
+    """Clique na tela + job diario: a segunda varredura nao comeca.
+
+    Duas varreduras gravam a linha da MESMA empresa (`empresa_id` unique) e a
+    perdedora derruba o commit unico do fim, perdendo a varredura inteira."""
+    chamou = []
+    monkeypatch.setattr(manifestador_cofre, 'inventariar',
+                        lambda: chamou.append('varreu') or {})
+    monkeypatch.setattr(manifestador_cofre, 'certificados_a_vencer',
+                        lambda dias: [])
+    monkeypatch.setattr(notificacoes, 'alertar_certificados_vencendo',
+                        lambda contexto, itens: 0)
+
+    assert manifestador_cofre._inventario_acquire() is True
+    try:
+        assert agendador.job_inventario_cofre(app) is None
+        assert chamou == []          # nao varreu
+    finally:
+        manifestador_cofre._inventario_release()
+
+    # liberado o lock, a proxima execucao varre normalmente
+    agendador.job_inventario_cofre(app)
+    assert chamou == ['varreu']
 
 
 def test_inventario_cofre_job_nao_quebra_se_alerta_falha(app, ids, monkeypatch):

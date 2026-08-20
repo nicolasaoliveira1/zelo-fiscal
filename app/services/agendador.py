@@ -261,12 +261,25 @@ def job_inventario_cofre(app):
     from app.services import manifestador_cofre
 
     with app.app_context():
-        try:
-            resumo = manifestador_cofre.inventariar()
-        except manifestador_cofre.CofreError as exc:
-            log_event('manifestador_inventario_cofre_falhou', level='ERROR',
-                      error_type='NETWORK_PATH', error=str(exc))
-            return None
+        resumo = None
+        if not manifestador_cofre._inventario_acquire():
+            # Alguem clicou em "Inventariar" na tela e a varredura esta em curso:
+            # duas em paralelo brigam pela linha da mesma empresa. Sai de fininho
+            # e alerta pelo espelho, que a outra varredura vai atualizar.
+            log_event('manifestador_inventario_cofre_ocupado', level='WARNING')
+        else:
+            try:
+                resumo = manifestador_cofre.inventariar()
+            except manifestador_cofre.CofreError as exc:
+                # Drive fora e ambiente, nao portal: nao alimenta o breaker e
+                # NAO cancela o alerta. O espelho anterior continua valendo, e
+                # `certificados_a_vencer` le so o banco — com o drive fora por
+                # alguns dias, calar seria deixar de avisar de um vencimento que
+                # ja sabemos, por um motivo que nao tem nada a ver com ele.
+                log_event('manifestador_inventario_cofre_falhou', level='ERROR',
+                          error_type='NETWORK_PATH', error=str(exc))
+            finally:
+                manifestador_cofre._inventario_release()
 
         # A SELECAO entra no mesmo try do envio: as duas sao o passo "alertar",
         # que e best-effort (AD-011). Com a consulta fora, uma falha nela mataria
