@@ -1,7 +1,7 @@
 """Resolucao nome do banco -> Empresa com limiar duplo (NFSE-03 / ND-003).
 
-O cadastro guarda apelido curto ('ALUMAP') e o banco manda a razao social
-truncada em 35 caracteres ('ALUMAP COMERCIO DE ALUMINIOS LTDA'), com
+O cadastro guarda apelido curto ('VIDROMAX') e o banco manda a razao social
+truncada em 35 caracteres ('VIDROMAX COMERCIO DE VIDROS LTDA'), com
 abreviacoes proprias ('PROD', 'ADM', 'CONST'). Por isso o scorer e
 `token_set_ratio`, que pontua 100 quando um conjunto de tokens e subconjunto
 do outro.
@@ -43,17 +43,17 @@ def test_match_exato_normalizado_vence():
 
 def test_nome_repetido_no_cadastro_nao_resolve_por_exato():
     # dois cadastros com o mesmo nome: qualquer escolha seria arbitraria
-    empresas = [_empresa(1, 'ALUMAP'), _empresa(2, 'ALUMAP')]
-    assert not imp.resolver_empresa('ALUMAP', empresas).resolvido
+    empresas = [_empresa(1, 'VIDROMAX'), _empresa(2, 'VIDROMAX')]
+    assert not imp.resolver_empresa('VIDROMAX', empresas).resolvido
 
 
 def test_nome_vazio_nao_resolve():
-    assert not imp.resolver_empresa('', [_empresa(1, 'ALUMAP')]).resolvido
-    assert not imp.resolver_empresa('   ', [_empresa(1, 'ALUMAP')]).resolvido
+    assert not imp.resolver_empresa('', [_empresa(1, 'VIDROMAX')]).resolvido
+    assert not imp.resolver_empresa('   ', [_empresa(1, 'VIDROMAX')]).resolvido
 
 
 def test_cadastro_vazio_nao_resolve():
-    assert not imp.resolver_empresa('ALUMAP COMERCIO LTDA', []).resolvido
+    assert not imp.resolver_empresa('VIDROMAX COMERCIO LTDA', []).resolvido
 
 
 # --- 2) apelido ------------------------------------------------------------
@@ -80,21 +80,21 @@ def test_apelido_de_empresa_removida_nao_resolve():
 
 def test_truncamento_do_banco_resolve_pelo_fuzzy():
     # o cadastro guarda o apelido curto; o banco manda a razao social inteira
-    empresas = [_empresa(1, 'ALUMAP'), _empresa(2, 'ALUMINIOS DO SUL'), _empresa(3, 'MADEIRAS TAPIA')]
-    v = imp.resolver_empresa('ALUMAP COMERCIO DE ALUMINIOS LTDA', empresas)
+    empresas = [_empresa(1, 'VIDROMAX'), _empresa(2, 'VIDROS DO SUL'), _empresa(3, 'MADEIRAS PINHAL')]
+    v = imp.resolver_empresa('VIDROMAX COMERCIO DE VIDROS LTDA', empresas)
     assert v.empresa.id == 1
     assert v.origem == OrigemVinculoNfse.FUZZY
     assert v.score >= imp.LIMIAR_SCORE
 
 
 def test_abreviacao_do_banco_resolve_quando_inequivoca():
-    empresas = [_empresa(1, 'BOLL REPRESENTACOES'), _empresa(2, 'ANELISE BOLL')]
-    v = imp.resolver_empresa('BOLL REPRESENTACOES COMERCIAIS LTDA', empresas)
+    empresas = [_empresa(1, 'REPRESENTACOES LITORAL'), _empresa(2, 'ANELISE LITORAL')]
+    v = imp.resolver_empresa('REPRESENTACOES LITORAL COMERCIAIS LTDA', empresas)
     assert v.empresa.id == 1
 
 
 def test_score_baixo_nao_vincula():
-    empresas = [_empresa(1, 'MADEIRAS TAPIA'), _empresa(2, 'VALERIA CABREIRA')]
+    empresas = [_empresa(1, 'MADEIRAS PINHAL'), _empresa(2, 'VALERIA MOURA')]
     v = imp.resolver_empresa('ROTA 786 BEBIDAS LTDA', empresas)
     assert not v.resolvido
     assert v.origem is None
@@ -120,8 +120,8 @@ def test_score_maximo_com_gap_pequeno_NAO_vincula():
 
 
 def test_gap_suficiente_vincula_mesmo_com_segundo_parecido():
-    empresas = [_empresa(1, 'E E C PEREIRA'), _empresa(2, 'E E C PEREIRA FILIAL')]
-    v = imp.resolver_empresa('E E C PEREIRA LTDA', empresas)
+    empresas = [_empresa(1, 'A B C COMERCIO'), _empresa(2, 'A B C COMERCIO FILIAL')]
+    v = imp.resolver_empresa('A B C COMERCIO LTDA', empresas)
     assert v.empresa.id == 1
 
 
@@ -136,9 +136,9 @@ def test_limiares_sao_os_do_nd_003():
 def _empresas_da_fixture():
     """Cadastro no estilo real: apelido curto, subconjunto do nome do banco."""
     nomes = [
-        'ALUMAP', 'BOA VISTA TRANSPORTES', 'VALE VERDE AGROPECUARIA',
+        'VIDROMAX', 'BOA VISTA TRANSPORTES', 'VALE VERDE AGROPECUARIA',
         'TECNOFRIO', 'LAVANDERIA CRISTAL', 'HORIZONTE CONSTRUCOES',
-        'NORTEC', 'SIGMA', 'RENATO FIGUEIRA', 'MADEIREIRA TRES PINHEIROS',
+        'NORTEC', 'SIGMA', 'RENATO MOURA', 'MADEIREIRA TRES PINHEIROS',
     ]
     return [_empresa(i, nome) for i, nome in enumerate(nomes, start=1)]
 

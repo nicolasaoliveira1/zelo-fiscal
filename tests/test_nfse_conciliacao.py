@@ -313,7 +313,7 @@ def test_sem_extrato_algum_nao_ha_o_que_conferir(banco):
 def test_pessoa_fisica_concilia_como_qualquer_outra(banco):
     """Regressao da ND-028: com o CPF nao extraido, o mesmo tomador aparecia
     como "pagou e ficou sem nota" E como "nota sem linha" ao mesmo tempo."""
-    CPF = '113.411.570-91'
+    CPF = '390.533.447-05'
     nota = _nota(CPF, '487.00')
     emitida = _emitida('1' * 50, CPF, '487.00')
     db.session.commit()

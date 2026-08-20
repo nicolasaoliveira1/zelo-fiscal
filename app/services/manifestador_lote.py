@@ -80,7 +80,7 @@ def grupos_sem_certificado(ids):
     """{nome da empresa: motivo} para os grupos que serao pulados.
 
     Nomear e o ponto: "2 empresas puladas" manda o operador caçar quais, e com
-    24 das 93 empresas sem certificado utilizavel isso e o caso comum, nao a
+    uma parte da carteira sem certificado utilizavel isso e o caso comum, nao a
     excecao."""
     if not ids:
         return {}

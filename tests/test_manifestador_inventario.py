@@ -1,9 +1,9 @@
 """Inventario do cofre: varredura do drive e os 6 estados (MANIF-01/03/04/06).
 
-Os estados nao foram imaginados — reproduzem o que a varredura real das 93
-empresas ativas produziu (`.specs/features/manifestador-nfe/recon.md`):
+Os estados nao foram imaginados — reproduzem o que a varredura real da carteira de
+empresas produziu (`.specs/features/manifestador-nfe/recon.md`):
 69 prontas, 10 vencidas, 9 sem arquivo, 4 com senha diferente e 1 so com e-CPF
-de socios (BOLL REPRESENTACOES).
+de socios (REPRESENTACOES LITORAL).
 """
 from app import db
 from app.models import CertificadoEmpresa, Empresa, EstadoCertificado
@@ -87,23 +87,23 @@ def test_senha_pendente_quando_nenhuma_senha_conhecida_abre(app, ids, tmp_path,
 
 def test_cnpj_divergente_quando_so_ha_e_cpf_de_socios(app, ids, tmp_path,
                                                       monkeypatch):
-    """O caso BOLL REPRESENTACOES: a pasta tem 4 e-CPF de socios e nenhum
+    """O caso REPRESENTACOES LITORAL: a pasta tem 4 e-CPF de socios e nenhum
     e-CNPJ. Manifestar por e-CPF exigiria procuracao eletronica."""
     with app.app_context():
-        emp = _empresa('BOLL REPRESENTACOES', '02.668.535/0001-60')
-        pasta = tmp_path / 'BOLL'
+        emp = _empresa('REPRESENTACOES LITORAL', '11.222.333/0001-81')
+        pasta = tmp_path / 'LITORAL'
         pasta.mkdir()
-        (pasta / 'JOSE FELIPE BOLL.p12').write_bytes(
-            _fazer_pfx(cn='JOSE FELIPE BOLL:92278361015'))
+        (pasta / 'PAULO MENDES SOCIO.p12').write_bytes(
+            _fazer_pfx(cn='PAULO MENDES SOCIO:39053344705'))
         (pasta / 'MAICO FRAGA ABEL.p12').write_bytes(
             _fazer_pfx(cn='MAICO FRAGA ABEL:83567984004'))
-        _montar_drive(tmp_path, monkeypatch, {'BOLL REPRESENTACOES': pasta})
+        _montar_drive(tmp_path, monkeypatch, {'REPRESENTACOES LITORAL': pasta})
 
         cofre.inventariar()
 
         cert = db.session.get(Empresa, emp.id).certificado
         assert cert.estado == EstadoCertificado.CNPJ_DIVERGENTE
-        assert 'JOSE FELIPE BOLL' in cert.detalhe
+        assert 'PAULO MENDES SOCIO' in cert.detalhe
 
 
 def test_sem_arquivo_quando_a_pasta_existe_e_esta_sem_pfx(app, ids, tmp_path,

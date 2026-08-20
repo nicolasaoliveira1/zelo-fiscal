@@ -1,7 +1,7 @@
 /* Manifestador de NF-e — "a fila é a página".
  *
  * As barras reusam as classes .zl-comp-* do design language: tanto os estados
- * do cofre (somam as 93 empresas) quanto os do lote (somam as chaves) são
+ * do cofre (somam as empresas) quanto os do lote (somam as chaves) são
  * composição, não fatos independentes.
  */
 import { showToast as toast } from './toasts.js';

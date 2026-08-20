@@ -827,8 +827,8 @@ class ServicoNfse(db.Model):
 class EstadoCertificado:
     """Em que pe esta o certificado da empresa no drive de rede.
 
-    Os seis valores nao foram imaginados: sairam do inventario real das 93
-    empresas ativas (`.specs/features/manifestador-nfe/recon.md`), que produziu
+    Os seis valores nao foram imaginados: sairam do inventario real da carteira
+    de empresas (`.specs/features/manifestador-nfe/recon.md`), que produziu
     exatamente estas situacoes. String, nunca db.Enum nativo (AD-016/AD-020).
     """
     # abre com a senha guardada, o CNPJ de dentro bate com o cadastro, e esta
@@ -888,8 +888,7 @@ class CertificadoEmpresa(db.Model):
 
     # O CN tem a forma `RAZAO SOCIAL:CNPJ`. E o CNPJ dali — nao o nome do
     # arquivo, nem o da pasta, nem a razao social — que casa com a empresa: na
-    # carteira real ha certificado chamado `CONSULTA RFB A REALIZAR NA HORA DA
-    # VALIDACAO`, grafias `SOARES & LEAL` x `SOARES E LEAL`, e uma razao social
+    # carteira real ha certificado chamado `CERTIFICADO A VALIDAR NA EMISSAO`, grafias `MARTINS & FILHOS` x `MARTINS E FILHOS`, e uma razao social
     # repetida em 5 CNPJs (AD-027).
     subject_cn = db.Column(db.String(200), nullable=True)
     issuer_cn = db.Column(db.String(200), nullable=True)
