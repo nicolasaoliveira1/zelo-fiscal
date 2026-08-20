@@ -1,8 +1,8 @@
-"""Testes para as otimizações de performance do dashboard (perf/dashboard-filters).
+"""Testes para as otimizações de performance de Certidões (perf/certidoes-filters).
 
 Cobre:
 - _get_config_cached: caching por contexto de app (flask.g)
-- Rota GET / (dashboard): renderiza sem erro, filtro de cidade funciona
+- Rota GET /certidoes: renderiza sem erro, filtro de cidade funciona
 - Rota GET /certidao/<id>/token-visualizar: lazy token
 """
 import os
@@ -91,21 +91,21 @@ class TestGetConfigCached:
 
 
 # ---------------------------------------------------------------------------
-# Rota dashboard GET /
+# Rota Certidões GET /certidoes
 # ---------------------------------------------------------------------------
 
-class TestDashboard:
-    def test_dashboard_renderiza_ok(self, client, ids):
+class TestCertidoes:
+    def test_certidoes_renderiza_ok(self, client, ids):
         r = client.get('/certidoes')
         assert r.status_code == 200
         assert b'Empresa Teste' in r.data
 
-    def test_dashboard_filtro_cidade_existente(self, client, ids):
+    def test_certidoes_filtro_cidade_existente(self, client, ids):
         r = client.get('/certidoes?cidade=Tramandai')
         assert r.status_code == 200
         assert b'Empresa Teste' in r.data
 
-    def test_dashboard_cidade_deeplink_renderiza_todas_e_marca_chip(self, client, ids, empresa_sp):
+    def test_certidoes_cidade_deeplink_renderiza_todas_e_marca_chip(self, client, ids, empresa_sp):
         """Estado/cidade agora filtram no cliente: todas as empresas continuam no
         HTML (o filtro efetivo é no navegador) e o chip da cidade vem pré-marcado."""
         r = client.get('/certidoes?cidade=S%C3%A3o+Paulo')
@@ -115,13 +115,13 @@ class TestDashboard:
         # algum chip de cidade vem pré-marcado (deep-link)
         assert re.search(rb'id="cidade-[^"]+"[^>]*\bchecked\b', r.data)
 
-    def test_dashboard_filtro_cidade_inexistente_nao_quebra(self, client, ids):
+    def test_certidoes_filtro_cidade_inexistente_nao_quebra(self, client, ids):
         """Cidade inexistente: sem chip para pré-marcar, a página renderiza tudo."""
         r = client.get('/certidoes?cidade=CidadeQueNaoExiste')
         assert r.status_code == 200
         assert b'Empresa Teste' in r.data
 
-    def test_dashboard_estado_deeplink_renderiza_todas_e_marca_chip(self, client, ids, empresa_sp):
+    def test_certidoes_estado_deeplink_renderiza_todas_e_marca_chip(self, client, ids, empresa_sp):
         r = client.get('/certidoes?estado=SP')
         assert r.status_code == 200
         assert b'Empresa SP' in r.data
@@ -129,7 +129,7 @@ class TestDashboard:
         # chip do estado SP pré-marcado
         assert re.search(rb'id="estado-SP"[^>]*\bchecked\b', r.data)
 
-    def test_dashboard_cidade_variantes_agrupadas_em_um_chip(self, app, client, ids):
+    def test_certidoes_cidade_variantes_agrupadas_em_um_chip(self, app, client, ids):
         """'Imbé' e 'IMBE' (acento/caixa) devem gerar um único chip de cidade,
         e cada card recebe a mesma data-cidade-key (agrupamento canônico)."""
         with app.app_context():
@@ -159,14 +159,14 @@ class TestDashboard:
                     db.session.delete(emp)
                 db.session.commit()
 
-    def test_dashboard_data_attributes_presentes(self, client, ids):
+    def test_certidoes_data_attributes_presentes(self, client, ids):
         """Os data-* de contadores devem aparecer no HTML."""
         r = client.get('/certidoes')
         assert b'data-count-total=' in r.data
         assert b'data-menor-validade=' in r.data
         assert b'data-status-cert=' in r.data
 
-    def test_dashboard_certidao_status_cert_pendente(self, app, client, ids):
+    def test_certidoes_certidao_status_cert_pendente(self, app, client, ids):
         """Certidão PENDENTE deve aparecer com data-status-cert='pendentes'."""
         with app.app_context():
             cert = Certidao.query.get(ids['trabalhista'])
@@ -179,7 +179,7 @@ class TestDashboard:
             cert.status_especial = None
             db.session.commit()
 
-    def test_dashboard_certidao_vencida(self, app, client, ids):
+    def test_certidoes_certidao_vencida(self, app, client, ids):
         with app.app_context():
             cert = Certidao.query.get(ids['trabalhista'])
             cert.data_validade = date.today() - timedelta(days=1)
@@ -191,7 +191,7 @@ class TestDashboard:
             cert.data_validade = None
             db.session.commit()
 
-    def test_dashboard_ultima_atualizacao_agrega_max_ignorando_nulos(self, app, client, ids):
+    def test_certidoes_ultima_atualizacao_agrega_max_ignorando_nulos(self, app, client, ids):
         """data-ultima-atualizacao do card = a atualizacao MAIS RECENTE (max ISO)
         entre as certidoes da empresa; NULL nao conta se ha ao menos uma data.
 
@@ -225,7 +225,7 @@ class TestDashboard:
                 db.session.delete(Empresa.query.filter_by(nome='Aggr SA').first())
                 db.session.commit()
 
-    def test_dashboard_ultima_atualizacao_vazia_quando_todas_nulas(self, app, client, ids):
+    def test_certidoes_ultima_atualizacao_vazia_quando_todas_nulas(self, app, client, ids):
         """Empresa cujas certidoes tem atualizado_em NULL -> data-attr vazio ''
         (AC P1-4: sem dado tende ao topo)."""
         with app.app_context():

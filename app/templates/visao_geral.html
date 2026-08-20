@@ -85,7 +85,7 @@
         {#- CERTIDÕES: componente A — os números somam a carteira. -#}
         {% set bloco = blocos.certidoes %}
         {% call vg_card('cert', 'file-earmark-check', 'Certidões',
-                        url_for('main.dashboard'), 'Abrir Certidões',
+                        url_for('main.certidoes'), 'Abrir Certidões',
                         largo=(not bloco.erro and not bloco.vazio)) %}
         {%- if bloco.erro or bloco.vazio %}
         {{ vg_estado(bloco, 'Nenhuma certidão pede atenção hoje.') }}

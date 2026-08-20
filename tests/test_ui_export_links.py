@@ -1,11 +1,11 @@
 """Testes do wiring de UI da exportacao (spec 04, EXPORT-01/EXPORT-03/EXPORT-05).
 
-Botao 'Exportar carteira' no dashboard, botao 'Dossie' por empresa (so operador+)
+Botão 'Exportar carteira' em Certidões, botão 'Dossiê' por empresa (só operador+)
 e link 'Produtividade' na navegacao.
 """
 
 
-def test_dashboard_tem_botao_exportar_carteira(login_as):
+def test_certidoes_tem_botao_exportar_carteira(login_as):
     html = login_as('leitura').get('/certidoes').get_data(as_text=True)
     assert 'id="btn-exportar-carteira"' in html
     assert '/exportar/carteira.xlsx' in html

@@ -2309,13 +2309,13 @@ window.showToast = showToast;
             const ordemRadios = Array.from(document.querySelectorAll('.btn-check[name="ordem-opt"]'));
             const ordemBadge = document.getElementById('ordem-dd-badge');
             const ordemHidden = document.getElementById('ordem-hidden');
-            const ordemStorageKey = 'dashboardOrdem';
+            const ordemStorageKey = 'certidoesOrdem';
 
             // Direcao do modo "Atividade": 'paradas' (padrao, ISO asc — parada ha mais
             // tempo no topo) ou 'recentes' (ISO desc — atualizada agora no topo).
             const dirToggle = document.getElementById('ordem-atividade-dir');
             const dirToggleLabel = document.getElementById('ordem-atividade-dir-label');
-            const ordemDirStorageKey = 'dashboardOrdemAtividadeDir';
+            const ordemDirStorageKey = 'certidoesOrdemAtividadeDir';
             let dirAtividade = 'paradas';
 
             function getOrdemAtual() {
@@ -2700,11 +2700,11 @@ window.showToast = showToast;
 
             // Revela lista, contagens dos chips e remove skeleton após inicialização completa
             (function () {
-                const skEl = document.getElementById('skeleton-dashboard');
+                const skEl = document.getElementById('skeleton-certidoes');
                 const listaEl = document.getElementById('lista-empresas');
                 const filtrosEl = document.getElementById('filtros-card');
                 if (skEl) skEl.style.display = 'none';
-                if (listaEl) listaEl.classList.remove('dashboard-loading');
+                if (listaEl) listaEl.classList.remove('certidoes-loading');
                 if (filtrosEl) filtrosEl.classList.remove('chips-loading');
             })();
 

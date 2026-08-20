@@ -1,7 +1,7 @@
 """Recorte da carteira replicado server-side (spec 04, EXPORT-02).
 
 Fonte unica do "o que o painel mostraria" para um dado conjunto de filtros. O
-dashboard NAO filtra no servidor: carrega todas as empresas e o JS (`aplicarFiltros`)
+Certidões não filtra no servidor: carrega todas as empresas e o JS (`aplicarFiltros`)
 esconde/mostra. Aqui reproduzimos a MESMA semantica em Python para a exportacao
 sair exatamente igual a tela:
 
@@ -33,7 +33,7 @@ def status_categoria(certidao, hoje):
     | pendentes | nao_definida.
 
     Envelopa `classificar_status_certidao` (que devolve 'sem_data') e mapeia para
-    'nao_definida', o rotulo usado pelos chips do dashboard (`data-status`).
+    'nao_definida', o rótulo usado pelos chips de Certidões (`data-status`).
     """
     cat = classificar_status_certidao(certidao, hoje)
     return 'nao_definida' if cat == 'sem_data' else cat

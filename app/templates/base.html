@@ -223,7 +223,7 @@
                 <i class="bi bi-columns-gap"></i>
                 <span>Visão geral</span>
             </a>
-            <a class="sidebar-link {% if current_endpoint == 'main.dashboard' %}active{% endif %}" href="{{ url_for('main.dashboard') }}" title="Certidões">
+            <a class="sidebar-link {% if current_endpoint == 'main.certidoes' %}active{% endif %}" href="{{ url_for('main.certidoes') }}" title="Certidões">
                 <i class="bi bi-file-earmark-check"></i>
                 <span>Certidões</span>
             </a>
@@ -302,7 +302,7 @@
             if (!btn) return;
             const id = btn.dataset.empresaId;
             if (!id) return;
-            const toast = window.showToast;   // presente onde o toasts.js modulo carrega (ex.: dashboard)
+            const toast = window.showToast;   // presente onde o toasts.js modulo carrega (ex.: Certidões)
             btn.disabled = true;
             try {
                 const resp = await fetch(`/empresa/${id}/abrir-pasta`, { method: 'POST' });

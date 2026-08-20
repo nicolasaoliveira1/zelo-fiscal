@@ -142,7 +142,7 @@ class Certidao(db.Model):
     status_especial = db.Column(db.Enum(StatusEspecial), nullable=True)
     # Ultima modificacao (hora local naive). default cobre a criacao/INSERT
     # (onde onupdate nao dispara); onupdate cobre qualquer UPDATE persistido.
-    # Alimenta a ordenacao "Ultima atualizacao" do dashboard.
+    # Alimenta a ordenação "Última atualização" de Certidões.
     atualizado_em = db.Column(
         db.DateTime, nullable=True,
         default=datetime.now, onupdate=datetime.now)

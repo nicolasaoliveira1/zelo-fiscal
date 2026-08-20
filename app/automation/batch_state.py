@@ -40,7 +40,7 @@ def marcar_emissao_individual(ativa):
 # Ate aqui, os guardas eram por TIPO: um lote FGTS so barrava outro FGTS. Nada
 # no servidor impedia dois lotes de tipos diferentes, nem emissao individual
 # durante lote de outro tipo, nem duas individuais ao mesmo tempo. Isso nunca
-# acontecia porque o overlay de tela cheia cobria o dashboard e o operador nao
+# acontecia porque o overlay de tela cheia cobria Certidões e o operador nao
 # conseguia clicar — ou seja, a trava era a UI, por acidente.
 #
 # Ao permitir minimizar o lote, essa trava acidental deixa de existir. Este

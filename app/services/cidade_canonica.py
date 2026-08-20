@@ -1,7 +1,7 @@
 """Grafia canonica de cidades (COV-05): display com acento, matching sem acento.
 
 O banco guarda o nome de exibicao (ex.: 'Imbé'); todo casamento no backend
-(dispatch da automacao, resolver de municipio, filtro do dashboard, export)
+(dispatch da automacao, resolver de municipio, filtro de Certidões, export)
 normaliza via `utils.normalizar_cidade` (remove acento + upper), entao a grafia
 acentuada nao quebra nada. Este modulo e a fonte unica do mapa
 chave-normalizada -> grafia correta, reusado pela migration de padronizacao e

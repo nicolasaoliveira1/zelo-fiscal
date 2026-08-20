@@ -2490,7 +2490,7 @@ tr.filter-hidden {
     display: none;
 }
 
-/* ── Skeleton do dashboard ─────────────────────────────────── */
+/* ── Skeleton de Certidões ─────────────────────────────────── */
 .sk-bloco {
     background: linear-gradient(90deg, #e4e9f0 25%, #d5dce9 50%, #e4e9f0 75%);
     background-size: 400% 100%;
@@ -2509,7 +2509,7 @@ tr.filter-hidden {
     100% { background-position: -100% 0; }
 }
 
-#skeleton-dashboard {
+#skeleton-certidoes {
     display: block;
 }
 
@@ -2517,7 +2517,7 @@ tr.filter-hidden {
     transition: opacity 0.25s ease;
 }
 
-#lista-empresas.dashboard-loading {
+#lista-empresas.certidoes-loading {
     opacity: 0;
     pointer-events: none;
 }

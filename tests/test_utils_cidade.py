@@ -1,6 +1,6 @@
 """Testes de `utils.normalizar_cidade` (spec 04, EXPORT-02).
 
-A chave de cidade e a fonte unica compartilhada pelo filtro do dashboard e pela
+A chave de cidade e a fonte unica compartilhada pelo filtro de Certidões e pela
 exportacao da carteira. Variacoes de acento/caixa DEVEM colapsar na mesma chave
 para o recorte do export bater 1:1 com o painel.
 """
@@ -29,8 +29,8 @@ def test_espacos_sao_removidos():
     assert normalizar_cidade('Xangri-Lá') == normalizar_cidade('Xangrila')
 
 
-def test_paridade_com_o_alias_do_dashboard():
-    # O alias do dashboard deve delegar exatamente a esta funcao (mesma chave).
-    from app.routes import _normalizar_cidade_dashboard
+def test_paridade_com_o_alias_de_certidoes():
+    # O alias de Certidões deve delegar exatamente a esta função (mesma chave).
+    from app.routes import _normalizar_cidade_certidoes
     for valor in ('Tramandaí', 'SANTO ANTÔNIO', '', None, '  Osório '):
-        assert _normalizar_cidade_dashboard(valor) == normalizar_cidade(valor)
+        assert _normalizar_cidade_certidoes(valor) == normalizar_cidade(valor)

@@ -41,7 +41,7 @@ from app.services.cidade_canonica import canonicalizar
 from app.services.execution_logger import log_event
 from app.auth import requer_papel
 
-from app.routes import bp, _escolher_cidade_canonica_dashboard, _normalizar_cidade_dashboard
+from app.routes import bp, _escolher_cidade_canonica_certidoes, _normalizar_cidade_certidoes
 
 
 @bp.route('/empresas')
@@ -64,7 +64,7 @@ def empresas():
         if not cidade:
             continue
 
-        chave_normalizada = _normalizar_cidade_dashboard(cidade)
+        chave_normalizada = _normalizar_cidade_certidoes(cidade)
         if not chave_normalizada:
             continue
 
@@ -72,22 +72,22 @@ def empresas():
         variantes[cidade] = variantes.get(cidade, 0) + 1
 
     cidades_por_chave = {
-        chave: _escolher_cidade_canonica_dashboard(variantes)
+        chave: _escolher_cidade_canonica_certidoes(variantes)
         for chave, variantes in cidades_variantes.items()
     }
     cidades_disponiveis = sorted(
         cidades_por_chave.values(),
-        key=_normalizar_cidade_dashboard,
+        key=_normalizar_cidade_certidoes,
     )
 
     empresas = query.order_by(Empresa.id).all()
 
     if cidade_filtro:
-        chave_filtro = _normalizar_cidade_dashboard(cidade_filtro)
+        chave_filtro = _normalizar_cidade_certidoes(cidade_filtro)
         if chave_filtro:
             empresas = [
                 empresa for empresa in empresas
-                if _normalizar_cidade_dashboard(empresa.cidade) == chave_filtro
+                if _normalizar_cidade_certidoes(empresa.cidade) == chave_filtro
             ]
             cidade_filtro = cidades_por_chave.get(chave_filtro, cidade_filtro)
 
@@ -370,7 +370,7 @@ def adicionar_empresa():
     def _redirect_apos_cadastro():
         if origem == 'nova_empresa':
             return redirect(url_for('main.nova_empresa'))
-        return redirect(url_for('main.dashboard'))
+        return redirect(url_for('main.certidoes'))
 
     if not nome:
         flash('Nome da empresa é obrigatório.', 'warning')

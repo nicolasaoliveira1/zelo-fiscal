@@ -66,7 +66,7 @@ def atualizar_validade(certidao_id):
                                 alvo_id=certidao_id, resultado='erro', detalhe=erro)
     else:
         flash("Nenhuma data foi fornecida.", 'warning')
-    return redirect(url_for('main.dashboard'))
+    return redirect(url_for('main.certidoes'))
 
 
 @bp.route('/certidao/marcar_pendente/<int:certidao_id>', methods=['POST'])
@@ -83,7 +83,7 @@ def marcar_pendente(certidao_id):
         auditoria.registrar('certidao.marcar_pendente', alvo_tipo='certidao',
                             alvo_id=certidao_id, resultado='erro', detalhe=erro)
 
-    return redirect(url_for('main.dashboard'))
+    return redirect(url_for('main.certidoes'))
 
 
 @bp.route('/certidao/baixar/<int:certidao_id>')
@@ -337,7 +337,7 @@ def visualizar_certidao(token):
 
 @bp.route('/certidao/<int:certidao_id>/token-visualizar')
 def gerar_token_visualizar(certidao_id):
-    """Gera token de visualização sob demanda (lazy), evitando crypto no render do dashboard."""
+    """Gera token de visualização sob demanda (lazy), evitando crypto no render de Certidões."""
     certidao = Certidao.query.get_or_404(certidao_id)
     caminho = certidao.caminho_arquivo
 

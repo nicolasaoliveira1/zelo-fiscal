@@ -106,5 +106,5 @@ def test_menu_tem_visao_geral_e_certidoes(app, ids, client, monkeypatch):
     corpo = client.get('/').get_data(as_text=True)
 
     assert '<span>Visão geral</span>' in corpo
+    assert 'Dashboard' not in corpo
     assert '<span>Certidões</span>' in corpo
-    assert '<span>Dashboard</span>' not in corpo
