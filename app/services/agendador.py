@@ -268,10 +268,14 @@ def job_inventario_cofre(app):
                       error_type='NETWORK_PATH', error=str(exc))
             return None
 
-        dias = app.config.get('MANIF_CERT_ALERTA_DIAS', 30)
-        itens = manifestador_cofre.certificados_a_vencer(dias=dias)
+        # A SELECAO entra no mesmo try do envio: as duas sao o passo "alertar",
+        # que e best-effort (AD-011). Com a consulta fora, uma falha nela mataria
+        # o job DEPOIS de o inventario ter sido gravado — e o log diria que o job
+        # falhou, quando o trabalho que importa ja estava feito.
         try:
             from app.services import notificacoes
+            dias = app.config.get('MANIF_CERT_ALERTA_DIAS', 30)
+            itens = manifestador_cofre.certificados_a_vencer(dias=dias)
             notificacoes.alertar_certificados_vencendo(app, itens)
         except Exception as exc:
             log_event('manifestador_inventario_alerta_falhou', level='ERROR',
