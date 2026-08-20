@@ -517,6 +517,7 @@ body.navbar-hidden.sidebar-open .sidebar-toggle-menu {
 }
 
 .sidebar-link {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 0.75rem;
@@ -551,6 +552,16 @@ body.navbar-hidden.sidebar-open .sidebar-toggle-menu {
     background: var(--bs-primary-bg-subtle);
     color: var(--bs-primary-text-emphasis);
     border-color: var(--bs-primary-border-subtle);
+}
+
+.sidebar-link.active::before {
+    content: "";
+    position: absolute;
+    inset-block: 0.35rem;
+    inset-inline-start: 0;
+    width: 3px;
+    border-radius: 999px;
+    background: var(--zelo-graphite);
 }
 
 .sidebar-link:focus-visible {
