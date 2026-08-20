@@ -18,7 +18,10 @@
         rel="stylesheet">
 
     <link rel="stylesheet" href="{{ static_versionado('css/style.css') }}">
-    <link rel="shortcut icon" href="{{ url_for('static', filename='images/assecon.ico') }}">
+    <!-- Zelo nomeia o sistema (aba/wordmark); a marca Assecon segue na navbar e na sidebar.
+         SVG primeiro para navegador moderno; .ico como fallback (Windows/navegador antigo). -->
+    <link rel="icon" type="image/svg+xml" href="{{ static_versionado('images/zelo-mark.svg') }}">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='images/zelo.ico') }}">
 
     <style>
         /* cores de status das validades — banda suave (Zelo: a única cor é o status) */
