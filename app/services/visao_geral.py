@@ -4,12 +4,12 @@ A pagina nao e fonte de dados: cada bloco reaproveita a pergunta que ja e
 respondida no respectivo pilar. Assim, ela nao faz rede nem cria uma segunda
 regra para os mesmos numeros.
 """
-from app.models import NotaNfse, PapelUsuario, StatusNotaNfse
+from app.models import PapelUsuario
 from app.services import (
     circuit_breaker,
     fila_emissao,
     manifestador_cofre,
-    nfse_grupos,
+    nfse_import,
     snapshot_service,
 )
 from app.services.execution_logger import log_event
@@ -45,21 +45,10 @@ def _certificados():
 
 
 def _nfse():
-    notas = NotaNfse.query.all()
-    grupos_pendentes = {
-        nota.grupo_sugerido for nota in notas
-        if nfse_grupos.tem_proposta_pendente(nota)
-    }
-    prontas = sum(nota.status == StatusNotaNfse.PRONTA for nota in notas)
-    pendentes = sum(nota.status in (
-        StatusNotaNfse.EMPRESA_PENDENTE,
-        StatusNotaNfse.DESCRICAO_PENDENTE,
-    ) for nota in notas)
+    contagem = nfse_import.contagem_fila()
     return {
-        'prontas': prontas,
-        'pendentes': pendentes,
-        'grupos_pendentes': len(grupos_pendentes),
-        'vazio': not (prontas or pendentes or grupos_pendentes),
+        **contagem,
+        'vazio': not any(contagem.values()),
     }
 
 

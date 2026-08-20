@@ -105,6 +105,22 @@ def _nota(status, *, grupo=None, grupo_descartado=False, grupo_confirmado=False)
     )
 
 
+def _contagem_nfse(notas):
+    """Traduz as notas de fixture para o formato que `contagem_fila` devolve —
+    os testes de composicao continuam falando de notas, que e o vocabulario do
+    caso; a contagem em si tem teste proprio, contra banco de verdade."""
+    from app.models import StatusNotaNfse
+    from app.services import nfse_grupos
+    return {
+        'prontas': sum(n.status == StatusNotaNfse.PRONTA for n in notas),
+        'pendentes': sum(n.status in (StatusNotaNfse.EMPRESA_PENDENTE,
+                                      StatusNotaNfse.DESCRICAO_PENDENTE)
+                         for n in notas),
+        'grupos_pendentes': len({n.grupo_sugerido for n in notas
+                                 if nfse_grupos.tem_proposta_pendente(n)}),
+    }
+
+
 def _configurar_fontes(monkeypatch, *, contagem=None, estados=None, itens=None,
                         notas=None, grupos=None, breakers=None):
     monkeypatch.setattr(
@@ -122,10 +138,13 @@ def _configurar_fontes(monkeypatch, *, contagem=None, estados=None, itens=None,
         'certificados_a_vencer',
         lambda: itens or [],
     )
+    # A contagem da fila de NFSe agora e uma funcao do dominio da NFSe
+    # (`nfse_import.contagem_fila`), como a da carteira e do snapshot_service:
+    # aqui ela e uma FONTE, patchada igual as outras.
     monkeypatch.setattr(
-        visao_geral,
-        'NotaNfse',
-        SimpleNamespace(query=SimpleNamespace(all=lambda: notas or [])),
+        visao_geral.nfse_import,
+        'contagem_fila',
+        lambda: _contagem_nfse(notas or []),
     )
     monkeypatch.setattr(
         visao_geral.fila_emissao,
@@ -251,11 +270,7 @@ def test_falha_da_fonte_nfse_fica_no_bloco_nfse(monkeypatch):
     def falhar():
         raise RuntimeError('consulta indisponivel')
 
-    monkeypatch.setattr(
-        visao_geral,
-        'NotaNfse',
-        SimpleNamespace(query=SimpleNamespace(all=falhar)),
-    )
+    monkeypatch.setattr(visao_geral.nfse_import, 'contagem_fila', falhar)
 
     blocos = visao_geral.montar(_usuario())
 

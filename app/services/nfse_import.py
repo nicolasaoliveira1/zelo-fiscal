@@ -44,6 +44,48 @@ from app.models import OrigemVinculoNfse
 ORIGEM_CSV = 'csv'
 ORIGEM_INTER = 'inter'
 
+
+# Status que contam como "tem pendencia do OPERADOR": falta o documento do
+# tomador ou falta o texto do servico. Sao os dois que seguram a nota fora da
+# fila e que so uma decisao humana resolve.
+_STATUS_PENDENTES = ('empresa_pendente', 'descricao_pendente')
+
+
+def contagem_fila():
+    """Quantas notas estao prontas, quantas tem pendencia, e quantos GRUPOS
+    esperam decisao. Espelha o papel do `snapshot_service.contagem_carteira`.
+
+    Conta no BANCO em vez de carregar a tabela: a tela de NFSe carrega as notas
+    porque vai RENDERIZA-LAS, mas quem so quer o numero (a Visao Geral) nao pode
+    pagar o historico inteiro, que cresce todo mes e nunca e podado.
+
+    Grupos contam PROPOSTAS, nao notas — as tres linhas do grupo do estorno sao
+    uma decisao so para o operador. E a regra de "esperando resposta" continua
+    sendo UMA (`nfse_grupos.tem_proposta_pendente`): as colunas vem do banco e a
+    decisao fica em Python, o mesmo padrao do `calc_targets`. Uma copia da regra
+    em SQL divergiria no dia em que "descartado" ganhasse outro significado.
+    """
+    from app import db
+    from app.models import NotaNfse, StatusNotaNfse
+    from app.services import nfse_grupos
+
+    por_status = dict(
+        db.session.query(NotaNfse.status, db.func.count(NotaNfse.id))
+        .group_by(NotaNfse.status).all())
+
+    candidatas = (
+        db.session.query(NotaNfse.grupo_sugerido, NotaNfse.grupo_descartado,
+                         NotaNfse.grupo_confirmado)
+        .filter(NotaNfse.grupo_sugerido.isnot(None)).all())
+
+    return {
+        'prontas': por_status.get(StatusNotaNfse.PRONTA, 0),
+        'pendentes': sum(por_status.get(st, 0) for st in _STATUS_PENDENTES),
+        'grupos_pendentes': len({
+            linha.grupo_sugerido for linha in candidatas
+            if nfse_grupos.tem_proposta_pendente(linha)}),
+    }
+
 DELIMITADOR = ';'
 COLUNAS_ESPERADAS = 10
 # A amostra nao tem acento, entao o encoding nao e inferivel: extratos de banco

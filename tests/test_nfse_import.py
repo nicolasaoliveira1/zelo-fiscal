@@ -171,3 +171,82 @@ def test_fixture_exercita_a_virada_de_ano():
     comps = {imp.competencia_da_descricao(linha.vencimento)
              for linha in imp.parse_csv(_fixture_bytes()) if not linha.invalida}
     assert '12/2026' in comps, 'a fixture precisa de vencimento em janeiro/2027'
+
+
+# --- contagem da fila (consumida pela Visao Geral) --------------------------
+
+def _nota_fila(status, **kw):
+    """Nota minima para contagem: o que importa aqui e status e grupo."""
+    from decimal import Decimal
+
+    from app import db
+    from app.models import Empresa, LoteNfse, NotaNfse
+
+    empresa = Empresa.query.first()
+    if empresa is None:
+        empresa = Empresa(nome='ACME', cnpj='11.111.111/0001-11',
+                          cidade='Imbe', estado='RS')
+        db.session.add(empresa)
+        db.session.commit()
+    lote = LoteNfse.query.first()
+    if lote is None:
+        lote = LoteNfse(nome_arquivo='extrato.csv', total=1)
+        db.session.add(lote)
+        db.session.commit()
+    dados = dict(lote_id=lote.id, empresa_id=empresa.id, nome_csv='ACME LTDA',
+                 documento=empresa.cnpj, tipo_documento='cnpj',
+                 competencia='06/2026', valor_final=Decimal('100.00'),
+                 status=status)
+    dados.update(kw)
+    nota = NotaNfse(**dados)
+    db.session.add(nota)
+    db.session.commit()
+    return nota
+
+
+def test_contagem_fila_separa_prontas_de_pendentes(app, ids):
+    from app.models import StatusNotaNfse
+
+    with app.app_context():
+        _nota_fila(StatusNotaNfse.PRONTA)
+        _nota_fila(StatusNotaNfse.PRONTA)
+        _nota_fila(StatusNotaNfse.EMPRESA_PENDENTE)
+        _nota_fila(StatusNotaNfse.DESCRICAO_PENDENTE)
+        _nota_fila(StatusNotaNfse.EMITIDA)
+
+        contagem = imp.contagem_fila()
+
+        assert contagem['prontas'] == 2
+        assert contagem['pendentes'] == 2      # emitida nao e pendencia
+
+
+def test_contagem_fila_conta_grupos_e_nao_notas(app, ids):
+    """As tres linhas do grupo do estorno sao UMA decisao do operador."""
+    from app.models import StatusNotaNfse
+
+    with app.app_context():
+        for _ in range(3):
+            _nota_fila(StatusNotaNfse.AGRUPADA, grupo_sugerido='tok-1')
+
+        assert imp.contagem_fila()['grupos_pendentes'] == 1
+
+
+def test_contagem_fila_ignora_grupo_ja_resolvido(app, ids):
+    """Confirmado e descartado saem da conta pelos dois caminhos opostos — a
+    regra e a mesma `nfse_grupos.tem_proposta_pendente`, sem copia em SQL."""
+    from app.models import StatusNotaNfse
+
+    with app.app_context():
+        _nota_fila(StatusNotaNfse.AGRUPADA, grupo_sugerido='tok-conf',
+                   grupo_confirmado=True)
+        _nota_fila(StatusNotaNfse.PULADA, grupo_sugerido='tok-desc',
+                   grupo_descartado=True)
+        _nota_fila(StatusNotaNfse.PRONTA)
+
+        assert imp.contagem_fila()['grupos_pendentes'] == 0
+
+
+def test_contagem_fila_com_tabela_vazia(app, ids):
+    with app.app_context():
+        assert imp.contagem_fila() == {
+            'prontas': 0, 'pendentes': 0, 'grupos_pendentes': 0}
