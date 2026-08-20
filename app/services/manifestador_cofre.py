@@ -441,14 +441,23 @@ def certificados_a_vencer(dias=30):
     O estado gravado pelo inventario e apenas informativo para este alerta: a
     data de vencimento e a fonte de verdade. Assim um certificado vencido entra
     mesmo se uma linha antiga ainda disser ``pronto``.
+
+    A `Empresa` vem no MESMO select, nao pelo backref: `CertificadoEmpresa.empresa`
+    e lazy padrao, e uma query por linha traria a carteira inteira de volta ao
+    banco so para ler o nome e a situacao (o mesmo N+1 que o `calc_targets` evita).
     """
-    from app.models import CertificadoEmpresa
+    from app import db
+    from app.models import CertificadoEmpresa, Empresa
     from app.services.receita_service import empresa_ativa
 
+    linhas = (db.session.query(CertificadoEmpresa, Empresa)
+              .join(Empresa, Empresa.id == CertificadoEmpresa.empresa_id)
+              .filter(CertificadoEmpresa.not_after.isnot(None))
+              .all())
+
     itens = []
-    for certificado in CertificadoEmpresa.query.filter(
-            CertificadoEmpresa.not_after.isnot(None)).all():
-        if not empresa_ativa(certificado.empresa):
+    for certificado, empresa in linhas:
+        if not empresa_ativa(empresa):
             continue
 
         dias_restantes = (certificado.not_after.date() - date.today()).days
@@ -458,7 +467,7 @@ def certificados_a_vencer(dias=30):
         causa = 'vencido' if dias_restantes < 0 else 'vencendo'
         itens.append({
             'empresa_id': certificado.empresa_id,
-            'empresa_nome': certificado.empresa.nome,
+            'empresa_nome': empresa.nome,
             'not_after': certificado.not_after,
             'estado': certificado.estado,
             'dias_restantes': dias_restantes,
