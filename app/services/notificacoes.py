@@ -95,9 +95,9 @@ def montar_digest():
     vazio = (a_vencer == 0 and vencidas == 0 and pendentes == 0)
 
     if vazio:
-        assunto = '[Certidoes] Digest — tudo em dia'
+        assunto = '[Zelo] Digest — tudo em dia'
     else:
-        assunto = (f'[Certidoes] Digest — {a_vencer} a vencer, '
+        assunto = (f'[Zelo] Digest — {a_vencer} a vencer, '
                    f'{vencidas} vencidas, {pendentes} pendentes')
 
     linhas = [
@@ -187,7 +187,7 @@ def enviar_alertas(app):
         error_type = alerta.get('error_type')
         alvo = alerta.get('alvo')
         chave = f'falha:{error_type}:{alvo}'
-        assunto = f'[Certidoes] Alerta: falha recorrente {error_type} em {alvo}'
+        assunto = f'[Zelo] Alerta: falha recorrente {error_type} em {alvo}'
         corpo = '\n'.join([
             f'Falha recorrente detectada em {alvo}.',
             f'Tipo de erro: {error_type}',
@@ -203,7 +203,7 @@ def enviar_alertas(app):
     if saldo is not None and saldo < minimo:
         # o aviso no painel de diagnostico e responsabilidade do agendador
         # (_avisar_saldo_baixo, spec 02); aqui so cuidamos do push por e-mail.
-        assunto = '[Certidoes] Alerta: saldo 2captcha baixo'
+        assunto = '[Zelo] Alerta: saldo 2captcha baixo'
         corpo = '\n'.join([
             f'Saldo atual do 2captcha: {saldo:.2f} USD',
             f'Limiar minimo configurado: {minimo:.2f} USD',
@@ -238,7 +238,7 @@ def alertar_empresas_baixadas(app, baixadas):
 
     for empresa_id, nome, situacao in baixadas or []:
         situacao_txt = situacao or 'nao ativa'
-        assunto = f'[Certidoes] {nome} consta como {situacao_txt} na Receita'
+        assunto = f'[Zelo] {nome} consta como {situacao_txt} na Receita'
         corpo = '\n'.join([
             f'A verificacao diaria detectou que "{nome}" deixou de constar como',
             f'ATIVA na Receita. Situacao atual: {situacao_txt}.',
@@ -261,7 +261,7 @@ def alertar_empresas_baixadas(app, baixadas):
 _ALERTA_CERTIFICADO_POR_CAUSA = {
     'vencido': {
         'chave': 'certificado_vencido:{empresa_id}',
-        'assunto': '[Certidoes] Alerta: certificado vencido de {empresa_nome}',
+        'assunto': '[Zelo] Alerta: certificado vencido de {empresa_nome}',
         'linhas': [
             'O certificado da empresa {empresa_nome} venceu em {data_vencimento}.',
             '',
@@ -271,7 +271,7 @@ _ALERTA_CERTIFICADO_POR_CAUSA = {
     },
     'vencendo': {
         'chave': 'certificado_vencendo:{empresa_id}',
-        'assunto': '[Certidoes] Alerta: certificado vencendo de {empresa_nome}',
+        'assunto': '[Zelo] Alerta: certificado vencendo de {empresa_nome}',
         'linhas': [
             'O certificado da empresa {empresa_nome} vence em {data_vencimento}.',
             'Faltam {dias_restantes} dia(s) para o vencimento.',
@@ -333,7 +333,7 @@ _ALERTA_POR_CAUSA = {
     'portal': {
         'chave': 'portal_fora:{alvo}',
         'tipo': 'alerta_portal',
-        'assunto': '[Certidoes] Alerta: portal {alvo} pausado (fora do ar)',
+        'assunto': '[Zelo] Alerta: portal {alvo} pausado (fora do ar)',
         'linhas': [
             'O sistema detectou falhas seguidas no portal {alvo} e pausou a emissao',
             'nele para nao gastar creditos de captcha contra um portal fora.',
@@ -342,7 +342,7 @@ _ALERTA_POR_CAUSA = {
     'captcha': {
         'chave': 'solver_captcha:{alvo}',
         'tipo': 'alerta_solver',
-        'assunto': '[Certidoes] Alerta: captcha falhando em {alvo} (emissao pausada)',
+        'assunto': '[Zelo] Alerta: captcha falhando em {alvo} (emissao pausada)',
         'linhas': [
             'O sistema detectou falhas seguidas de CAPTCHA em {alvo} e pausou a',
             'emissao para nao queimar mais chamadas pagas do solver.',
@@ -416,7 +416,7 @@ def alertar_municipios_quebrados(app, relatorios):
         # config_automacao. Mandar revisar seletor de um portal inalcançavel faz
         # o operador depurar o lugar errado (mesma razao do alerta_solver).
         if falhou_ao_abrir(relatorio):
-            assunto = f'[Certidoes] Alerta: portal do municipio {nome} nao respondeu'
+            assunto = f'[Zelo] Alerta: portal do municipio {nome} nao respondeu'
             fecho = [
                 'O portal nao chegou a abrir: o endereco pode ter mudado ou o site',
                 'esta fora do ar. Confira a URL do municipio (tabela municipio,',
@@ -424,7 +424,7 @@ def alertar_municipios_quebrados(app, relatorios):
                 'novamente. Enquanto isso a emissao deste municipio nao funciona.',
             ]
         else:
-            assunto = f'[Certidoes] Alerta: automacao do municipio {nome} pode ter quebrado'
+            assunto = f'[Zelo] Alerta: automacao do municipio {nome} pode ter quebrado'
             fecho = [
                 'Provavel mudanca de layout do portal. Revise os seletores do municipio',
                 '(tabela municipio / config_automacao) e rode a verificacao novamente.',
