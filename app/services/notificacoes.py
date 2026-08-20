@@ -82,9 +82,9 @@ def montar_digest():
     vazio = (a_vencer == 0 and vencidas == 0 and pendentes == 0)
 
     if vazio:
-        assunto = '[Certidoes] Digest — tudo em dia'
+        assunto = '[Zelo] Digest — tudo em dia'
     else:
-        assunto = (f'[Certidoes] Digest — {a_vencer} a vencer, '
+        assunto = (f'[Zelo] Digest — {a_vencer} a vencer, '
                    f'{vencidas} vencidas, {pendentes} pendentes')
 
     linhas = [
@@ -174,7 +174,7 @@ def enviar_alertas(app):
         error_type = alerta.get('error_type')
         alvo = alerta.get('alvo')
         chave = f'falha:{error_type}:{alvo}'
-        assunto = f'[Certidoes] Alerta: falha recorrente {error_type} em {alvo}'
+        assunto = f'[Zelo] Alerta: falha recorrente {error_type} em {alvo}'
         corpo = '\n'.join([
             f'Falha recorrente detectada em {alvo}.',
             f'Tipo de erro: {error_type}',
@@ -190,7 +190,7 @@ def enviar_alertas(app):
     if saldo is not None and saldo < minimo:
         # o aviso no painel de diagnostico e responsabilidade do agendador
         # (_avisar_saldo_baixo, spec 02); aqui so cuidamos do push por e-mail.
-        assunto = '[Certidoes] Alerta: saldo 2captcha baixo'
+        assunto = '[Zelo] Alerta: saldo 2captcha baixo'
         corpo = '\n'.join([
             f'Saldo atual do 2captcha: {saldo:.2f} USD',
             f'Limiar minimo configurado: {minimo:.2f} USD',
@@ -225,7 +225,7 @@ def alertar_empresas_baixadas(app, baixadas):
 
     for empresa_id, nome, situacao in baixadas or []:
         situacao_txt = situacao or 'nao ativa'
-        assunto = f'[Certidoes] {nome} consta como {situacao_txt} na Receita'
+        assunto = f'[Zelo] {nome} consta como {situacao_txt} na Receita'
         corpo = '\n'.join([
             f'A verificacao diaria detectou que "{nome}" deixou de constar como',
             f'ATIVA na Receita. Situacao atual: {situacao_txt}.',
@@ -245,6 +245,85 @@ def alertar_empresas_baixadas(app, baixadas):
     return enviados
 
 
+# A JANELA anti-spam deste alerta e propria, e nao a global de 24h: quem o
+# alimenta e um job DIARIO, entao uma janela de 24h nunca segura nada — cada
+# certificado renderia ~30 e-mails ao longo da janela de 30 dias, e um vencido
+# nao renovado renderia um por dia para sempre. O alerta de empresa baixada nao
+# tem esse problema porque recebe so TRANSICOES; aqui a condicao persiste por
+# semanas, entao quem espaca e a janela.
+#
+# Vencendo repete por semana (ha tempo de agir); vencido repete a cada 3 dias,
+# porque ali a manifestacao da empresa esta parada e o silencio custa caro.
+_JANELA_VENCENDO_H = 24 * 7
+_JANELA_VENCIDO_H = 24 * 3
+
+_ALERTA_CERTIFICADO_POR_CAUSA = {
+    'vencido': {
+        'janela': _JANELA_VENCIDO_H,
+        'chave': 'certificado_vencido:{empresa_id}',
+        'assunto': '[Zelo] Alerta: certificado vencido de {empresa_nome}',
+        'linhas': [
+            'O certificado da empresa {empresa_nome} venceu em {data_vencimento}.',
+            '',
+            'A manifestacao dessa empresa esta parada ate renovar o certificado.',
+            'Renove o certificado e atualize o inventario do cofre antes de retomar.',
+        ],
+    },
+    'vencendo': {
+        'janela': _JANELA_VENCENDO_H,
+        'chave': 'certificado_vencendo:{empresa_id}',
+        'assunto': '[Zelo] Alerta: certificado vencendo de {empresa_nome}',
+        'linhas': [
+            'O certificado da empresa {empresa_nome} vence em {data_vencimento}.',
+            'Faltam {dias_restantes} dia(s) para o vencimento.',
+            '',
+            'Providencie a renovacao para evitar a interrupcao da manifestacao.',
+        ],
+    },
+}
+
+
+def alertar_certificados_vencendo(app, itens):
+    """Alerta certificados vencidos ou proximos de vencer, um por empresa/causa.
+
+    Recebe a selecao ja pronta de ``manifestador_cofre.certificados_a_vencer``:
+    consultar o banco e responsabilidade do chamador. A chave separa vencido de
+    vencendo porque a transicao entre os estados pede novo alerta, mas mantem o
+    anti-spam duravel para cada empresa dentro da mesma causa.
+    """
+    cfg = _config()
+    destinatarios = _destinatarios(cfg)
+    tem_smtp = email_sender.smtp_configurado(app.config)
+    if not tem_smtp or not destinatarios:
+        log_event('notif_certificados_sem_smtp', level='WARNING',
+                  tem_smtp=tem_smtp, destinatarios=len(destinatarios))
+        return 0
+
+    enviados = 0
+    for item in itens or []:
+        modelo = _ALERTA_CERTIFICADO_POR_CAUSA.get(item.get('causa'))
+        if modelo is None:
+            continue
+
+        not_after = item.get('not_after')
+        if not_after is None:
+            continue
+        dados = {
+            'empresa_id': item.get('empresa_id'),
+            'empresa_nome': item.get('empresa_nome') or '?',
+            'data_vencimento': not_after.strftime('%d/%m/%Y'),
+            'dias_restantes': item.get('dias_restantes'),
+        }
+        corpo = '\n'.join(linha.format(**dados) for linha in modelo['linhas'])
+        if _enviar_alerta(
+                app, destinatarios, modelo['chave'].format(**dados),
+                'alerta_certificado', modelo['assunto'].format(**dados), corpo,
+                modelo['janela'], detalhe=item['causa']):
+            enviados += 1
+
+    return enviados
+
+
 # Causas de abertura do breaker que geram mensagens DIFERENTES. O breaker e o
 # mesmo (parar de gastar em cima de falha repetida), mas o que o operador faz e
 # outro: portal fora se resolve esperando; solver falhando se resolve na conta
@@ -254,7 +333,7 @@ _ALERTA_POR_CAUSA = {
     'portal': {
         'chave': 'portal_fora:{alvo}',
         'tipo': 'alerta_portal',
-        'assunto': '[Certidoes] Alerta: portal {alvo} pausado (fora do ar)',
+        'assunto': '[Zelo] Alerta: portal {alvo} pausado (fora do ar)',
         'linhas': [
             'O sistema detectou falhas seguidas no portal {alvo} e pausou a emissao',
             'nele para nao gastar creditos de captcha contra um portal fora.',
@@ -263,7 +342,7 @@ _ALERTA_POR_CAUSA = {
     'captcha': {
         'chave': 'solver_captcha:{alvo}',
         'tipo': 'alerta_solver',
-        'assunto': '[Certidoes] Alerta: captcha falhando em {alvo} (emissao pausada)',
+        'assunto': '[Zelo] Alerta: captcha falhando em {alvo} (emissao pausada)',
         'linhas': [
             'O sistema detectou falhas seguidas de CAPTCHA em {alvo} e pausou a',
             'emissao para nao queimar mais chamadas pagas do solver.',
@@ -337,7 +416,7 @@ def alertar_municipios_quebrados(app, relatorios):
         # config_automacao. Mandar revisar seletor de um portal inalcançavel faz
         # o operador depurar o lugar errado (mesma razao do alerta_solver).
         if falhou_ao_abrir(relatorio):
-            assunto = f'[Certidoes] Alerta: portal do municipio {nome} nao respondeu'
+            assunto = f'[Zelo] Alerta: portal do municipio {nome} nao respondeu'
             fecho = [
                 'O portal nao chegou a abrir: o endereco pode ter mudado ou o site',
                 'esta fora do ar. Confira a URL do municipio (tabela municipio,',
@@ -345,7 +424,7 @@ def alertar_municipios_quebrados(app, relatorios):
                 'novamente. Enquanto isso a emissao deste municipio nao funciona.',
             ]
         else:
-            assunto = f'[Certidoes] Alerta: automacao do municipio {nome} pode ter quebrado'
+            assunto = f'[Zelo] Alerta: automacao do municipio {nome} pode ter quebrado'
             fecho = [
                 'Provavel mudanca de layout do portal. Revise os seletores do municipio',
                 '(tabela municipio / config_automacao) e rode a verificacao novamente.',

@@ -24,12 +24,16 @@ _JOB_RENOVACAO = 'agendador_renovacao_diaria'
 _JOB_SNAPSHOT = 'agendador_snapshot_diario'
 _JOB_VERIF_MUNICIPIOS = 'agendador_verificacao_municipios'
 _JOB_RECHECK_RECEITA = 'agendador_recheck_receita'
+_JOB_INVENTARIO_COFRE = 'agendador_inventario_cofre'
 # Offset em horas para a verificacao de municipios nao concorrer com o lote da
 # renovacao (que roda na hora cheia e pode demorar): abre navegador, nao captcha.
 _OFFSET_VERIFICACAO_H = 3
 # Deslocado tambem da verificacao de municipios: os dois sao jobs longos e
 # nao ha por que disputarem a mesma janela.
 _OFFSET_RECHECK_RECEITA_H = 5
+# O inventario percorre o drive de rede; fica em outra janela dos demais jobs
+# longos para nao concorrer com eles.
+_OFFSET_INVENTARIO_COFRE_H = 7
 # 6h: se o PC ligou depois do horário, o job ainda roda atrasado (catch-up).
 _MISFIRE_GRACE = 6 * 3600
 
@@ -147,6 +151,14 @@ def _agendar_jobs(app):
         args=[app], id=_JOB_RECHECK_RECEITA, replace_existing=True,
         misfire_grace_time=_MISFIRE_GRACE, coalesce=True, max_instances=1)
 
+    # O inventario so atualiza o espelho do cofre e dispara alertas; nao emite
+    # documento nem consome captcha, portanto roda mesmo com o agendador inativo.
+    _scheduler.add_job(
+        job_inventario_cofre,
+        CronTrigger(hour=(hora + _OFFSET_INVENTARIO_COFRE_H) % 24, minute=45),
+        args=[app], id=_JOB_INVENTARIO_COFRE, replace_existing=True,
+        misfire_grace_time=_MISFIRE_GRACE, coalesce=True, max_instances=1)
+
     if ativo:
         _scheduler.add_job(
             job_renovacao_diaria, CronTrigger(hour=hora, minute=0),
@@ -237,6 +249,50 @@ def job_recheck_receita(app):
             notificacoes.alertar_empresas_baixadas(app, resumo.get('baixadas') or [])
         except Exception as exc:
             log_event('receita_recheck_alerta_falhou', level='ERROR', error=str(exc))
+        return resumo
+
+
+def job_inventario_cofre(app):
+    """Atualiza o cofre e alerta certificados vencidos ou proximos de vencer.
+
+    O drive fora e erro de ambiente, nao sinal do portal da SEFAZ: preserva o
+    inventario anterior, nao envia alerta e nunca alimenta o circuit breaker.
+    """
+    from app.services import manifestador_cofre
+
+    with app.app_context():
+        resumo = None
+        if not manifestador_cofre._inventario_acquire():
+            # Alguem clicou em "Inventariar" na tela e a varredura esta em curso:
+            # duas em paralelo brigam pela linha da mesma empresa. Sai de fininho
+            # e alerta pelo espelho, que a outra varredura vai atualizar.
+            log_event('manifestador_inventario_cofre_ocupado', level='WARNING')
+        else:
+            try:
+                resumo = manifestador_cofre.inventariar()
+            except manifestador_cofre.CofreError as exc:
+                # Drive fora e ambiente, nao portal: nao alimenta o breaker e
+                # NAO cancela o alerta. O espelho anterior continua valendo, e
+                # `certificados_a_vencer` le so o banco — com o drive fora por
+                # alguns dias, calar seria deixar de avisar de um vencimento que
+                # ja sabemos, por um motivo que nao tem nada a ver com ele.
+                log_event('manifestador_inventario_cofre_falhou', level='ERROR',
+                          error_type='NETWORK_PATH', error=str(exc))
+            finally:
+                manifestador_cofre._inventario_release()
+
+        # A SELECAO entra no mesmo try do envio: as duas sao o passo "alertar",
+        # que e best-effort (AD-011). Com a consulta fora, uma falha nela mataria
+        # o job DEPOIS de o inventario ter sido gravado — e o log diria que o job
+        # falhou, quando o trabalho que importa ja estava feito.
+        try:
+            from app.services import notificacoes
+            dias = app.config.get('MANIF_CERT_ALERTA_DIAS', 30)
+            itens = manifestador_cofre.certificados_a_vencer(dias=dias)
+            notificacoes.alertar_certificados_vencendo(app, itens)
+        except Exception as exc:
+            log_event('manifestador_inventario_alerta_falhou', level='ERROR',
+                      error=str(exc))
         return resumo
 
 
