@@ -3,14 +3,14 @@ r"""Cofre de certificados A1 da carteira (MANIF-01..06, AD-027).
 Responde uma pergunta so: "qual certificado usar para manifestar por esta
 empresa, e ele esta utilizavel?".
 
-Tres invariantes vieram da varredura real das 93 empresas ativas
+Tres invariantes vieram da varredura real da carteira
 (`.specs/features/manifestador-nfe/recon.md`) e nao devem ser afrouxadas:
 
 1. **A empresa e identificada pelo CNPJ de dentro do certificado**, extraido do
    CN (`RAZAO SOCIAL:14 digitos`). Nao pelo nome do arquivo, nem pelo da pasta,
    nem pela razao social: na carteira existe certificado cujo CN e
-   `CONSULTA RFB A REALIZAR NA HORA DA VALIDACAO`, existem `SOARES & LEAL` e
-   `SOARES E LEAL` para o mesmo CNPJ, e `E E C PEREIRA` aparece em 5 CNPJs.
+   `CERTIFICADO A VALIDAR NA EMISSAO`, existem `MARTINS & FILHOS` e
+   `MARTINS E FILHOS` para o mesmo CNPJ, e `A B C COMERCIO` aparece em 5 CNPJs.
 2. **Nada e copiado.** O que se guarda e o caminho e a senha cifrada; o `.pfx`
    e lido do drive no momento do uso. Assim a renovacao anual na pasta e
    herdada sem recadastro, e nao se duplica chave privada.
@@ -35,7 +35,7 @@ from app.utils import get_config_value
 
 VAULT_KEY_ENV = 'MANIF_VAULT_KEY'
 
-# Ordem importa: `123456` abre 69 das 93 empresas da carteira, entao e a
+# Ordem importa: `123456` abre a maior parte da carteira, entao e a
 # primeira tentativa. A senha vazia cobre o .pfx exportado sem protecao.
 SENHAS_PADRAO = (b'123456', b'')
 
@@ -226,7 +226,7 @@ def decifrar_senha(token):
 EXTENSOES_PFX = ('.pfx', '.p12')
 # Fundo suficiente para `EMPRESA\DOC. EMPRESA\CERTIFICADO A-1 SENHA X\a.pfx`, e
 # raso o bastante para a varredura nao custar minutos por empresa: a medida real
-# foi ~135 s para 93 empresas com este limite.
+# foi ~135 s para a carteira inteira com este limite.
 PROFUNDIDADE_MAX = 4
 
 # A senha as vezes esta escrita no caminho ('CERTIFICADO A-1 SENHA 17022013').
@@ -360,7 +360,7 @@ def _aplicar(empresa, estado, info, senha, detalhe):
         cert.not_after = info.not_after
         # So regrava a senha quando ela NAO e uma das padrao: guardar `123456`
         # cifrado nao protege nada e cria dependencia da chave do cofre para 69
-        # das 93 empresas.
+        # da carteira.
         if senha and senha.encode() not in SENHAS_PADRAO:
             try:
                 cert.senha_cifrada = cifrar_senha(senha)
@@ -417,7 +417,7 @@ def _inventario_release():
 def inventariar(empresas=None):
     """Varre o drive e grava o estado do certificado de cada empresa ativa.
 
-    Custa rede: a medida real foi ~135 s para 93 empresas. Por isso roda fora da
+    Custa rede: a medida real foi ~135 s para a carteira inteira. Por isso roda fora da
     requisicao e o resultado fica no banco — a tela le `estado_da_carteira()`.
 
     Levanta `CofreError` quando o drive base nao responde: marcar todo mundo

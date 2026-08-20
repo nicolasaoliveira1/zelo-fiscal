@@ -87,11 +87,11 @@ def test_campos_do_certificado_persistem(app, ids):
         emp = _empresa()
         vence = datetime(2027, 7, 20, 12, 0, 0)
         emp.certificado = CertificadoEmpresa(
-            caminho=r'Z:\PASTAS EMPRESAS\LOURDES\DOCUMENTOS\CERTIFIC\a.pfx',
+            caminho=r'Z:\PASTAS EMPRESAS\MARTINS\DOCUMENTOS\CERTIFIC\a.pfx',
             senha_cifrada='gAAAAAB-fake-token',
-            subject_cn='LOURDES M PESCE LTDA:54214676000107',
+            subject_cn='MARTINS & FILHOS LTDA:11222333000181',
             issuer_cn='AC SyngularID Multipla',
-            cnpj_certificado='54214676000107',
+            cnpj_certificado='11222333000181',
             not_after=vence,
             estado=EstadoCertificado.PRONTO,
             detalhe='',
@@ -101,9 +101,9 @@ def test_campos_do_certificado_persistem(app, ids):
         cert = db.session.get(Empresa, emp.id).certificado
         assert cert.caminho.endswith('a.pfx')
         assert cert.senha_cifrada == 'gAAAAAB-fake-token'
-        assert cert.subject_cn == 'LOURDES M PESCE LTDA:54214676000107'
+        assert cert.subject_cn == 'MARTINS & FILHOS LTDA:11222333000181'
         assert cert.issuer_cn == 'AC SyngularID Multipla'
-        assert cert.cnpj_certificado == '54214676000107'
+        assert cert.cnpj_certificado == '11222333000181'
         assert cert.not_after == vence
         assert cert.verificado_em is not None
 
