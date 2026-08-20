@@ -296,7 +296,9 @@
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
-    <script>
+    <script type="module">
+        import { showToast } from "{{ url_for('static', filename='js/toasts.js') }}";
+
         // Abrir a pasta de certidoes da empresa (Explorer local; o app roda na estacao).
         // Delegado no document para funcionar em qualquer pagina com .btn-abrir-pasta.
         document.addEventListener('click', async function (e) {
@@ -304,23 +306,18 @@
             if (!btn) return;
             const id = btn.dataset.empresaId;
             if (!id) return;
-            const toast = window.showToast;   // presente onde o toasts.js modulo carrega (ex.: Certidões)
             btn.disabled = true;
             try {
                 const resp = await fetch(`/empresa/${id}/abrir-pasta`, { method: 'POST' });
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok) {
-                    // Erro e alto sinal: usa toast se houver, senao alert (pagina sem toast).
                     const msg = data.message || data.mensagem || 'Não foi possível abrir a pasta.';
-                    if (toast) { toast(msg, 'error'); } else { alert(msg); }
-                } else if (toast) {
-                    // Sucesso e baixo sinal: a pasta abre no Explorer (outra janela) e o toast
-                    // confirma a acao. Sem toast, fica silencioso — nada de alert nativo.
-                    toast(data.message || data.mensagem || 'Abrindo pasta…', 'success');
+                    showToast(msg, 'error');
+                } else {
+                    showToast(data.message || data.mensagem || 'Abrindo pasta…', 'success');
                 }
             } catch (err) {
-                const msg = 'Erro ao abrir a pasta.';
-                if (toast) { toast(msg, 'error'); } else { alert(msg); }
+                showToast('Erro ao abrir a pasta.', 'error');
             } finally {
                 btn.disabled = false;
             }
