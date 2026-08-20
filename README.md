@@ -1,12 +1,10 @@
-<img src="app/static/images/zelo-mark-512.png" width="92" align="left" alt="Zelo" />
-
-# Zelo
-
-**Regularidade sob controle.**
-
-<br clear="left" />
-
 <div align="center">
+
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="app/static/images/zelo-lockup-dark.png">
+    <img src="app/static/images/zelo-lockup-light.png" width="369" alt="Zelo. Regularidade sob controle." />
+  </picture>
+
 
   <p>
     Automação das rotinas fiscais que se repetem todo mês e têm prazo:<br />
