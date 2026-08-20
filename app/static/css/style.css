@@ -6,15 +6,20 @@
     /* chrome monocromático */
     --zelo-ink: #16181C;
     --zelo-graphite: #2B2F36;
+    --zelo-graphite-rgb: 43, 47, 54;
     --zelo-slate: #6B7280;
+    --zelo-slate-rgb: 107, 114, 128;
     --zelo-line: #E3E6EB;
     --zelo-mist: #F5F6F8;
     --zelo-paper: #FFFFFF;
 
     /* status (a única cromaticidade) — light */
     --zelo-ok: #2E7D52;
+    --zelo-ok-rgb: 46, 125, 82;
     --zelo-warn: #B07408;
+    --zelo-warn-rgb: 176, 116, 8;
     --zelo-danger: #B23A33;
+    --zelo-danger-rgb: 178, 58, 51;
     --zelo-muted: #9AA1AB;
     /* "pendente" tem tom próprio (provável débito) — distinto de "vencida" */
     --zelo-pend: #C2622A;
@@ -102,27 +107,27 @@
     will-change: transform, opacity;
 }
 
-.toast-stack .stk-toast.bg-success {
+.toast-stack .stk-toast.is-success {
     background-color: var(--bs-success);
 }
 
-.toast-stack .stk-toast.bg-danger {
+.toast-stack .stk-toast.is-danger {
     background-color: var(--bs-danger);
 }
 
-.toast-stack .stk-toast.bg-warning {
+.toast-stack .stk-toast.is-warning {
     background-color: var(--zelo-warn);
     color: var(--zelo-ink);
 }
 
-.toast-stack .stk-toast.bg-primary {
+.toast-stack .stk-toast.is-info {
     background-color: var(--bs-primary);
 }
 
 /* No escuro, --bs-primary inverte para cinza claro; o texto branco fixo do
    .stk-toast some. Usa texto escuro (mesmo token da acao primaria no dark). */
-[data-bs-theme="dark"] .toast-stack .stk-toast.bg-primary,
-[data-bs-theme="dark"] .toast-stack .stk-toast.bg-warning {
+[data-bs-theme="dark"] .toast-stack .stk-toast.is-info,
+[data-bs-theme="dark"] .toast-stack .stk-toast.is-warning {
     color: var(--zelo-action-fg);
 }
 
@@ -153,14 +158,19 @@
 [data-bs-theme="dark"] {
     --zelo-ink: #F2F4F7;
     --zelo-graphite: #E2E5EA;
+    --zelo-graphite-rgb: 226, 229, 234;
     --zelo-slate: #9BA3AD;
+    --zelo-slate-rgb: 155, 163, 173;
     --zelo-line: #2A2F35;
     --zelo-mist: #16191D;
     --zelo-paper: #0F1115;
 
     --zelo-ok: #4FB07E;
+    --zelo-ok-rgb: 79, 176, 126;
     --zelo-warn: #E0A642;
+    --zelo-warn-rgb: 224, 166, 66;
     --zelo-danger: #E8736B;
+    --zelo-danger-rgb: 232, 115, 107;
     --zelo-muted: #6B7280;
     --zelo-pend: #D98A52;
 
@@ -202,6 +212,53 @@
     --bs-btn-disabled-color: var(--zelo-action-fg);
     --bs-btn-disabled-bg: var(--zelo-action-bg);
     --bs-btn-disabled-border-color: var(--zelo-action-bg);
+}
+
+/* O Bootstrap compila as variantes outline com cores literais; remapear
+   --bs-primary/--bs-warning não chega a estas variáveis de componente. */
+.btn-outline-primary {
+    --zelo-outline-color: var(--zelo-graphite);
+    --zelo-outline-focus-rgb: var(--zelo-graphite-rgb);
+}
+
+.btn-outline-secondary,
+.btn-outline-info {
+    --zelo-outline-color: var(--zelo-slate);
+    --zelo-outline-focus-rgb: var(--zelo-slate-rgb);
+}
+
+.btn-outline-success {
+    --zelo-outline-color: var(--zelo-ok);
+    --zelo-outline-focus-rgb: var(--zelo-ok-rgb);
+}
+
+.btn-outline-danger {
+    --zelo-outline-color: var(--zelo-danger);
+    --zelo-outline-focus-rgb: var(--zelo-danger-rgb);
+}
+
+.btn-outline-warning {
+    --zelo-outline-color: var(--zelo-warn);
+    --zelo-outline-focus-rgb: var(--zelo-warn-rgb);
+}
+
+.btn-outline-primary,
+.btn-outline-secondary,
+.btn-outline-success,
+.btn-outline-danger,
+.btn-outline-warning,
+.btn-outline-info {
+    --bs-btn-color: var(--zelo-outline-color);
+    --bs-btn-border-color: var(--zelo-outline-color);
+    --bs-btn-hover-color: var(--zelo-action-fg);
+    --bs-btn-hover-bg: var(--zelo-outline-color);
+    --bs-btn-hover-border-color: var(--zelo-outline-color);
+    --bs-btn-focus-shadow-rgb: var(--zelo-outline-focus-rgb);
+    --bs-btn-active-color: var(--zelo-action-fg);
+    --bs-btn-active-bg: var(--zelo-outline-color);
+    --bs-btn-active-border-color: var(--zelo-outline-color);
+    --bs-btn-disabled-color: var(--zelo-outline-color);
+    --bs-btn-disabled-border-color: var(--zelo-outline-color);
 }
 
 /* botões de ação semânticos — mesma convenção (criar=verde / destrutivo=vermelho),

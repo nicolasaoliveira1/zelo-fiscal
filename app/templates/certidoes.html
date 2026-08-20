@@ -276,7 +276,7 @@
             <!-- Barra de controles -->
             <div class="filtros-toolbar">
                 <div class="input-group busca">
-                    <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
+                    <span class="input-group-text bg-body border-end-0"><i class="bi bi-search text-muted"></i></span>
                     <input type="search" class="form-control border-start-0 ps-1" id="filtroEmpresa"
                         placeholder="Buscar empresa...">
                 </div>
@@ -443,7 +443,7 @@
     <div id="skeleton-certidoes" aria-hidden="true" aria-label="Carregando empresas...">
         {% for _ in range(3) %}
         <div class="card mb-4 shadow-sm border-0">
-            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center gap-3">
+            <div class="card-header bg-body border-bottom py-3 d-flex align-items-center gap-3">
                 <div class="sk-bloco rounded" style="width:45px;height:45px;flex-shrink:0;border-radius:8px!important"></div>
                 <div class="flex-grow-1">
                     <div class="sk-bloco mb-2" style="height:17px;width:38%"></div>
@@ -496,14 +496,14 @@
             data-count-tipo-municipal="{{ ct['tipo_municipal'] }}" data-count-tipo-trabalhista="{{ ct['tipo_trabalhista'] }}">
 
             <div
-                class="card-header bg-white border-bottom py-3 d-flex flex-wrap justify-content-between align-items-center">
+                class="card-header bg-body border-bottom py-3 d-flex flex-wrap justify-content-between align-items-center">
                 <div class="d-flex align-items-center gap-3">
                     <div class="bg-primary bg-opacity-10 text-primary rounded p-2 d-flex align-items-center justify-content-center"
                         style="width: 45px; height: 45px;">
                         <i class="bi bi-building fs-4"></i>
                     </div>
                     <div>
-                        <h5 class="mb-0 fw-bold text-dark">{{ empresa.nome }}</h5>
+                        <h5 class="mb-0 fw-bold text-body">{{ empresa.nome }}</h5>
                         <div class="d-flex gap-3 text-muted small mt-1">
                             <span><i class="bi bi-geo-alt me-1"></i>{{ empresa.estado }} - {{ empresa.cidade
                                 }}</span>
