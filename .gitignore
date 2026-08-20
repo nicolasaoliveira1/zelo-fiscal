@@ -68,8 +68,13 @@ docs/DESIGN_LANGUAGE.md
 *.sqlite3
 *.db
 
-# Screenshots gerados pelo harness de UI (Playwright) — artefatos, não versionar
-tools/ui-harness/shots/
+# Harness de UI (mockups, paginas de inspecao e scripts de screenshot): material
+# de TRABALHO, nao codigo do app — nada aqui e usado pelo app, pelos testes ou
+# pelo CI. Fica so na maquina. Os geradores da marca sao a excecao: eles
+# produzem assets que ESTAO versionados em app/static/images.
+tools/ui-harness/*
+!tools/ui-harness/gen_zelo_mark.py
+!tools/ui-harness/gen_zelo_lockup.py
 
 # Claude Code — versiona .claude/skills (compartilhado); ignora config pessoal/local
 .claude/settings.local.json
@@ -78,6 +83,10 @@ tools/ui-harness/shots/
 
 # Specs de trabalho da skill spec-driven (uso local, não versionadas)
 .specs/
+
+# Rascunho de execucao dos agentes e artefatos de teste (apagavel a qualquer momento)
+tmp/
+.pytest-tmp*/
 
 # Artefatos locais diversos
 Thumbs.db
