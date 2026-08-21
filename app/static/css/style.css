@@ -3270,3 +3270,44 @@ tr.filter-hidden {
         overflow-x: visible;
     }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   ERRO DE CAMPO (A-20)
+
+   O sistema tinha 100 campos de entrada e ZERO ocorrências de
+   `is-invalid`, `invalid-feedback` ou `was-validated`: não existia
+   validação inline em lugar nenhum. O erro de preenchimento chegava
+   por balão nativo do navegador (só para `required`), por flash no
+   topo (que perde o vínculo com o campo) ou por toast — que até há
+   pouco nem aparecia fora de uma tela.
+
+   Reusa o estado que o Bootstrap já tem, em vez de inventar um: aqui
+   as variáveis SÃO lidas do :root (ao contrário de `.btn-outline-*`,
+   que trazem hex literal), então remapear alcança tudo.
+   ══════════════════════════════════════════════════════════════ */
+:root {
+    --bs-form-invalid-color: var(--zelo-danger);
+    --bs-form-invalid-border-color: var(--zelo-danger);
+}
+
+/* O ícone que o Bootstrap embute no campo traz #dc3545 CRAVADO num
+   data-URI, fora da escala do Zelo e imune a remapeamento. Sai: quem
+   carrega o sinal sem depender de cor é a mensagem abaixo do campo. */
+.form-control.is-invalid,
+.was-validated .form-control:invalid,
+.form-select.is-invalid,
+.was-validated .form-select:invalid {
+    background-image: none;
+    padding-right: var(--zl-space-3);
+}
+
+.invalid-feedback {
+    font-size: var(--zl-fs-1);
+    margin-top: var(--zl-space-1);
+}
+
+/* A mensagem aparece porque o JS a insere; não depende de `.was-validated`
+   no formulário, que é o modo "valide tudo de uma vez" do Bootstrap. */
+.invalid-feedback.zl-erro-campo {
+    display: block;
+}

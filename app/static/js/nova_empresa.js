@@ -3,6 +3,7 @@
 // A consulta acontece ANTES de salvar, de proposito: o operador ve o que veio e
 // corrige se precisar. O POST de cadastro nunca toca a rede (DATA-01.4).
 import { showToast } from './toasts.js';
+import { marcarInvalido, validar } from './campos.js';
 
 const CAMPOS_PREVIA = [
     ['Razão social', 'razao_social'],
@@ -74,7 +75,8 @@ async function buscarDados(botao, previa) {
     const campoCnpj = document.getElementById('cnpj');
     const cnpj = (campoCnpj?.value || '').trim();
     if (!cnpj) {
-        showToast('Informe o CNPJ antes de buscar.', 'warning');
+        // A-20: o erro pertence AO CAMPO. Toast some em 6s e nao diz qual campo.
+        marcarInvalido(campoCnpj, 'Informe o CNPJ para consultar a Receita.');
         campoCnpj?.focus();
         return;
     }
@@ -130,4 +132,59 @@ document.addEventListener('DOMContentLoaded', () => {
     const previa = document.getElementById('previa-receita');
     if (!botao || !previa) return;
     botao.addEventListener('click', () => buscarDados(botao, previa));
+});
+
+/* ── Validação antes de enviar (A-20) ────────────────────────────────────
+   Sem isto o caminho do erro era: POST, o servidor dá flash e REDIRECIONA,
+   e o redirect descarta tudo o que foi digitado — o operador reescreve o
+   formulário inteiro para trocar um dígito. Validar aqui faz os quatro erros
+   comuns nunca chegarem lá.
+
+   A regra do CNPJ é a MESMA do servidor (dígito verificador, não contagem de
+   14 dígitos): contar dígitos deixava passar erro de digitação, e é por isso
+   que o backend passou a conferir o DV. Cliente e servidor divergirem seria
+   pior que não validar — o operador veria "ok" aqui e "inválido" lá. */
+function digitoVerificadorOk(cnpj) {
+    if (cnpj.length !== 14 || /^(\d)\1{13}$/.test(cnpj)) return false;
+    const calcula = (base) => {
+        let peso = base.length - 7;
+        const soma = [...base].reduce((acc, d) => {
+            acc += Number(d) * peso--;
+            if (peso < 2) peso = 9;
+            return acc;
+        }, 0);
+        const resto = soma % 11;
+        return resto < 2 ? 0 : 11 - resto;
+    };
+    const d1 = calcula(cnpj.slice(0, 12));
+    const d2 = calcula(cnpj.slice(0, 12) + d1);
+    return cnpj === cnpj.slice(0, 12) + String(d1) + String(d2);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.querySelector('form[action*="adicionar"]');
+    if (!form) return;
+
+    form.addEventListener('submit', (evento) => {
+        const nome = form.querySelector('#nome');
+        const cnpj = form.querySelector('#cnpj');
+        const estado = form.querySelector('#estado');
+        const cidade = form.querySelector('#cidade');
+        const digitos = (cnpj?.value || '').replace(/\D/g, '');
+
+        const tudoCerto = validar([
+            [nome, nome && !nome.value.trim() ? 'Informe o nome da empresa.' : ''],
+            [cnpj, !digitos
+                ? 'Informe o CNPJ.'
+                : (digitos.length !== 14
+                    ? 'O CNPJ precisa ter 14 dígitos.'
+                    : (!digitoVerificadorOk(digitos)
+                        ? 'O dígito verificador não confere. Confira a digitação.'
+                        : ''))],
+            [estado, estado && !estado.value ? 'Escolha o estado.' : ''],
+            [cidade, cidade && !cidade.value ? 'Escolha a cidade.' : ''],
+        ]);
+
+        if (!tudoCerto) evento.preventDefault();
+    });
 });
