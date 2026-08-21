@@ -548,14 +548,21 @@
 
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0">
+                    {#- O nome acessivel vai em aria-label, e nao num <caption
+                        class="visually-hidden">: aquele utilitario usa `height: 1px`, e num
+                        <caption> isso PERMANECE no fluxo. Como o .table-responsive tem
+                        `overflow-x: auto` — e pela regra do CSS o overflow-y computa como
+                        `auto` junto — aquele 1px bastava para uma barra de rolagem vertical
+                        aparecer dentro do cartao. Medido: scrollHeight 275 contra
+                        clientHeight 274, e zero ao tirar o caption. -#}
+                    <table class="table table-hover align-middle mb-0"
+                           aria-label="Certidões de {{ empresa.nome }}">
                         {#- Legenda e cabeçalho existem para o leitor de tela, não para a
                             tela (A-17/A-18). Um <thead> VISÍVEL seria repetido uma vez por
                             empresa — dezenas de vezes na página — para nomear colunas que a
                             linha de razão já torna evidentes. Escondê-lo com
                             `visually-hidden` dá a associação célula/cabeçalho a quem navega
                             por tabela, sem cobrar nada de quem enxerga. -#}
-                        <caption class="visually-hidden">Certidões de {{ empresa.nome }}</caption>
                         <thead class="visually-hidden">
                             <tr>
                                 <th scope="col">Tipo de certidão</th>
