@@ -3168,11 +3168,6 @@ tr.filter-hidden {
     gap: var(--zl-space-3);
 }
 
-.zl-page-titulo .bi {
-    font-size: 0.8em;
-    color: var(--zelo-slate);
-}
-
 .zl-page-sub {
     font-size: var(--zl-fs-2);
     color: var(--zelo-slate);

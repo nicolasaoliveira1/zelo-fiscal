@@ -86,18 +86,28 @@
     um deslize não pode mais virar o outro. E como a tela de Certidões não tinha
     cabeçalho nenhum, isto também devolve o "você está aqui" que faltava (A-04).
 
+    SUBTÍTULO: só quando ele DIZ ALGO que o título não diz. "Relatórios /
+    Visão rápida dos principais indicadores" e "Configurações / Área inicial
+    para ajustes do sistema" eram preenchimento — leia só o título e você já
+    sabia. É a mesma duplicação que tirou o subtítulo de contagem da Visão
+    Geral. Ganham subtítulo: escopo, janela, identidade ou uma capacidade não
+    óbvia (o CNPJ da empresa, "últimos N dias", "dá para consultar a Receita").
+
+    SEM ÍCONE ao lado do título: a barra lateral já mostra um ícone por página,
+    e repeti-lo aqui não informa nada — mesma razão que tirou o ícone de prédio
+    idêntico do cabeçalho de cada empresa (E-08).
+
     Uso com ação à direita:
         {% call zl_page('Empresas') %}<a class="btn btn-primary">…</a>{% endcall %}
-    Sem ação:
-        {{ zl_page('Relatórios', 'Visão rápida dos principais indicadores.') }}
+    Sem ação, e sem subtítulo (o caso comum):
+        {{ zl_page('Relatórios') }}
+    Com subtítulo que se paga (diz a janela do recorte):
+        {{ zl_page('Produtividade', 'Emissões e taxa de sucesso nos últimos ' ~ dias ~ ' dias.') }}
 -#}
-{% macro zl_page(titulo, subtitulo='', icone='') -%}
+{% macro zl_page(titulo, subtitulo='') -%}
 <header class="zl-page">
     <div class="zl-page-txt">
-        <h1 class="zl-page-titulo">
-            {%- if icone %}<i class="bi bi-{{ icone }}" aria-hidden="true"></i>{% endif -%}
-            {{ titulo }}
-        </h1>
+        <h1 class="zl-page-titulo">{{ titulo }}</h1>
         {%- if subtitulo %}<p class="zl-page-sub">{{ subtitulo }}</p>{% endif %}
     </div>
     {%- if caller %}<div class="zl-page-acoes">{{ caller() }}</div>{% endif %}
