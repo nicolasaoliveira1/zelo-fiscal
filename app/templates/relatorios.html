@@ -224,6 +224,9 @@
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
         <p class="rel-section-title mb-3">Últimos lotes emitidos</p>
+        {% set lotes_pendentes = lotes_resumo | selectattr('pendentes') | list %}
+        {% set lotes_gerais = lotes_resumo | selectattr('geral') | list %}
+        {% if lotes_pendentes or lotes_gerais %}
         {% for l in lotes_resumo %}
         <div class="rel-lote-row">
             <span class="rel-lote-tipo">{{ l.tipo }}</span>
@@ -231,6 +234,9 @@
             {{ lote_cell('Geral (vencidas / a vencer)', l.geral) }}
         </div>
         {% endfor %}
+        {% else %}
+        <p class="rel-empty mb-0">Nenhum lote foi emitido ainda.</p>
+        {% endif %}
     </div>
 </div>
 
@@ -278,11 +284,11 @@
             <table class="table table-sm rel-table align-middle mb-0">
                 <thead>
                     <tr class="text-body-secondary">
-                        <th>Empresa</th>
-                        <th>Cidade</th>
-                        <th>Certidão</th>
-                        <th>Validade</th>
-                        <th class="text-end">Emitida</th>
+                            <th scope="col">Empresa</th>
+                            <th scope="col">Cidade</th>
+                            <th scope="col">Certidão</th>
+                            <th scope="col">Validade</th>
+                            <th scope="col" class="text-end">Emitida</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -352,10 +358,10 @@
             <table class="table table-sm rel-table align-middle mb-0">
                 <thead>
                     <tr class="text-body-secondary">
-                        <th>Empresa</th>
-                        <th>Cidade</th>
-                        <th>Certidão</th>
-                        <th class="text-end">Pendente</th>
+                            <th scope="col">Empresa</th>
+                            <th scope="col">Cidade</th>
+                            <th scope="col">Certidão</th>
+                            <th scope="col" class="text-end">Pendente</th>
                     </tr>
                 </thead>
                 <tbody>

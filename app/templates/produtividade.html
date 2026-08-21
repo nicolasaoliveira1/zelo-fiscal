@@ -53,12 +53,12 @@
                     <table class="table table-sm mb-0 align-middle">
                         <thead>
                             <tr>
-                                <th>Tipo</th>
-                                <th class="text-end">Lotes</th>
-                                <th class="text-end">Sucessos</th>
-                                <th class="text-end">Falhas</th>
-                                <th class="text-end">Taxa</th>
-                                <th class="text-end">Tempo médio</th>
+                            <th scope="col">Tipo</th>
+                            <th scope="col" class="text-end">Lotes</th>
+                            <th scope="col" class="text-end">Sucessos</th>
+                            <th scope="col" class="text-end">Falhas</th>
+                            <th scope="col" class="text-end">Taxa</th>
+                            <th scope="col" class="text-end">Tempo médio</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -91,9 +91,9 @@
                     <table class="table table-sm mb-0 align-middle">
                         <thead>
                             <tr>
-                                <th>Origem</th>
-                                <th class="text-end">Lotes</th>
-                                <th class="text-end">Emissões</th>
+                            <th scope="col">Origem</th>
+                            <th scope="col" class="text-end">Lotes</th>
+                            <th scope="col" class="text-end">Emissões</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -119,7 +119,7 @@
                 <div class="table-responsive">
                     <table class="table table-sm mb-0 align-middle">
                         <thead>
-                            <tr><th>Data</th><th class="text-end">Emissões</th></tr>
+                    <tr><th scope="col">Data</th><th scope="col" class="text-end">Emissões</th></tr>
                         </thead>
                         <tbody>
                             {% for e in dados.emissoes_por_dia %}

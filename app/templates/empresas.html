@@ -17,9 +17,11 @@
     <div>
         <h4 class="mb-1 fw-bold">Empresas</h4>
     </div>
-    <a class="btn btn-success" href="{{ url_for('main.nova_empresa') }}" aria-label="Cadastrar nova empresa">
-        <i class="bi bi-building-add me-1"></i> Nova Empresa
+    {% if current_user.papel in ['operador', 'admin'] %}
+    <a class="btn btn-primary" href="{{ url_for('main.nova_empresa') }}" aria-label="Cadastrar nova empresa">
+        <i class="bi bi-building-add me-1"></i> Nova empresa
     </a>
+    {% endif %}
 </div>
 
 <div class="card shadow-sm border-0 mb-4">
@@ -66,13 +68,13 @@
             <table class="table table-hover align-middle mb-0">
                 <thead class="table-light text-uppercase small text-muted">
                     <tr>
-                        <th class="ps-4">Empresa</th>
-                        <th>CNPJ</th>
-                        <th>Estado</th>
-                        <th>Cidade</th>
-                        <th>Inscricao</th>
-                        <th>Certidoes</th>
-                        <th class="text-end pe-4">Acoes</th>
+                            <th scope="col" class="ps-4">Empresa</th>
+                            <th scope="col">CNPJ</th>
+                            <th scope="col">Estado</th>
+                            <th scope="col">Cidade</th>
+                            <th scope="col">Inscricao</th>
+                            <th scope="col">Certidoes</th>
+                            <th scope="col" class="text-end pe-4">Acoes</th>
                     </tr>
                 </thead>
                 <tbody>

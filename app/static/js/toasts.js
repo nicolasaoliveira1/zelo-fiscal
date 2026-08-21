@@ -15,10 +15,14 @@ const MAX_PEEK = 3;        // quantos toasts de tras ficam visiveis recolhidos
 const MAX_TOASTS = 6;      // limite na pilha
 const TOAST_DELAY = 6000;
 
-function bgClass(type) {
-    if (type === 'success') return 'bg-success';
-    if (type === 'error') return 'bg-danger';
-    return 'bg-primary';
+function toastClass(type) {
+    const classes = {
+        success: 'is-success',
+        error: 'is-danger',
+        warning: 'is-warning',
+        info: 'is-info',
+    };
+    return classes[type] || classes.info;
 }
 
 function reflow() {
@@ -68,7 +72,7 @@ export function showToast(message, type = 'success') {
     if (!toastStack) return;
 
     const el = document.createElement('div');
-    el.className = 'stk-toast ' + bgClass(type);
+    el.className = 'stk-toast ' + toastClass(type);
     el.setAttribute('role', 'alert');
 
     const body = document.createElement('div');

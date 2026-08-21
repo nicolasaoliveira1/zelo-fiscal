@@ -63,14 +63,15 @@
         Antes eram 3 cartões irmãos, com a soma parecendo mais uma parcela. -#}
     {% macro batch_confirm_modal(slug, titulo, plural) -%}
     {%- set Slug = slug | capitalize -%}
-    <div class="modal fade" id="{{ slug }}BatchModal" tabindex="-1" aria-hidden="true"
+    <div class="modal fade" id="{{ slug }}BatchModal" tabindex="-1"
+        aria-labelledby="{{ slug }}BatchModalTitulo" aria-hidden="true"
         data-bs-backdrop="static" data-bs-keyboard="false">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content batch-action-modal">
                 <div class="modal-header">
                     <div>
                         <span class="zl-eyebrow">Confirmar</span>
-                        <h5 class="modal-title mb-0">Emitir {{ titulo }} em lote</h5>
+                        <h5 class="modal-title mb-0" id="{{ slug }}BatchModalTitulo">Emitir {{ titulo }} em lote</h5>
                     </div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
                 </div>
@@ -112,14 +113,15 @@
         para lista de fatos). Mesmo componente do painel de andamento, de
         propósito: o operador acabou de olhar para ele. -#}
     {% macro batch_summary_modal(slug, titulo) -%}
-    <div class="modal fade" id="{{ slug }}BatchSummaryModal" tabindex="-1" aria-hidden="true"
+    <div class="modal fade" id="{{ slug }}BatchSummaryModal" tabindex="-1"
+        aria-labelledby="{{ slug }}BatchSummaryModalTitulo" aria-hidden="true"
         data-bs-backdrop="static" data-bs-keyboard="false">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content batch-summary-modal">
                 <div class="modal-header border-0 pb-0">
                     <div>
                         <span class="zl-eyebrow">Lote concluído</span>
-                        <h5 class="modal-title mb-0">Resumo do lote {{ titulo }}</h5>
+                        <h5 class="modal-title mb-0" id="{{ slug }}BatchSummaryModalTitulo">Resumo do lote {{ titulo }}</h5>
                     </div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
                 </div>
@@ -276,7 +278,7 @@
             <!-- Barra de controles -->
             <div class="filtros-toolbar">
                 <div class="input-group busca">
-                    <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
+                    <span class="input-group-text bg-body border-end-0"><i class="bi bi-search text-muted"></i></span>
                     <input type="search" class="form-control border-start-0 ps-1" id="filtroEmpresa"
                         placeholder="Buscar empresa...">
                 </div>
@@ -443,7 +445,7 @@
     <div id="skeleton-certidoes" aria-hidden="true" aria-label="Carregando empresas...">
         {% for _ in range(3) %}
         <div class="card mb-4 shadow-sm border-0">
-            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center gap-3">
+            <div class="card-header bg-body border-bottom py-3 d-flex align-items-center gap-3">
                 <div class="sk-bloco rounded" style="width:45px;height:45px;flex-shrink:0;border-radius:8px!important"></div>
                 <div class="flex-grow-1">
                     <div class="sk-bloco mb-2" style="height:17px;width:38%"></div>
@@ -496,14 +498,14 @@
             data-count-tipo-municipal="{{ ct['tipo_municipal'] }}" data-count-tipo-trabalhista="{{ ct['tipo_trabalhista'] }}">
 
             <div
-                class="card-header bg-white border-bottom py-3 d-flex flex-wrap justify-content-between align-items-center">
+                class="card-header bg-body border-bottom py-3 d-flex flex-wrap justify-content-between align-items-center">
                 <div class="d-flex align-items-center gap-3">
                     <div class="bg-primary bg-opacity-10 text-primary rounded p-2 d-flex align-items-center justify-content-center"
                         style="width: 45px; height: 45px;">
                         <i class="bi bi-building fs-4"></i>
                     </div>
                     <div>
-                        <h5 class="mb-0 fw-bold text-dark">{{ empresa.nome }}</h5>
+                        <h5 class="mb-0 fw-bold text-body">{{ empresa.nome }}</h5>
                         <div class="d-flex gap-3 text-muted small mt-1">
                             <span><i class="bi bi-geo-alt me-1"></i>{{ empresa.estado }} - {{ empresa.cidade
                                 }}</span>
@@ -582,7 +584,7 @@
 
                                 <td class="text-end pe-4" style="white-space: nowrap; width: 1%;">
                                     <div class="d-flex justify-content-end gap-2">
-                                        <button type="button" class="btn btn-sm btn-outline-info border-0 btn-abrir-site"
+                                        <button type="button" class="btn btn-sm btn-outline-secondary border-0 btn-abrir-site"
                                             title="Abrir Site"
                                             data-bs-tooltip="true" data-bs-placement="top"
                                             aria-label="Abrir site da certidao {{ tipo_exibicao }} de {{ empresa.nome }}"
@@ -602,7 +604,7 @@
                                         </button>
 
                                         {% if current_user.papel in ['operador', 'admin'] %}
-                                        <button type="button" class="btn btn-sm btn-outline-warning border-0" title="Editar"
+                                        <button type="button" class="btn btn-sm btn-outline-secondary border-0 btn-editar-validade" title="Editar"
                                             data-bs-tooltip="true" data-bs-placement="top"
                                             aria-label="Editar validade da certidao {{ tipo_exibicao }} de {{ empresa.nome }}"
                                             data-bs-toggle="modal" data-bs-target="#editModal"
@@ -614,7 +616,7 @@
                                         {% if certidao.tipo.name == 'FEDERAL' %}
                                         {# Federal e assistido/upload: no lugar de "Emitir" (que so redirecionava
                                            para "Abrir Site"), a acao util e registrar o PDF baixado/em maos. #}
-                                        <button type="button" class="btn btn-sm btn-outline-primary border-0 btn-registrar-federal"
+                                        <button type="button" class="btn btn-sm btn-outline-secondary border-0 btn-registrar-federal"
                                             title="Registrar PDF"
                                             data-bs-tooltip="true" data-bs-placement="top"
                                             aria-label="Registrar PDF da certidao Federal de {{ empresa.nome }}"
@@ -623,7 +625,7 @@
                                             <i class="bi bi-file-earmark-arrow-up fs-5"></i>
                                         </button>
                                         {% else %}
-                                        <button type="button" class="btn btn-sm btn-outline-primary border-0 btn-baixar-certidao"
+                                        <button type="button" class="btn btn-sm btn-outline-secondary border-0 btn-baixar-certidao"
                                             title="Emitir"
                                             data-bs-tooltip="true" data-bs-placement="top"
                                             aria-label="Emitir certidao {{ tipo_exibicao }} de {{ empresa.nome }}"
@@ -689,12 +691,13 @@
         </div>
     </div>
 
-    <div class="modal fade" id="confirmarDataModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
+    <div class="modal fade" id="confirmarDataModal" tabindex="-1" aria-labelledby="confirmarDataModalTitulo"
+        aria-hidden="true" data-bs-backdrop="static"
         data-bs-keyboard="false">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Confirmar Atualização</h5>
+                    <h5 class="modal-title" id="confirmarDataModalTitulo">Confirmar Atualização</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -715,12 +718,13 @@
         </div>
     </div>
 
-    <div class="modal fade" id="marcarPendenteModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
+    <div class="modal fade" id="marcarPendenteModal" tabindex="-1" aria-labelledby="marcarPendenteModalTitulo"
+        aria-hidden="true" data-bs-backdrop="static"
         data-bs-keyboard="false">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Nenhum arquivo baixado</h5>
+                    <h5 class="modal-title" id="marcarPendenteModalTitulo">Nenhum arquivo baixado</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -738,12 +742,13 @@
         </div>
     </div>
 
-    <div class="modal fade" id="estadualRsPositivaModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
+    <div class="modal fade" id="estadualRsPositivaModal" tabindex="-1"
+        aria-labelledby="estadualRsPositivaModalTitulo" aria-hidden="true" data-bs-backdrop="static"
         data-bs-keyboard="false">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title text-danger">Certidão Positiva Detectada</h5>
+                    <h5 class="modal-title text-danger" id="estadualRsPositivaModalTitulo">Certidão Positiva Detectada</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -757,83 +762,13 @@
         </div>
     </div>
 
-    <style>
-        /* Pilha de toasts: recolhidos (deck) por padrao, expandem no hover */
-        .toast-stack {
-            position: fixed;
-            right: 1rem;
-            bottom: 1rem;
-            width: 420px;
-            max-width: calc(100vw - 2rem);
-            z-index: 1090;
-        }
-
-        .toast-stack .stk-toast {
-            position: absolute;
-            right: 0;
-            bottom: 0;
-            width: 100%;
-            box-sizing: border-box;
-            border-radius: .55rem;
-            color: #fff;
-            box-shadow: 0 .6rem 1.4rem rgba(0, 0, 0, .28);
-            transform-origin: bottom right;
-            transition: transform .35s cubic-bezier(.22, 1, .36, 1), opacity .3s ease;
-            will-change: transform, opacity;
-        }
-
-        .toast-stack .stk-toast.bg-success {
-            background-color: var(--bs-success);
-        }
-
-        .toast-stack .stk-toast.bg-danger {
-            background-color: var(--bs-danger);
-        }
-
-        .toast-stack .stk-toast.bg-primary {
-            background-color: var(--bs-primary);
-        }
-
-        /* No escuro, --bs-primary inverte para cinza claro; o texto branco fixo do
-           .stk-toast some. Usa texto escuro (mesmo token da acao primaria no dark). */
-        [data-bs-theme="dark"] .toast-stack .stk-toast.bg-primary,
-        [data-bs-theme="dark"] .toast-stack .stk-toast.bg-primary .stk-close {
-            color: var(--zelo-action-fg);
-        }
-
-        .toast-stack .stk-body {
-            padding: .85rem 2.3rem .85rem 1rem;
-            font-size: 1rem;
-            line-height: 1.3;
-        }
-
-        .toast-stack .stk-close {
-            position: absolute;
-            top: .3rem;
-            right: .4rem;
-            padding: .1rem .4rem;
-            border: 0;
-            background: transparent;
-            color: #fff;
-            opacity: .75;
-            font-size: 1.15rem;
-            line-height: 1;
-            cursor: pointer;
-        }
-
-        .toast-stack .stk-close:hover {
-            opacity: 1;
-        }
-    </style>
-
-    <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
-
-    <div class="modal fade" id="infoModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static"
+    <div class="modal fade" id="infoModal" tabindex="-1" aria-labelledby="infoModalTitulo"
+        aria-hidden="true" data-bs-backdrop="static"
         data-bs-keyboard="false">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Pronto para emitir</h5>
+                    <h5 class="modal-title" id="infoModalTitulo">Pronto para emitir</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body" id="infoModalBody">
@@ -845,11 +780,12 @@
         </div>
     </div>
 
-    <div class="modal fade" id="registrarFederalModal" tabindex="-1" aria-hidden="true">
+    <div class="modal fade" id="registrarFederalModal" tabindex="-1"
+        aria-labelledby="registrarFederalModalTitulo" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Registrar certidão Federal</h5>
+                    <h5 class="modal-title" id="registrarFederalModalTitulo">Registrar certidão Federal</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
                 </div>
                 <div class="modal-body">

@@ -137,6 +137,7 @@
 </head>
 
 <body>
+    <a class="visually-hidden-focusable skip-link" href="#conteudo-principal">Pular para o conteúdo</a>
     <script>
         (function () {
             const bodyEl = document.body;
@@ -201,7 +202,7 @@
 
     <div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true"></div>
 
-    <aside class="app-sidebar" id="appSidebar" aria-hidden="true">
+    <aside class="app-sidebar" id="appSidebar">
         <div class="sidebar-header">
             <div class="sidebar-logo" aria-hidden="true">
                 <img src="{{ url_for('static', filename='images/assecon_preto.png') }}"
@@ -227,16 +228,10 @@
                 <i class="bi bi-file-earmark-check"></i>
                 <span>Certidões</span>
             </a>
-            <a class="sidebar-link {% if current_endpoint in ['main.empresas', 'main.empresa_detalhe'] %}active{% endif %}" href="{{ url_for('main.empresas') }}" title="Empresas">
+            <a class="sidebar-link {% if current_endpoint in ['main.empresas', 'main.empresa_detalhe', 'main.nova_empresa'] %}active{% endif %}" href="{{ url_for('main.empresas') }}" title="Empresas">
                 <i class="bi bi-buildings"></i>
                 <span>Empresas</span>
             </a>
-            {% if current_user.papel in ['operador', 'admin'] %}
-            <a class="sidebar-link {% if current_endpoint == 'main.nova_empresa' %}active{% endif %}" href="{{ url_for('main.nova_empresa') }}" title="Nova Empresa">
-                <i class="bi bi-building-add"></i>
-                <span>Nova Empresa</span>
-            </a>
-            {% endif %}
             <a class="sidebar-link {% if current_endpoint == 'main.relatorios' %}active{% endif %}" href="{{ url_for('main.relatorios') }}" title="Relatórios">
                 <i class="bi bi-bar-chart-line-fill"></i>
                 <span>Relatórios</span>
@@ -281,7 +276,7 @@
             <i class="bi bi-arrow-up"></i>
         </button>
         
-        <main class="container-fluid app-main mt-4">
+        <main class="container-fluid app-main mt-4" id="conteudo-principal">
             {% block content %}{% endblock %}
         </main>
         <footer class="bg-body-secondary border-top mt-auto py-2">
@@ -291,10 +286,14 @@
             </div>
         </footer>
     </div>
+
+    <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
-    <script>
+    <script type="module">
+        import { showToast } from "{{ url_for('static', filename='js/toasts.js') }}";
+
         // Abrir a pasta de certidoes da empresa (Explorer local; o app roda na estacao).
         // Delegado no document para funcionar em qualquer pagina com .btn-abrir-pasta.
         document.addEventListener('click', async function (e) {
@@ -302,23 +301,18 @@
             if (!btn) return;
             const id = btn.dataset.empresaId;
             if (!id) return;
-            const toast = window.showToast;   // presente onde o toasts.js modulo carrega (ex.: Certidões)
             btn.disabled = true;
             try {
                 const resp = await fetch(`/empresa/${id}/abrir-pasta`, { method: 'POST' });
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok) {
-                    // Erro e alto sinal: usa toast se houver, senao alert (pagina sem toast).
                     const msg = data.message || data.mensagem || 'Não foi possível abrir a pasta.';
-                    if (toast) { toast(msg, 'error'); } else { alert(msg); }
-                } else if (toast) {
-                    // Sucesso e baixo sinal: a pasta abre no Explorer (outra janela) e o toast
-                    // confirma a acao. Sem toast, fica silencioso — nada de alert nativo.
-                    toast(data.message || data.mensagem || 'Abrindo pasta…', 'success');
+                    showToast(msg, 'error');
+                } else {
+                    showToast(data.message || data.mensagem || 'Abrindo pasta…', 'success');
                 }
             } catch (err) {
-                const msg = 'Erro ao abrir a pasta.';
-                if (toast) { toast(msg, 'error'); } else { alert(msg); }
+                showToast('Erro ao abrir a pasta.', 'error');
             } finally {
                 btn.disabled = false;
             }
@@ -370,7 +364,7 @@
             function applySidebarState(open, persist = true) {
                 bodyEl.classList.toggle('sidebar-open', open);
                 const hidden = isMobile() ? !open : false;
-                sidebarEl.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+                sidebarEl.toggleAttribute('inert', hidden);
                 toggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
                 if (toggleButtonMenu) {
                     toggleButtonMenu.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -419,6 +413,7 @@
 
             window.addEventListener('resize', function () {
                 syncNavbarHeight();
+                applySidebarState(isSidebarOpen(), false);
             });
 
             let lastScrollY = window.scrollY;
@@ -487,10 +482,13 @@
                 const modalForm = editModal.querySelector('#editForm');
                 const pendenteForm = editModal.querySelector('#pendenteForm')
 
-                modalTitle.textContent = `Editar Validade: ${certidaoInfo}`;
-
-                modalForm.action = `/certidao/atualizar/${certidaoId}`;
-                pendenteForm.action = `/certidao/marcar_pendente/${certidaoId}`;
+                if (modalTitle) modalTitle.textContent = `Editar Validade: ${certidaoInfo}`;
+                if (modalForm) modalForm.action = `/certidao/atualizar/${certidaoId}`;
+                // #pendenteForm nao existe em nenhum template: "marcar pendente"
+                // roda por fetch (btnConfirmarPendente), nao por POST de form.
+                // Sem a guarda, abrir o modal lancava "Cannot set properties of
+                // null (setting 'action')" e abortava o resto do handler.
+                if (pendenteForm) pendenteForm.action = `/certidao/marcar_pendente/${certidaoId}`;
             });
         }
 

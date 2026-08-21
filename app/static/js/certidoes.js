@@ -1,9 +1,5 @@
 import { showToast } from './toasts.js';
 
-// Expoe o toast para scripts nao-modulo (ex.: handler .btn-abrir-pasta no base.html),
-// que ate entao caiam no alert() nativo por window.showToast estar indefinido.
-window.showToast = showToast;
-
         document.addEventListener('DOMContentLoaded', function () {
 
 
@@ -231,7 +227,11 @@ window.showToast = showToast;
             const btnVisualizarPdf = document.getElementById('btnVisualizarPdf');
 
 
-            const btnsEditar = document.querySelectorAll('.btn-outline-warning');
+            // Seletor pelo PAPEL, nunca pela cor: enquanto isto era
+            // '.btn-outline-warning', neutralizar a cor do botao (A-11) matava o
+            // handler em silencio — certidaoIdManual ficava null e "Salvar" da
+            // edicao de validade nao disparava requisicao nenhuma.
+            const btnsEditar = document.querySelectorAll('.btn-editar-validade');
             const btnPendenteManual = document.getElementById('btnPendenteManual');
             const btnSalvarManual = document.getElementById('btnSalvarManual');
             const editFormInput = document.getElementById('nova_validade');
