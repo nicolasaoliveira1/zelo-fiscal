@@ -151,7 +151,7 @@
     bottom: 0;
     width: 100%;
     box-sizing: border-box;
-    border-radius: .55rem;
+    border-radius: var(--zl-radius-md);
     color: var(--bs-white);
     box-shadow: 0 .6rem 1.4rem rgba(0, 0, 0, .28);
     transform-origin: bottom right;
@@ -403,7 +403,7 @@ h1, h2, .h1, .h2 {
     z-index: 1100;
     padding: 0.65rem 0.9rem;
     border: 2px solid var(--zelo-graphite);
-    border-radius: 0.5rem;
+    border-radius: var(--zl-radius-sm);
     background: var(--zelo-paper);
     color: var(--zelo-ink);
     font-weight: 600;
@@ -636,7 +636,7 @@ main {
     width: 30px;
     height: 30px;
     flex: none;
-    border-radius: 7px;
+    border-radius: var(--zl-radius-sm);
     object-fit: contain;
 }
 
@@ -751,7 +751,7 @@ main {
 .sidebar-avatar {
     width: 30px;
     height: 30px;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     background: var(--bs-body-bg);
     border: 1px solid var(--zelo-line);
     display: grid;
@@ -917,7 +917,7 @@ footer {
 }
 .batch-summary-modal {
     border: 1px solid var(--bs-border-color-translucent);
-    border-radius: 0.85rem;
+    border-radius: var(--zl-radius-md);
 }
 
 .modal-dialog.modal-shake {
@@ -952,7 +952,7 @@ footer {
 
 .batch-action-modal {
     border: 1px solid var(--bs-border-color-translucent);
-    border-radius: 0.85rem;
+    border-radius: var(--zl-radius-md);
 }
 
 .batch-modal-intro {
@@ -1053,7 +1053,7 @@ footer {
     display: flex;
     height: 0.5rem;
     margin-top: 0.65rem;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     background: var(--zelo-line);
     overflow: hidden;
 }
@@ -1110,7 +1110,7 @@ footer {
     content: "";
     width: 0.5rem;
     height: 0.5rem;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     background: var(--zelo-muted);
 }
 
@@ -1179,12 +1179,12 @@ footer {
     width: 0.55rem;
     height: 0.55rem;
     margin-right: 0.4rem;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
 }
 
 .zl-bars-track {
     height: 0.55rem;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     background: var(--zelo-line);
     overflow: hidden;
 }
@@ -1192,7 +1192,7 @@ footer {
 .zl-bars-fill {
     display: block;
     height: 100%;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     min-width: 2px;
 }
 
@@ -1224,7 +1224,7 @@ footer {
     gap: 0.7rem;
     padding: 0.55rem 0.7rem 0.55rem 0.85rem;
     border: 1px solid var(--zelo-line);
-    border-radius: 0.75rem;
+    border-radius: var(--zl-radius-md);
     background: var(--bs-body-bg);
     box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
     font-size: 0.82rem;
@@ -1269,7 +1269,7 @@ body.topo-visivel .zl-dock {
 .zl-dock-dot {
     width: 0.45rem;
     height: 0.45rem;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     background: var(--zelo-ok);
     flex: 0 0 auto;
     animation: batchPulse 1.6s ease-in-out infinite;
@@ -1360,7 +1360,7 @@ body.topo-visivel .zl-dock {
     top: 0.55rem;
     bottom: 0.55rem;
     width: 3px;
-    border-radius: 2px;
+    border-radius: var(--zl-radius-pill);
     background: transparent;
 }
 
@@ -1421,7 +1421,7 @@ body.topo-visivel .zl-dock {
    deixar de dizer que está mal. */
 .vg-faixa {
     border: 1px solid var(--zelo-line);
-    border-radius: 0.65rem;
+    border-radius: var(--zl-radius-md);
     overflow: hidden;
     background: var(--bs-body-bg);
     margin-bottom: 1.1rem;
@@ -1506,7 +1506,7 @@ body.topo-visivel .zl-dock {
     line-height: 1.5;
     padding: 0 0.4rem;
     border: 1px solid var(--zelo-line);
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     color: var(--bs-secondary-color);
     white-space: nowrap;
     max-width: 22ch;
@@ -1761,7 +1761,7 @@ body.topo-visivel .zl-dock {
 .batch-progress-panel {
     width: min(27rem, calc(100vw - 2rem));
     border: 1px solid var(--zelo-line);
-    border-radius: 0.85rem;
+    border-radius: var(--zl-radius-md);
     /* Mesmo fundo dos modais (--bs-modal-bg cai em --bs-body-bg): o painel e o
        resumo do lote aparecem em sequência e não podem ter tons diferentes.
        Quem separa do app atrás é o scrim do .loading-overlay, não a cor. */
@@ -1815,7 +1815,7 @@ body.topo-visivel .zl-dock {
     flex: 0 0 auto;
     width: 0.45rem;
     height: 0.45rem;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     background: var(--zelo-ok);
     animation: batchPulse 1.6s ease-in-out infinite;
 }
@@ -1838,7 +1838,7 @@ body.topo-visivel .zl-dock {
     height: 0.85rem;
     border: 2px solid var(--zelo-line);
     border-top-color: var(--zelo-ok);
-    border-radius: 50%;
+    border-radius: var(--zl-radius-pill);
     animation: zlSpin .7s linear infinite;
 }
 
@@ -2048,7 +2048,7 @@ body.topo-visivel .zl-dock {
 .copy-cnpj:focus-visible {
     outline: 2px solid rgba(var(--bs-primary-rgb), 0.35);
     outline-offset: 2px;
-    border-radius: 0.25rem;
+    border-radius: var(--zl-radius-sm);
 }
 
 .copy-cnpj i {
@@ -2172,7 +2172,7 @@ tr.status-cinza > td:nth-last-child(3) {
     padding: 0.45rem 0.7rem;
     font-size: 0.82rem;
     font-weight: 600;
-    border-radius: 50px;
+    border-radius: var(--zl-radius-pill);
     border: 1px solid transparent;
     cursor: pointer;
     transition: transform 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
@@ -2290,7 +2290,7 @@ tr.status-cinza > td:nth-last-child(3) {
     justify-content: center;
     min-width: 1.2rem;
     padding: 0.1rem 0.35rem;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     font-size: 0.7rem;
     font-weight: 700;
     line-height: 1;
@@ -2334,7 +2334,7 @@ tr.status-cinza > td:nth-last-child(3) {
     gap: 0.45rem;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     padding: 0.3rem 0.7rem;
     cursor: pointer;
     color: var(--bs-body-color);
@@ -2349,7 +2349,7 @@ tr.status-cinza > td:nth-last-child(3) {
 .resumo-item .dot {
     width: 0.62rem;
     height: 0.62rem;
-    border-radius: 50%;
+    border-radius: var(--zl-radius-pill);
     flex: 0 0 auto;
     background: var(--cor, var(--zelo-muted));
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--cor, transparent) 22%, transparent);
@@ -2413,7 +2413,7 @@ tr.status-cinza > td:nth-last-child(3) {
     background: var(--bs-body-bg);
     border: 1px solid var(--bs-border-color);
     color: var(--bs-body-color);
-    border-radius: 0.375rem;
+    border-radius: var(--zl-radius-sm);
     padding: 0.375rem 0.75rem;
     font-size: 0.9rem;
     cursor: pointer;
@@ -2450,7 +2450,7 @@ tr.status-cinza > td:nth-last-child(3) {
 .filtro-dd-toggle .dd-badge {
     background: var(--zelo-action-bg);
     color: var(--zelo-action-fg);
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     font-size: 0.68rem;
     font-weight: 700;
     padding: 0.05rem 0.45rem;
@@ -2465,7 +2465,7 @@ tr.status-cinza > td:nth-last-child(3) {
     z-index: 1030;
     background: var(--bs-body-bg);
     border: 1px solid var(--bs-border-color);
-    border-radius: 0.6rem;
+    border-radius: var(--zl-radius-md);
     box-shadow: var(--zl-elev-2);
     padding: 0.5rem;
     display: none;
@@ -2613,7 +2613,7 @@ tr.status-cinza > td:nth-last-child(3) {
     right: clamp(10px, 2.5vw, 22px);
     width: clamp(32px, 4vw, 52px);
     height: clamp(32px, 4vw, 52px);
-    border-radius: 50%;
+    border-radius: var(--zl-radius-pill);
     background-color: var(--zelo-fab-bg);
     color: white;
     border: none;
@@ -2705,7 +2705,7 @@ td.cert-tipo-col::before {
     top: 18%;
     bottom: 18%;
     width: 3px;
-    border-radius: 3px;
+    border-radius: var(--zl-radius-pill);
 }
 
 tr[data-status-cert="validas"]      td.cert-tipo-col::before { background: var(--zelo-ok); }
@@ -2797,7 +2797,7 @@ tr.filter-hidden {
     );
     background-size: 400% 100%;
     animation: sk-wave 1.4s ease infinite;
-    border-radius: 4px;
+    border-radius: var(--zl-radius-sm);
     display: block;
 }
 
@@ -2896,7 +2896,7 @@ tr.filter-hidden {
     flex-wrap: wrap;
     padding: 0.55rem 0.9rem;
     border: 1px solid var(--zelo-line);
-    border-radius: 0.55rem;
+    border-radius: var(--zl-radius-sm);
     background: var(--zelo-mist);
     font-size: 0.86rem;
 }
@@ -3006,7 +3006,7 @@ tr.filter-hidden {
 /* ── andamento do lote ───────────────────────────────────────── */
 .manif-andamento {
     border: 1px solid var(--zelo-line);
-    border-radius: 0.55rem;
+    border-radius: var(--zl-radius-md);
     background: var(--zelo-paper);
     padding: 0.8rem 0.95rem;
     margin-bottom: 0.75rem;
@@ -3057,7 +3057,7 @@ tr.filter-hidden {
     text-align: center;
     padding: 1.2rem;
     border: 1px dashed var(--zelo-line);
-    border-radius: 0.5rem;
+    border-radius: var(--zl-radius-sm);
     color: var(--bs-secondary-color);
     font-size: 0.82rem;
 }
@@ -3086,7 +3086,7 @@ tr.filter-hidden {
     margin: 0.35rem 0 0;
     padding: 0;
     border: 1px solid var(--zelo-line);
-    border-radius: 0.5rem;
+    border-radius: var(--zl-radius-sm);
     /* Rola dentro da própria caixa: são 26 pastas num mês normal, e o botão de
        importar tem de continuar visível logo abaixo delas. */
     max-height: 13.5rem;
@@ -3150,7 +3150,7 @@ tr.filter-hidden {
     font-size: 0.78rem;
     font-weight: 500;
     padding: 0.12rem 0.5rem;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     white-space: nowrap;
 }
 
