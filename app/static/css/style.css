@@ -2677,18 +2677,43 @@ tr.status-cinza > td:nth-last-child(3) {
    rótulo à esquerda, fio percorrendo o vão, cifra alinhada à direita
    em coluna fixa. Em vez de combater o vão, usa ele.
 
-   Saiu junto o fio colorido à esquerda da linha. O status era dito
-   TRÊS vezes (fio, ícone e data), e três sinais fracos para a mesma
-   coisa competem entre si. O fio era o único que não acrescentava
-   nada: cor pura. O ícone FICA, porque é o único sinal que não é cor
-   — sem ele o status passaria a depender de cor, que é falha de
-   WCAG 1.4.1 para quem não distingue verde de vermelho.
+   O fio colorido à esquerda e o ícone FICAM os dois, e não são
+   redundância: o fio serve à leitura VERTICAL (varrendo o cartão de
+   uma empresa, a coluna de fios dá a saúde dela num relance) e o
+   ícone à leitura HORIZONTAL da linha. O ícone é, além disso, o
+   único sinal que não é cor — sem ele o status dependeria só de cor,
+   falha de WCAG 1.4.1 para quem não distingue verde de vermelho.
    ══════════════════════════════════════════════════════════════ */
 td.cert-tipo-col {
     width: 1%;
     white-space: nowrap;
-    padding-left: var(--zl-space-4) !important;
+    position: relative;
+    padding-left: 1.85rem !important;
 }
+
+/* O fio de status na borda esquerda. Ele responde a uma pergunta que o ícone
+   lá na direita não responde: varrendo o cartão de uma empresa na VERTICAL, a
+   coluna de fios dá a saúde dela num relance, sem ler nada. Ícone e data ficam
+   longe demais um do outro para isso.
+   (Cheguei a tirá-lo em nome de "um sinal por linha". Era argumento demais: o
+   fio serve à leitura vertical e o ícone à horizontal — não são o mesmo sinal
+   dito duas vezes, são duas leituras diferentes do mesmo dado.) */
+td.cert-tipo-col::before {
+    content: '';
+    position: absolute;
+    left: 0.6rem;
+    top: 18%;
+    bottom: 18%;
+    width: 3px;
+    border-radius: 3px;
+}
+
+tr[data-status-cert="validas"]      td.cert-tipo-col::before { background: var(--zelo-ok); }
+tr[data-status-cert="a_vencer"]     td.cert-tipo-col::before { background: var(--zelo-warn); }
+tr[data-status-cert="vencidas"]     td.cert-tipo-col::before,
+tr[data-status-cert="pendentes"]    td.cert-tipo-col::before { background: var(--zelo-danger); }
+tr[data-status-cert="nao_definida"] td.cert-tipo-col::before,
+tr[data-status-cert="cinza"]        td.cert-tipo-col::before { background: var(--zelo-muted); }
 
 /* A guia. 1px, ponto de 2px e vão de 5px, na cor do fio do sistema —
    discreta o bastante para não virar sumário de livro, e ganha
