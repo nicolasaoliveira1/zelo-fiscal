@@ -360,10 +360,28 @@
     --bs-btn-disabled-border-color: #B23A33;
 }
 
+/* Controles leem a paleta Zelo diretamente. O Bootstrap já troca seus tokens
+   globais por tema, mas estes valores deixam o componente independente da
+   paleta paralela que existia no antigo remendo escuro. */
+.form-control,
+.form-select {
+    background-color: var(--zelo-paper);
+    border-color: var(--zelo-line);
+    color: var(--zelo-ink);
+}
+
+.input-group-text {
+    background-color: var(--zelo-mist);
+    border-color: var(--zelo-line);
+    color: var(--zelo-slate);
+}
+
 /* foco de inputs em grafite (remove o glow azul estático do Bootstrap) */
 .form-control:focus,
 .form-select:focus {
+    background-color: var(--zelo-paper);
     border-color: var(--bs-primary);
+    color: var(--zelo-ink);
     box-shadow: 0 0 0 0.2rem rgba(var(--bs-primary-rgb), 0.18);
 }
 
@@ -448,13 +466,13 @@ h1, h2, .h1, .h2 {
        Agora o chão da página é --zelo-mist e o cartão é --zelo-paper: a
        separação passa a ser ESTRUTURAL (dois tons + fio), não atmosférica
        (sombra). O tema escuro já fazia isso e por isso lia melhor. */
-    --bs-body-bg: #F5F6F8;
+    --bs-body-bg: var(--zelo-mist);
     --bs-body-bg-rgb: 245, 246, 248;
-    --bs-secondary-bg: #f0f3f7;
+    --bs-secondary-bg: color-mix(in srgb, var(--zelo-ink) 3%, var(--zelo-mist));
     --bs-secondary-bg-rgb: 240, 243, 247;
-    --bs-tertiary-bg: #f6f8fb;
+    --bs-tertiary-bg: color-mix(in srgb, var(--zelo-paper) 35%, var(--zelo-mist));
     --bs-tertiary-bg-rgb: 246, 248, 251;
-    --bs-border-color: #d0d7de;
+    --bs-border-color: var(--zelo-line);
     --bs-border-color-translucent: rgba(31, 35, 40, 0.15);
 
     /* o cartão deixa de herdar o fundo do corpo */
@@ -500,7 +518,28 @@ h1, h2, .h1, .h2 {
    (E-07), cada tabela virou um retângulo cinza dentro de um cartão branco.
    Transparente é o certo: a tabela mostra a superfície que a sustenta. */
 .table {
+    --bs-table-color: var(--zelo-ink);
     --bs-table-bg: transparent;
+    --bs-table-border-color: var(--zelo-line);
+}
+
+/* `table-light` também declara a paleta dentro do componente no Bootstrap.
+   A mistura parte dos tokens de cada tema e mantém o cabeçalho destacado sem
+   uma segunda coleção de cinzas codificada à mão. */
+.table-light {
+    --bs-table-color: var(--zelo-slate);
+    --bs-table-bg: color-mix(in srgb, var(--zelo-ink) 6%, var(--zelo-mist));
+    --bs-table-border-color: var(--zelo-line);
+    --bs-table-striped-color: var(--zelo-ink);
+    --bs-table-striped-bg: color-mix(in srgb, var(--zelo-ink) 9%, var(--zelo-mist));
+    --bs-table-active-color: var(--zelo-ink);
+    --bs-table-active-bg: color-mix(in srgb, var(--zelo-ink) 12%, var(--zelo-mist));
+    --bs-table-hover-color: var(--zelo-ink);
+    --bs-table-hover-bg: color-mix(in srgb, var(--zelo-ink) 9%, var(--zelo-mist));
+}
+
+.card-header .text-dark {
+    color: var(--zelo-ink) !important;
 }
 
 html, body {
@@ -568,15 +607,11 @@ main {
     width: var(--sidebar-width);
     display: flex;
     flex-direction: column;
-    background: var(--zelo-paper);
+    background: var(--bs-card-bg);
     border-right: 1px solid var(--zelo-line);
     overflow-y: auto;
     overscroll-behavior: contain;
     transition: width var(--sidebar-transition), transform var(--sidebar-transition);
-}
-
-[data-bs-theme="dark"] .app-sidebar {
-    background: var(--zelo-mist);
 }
 
 /* ---- marca: é o atalho para a página inicial ---- */
@@ -662,12 +697,10 @@ main {
 }
 
 .sidebar-link:hover {
-    background: var(--zelo-mist);
+    background: var(--bs-body-bg);
     border-left-color: var(--zelo-line);
 }
 .sidebar-link:hover i { color: var(--zelo-ink); }
-
-[data-bs-theme="dark"] .sidebar-link:hover { background: var(--zelo-paper); }
 
 /* A RÉGUA DUPLA, preenchida. Três faixas empilhadas por box-shadow:
    tinta (0–2px) · vão na cor do preenchimento (2–4px) · tinta (4–6px).
@@ -682,7 +715,7 @@ main {
        propria superficie da barra da um degrau que se ve sem gritar.
        O VAO da regua usa o mesmo token: se divergir, as duas linhas deixam de
        ler como regua dupla e viram uma barra grossa. */
-    --zl-sel-bg: color-mix(in srgb, var(--zelo-ink) 9%, var(--zelo-paper));
+    --zl-sel-bg: color-mix(in srgb, var(--zelo-ink) 10%, var(--bs-card-bg));
     background: var(--zl-sel-bg);
     font-weight: 600;
     border-left-color: transparent;
@@ -693,11 +726,6 @@ main {
 }
 
 .sidebar-link.active i { color: var(--zelo-ink); }
-
-/* No escuro a barra e --zelo-mist, entao a mistura parte dela. */
-[data-bs-theme="dark"] .sidebar-link.active {
-    --zl-sel-bg: color-mix(in srgb, var(--zelo-ink) 11%, var(--zelo-mist));
-}
 
 .sidebar-link:focus-visible {
     outline: 2px solid var(--bs-primary);
@@ -724,7 +752,7 @@ main {
     width: 30px;
     height: 30px;
     border-radius: 999px;
-    background: var(--zelo-mist);
+    background: var(--bs-body-bg);
     border: 1px solid var(--zelo-line);
     display: grid;
     place-items: center;
@@ -733,8 +761,6 @@ main {
     color: var(--zelo-slate);
     flex: none;
 }
-
-[data-bs-theme="dark"] .sidebar-avatar { background: var(--zelo-paper); }
 
 .sidebar-quem { min-width: 0; line-height: 1.2; }
 
@@ -771,8 +797,7 @@ main {
     padding: 0;
 }
 
-.sidebar-mini:hover { background: var(--zelo-mist); color: var(--zelo-ink); }
-[data-bs-theme="dark"] .sidebar-mini:hover { background: var(--zelo-paper); }
+.sidebar-mini:hover { background: var(--bs-body-bg); color: var(--zelo-ink); }
 .sidebar-mini:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 1px; }
 
 /* ---- navbar: só no mobile ---- */
@@ -781,12 +806,10 @@ main {
     position: sticky;
     top: 0;
     z-index: 1045;
-    background: var(--zelo-paper);
+    background: var(--bs-card-bg);
     border-bottom: 1px solid var(--zelo-line);
     min-height: 56px;
 }
-[data-bs-theme="dark"] .navbar-movel { background: var(--zelo-mist); }
-
 /* ══════════ ≥1200px — ABERTA por padrão (A-01) ══════════ */
 @media (min-width: 1200px) {
     .page-content { margin-left: var(--sidebar-width); width: calc(100% - var(--sidebar-width)); }
@@ -2031,94 +2054,43 @@ body.topo-visivel .zl-dock {
     line-height: 1.5;
 }
 
-/* dark mode */
-
-[data-bs-theme="dark"] .table-bordered,
-[data-bs-theme="dark"] .table-bordered > :not(caption) > * > * {
-    border-color: #495057 !important;
-    border-width: 1px !important;
+/* Linhas legadas ainda recebem estas classes do JS após uma atualização. A
+   banda usa as variáveis locais da tabela, em vez de disputar especificidade
+   com o Bootstrap por `background-color !important`. */
+tr[class*="status-"] > td,
+tr[class*="status-"] > th {
+    --bs-table-color: var(--zelo-ink);
+    --bs-table-bg: transparent;
 }
 
-[data-bs-theme="dark"] tr[class*="status-"] > td,
-[data-bs-theme="dark"] tr[class*="status-"] > th {
-    background-color: transparent !important;
-    color: var(--bs-body-color) !important;
+tr.status-verde > td:nth-last-child(2),
+tr.status-verde > td:nth-last-child(3) {
+    --bs-table-bg: var(--zelo-ok-soft);
+    --bs-table-bg-state: var(--zelo-ok-soft);
 }
 
-/* banda de status no dark: a cor está no fundo; o texto fica neutro (herda body) */
-[data-bs-theme="dark"] tr.status-verde > td:nth-last-child(2),
-[data-bs-theme="dark"] tr.status-verde > td:nth-last-child(3) {
-    background-color: var(--zelo-ok-soft) !important;
+tr.status-vermelho > td:nth-last-child(2),
+tr.status-vermelho > td:nth-last-child(3) {
+    --bs-table-bg: var(--zelo-danger-soft);
+    --bs-table-bg-state: var(--zelo-danger-soft);
 }
 
-[data-bs-theme="dark"] tr.status-vermelho > td:nth-last-child(2),
-[data-bs-theme="dark"] tr.status-vermelho > td:nth-last-child(3) {
-    background-color: var(--zelo-danger-soft) !important;
+tr.status-amarelo > td:nth-last-child(2),
+tr.status-amarelo > td:nth-last-child(3) {
+    --bs-table-bg: var(--zelo-warn-soft);
+    --bs-table-bg-state: var(--zelo-warn-soft);
 }
 
-[data-bs-theme="dark"] tr.status-amarelo > td:nth-last-child(2),
-[data-bs-theme="dark"] tr.status-amarelo > td:nth-last-child(3) {
-    background-color: var(--zelo-warn-soft) !important;
-}
-
-[data-bs-theme="dark"] tr.status-cinza > td:nth-last-child(2),
-[data-bs-theme="dark"] tr.status-cinza > td:nth-last-child(3) {
-    background-color: var(--zelo-muted-soft) !important;
+tr.status-cinza > td:nth-last-child(2),
+tr.status-cinza > td:nth-last-child(3) {
+    --bs-table-bg: var(--zelo-muted-soft);
+    --bs-table-bg-state: var(--zelo-muted-soft);
 }
 
 [data-bs-theme="dark"] .app-sidebar {
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
-}
-
-[data-bs-theme="dark"] .table td[rowspan] {
-    background-color: var(--bs-table-bg) !important;
-}
-
-/* E-07 no escuro. O patch anterior era `background-color:#212529!important`,
-   e o corpo do documento também era #212529 (o default do Bootstrap): cartão e
-   chão na MESMA cor, exatamente a doença do tema claro. Agora sai de token, e
-   sem !important — o remendo com !important era o que fazia componente novo
-   "certo" perder para o legado (A-13). */
-[data-bs-theme="dark"] .card {
-    background-color: var(--bs-card-bg);
-    border: 1px solid var(--zelo-line);
-}
-
-/* Tokenizado junto com .card (E-07/A-13): era paleta paralela em hex com
-   !important, o que sobrescrevia componente novo que fazia certo. O cabeçalho
-   segue o papel do cartão; a separação é o fio. */
-[data-bs-theme="dark"] .card-header {
-    background-color: transparent;
-    border-bottom-color: var(--zelo-line);
-    color: var(--zelo-ink);
-}
-
-[data-bs-theme="dark"] .card-header .text-dark {
-    color: #fff !important;
-}
-
-[data-bs-theme="dark"] .input-group-text {
-    background-color: #2c3034 !important;
-    border-color: #373b3e !important;
-    color: #adb5bd !important;
-}
-
-[data-bs-theme="dark"] .form-control {
-    background-color: #212529;
-    border-color: #373b3e;
-    color: #fff;
-}
-
-[data-bs-theme="dark"] .table-light {
-    background-color: #2c3034 !important;
-    color: #adb5bd !important;
-    border-color: #373b3e !important;
-}
-
-[data-bs-theme="dark"] .table-light th {
-    background-color: #292d30 !important;
-    color: #b6bec6 !important;
-    border-bottom: 1px solid #373b3e !important;
+    /* No escuro, o fio sozinho não separa a barra do chão. A elevação é o
+       único comportamento temático; o valor continua vindo do token. */
+    box-shadow: var(--zl-elev-2);
 }
 
 /* tabelas responsividade */
@@ -2202,14 +2174,14 @@ body.topo-visivel .zl-dock {
     border: 1px solid transparent;
     cursor: pointer;
     transition: transform 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
-    background-color: #f0f3f7;
-    color: #6c757d;
+    background-color: var(--zelo-mist);
+    color: var(--zelo-slate);
     user-select: none;
 }
 
 .filter-chip:hover {
     transform: translateY(-1px);
-    background-color: #e4e9f0;
+    background-color: color-mix(in srgb, var(--zelo-ink) 8%, var(--zelo-mist));
 }
 
 .btn-check:focus + .filter-chip {
@@ -2245,7 +2217,7 @@ body.topo-visivel .zl-dock {
     flex: 0 0 1px;
     align-self: stretch;
     margin: 1.8rem 1rem 0;
-    background-color: rgba(0, 0, 0, 0.12);
+    background-color: var(--zelo-line);
 }
 
 .filter-group {
@@ -2320,7 +2292,7 @@ body.topo-visivel .zl-dock {
     font-size: 0.7rem;
     font-weight: 700;
     line-height: 1;
-    background-color: rgba(0, 0, 0, 0.12);
+    background-color: color-mix(in srgb, var(--zelo-ink) 12%, transparent);
     color: inherit;
 }
 
@@ -2377,7 +2349,7 @@ body.topo-visivel .zl-dock {
     height: 0.62rem;
     border-radius: 50%;
     flex: 0 0 auto;
-    background: var(--cor, #adb5bd);
+    background: var(--cor, var(--zelo-muted));
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--cor, transparent) 22%, transparent);
 }
 
@@ -2393,8 +2365,8 @@ body.topo-visivel .zl-dock {
 }
 
 .btn-check:checked + .resumo-item {
-    background: color-mix(in srgb, var(--cor, #6c757d) 18%, transparent);
-    border-color: color-mix(in srgb, var(--cor, #6c757d) 50%, transparent);
+    background: color-mix(in srgb, var(--cor, var(--zelo-slate)) 18%, transparent);
+    border-color: color-mix(in srgb, var(--cor, var(--zelo-slate)) 50%, transparent);
 }
 
 .btn-check:focus-visible + .resumo-item {
@@ -2492,7 +2464,7 @@ body.topo-visivel .zl-dock {
     background: var(--bs-body-bg);
     border: 1px solid var(--bs-border-color);
     border-radius: 0.6rem;
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+    box-shadow: var(--zl-elev-2);
     padding: 0.5rem;
     display: none;
     flex-direction: column;
@@ -2556,43 +2528,47 @@ body.topo-visivel .zl-dock {
     right: 0.75rem;
     pointer-events: none;
     font-size: 0.9rem;
-    color: #6c757d;
+    color: var(--zelo-slate);
 }
 
 .btn-check:checked + .chip-gray {
-    background-color: #343a40 !important;
-    color: #fff;
-    box-shadow: 0 4px 10px rgba(52, 58, 64, 0.3);
+    background-color: var(--zelo-action-bg);
+    color: var(--zelo-action-fg);
+    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-ink) 22%, transparent);
 }
 
 .btn-check:checked + .chip-green {
-    background-color: var(--zelo-ok) !important;
-    color: #fff;
+    background-color: var(--zelo-ok-soft);
+    border-color: var(--zelo-ok);
+    color: var(--zelo-ok);
     box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-ok) 30%, transparent);
 }
 
 .btn-check:checked + .chip-yellow {
-    background-color: var(--zelo-warn) !important;
-    color: #fff;
+    background-color: var(--zelo-warn-soft);
+    border-color: var(--zelo-warn);
+    color: var(--zelo-warn);
     box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-warn) 30%, transparent);
 }
 
 .btn-check:checked + .chip-red {
-    background-color: var(--zelo-danger) !important;
-    color: #fff;
+    background-color: var(--zelo-danger-soft);
+    border-color: var(--zelo-danger);
+    color: var(--zelo-danger);
     box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-danger) 30%, transparent);
 }
 
 .btn-check:checked + .chip-red-outline {
-    background-color: var(--zelo-paper) !important;
+    background-color: var(--zelo-paper);
     border-color: var(--zelo-danger);
     color: var(--zelo-danger);
     box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-danger) 15%, transparent);
 }
 
 .btn-check:checked + .chip-nao-definida {
-    background-color: var(--zelo-muted) !important;
-    color: #fff;
+    background-color: var(--zelo-muted-soft);
+    border-color: var(--zelo-muted);
+    color: var(--zelo-ink);
     box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-muted) 30%, transparent);
 }
 
@@ -2606,49 +2582,13 @@ body.topo-visivel .zl-dock {
 .btn-check:checked + .chip-estado,
 .btn-check:checked + .chip-cidade,
 .btn-check:checked + .chip-ordem {
-    background-color: var(--zelo-action-bg) !important;
+    background-color: var(--zelo-action-bg);
     color: var(--zelo-action-fg);
     box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-ink) 22%, transparent);
 }
 
 /* item de cidade escondido pelo recorte "cidade segue o estado" */
 .dd-cidade-item.dd-hidden { display: none; }
-
-[data-bs-theme="dark"] .filter-chip {
-    background-color: #2b3035;
-    color: #adb5bd;
-}
-
-[data-bs-theme="dark"] .filter-chip .chip-count {
-    background-color: rgba(0, 0, 0, 0.4);
-}
-
-[data-bs-theme="dark"] .order-select .bi {
-    color: #adb5bd;
-}
-
-[data-bs-theme="dark"] .filter-divider {
-    background-color: rgba(255, 255, 255, 0.12);
-}
-
-[data-bs-theme="dark"] .filter-chip:hover {
-    background-color: #343a40;
-}
-
-[data-bs-theme="dark"] .btn-check:checked + .filter-chip:hover {
-    transform: translateY(-1px);
-}
-
-[data-bs-theme="dark"] .btn-check:checked + .chip-gray {
-    background-color: #495057 !important;
-}
-
-
-[data-bs-theme="dark"] .form-select {
-    background-color: #212529;
-    border-color: #373b3e;
-    color: #fff;
-}
 
 #filtroEmpresa:focus {
     outline: none;
@@ -2715,14 +2655,6 @@ body.topo-visivel .zl-dock {
     }
 }
 
-[data-bs-theme="dark"] .btn-voltar-topo {
-    background-color: var(--zelo-fab-bg);
-}
-
-[data-bs-theme="dark"] .btn-voltar-topo:hover {
-    background-color: var(--zelo-fab-hover);
-}
-
 .company-card.search-hidden,
 .company-card.status-hidden {
     display: none;
@@ -2764,16 +2696,16 @@ tr.filter-hidden {
 
 /* ── Skeleton de Certidões ─────────────────────────────────── */
 .sk-bloco {
-    background: linear-gradient(90deg, #e4e9f0 25%, #d5dce9 50%, #e4e9f0 75%);
+    background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--zelo-ink) 7%, var(--zelo-mist)) 25%,
+        color-mix(in srgb, var(--zelo-ink) 14%, var(--zelo-mist)) 50%,
+        color-mix(in srgb, var(--zelo-ink) 7%, var(--zelo-mist)) 75%
+    );
     background-size: 400% 100%;
     animation: sk-wave 1.4s ease infinite;
     border-radius: 4px;
     display: block;
-}
-
-[data-bs-theme="dark"] .sk-bloco {
-    background: linear-gradient(90deg, #2a2f34 25%, #343a40 50%, #2a2f34 75%);
-    background-size: 400% 100%;
 }
 
 @keyframes sk-wave {
