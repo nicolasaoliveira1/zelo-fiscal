@@ -3235,3 +3235,38 @@ tr.filter-hidden {
 .zl-secao + .text-body-secondary {
     margin-top: calc(var(--zl-space-2) * -1);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   CABEÇALHO DE TABELA FIXO NA ROLAGEM (A-19)
+
+   Em 3.026 linhas de CSS existia UM `position: sticky`, e era a
+   navbar. Rolar Relatórios, Auditoria, Empresas ou Produtividade
+   levava embora os nomes das colunas, e a partir daí cada célula
+   virava um número sem rótulo.
+
+   NÃO se aplica à tabela de Certidões, e é decisão, não esquecimento:
+   lá o cabeçalho é `visually-hidden` (A-17) porque a linha de razão
+   já nomeia o que mostra, e cada cartão tem ~5 linhas — o cabeçalho
+   do cartão praticamente não sai da tela enquanto suas linhas estão
+   nela. Fixar coisa que não some é peso sem ganho.
+   ══════════════════════════════════════════════════════════════ */
+.table > thead:not(.visually-hidden) th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    /* opaco de propósito: o padrão do Bootstrap é transparente, e a
+       linha rolaria POR BAIXO do cabeçalho, visível através dele. */
+    background: var(--bs-card-bg, var(--zelo-paper));
+    box-shadow: inset 0 -1px 0 var(--zelo-line);
+}
+
+/* O `.table-responsive` do Bootstrap cria contexto de rolagem próprio
+   (`overflow-x: auto`), e dentro dele o sticky se prende ao topo do
+   CONTAINER, não da janela — o cabeçalho fica parado onde está. Como
+   estas tabelas não estouram a largura, `visible` devolve o sticky ao
+   comportamento da página. */
+@media (min-width: 901px) {
+    .table-responsive:has(> .table > thead:not(.visually-hidden)) {
+        overflow-x: visible;
+    }
+}

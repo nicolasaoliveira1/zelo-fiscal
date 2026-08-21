@@ -549,7 +549,22 @@
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0">
-<tbody>
+                        {#- Legenda e cabeçalho existem para o leitor de tela, não para a
+                            tela (A-17/A-18). Um <thead> VISÍVEL seria repetido uma vez por
+                            empresa — dezenas de vezes na página — para nomear colunas que a
+                            linha de razão já torna evidentes. Escondê-lo com
+                            `visually-hidden` dá a associação célula/cabeçalho a quem navega
+                            por tabela, sem cobrar nada de quem enxerga. -#}
+                        <caption class="visually-hidden">Certidões de {{ empresa.nome }}</caption>
+                        <thead class="visually-hidden">
+                            <tr>
+                                <th scope="col">Tipo de certidão</th>
+                                <th scope="col" aria-hidden="true"></th>{#- a guia é decorativa; o td dela também é aria-hidden -#}
+                                <th scope="col">Validade</th>
+                                <th scope="col">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
                             {% for certidao in certidoes_por_empresa[empresa.id] %}
                             {% set data_url_final = resolve_data_url(certidao, sites_urls, urls_municipais) %}
 
