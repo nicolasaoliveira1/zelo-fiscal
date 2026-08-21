@@ -245,6 +245,14 @@
     --zl-elev-1: 0 1px 2px rgba(0, 0, 0, 0.40);
     --zl-elev-2: 0 12px 28px rgba(0, 0, 0, 0.55);
 
+    /* E-07 no escuro: chão e superfície levantada em tons distintos. No escuro
+       a peça levantada é MAIS CLARA que o chão (o oposto do claro), então aqui
+       o cartão é --zelo-mist e o chão é --zelo-paper — que no escuro é o tom
+       mais fundo. Os *-soft de status seguem misturando sobre --zelo-paper. */
+    --bs-body-bg: var(--zelo-paper);
+    --bs-body-bg-rgb: 15, 17, 21;
+    --bs-card-bg: var(--zelo-mist);
+
     --bs-primary: #AEB6C0;
     --bs-primary-rgb: 174, 182, 192;
     --bs-link-color: #C9CFD7;
@@ -454,14 +462,68 @@ body.navbar-hidden .navbar {
 /* Substitui os fundos padrão do Bootstrap (levemente amarelados em certos monitores)
    por tons frios e neutros, padrão em sites modernos como GitHub e Stripe */
 [data-bs-theme="light"] {
-    --bs-body-bg: #ffffff;
-    --bs-body-bg-rgb: 255, 255, 255;
+    /* E-07 — convicção de superfície. O Bootstrap declara
+       `--bs-card-bg: var(--bs-body-bg)`: cartão e fundo da página saem da
+       MESMA variável. Com o corpo em #ffffff o resultado era papel branco
+       sobre papel branco, separado só por uma sombra difusa que quase não
+       aparece — e é daí que vinha a sensação de página lavada, em que tudo
+       flutua e nada é superfície.
+       Agora o chão da página é --zelo-mist e o cartão é --zelo-paper: a
+       separação passa a ser ESTRUTURAL (dois tons + fio), não atmosférica
+       (sombra). O tema escuro já fazia isso e por isso lia melhor. */
+    --bs-body-bg: #F5F6F8;
+    --bs-body-bg-rgb: 245, 246, 248;
     --bs-secondary-bg: #f0f3f7;
     --bs-secondary-bg-rgb: 240, 243, 247;
     --bs-tertiary-bg: #f6f8fb;
     --bs-tertiary-bg-rgb: 246, 248, 251;
     --bs-border-color: #d0d7de;
     --bs-border-color-translucent: rgba(31, 35, 40, 0.15);
+
+    /* o cartão deixa de herdar o fundo do corpo */
+    --bs-card-bg: var(--zelo-paper);
+}
+
+/* Superfícies levantadas: fio + elevação da escala, nos dois temas. A sombra
+   do Bootstrap (.shadow-sm) lê variável, ao contrário das variantes de botão,
+   então remapear aqui alcança os 30 usos nos templates sem tocar em markup. */
+:root {
+    --bs-box-shadow-sm: var(--zl-elev-1);
+    --bs-box-shadow: var(--zl-elev-2);
+    --bs-border-radius: var(--zl-radius-md);
+    --bs-border-radius-sm: var(--zl-radius-sm);
+    --bs-border-radius-lg: var(--zl-radius-md);
+    --bs-border-radius-pill: var(--zl-radius-pill);
+}
+
+/* ATENÇÃO — mesma armadilha do R-01, terceira ocorrência. O Bootstrap declara
+   `--bs-card-bg: var(--bs-body-bg)` DENTRO da regra `.card`, então definir
+   --bs-card-bg no :root é sombreado pela declaração mais próxima e não tem
+   efeito nenhum. Medido: com o token só no :root, cartão (#f5f6f8) e chão
+   (#f3f4f6) continuavam no mesmo tom.
+   Regra geral: variável que o Bootstrap declara no COMPONENTE tem de ser
+   redeclarada no componente. No :root só funciona o que ele lê de lá. */
+.card {
+    --bs-card-bg: var(--zelo-paper);
+    --bs-card-border-color: var(--zelo-line);
+    /* cabeçalho no mesmo papel do corpo: quem separa é o fio, não um segundo
+       tom. Dois tons dentro do mesmo cartão competiam com a separação real,
+       que é cartão × chão. */
+    --bs-card-cap-bg: transparent;
+}
+
+[data-bs-theme="dark"] .card {
+    --bs-card-bg: var(--zelo-mist);
+}
+
+/* Quarta ocorrência da armadilha (btn-outline, card, card-header e agora
+   table): o Bootstrap declara `--bs-table-bg: var(--bs-body-bg)` DENTRO de
+   `.table`. Toda tabela pintava o chão da PÁGINA por cima da superfície em que
+   está. Ficava invisível enquanto o corpo era branco; ao dar tom ao chão
+   (E-07), cada tabela virou um retângulo cinza dentro de um cartão branco.
+   Transparente é o certo: a tabela mostra a superfície que a sustenta. */
+.table {
+    --bs-table-bg: transparent;
 }
 
 html, body {
@@ -2153,15 +2215,23 @@ body.topo-visivel .zl-dock {
     background-color: var(--bs-table-bg) !important;
 }
 
+/* E-07 no escuro. O patch anterior era `background-color:#212529!important`,
+   e o corpo do documento também era #212529 (o default do Bootstrap): cartão e
+   chão na MESMA cor, exatamente a doença do tema claro. Agora sai de token, e
+   sem !important — o remendo com !important era o que fazia componente novo
+   "certo" perder para o legado (A-13). */
 [data-bs-theme="dark"] .card {
-    background-color: #212529 !important;
-    border: 1px solid #373b3e !important;
+    background-color: var(--bs-card-bg);
+    border: 1px solid var(--zelo-line);
 }
 
+/* Tokenizado junto com .card (E-07/A-13): era paleta paralela em hex com
+   !important, o que sobrescrevia componente novo que fazia certo. O cabeçalho
+   segue o papel do cartão; a separação é o fio. */
 [data-bs-theme="dark"] .card-header {
-    background-color: #2c3034 !important;
-    border-bottom-color: #373b3e !important;
-    color: #e0e0e0 !important;
+    background-color: transparent;
+    border-bottom-color: var(--zelo-line);
+    color: var(--zelo-ink);
 }
 
 [data-bs-theme="dark"] .card-header .text-dark {
