@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_zelo.html" import zl_page %}
 {% block titulo %}NFSe{% endblock %}
 
 {% block content %}
@@ -320,13 +321,12 @@
     #nfseAliquota { font-family: var(--zelo-font-mono); font-weight: 600; }
 </style>
 
-<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-    <h1 class="h4 mb-0 nfse-title">Emissão de NFSe</h1>
-    <button class="btn btn-ghost btn-sm" type="button" id="btnConfigNfse"
-            data-bs-toggle="collapse" data-bs-target="#painelConfig">
-        <i class="bi bi-sliders"></i> Configurações da nota
-    </button>
-</div>
+{% call zl_page('Emissão de NFSe') %}
+<button class="btn btn-ghost btn-sm" type="button" id="btnConfigNfse"
+        data-bs-toggle="collapse" data-bs-target="#painelConfig">
+    <i class="bi bi-sliders"></i> Configurações da nota
+</button>
+{% endcall %}
 
 <!-- Configuracao dos campos fixos -->
 <div class="collapse mb-3" id="painelConfig">

@@ -3312,3 +3312,56 @@ body.navbar-hidden .sidebar-header {
     background: color-mix(in srgb, var(--zelo-pend) 16%, var(--zelo-paper));
     color: var(--zelo-pend);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   Cabeçalho de página (.zl-page) — achados A-14 e A-04
+   Primeiro consumidor da escala de forma da Onda 0: tamanho, espaço
+   e cor saem todos de token, nenhum valor decidido aqui.
+   O serif vem da CLASSE, não da tag: enquanto dependia de `h1, h2`,
+   seis páginas exibiam o título no papel tipográfico errado só por
+   terem escolhido <h4>.
+   ══════════════════════════════════════════════════════════════ */
+.zl-page {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--zl-space-4);
+    margin-bottom: var(--zl-space-5);
+}
+
+.zl-page-titulo {
+    font-family: var(--zelo-font-display);
+    font-size: var(--zl-fs-6);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+    color: var(--zelo-ink);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--zl-space-3);
+}
+
+.zl-page-titulo .bi {
+    font-size: 0.8em;
+    color: var(--zelo-slate);
+}
+
+.zl-page-sub {
+    font-size: var(--zl-fs-2);
+    color: var(--zelo-slate);
+    margin: var(--zl-space-1) 0 0;
+    max-width: 68ch;
+}
+
+.zl-page-acoes {
+    display: flex;
+    align-items: center;
+    gap: var(--zl-space-2);
+    flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+    .zl-page-titulo { font-size: var(--zl-fs-5); }
+}

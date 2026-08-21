@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_zelo.html" import zl_comp, zl_ficha, zl_bars %}
+{% from "_zelo.html" import zl_comp, zl_ficha, zl_bars, zl_page %}
 {% block titulo %}Relatórios{% endblock %}
 
 {% block content %}
@@ -176,12 +176,7 @@
     }
 </style>
 
-<div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
-    <div>
-        <h4 class="mb-1 fw-bold">Relatórios</h4>
-        <p class="text-body-secondary mb-0">Visão rápida dos principais indicadores.</p>
-    </div>
-</div>
+{{ zl_page('Relatórios', 'Visão rápida dos principais indicadores.') }}
 
 {# ── Carteira ───────────────────────────────────────────────────────────
    As 5 categorias de status SOMAM o total de certidões, então são composição

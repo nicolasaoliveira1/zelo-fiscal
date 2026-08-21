@@ -1,10 +1,11 @@
 {% extends "base.html" %}
+{% from "_zelo.html" import zl_page %}
 
 {% block titulo %}Usuários{% endblock %}
 
 {% block content %}
 <div class="container-fluid px-0">
-    <h1 class="h4 mb-3">Usuários</h1>
+    {{ zl_page('Usuários') }}
 
     <div class="card mb-3">
         <div class="card-header fw-semibold">Novo usuário</div>

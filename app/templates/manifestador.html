@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_zelo.html" import zl_page %}
 {% block titulo %}Manifestador{% endblock %}
 
 {% block content %}
@@ -8,17 +9,12 @@
     espaço permanente. Ver DESIGN_LANGUAGE.md → Histórico de decisões. -#}
 <div class="manif-pagina" id="manifDados" data-empresas='{{ empresas | tojson }}'>
 
-  <header class="d-flex justify-content-between align-items-end flex-wrap gap-2 mb-3">
-    <div>
-      <h1 class="h4 mb-1">Manifestador</h1>
-      <p class="text-secondary small mb-0">
-        Confirmação da operação das NF-e recebidas pelos clientes, direto na SEFAZ.
-      </p>
-    </div>
-    <button type="button" class="btn btn-soft-primary btn-sm" id="manifAbrirEntrada">
-      <i class="bi bi-plus-lg" aria-hidden="true"></i> Adicionar chaves
-    </button>
-  </header>
+  {% call zl_page('Manifestador',
+        'Confirmação da operação das NF-e recebidas pelos clientes, direto na SEFAZ.') %}
+  <button type="button" class="btn btn-soft-primary btn-sm" id="manifAbrirEntrada">
+    <i class="bi bi-plus-lg" aria-hidden="true"></i> Adicionar chaves
+  </button>
+  {% endcall %}
 
   {# ── régua do cofre ─────────────────────────────────────────────────── #}
   <div class="manif-regua" id="manifRegua">

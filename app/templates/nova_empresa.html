@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_zelo.html" import zl_page %}
 {% block titulo %}Nova empresa{% endblock %}
 
 {% block content %}
@@ -13,12 +14,11 @@
   {% endif %}
 {% endwith %}
 
+{{ zl_page('Nova empresa', 'O CNPJ pode ser consultado na Receita para preencher o resto.') }}
+
 <div class="row justify-content-center">
     <div class="col-12 col-xl-11 col-xxl-10">
         <div class="card shadow-sm border-0 rounded-3">
-            <div class="card-header bg-body-tertiary border-bottom py-3">
-                <h5 class="mb-1 fw-bold">Nova Empresa</h5>
-            </div>
             <div class="card-body p-4">
                 <form method="POST" action="{{ url_for('main.adicionar_empresa') }}" class="row g-3">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

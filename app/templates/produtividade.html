@@ -1,16 +1,11 @@
 {% extends "base.html" %}
 {% block titulo %}Produtividade{% endblock %}
-{% from "_zelo.html" import zl_ficha %}
+{% from "_zelo.html" import zl_ficha, zl_page %}
 
 {% block content %}
-<div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
-    <div>
-        <h4 class="mb-1 fw-bold">Produtividade</h4>
-        <p class="text-body-secondary mb-0">
-            Emissões, taxa de sucesso e tempo de lote nos últimos {{ dias }} dias.
-        </p>
-    </div>
-    <div class="d-flex align-items-center gap-2 flex-wrap">
+{% call zl_page('Produtividade',
+        'Emissões, taxa de sucesso e tempo de lote nos últimos ' ~ dias ~ ' dias.') %}
+<div class="d-flex align-items-center gap-2 flex-wrap">
         <div class="btn-group" role="group" aria-label="Período">
             {% for preset in presets %}
             <a class="btn btn-sm {{ 'btn-primary' if preset == dias else 'btn-soft-primary' }}"
@@ -21,7 +16,7 @@
             <i class="bi bi-file-earmark-spreadsheet"></i> Exportar XLSX
         </a>
     </div>
-</div>
+{% endcall %}
 
 <p class="text-body-secondary small mb-4">
     <i class="bi bi-info-circle"></i>

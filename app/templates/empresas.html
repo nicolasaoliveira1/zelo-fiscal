@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_zelo.html" import zl_page %}
 {% block titulo %}Empresas{% endblock %}
 
 {% block content %}
@@ -13,16 +14,13 @@
   {% endif %}
 {% endwith %}
 
-<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
-    <div>
-        <h4 class="mb-1 fw-bold">Empresas</h4>
-    </div>
-    {% if current_user.papel in ['operador', 'admin'] %}
-    <a class="btn btn-primary" href="{{ url_for('main.nova_empresa') }}" aria-label="Cadastrar nova empresa">
-        <i class="bi bi-building-add me-1"></i> Nova empresa
-    </a>
-    {% endif %}
-</div>
+{% call zl_page('Empresas') %}
+{% if current_user.papel in ['operador', 'admin'] %}
+<a class="btn btn-primary" href="{{ url_for('main.nova_empresa') }}" aria-label="Cadastrar nova empresa">
+    <i class="bi bi-building-add me-1"></i> Nova empresa
+</a>
+{% endif %}
+{% endcall %}
 
 <div class="card shadow-sm border-0 mb-4">
     <div class="card-body">

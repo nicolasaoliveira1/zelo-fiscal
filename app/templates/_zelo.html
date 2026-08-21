@@ -71,3 +71,35 @@
 </div>
 {%- endfor %}
 {%- endmacro %}
+
+{#- Cabeçalho de página (achados A-14 e A-04).
+
+    Existia UM problema com duas caras. O CSS aplica o serif da identidade por
+    `h1, h2, .h1, .h2`, então o papel tipográfico do título dependia de qual TAG
+    o template escolheu — e a escolha não foi uniforme: 5 páginas usavam <h1>
+    (serif, certo), 6 usavam <h4> (sans, errado) e 2 não tinham título nenhum.
+    Na tela de Relatórios dava para ver o absurdo: o título da PÁGINA saía em
+    sans enquanto os títulos de seção logo abaixo saíam em serif — a hierarquia
+    visual invertida em relação à semântica.
+
+    Aqui a CLASSE carrega o papel tipográfico e a TAG carrega a semântica, então
+    um deslize não pode mais virar o outro. E como a tela de Certidões não tinha
+    cabeçalho nenhum, isto também devolve o "você está aqui" que faltava (A-04).
+
+    Uso com ação à direita:
+        {% call zl_page('Empresas') %}<a class="btn btn-primary">…</a>{% endcall %}
+    Sem ação:
+        {{ zl_page('Relatórios', 'Visão rápida dos principais indicadores.') }}
+-#}
+{% macro zl_page(titulo, subtitulo='', icone='') -%}
+<header class="zl-page">
+    <div class="zl-page-txt">
+        <h1 class="zl-page-titulo">
+            {%- if icone %}<i class="bi bi-{{ icone }}" aria-hidden="true"></i>{% endif -%}
+            {{ titulo }}
+        </h1>
+        {%- if subtitulo %}<p class="zl-page-sub">{{ subtitulo }}</p>{% endif %}
+    </div>
+    {%- if caller %}<div class="zl-page-acoes">{{ caller() }}</div>{% endif %}
+</header>
+{%- endmacro %}
