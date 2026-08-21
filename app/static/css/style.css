@@ -44,6 +44,58 @@
     --zelo-font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --zelo-font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
 
+    /* ══════════════════════════════════════════════════════════════
+       ESCALA DE FORMA (Onda 0 da auditoria de UI — achados E-01..E-04)
+       O Zelo tinha sistema de COR e de TIPO, os dois bons, e nenhum
+       sistema de FORMA: tamanho, espaço, raio e elevação vinham do
+       padrão do Bootstrap mais valores decididos caso a caso. Medido
+       antes desta mudança: 33 font-sizes, 15 raios, ~20 sombras, zero
+       token de espaço. É disso que vem a sensação de tela "montada"
+       e não "composta".
+       Estes tokens são a RÉGUA. Componente novo puxa daqui; o legado
+       migra aos poucos (não force num diff só).
+       ══════════════════════════════════════════════════════════════ */
+
+    /* Tipo — 7 degraus, razão ~1.2. Antes eram 33 valores, dez deles
+       entre 0.64rem e 0.82rem, separados por 0.02rem (0,32px): abaixo
+       do limiar de percepção, então não eram hierarquia, eram ruído.
+       Toda aquela banda colapsa em --zl-fs-1 e --zl-fs-2. */
+    --zl-fs-1: 0.75rem;      /* 12px — metadado, eyebrow, contador */
+    --zl-fs-2: 0.875rem;     /* 14px — rótulo, texto secundário */
+    --zl-fs-3: 1rem;         /* 16px — corpo */
+    --zl-fs-4: 1.125rem;     /* 18px — destaque, título de cartão */
+    --zl-fs-5: 1.375rem;     /* 22px — título de seção */
+    --zl-fs-6: 1.75rem;      /* 28px — título de página */
+    --zl-fs-7: 2.25rem;      /* 36px — figura grande (zl-comp) */
+
+    /* Espaço — base 4px. Não existia nenhum token: o ritmo vertical
+       vinha de utilitário Bootstrap misturado com rem decidido no
+       componente, e por isso nenhum bloco respirava no mesmo múltiplo. */
+    --zl-space-1: 0.25rem;   /*  4px */
+    --zl-space-2: 0.5rem;    /*  8px */
+    --zl-space-3: 0.75rem;   /* 12px */
+    --zl-space-4: 1rem;      /* 16px */
+    --zl-space-5: 1.5rem;    /* 24px */
+    --zl-space-6: 2rem;      /* 32px */
+    --zl-space-7: 3rem;      /* 48px */
+
+    /* Raio — TRÊS, sem exceção. Eram 15, com nove "médios" entre
+       0.25rem e 0.85rem, porque a regra anterior mandava "seguir os
+       valores vizinhos do componente" e cada vizinho ajustava um
+       pouco. A deriva nunca fechava. */
+    --zl-radius-sm: 0.5rem;    /* controle: botão, input, chip retangular */
+    --zl-radius-md: 0.75rem;   /* superfície: card, modal, painel */
+    --zl-radius-pill: 999px;   /* pílula: badge, chip de status */
+
+    /* Elevação — TRÊS alturas, porque só existem três: o que está na
+       página, o que está levantado e o que está por cima de tudo.
+       Com ~20 sombras diferentes a elevação não conseguia dizer o que
+       está sobre o quê. No tema claro a separação é do FIO
+       (--zelo-line), não da sombra: ver E-07. */
+    --zl-elev-0: none;
+    --zl-elev-1: 0 1px 2px rgba(16, 18, 28, 0.06);
+    --zl-elev-2: 0 10px 24px rgba(16, 18, 28, 0.12);
+
     /* mapeamento Bootstrap → Zelo */
     --bs-body-font-family: var(--zelo-font-body);
     --bs-primary: #2B2F36;
@@ -186,6 +238,12 @@
 
     --zelo-fab-bg: #343A40;
     --zelo-fab-hover: #424A52;
+
+    /* Elevação no escuro: a sombra clara do tema light desaparece sobre
+       superfície escura, então precisa de mais peso. Tipo e espaço não
+       mudam por tema; raio também não. Só a elevação. */
+    --zl-elev-1: 0 1px 2px rgba(0, 0, 0, 0.40);
+    --zl-elev-2: 0 12px 28px rgba(0, 0, 0, 0.55);
 
     --bs-primary: #AEB6C0;
     --bs-primary-rgb: 174, 182, 192;
