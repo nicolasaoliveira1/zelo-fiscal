@@ -166,6 +166,20 @@ class TestCertidoes:
         assert b'data-menor-validade=' in r.data
         assert b'data-status-cert=' in r.data
 
+    def test_certidoes_barra_composicao_no_card(self, client, ids):
+        """A barra de composição vive no cabeçalho do card, ao lado de Pasta/Dossiê.
+
+        Já saiu uma vez numa auditoria de UI (E-08) e o usuário pediu de volta. O
+        teste fixa os dois lados do contrato com o JS: a barra existe com os cinco
+        segmentos, e cada segmento carrega o `data-comp-chave` que
+        `sincronizarBarraComposicao` usa para redesenhá-la conforme o filtro.
+        """
+        r = client.get('/certidoes')
+        assert r.status_code == 200
+        assert b'zl-comp-bar is-mini' in r.data
+        for chave in (b'validas', b'a_vencer', b'vencidas', b'pendentes', b'nao_definida'):
+            assert b'data-comp-chave="' + chave + b'"' in r.data
+
     def test_certidoes_certidao_status_cert_pendente(self, app, client, ids):
         """Certidão PENDENTE deve aparecer com data-status-cert='pendentes'."""
         with app.app_context():

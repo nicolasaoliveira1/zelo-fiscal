@@ -1066,6 +1066,17 @@ footer {
     height: 0.3rem;
     margin-top: 0;
     flex: 0 0 auto;
+    /* O recuo que alinha a barra com a coluna de validade é ESCRITO EM LINHA por
+       `alinharBarraComValidade()` (certidoes.js), cartão a cartão. Não dá para
+       resolver aqui: o valor é a largura da coluna de ações, que muda com o papel
+       do usuário (operador e admin veem 4 botões por linha, consulta vê 2) e com
+       a largura da janela, e não há identidade em CSS entre um item do flex do
+       cabeçalho e uma coluna de <table>.
+
+       O zero explícito é o estado de repouso: sem JS, a barra fica encostada no
+       grupo Pasta/Dossiê pelo `gap-2` do cabeçalho — sem alinhamento, mas nunca
+       fora do cartão. */
+    margin-right: 0;
 }
 
 .zl-comp-seg.is-ok { background: var(--zelo-ok); }
