@@ -65,6 +65,11 @@ function removeToast(t) {
 function scheduleDismiss(t) {
     clearTimeout(t.timer);
     if (stackHovered) return;   // nao some enquanto o mouse esta na pilha
+    // A-21: ERRO NAO EXPIRA. 66 das 98 chamadas do sistema sao de erro, e
+    // ate aqui a principal via de erro era efemera e irrecuperavel: passou,
+    // perdeu, sem historico em lugar nenhum da interface. Erro sai por
+    // dispensa explicita — o operador decide quando ja leu.
+    if (t.persistente) return;
     t.timer = setTimeout(() => removeToast(t), TOAST_DELAY);
 }
 
@@ -73,7 +78,11 @@ export function showToast(message, type = 'success') {
 
     const el = document.createElement('div');
     el.className = 'stk-toast ' + toastClass(type);
-    el.setAttribute('role', 'alert');
+    // A-22: 'alert' e assertivo e INTERROMPE a leitura em curso. Certo para os
+    // 66 toasts de erro do sistema; excessivo para os 16 de sucesso e os 8 de
+    // info, ainda mais com a pilha aceitando 6 ao mesmo tempo — viraria uma
+    // sequencia de interrupcoes. 'status' e polite: espera a pausa.
+    el.setAttribute('role', type === 'error' ? 'alert' : 'status');
 
     const body = document.createElement('div');
     body.className = 'stk-body';
@@ -93,7 +102,7 @@ export function showToast(message, type = 'success') {
     el.style.opacity = '0';
     toastStack.appendChild(el);
 
-    const t = { el, timer: null, leaving: false };
+    const t = { el, timer: null, leaving: false, persistente: type === 'error' };
     toasts.unshift(t);
     close.addEventListener('click', () => removeToast(t));
 
@@ -108,18 +117,20 @@ export function showToast(message, type = 'success') {
 }
 
 if (toastStack) {
-    toastStack.addEventListener('mouseenter', () => {
+    // A pilha pausava so por mouseenter: quem opera por teclado nao tinha como
+    // segurar a mensagem. focusin/focusout cobrem o mesmo pelo teclado.
+    ['mouseenter', 'focusin'].forEach((evt) => toastStack.addEventListener(evt, () => {
         clearTimeout(leaveTimer);
         stackHovered = true;
         toasts.forEach((t) => clearTimeout(t.timer));
         reflow();
-    });
-    toastStack.addEventListener('mouseleave', () => {
+    }));
+    ['mouseleave', 'focusout'].forEach((evt) => toastStack.addEventListener(evt, () => {
         clearTimeout(leaveTimer);
         leaveTimer = setTimeout(() => {
             stackHovered = false;
             reflow();
             toasts.forEach(scheduleDismiss);
-        }, 150);   // pequena folga evita flicker ao cruzar os vaos
-    });
+        }, 150);
+    }));
 }
