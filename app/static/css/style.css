@@ -1348,9 +1348,11 @@ body.topo-visivel .zl-dock {
     border-bottom: 1px solid var(--zelo-line);
 }
 
-/* O fio de status na borda é a única cor da ficha — mesma escala das linhas da
-   tabela de certidões (td.cert-tipo-col::before), para "vencida" ter a mesma
-   cor aqui e lá. Linha sem classe de status não ganha fio nenhum. */
+/* O fio de status na borda é a única cor da ficha, na mesma escala de
+   --zelo-ok/-warn/-danger que a tabela de certidões usa, para "vencida" ter a
+   mesma cor aqui e lá. Linha sem classe de status não ganha fio nenhum.
+   (A linha da tabela deixou de ter fio próprio no E-09: lá o status é dito
+   pelo ícone e pela data, e três sinais para a mesma coisa competiam.) */
 .zl-ficha-row::before {
     content: "";
     position: absolute;
@@ -2666,29 +2668,87 @@ tr.status-cinza > td:nth-last-child(3) {
 .cert-status-danger  { color: var(--zelo-danger); }
 .cert-status-muted   { color: var(--zelo-muted); }
 
-/* ── Barra lateral de status por linha ── */
+/* ══════════════════════════════════════════════════════════════
+   LINHA DE RAZÃO (E-09) — tipo · guia · validade · ações
+
+   O vão de ~900px entre a data e as ações era o defeito de composição
+   dominante da tela mais usada. Num livro razão, num sumário e num
+   balanço, EXATAMENTE essa distância é atravessada por uma guia:
+   rótulo à esquerda, fio percorrendo o vão, cifra alinhada à direita
+   em coluna fixa. Em vez de combater o vão, usa ele.
+
+   Saiu junto o fio colorido à esquerda da linha. O status era dito
+   TRÊS vezes (fio, ícone e data), e três sinais fracos para a mesma
+   coisa competem entre si. O fio era o único que não acrescentava
+   nada: cor pura. O ícone FICA, porque é o único sinal que não é cor
+   — sem ele o status passaria a depender de cor, que é falha de
+   WCAG 1.4.1 para quem não distingue verde de vermelho.
+   ══════════════════════════════════════════════════════════════ */
 td.cert-tipo-col {
-    position: relative;
-    padding-left: 1.85rem !important;
+    width: 1%;
+    white-space: nowrap;
+    padding-left: var(--zl-space-4) !important;
 }
 
-td.cert-tipo-col::before {
+/* A guia. 1px, ponto de 2px e vão de 5px, na cor do fio do sistema —
+   discreta o bastante para não virar sumário de livro, e ganha
+   presença só quando a linha está sob o cursor. */
+td.cert-guia {
+    width: 100%;
+    padding: 0 var(--zl-space-3);
+}
+
+td.cert-guia::after {
     content: '';
-    position: absolute;
-    left: 0.6rem;
-    top: 18%;
-    bottom: 18%;
-    width: 3px;
-    border-radius: 3px;
+    display: block;
+    height: 1px;
+    background: repeating-linear-gradient(to right,
+        var(--zelo-line) 0 2px, transparent 2px 7px);
 }
 
-/* espinha-assinatura: tokens Zelo (trocam por tema sozinhos) */
-tr[data-status-cert="validas"]      td.cert-tipo-col::before { background: var(--zelo-ok); }
-tr[data-status-cert="a_vencer"]     td.cert-tipo-col::before { background: var(--zelo-warn); }
-tr[data-status-cert="vencidas"]     td.cert-tipo-col::before,
-tr[data-status-cert="pendentes"]    td.cert-tipo-col::before { background: var(--zelo-danger); }
-tr[data-status-cert="nao_definida"] td.cert-tipo-col::before,
-tr[data-status-cert="cinza"]        td.cert-tipo-col::before { background: var(--zelo-muted); }
+.table-hover tbody tr:hover td.cert-guia::after {
+    background: repeating-linear-gradient(to right,
+        var(--zelo-slate) 0 2px, transparent 2px 7px);
+}
+
+/* No escuro a guia precisa de mais tinta, e a razão de contraste NÃO explica
+   por quê: medida, ela é 1.31:1 no escuro contra 1.25:1 no claro — ou seja, o
+   número diz que a do escuro é a mais forte, e o olho diz o contrário. Em
+   luminância baixa a fórmula não captura a percepção de um fio pontilhado de
+   1px. Aqui o olho decide, e a medida serve para não exagerar. */
+[data-bs-theme="dark"] td.cert-guia::after {
+    background: repeating-linear-gradient(to right,
+        color-mix(in srgb, var(--zelo-ink) 18%, var(--zelo-mist)) 0 2px,
+        transparent 2px 7px);
+}
+
+/* A validade em COLUNA fixa e alinhada à direita: é o que faz o
+   tabular-nums (já adotado) render de verdade. As datas passam a
+   formar uma coluna legível na vertical, e "o que vence antes" se lê
+   na rolagem, sem ler número por número. */
+td.cert-data {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+    padding-right: var(--zl-space-5);
+}
+
+td.cert-data .cert-status-ok,
+td.cert-data .cert-status-warn,
+td.cert-data .cert-status-danger,
+td.cert-data .cert-status-muted {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    justify-content: flex-end;
+    min-width: 11ch;
+}
+
+td.cert-acoes {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+    padding-right: var(--zl-space-4);
+}
 
 tr.filter-hidden {
     display: none;

@@ -574,15 +574,23 @@
 
                             <tr data-tipo="{{ certidao.tipo.name | lower }}" data-status-cert="{{ status_por_cert[certidao.id] }}"
                                 data-estado="{{ empresa.estado }}" data-cidade-key="{{ cidade_key_por_empresa[empresa.id] }}">
-                                <td class="cert-tipo-col fw-medium" style="width: 1%; white-space: nowrap;">{{ tipo_exibicao }}</td>
+                                {#- LINHA DE RAZÃO (E-09). O tipo à esquerda, a guia
+                                    atravessando o vão, a validade em coluna fixa à direita.
+                                    Antes havia um <td style="width:100%"> vazio aqui: ~900px
+                                    de nada entre a data e as ações, e o olho cruzava meia
+                                    tela para ligar "Municipal - Mobiliário" ao botão que
+                                    emite "Municipal - Mobiliário". A guia é a mesma coisa
+                                    que um livro razão, um sumário e um balanço fazem com
+                                    essa distância: em vez de combater o vão, usa ele. -#}
+                                <td class="cert-tipo-col fw-medium">{{ tipo_exibicao }}</td>
 
-                                <td style="width: 1%; white-space: nowrap; padding-left: 2.5rem;">
+                                <td class="cert-guia" aria-hidden="true"></td>
+
+                                <td class="cert-data">
                                     {{ render_badge(certidao, hoje) }}
                                 </td>
 
-                                <td style="width: 100%;"></td>
-
-                                <td class="text-end pe-4" style="white-space: nowrap; width: 1%;">
+                                <td class="cert-acoes">
                                     <div class="d-flex justify-content-end gap-2">
                                         <button type="button" class="btn btn-sm btn-outline-secondary border-0 btn-abrir-site"
                                             title="Abrir Site"
