@@ -312,12 +312,19 @@
         <main class="container-fluid app-main mt-4" id="conteudo-principal">
             {% block content %}{% endblock %}
         </main>
-        <footer class="bg-body-secondary border-top mt-auto py-2">
-            <div class="container-fluid text-center text-muted small">
-                <p class="mb-1">&copy; {{ year }} · Zelo — Regularidade sob controle.</p>
-                <p class="mb-0"><strong>Assecon Assessoria e Contabilidade</strong></p>
-            </div>
-        </footer>
+        {#- O rodapé saiu. Ele repetia em TODA página três coisas que o leitor já
+            sabe: o nome do sistema (que está no topo da barra, em serif, com a
+            marca ao lado), o tagline (que já é do login, onde ele se paga) e a
+            empresa — num sistema interno, usado por quem trabalha nela. O aviso
+            de copyright não protege nada aqui: não é site público.
+
+            É o mesmo critério que tirou o ícone de prédio idêntico e a barra de
+            composição do cartão de empresa (E-08): ornamento que não informa.
+            E ele competia com o bloco de usuário, que desceu para o rodapé da
+            barra lateral na Onda 2 — duas âncoras na mesma altura da tela.
+
+            A marca da Assecon passou a viver onde "de quem é este sistema" é
+            pergunta legítima: no login e em Configurações. -#}
     </div>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>

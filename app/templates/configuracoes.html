@@ -23,6 +23,14 @@
     .cfg-bloco .card-body { padding: .875rem; }
     .cfg-bloco .form-text { margin-top: .15rem; }
     .cfg-bloco p { margin-bottom: .5rem; }
+
+    .cfg-assinatura {
+        margin: var(--zl-space-6) 0 0;
+        padding-top: var(--zl-space-4);
+        border-top: 1px solid var(--zelo-line);
+        font-size: var(--zl-fs-1);
+        color: var(--zelo-slate);
+    }
 </style>
 
 {{ zl_page('Configurações') }}
@@ -184,7 +192,7 @@
         <div class="card border-0 shadow-sm cfg-bloco">
             <div class="card-header">{{ zl_secao('Tema') }}</div>
             <div class="card-body d-flex align-items-center justify-content-between flex-wrap gap-2">
-                <span class="text-body-secondary small">Também disponível no botão de tema da barra superior.</span>
+                <span class="text-body-secondary small">Também disponível no botão de tema, no rodapé da barra lateral.</span>
                 <button type="button" class="btn btn-sm btn-outline-primary" onclick="toggleTheme()" aria-label="Alternar tema">Alternar tema</button>
             </div>
         </div>
@@ -195,4 +203,9 @@
         <button type="submit" class="btn btn-primary">Salvar</button>
     </div>
 </form>
+
+{#- A marca da Assecon vive aqui e no login, e não mais num rodapé repetido em
+    toda página (ver o comentário em base.html). Aqui é onde se administra o
+    sistema, então "de quem ele é" tem lugar. -#}
+<p class="cfg-assinatura">Zelo · Assecon Assessoria e Contabilidade</p>
 {% endblock %}
