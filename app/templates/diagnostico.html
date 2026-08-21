@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_zelo.html" import zl_page %}
+{% from "_zelo.html" import zl_page, zl_secao %}
 {% block titulo %}Diagnóstico{% endblock %}
 
 {% block content %}
@@ -28,9 +28,9 @@
 </div>
 
 <div class="card mb-3">
-    <div class="card-header fw-semibold d-flex align-items-center justify-content-between gap-2">
-        <span>Saúde dos portais</span>
-        <span class="small text-muted fw-normal">Verde = o portal responde (não garante que a emissão funciona)</span>
+    <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap">
+        {{ zl_secao('Saúde dos portais') }}
+        <span class="small text-muted">Verde = o portal responde (não garante que a emissão funciona)</span>
     </div>
     <div class="table-responsive">
         <table class="table table-sm table-hover mb-0 align-middle">
@@ -56,9 +56,9 @@
 </div>
 
 <div class="card mb-3">
-    <div class="card-header fw-semibold d-flex align-items-center justify-content-between gap-2">
-        <span>Falhas da fila</span>
-        <span class="small text-muted fw-normal">Emissões que esgotaram as tentativas</span>
+    <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap">
+        {{ zl_secao('Falhas da fila') }}
+        <span class="small text-muted">Emissões que esgotaram as tentativas</span>
     </div>
     <div class="card-body py-3">
         <div id="diag-falhas-aviso" class="small mb-3 text-muted d-none"></div>
@@ -72,7 +72,7 @@
 </div>
 
 <div class="card">
-    <div class="card-header fw-semibold">Últimos erros e avisos</div>
+    <div class="card-header">{{ zl_secao('Últimos erros e avisos') }}</div>
     <div class="table-responsive">
         <table class="table table-sm table-hover mb-0 align-middle">
             <thead>
@@ -93,9 +93,9 @@
 </div>
 
 <div class="card mt-3">
-    <div class="card-header fw-semibold d-flex align-items-center justify-content-between gap-2">
-        <span>Automação dos municípios</span>
-        <span class="small text-muted fw-normal">Verifica os seletores sem emitir (não gasta captcha)</span>
+    <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap">
+        {{ zl_secao('Automação dos municípios') }}
+        <span class="small text-muted">Verifica os seletores sem emitir (não gasta captcha)</span>
     </div>
     <div class="table-responsive">
         <table class="table table-sm table-hover mb-0 align-middle">

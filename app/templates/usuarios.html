@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_zelo.html" import zl_page %}
+{% from "_zelo.html" import zl_page, zl_secao %}
 
 {% block titulo %}Usuários{% endblock %}
 
@@ -8,7 +8,7 @@
     {{ zl_page('Usuários') }}
 
     <div class="card mb-3">
-        <div class="card-header fw-semibold">Novo usuário</div>
+        <div class="card-header">{{ zl_secao('Novo usuário') }}</div>
         <div class="card-body">
             <form method="POST" action="{{ url_for('auth.usuario_criar') }}" class="row g-2 align-items-end">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

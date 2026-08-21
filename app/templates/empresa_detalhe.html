@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_zelo.html" import zl_page %}
+{% from "_zelo.html" import zl_page, zl_secao %}
 {% block titulo %}{{ empresa.nome }}{% endblock %}
 {% macro render_badge(certidao, hoje) -%}
 {%- set badge_class = 'text-bg-success' -%}
@@ -51,8 +51,8 @@
 {% endcall %}
 
 <div class="card shadow-sm border-0 mb-4">
-    <div class="card-header bg-body-tertiary">
-        <h6 class="mb-0 fw-bold">Dados da empresa</h6>
+    <div class="card-header">
+        {{ zl_secao('Dados da empresa') }}
     </div>
     <div class="card-body">
         <form method="POST" action="{{ url_for('main.empresa_editar', empresa_id=empresa.id) }}" class="row g-3" id="empresa-editar-form">
@@ -118,7 +118,7 @@
         </form>
         <div class="d-flex flex-wrap gap-2">
             {% if current_user.papel in ['operador', 'admin'] %}
-            <button type="submit" class="btn btn-primary" form="empresa-editar-form" aria-label="Salvar alteracoes da empresa">Salvar alteracoes</button>
+            <button type="submit" class="btn btn-primary" form="empresa-editar-form" aria-label="Salvar alterações da empresa">Salvar alterações</button>
             {% endif %}
             {% if current_user.papel == 'admin' %}
             <a class="btn btn-outline-danger" aria-label="Remover empresa"
@@ -131,8 +131,8 @@
 </div>
 
 <div class="card shadow-sm border-0 mb-4" id="card-receita" data-empresa-id="{{ empresa.id }}">
-    <div class="card-header bg-body-tertiary d-flex flex-wrap align-items-center justify-content-between gap-2">
-        <h6 class="mb-0 fw-bold">Dados da Receita</h6>
+    <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+        {{ zl_secao('Dados da Receita') }}
         <div class="d-flex align-items-center gap-2">
             {% if dados_receita and dados_receita.verificado_em %}
             <span class="text-muted small date-cell">
@@ -246,8 +246,8 @@
 </div>
 
 <div class="card shadow-sm border-0">
-    <div class="card-header bg-body-tertiary">
-        <h6 class="mb-0 fw-bold">Certidoes</h6>
+    <div class="card-header">
+        {{ zl_secao('Certidões') }}
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">

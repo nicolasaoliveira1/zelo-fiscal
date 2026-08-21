@@ -113,3 +113,26 @@
     {%- if caller %}<div class="zl-page-acoes">{{ caller() }}</div>{% endif %}
 </header>
 {%- endmacro %}
+
+{#- Título de SEÇÃO, dentro de um cartão ou bloco.
+
+    Mesmo problema do zl_page, um nível abaixo. O sistema tinha CINCO formas de
+    escrever a mesma coisa, e três delas nem eram cabeçalho:
+
+        <h2 class="h6 nfse-title">       NFS-e
+        <p  class="rel-section-title">   Relatórios      <- parágrafo
+        <div class="card-header ...">    Diagnóstico, Configurações, Usuários,
+                                         Produtividade   <- div
+        <h6>                             Empresa detalhe
+        <h2 class="h6">                  Visão Geral
+
+    Resultado medido: 10 das 13 páginas tinham `h1` e NENHUM `h2`, apesar de
+    exibirem títulos de seção na tela. Quem navega por cabeçalho não conseguia
+    pular entre as seções — elas não existiam como estrutura.
+
+    A classe carrega o papel tipográfico; a tag carrega a semântica. `nivel`
+    existe só para seção aninhada (h3 dentro de h2), nunca para escolher
+    tamanho: tamanho sai da escala. -#}
+{% macro zl_secao(titulo, nivel=2) -%}
+<h{{ nivel }} class="zl-secao">{{ titulo }}</h{{ nivel }}>
+{%- endmacro %}

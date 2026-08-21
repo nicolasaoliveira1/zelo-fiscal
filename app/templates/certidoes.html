@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_zelo.html" import zl_page %}
+{% from "_zelo.html" import zl_page, zl_secao %}
 {% block titulo %}Certidões{% endblock %}
 {% macro render_badge(certidao, hoje) -%}
 {%- if certidao.status_especial and certidao.status_especial.value == 'Pendente' -%}
@@ -449,7 +449,7 @@
     <div id="skeleton-certidoes" aria-hidden="true" aria-label="Carregando empresas...">
         {% for _ in range(3) %}
         <div class="card mb-4 shadow-sm border-0">
-            <div class="card-header border-bottom py-3 d-flex align-items-center gap-3">
+            <div class="card-header d-flex align-items-center gap-3 py-3">
                 <div class="sk-bloco rounded" style="width:45px;height:45px;flex-shrink:0;border-radius:8px!important"></div>
                 <div class="flex-grow-1">
                     <div class="sk-bloco mb-2" style="height:17px;width:38%"></div>
@@ -502,7 +502,7 @@
             data-count-tipo-municipal="{{ ct['tipo_municipal'] }}" data-count-tipo-trabalhista="{{ ct['tipo_trabalhista'] }}">
 
             <div
-                class="card-header border-bottom py-3 d-flex flex-wrap justify-content-between align-items-center">
+                class="card-header d-flex flex-wrap justify-content-between align-items-center py-3">
                 <div class="d-flex align-items-center gap-3">
                     <div>
                         <h5 class="mb-0 fw-bold text-body">{{ empresa.nome }}</h5>
@@ -669,7 +669,7 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="editModalLabel">Editar Validade</h5>
+                    <h5 class="modal-title" id="editModalLabel">Editar validade</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -685,7 +685,7 @@
                         Pendente</button>
                     <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
 
-                    <button type="button" class="btn btn-primary" id="btnSalvarManual">Salvar Alterações</button>
+                    <button type="button" class="btn btn-primary" id="btnSalvarManual">Salvar alterações</button>
                 </div>
             </div>
         </div>
@@ -697,7 +697,7 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="confirmarDataModalTitulo">Confirmar Atualização</h5>
+                    <h5 class="modal-title" id="confirmarDataModalTitulo">Confirmar atualização</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -712,7 +712,7 @@
                     <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
                     <a class="btn btn-soft-primary d-none btn-visualizar-certidao"
                         id="btnVisualizarPdf">Visualizar</a>
-                    <button type="button" class="btn btn-success" id="btnConfirmarSalvar">Confirmar e Salvar</button>
+                    <button type="button" class="btn btn-success" id="btnConfirmarSalvar">Confirmar e salvar</button>
                 </div>
             </div>
         </div>
@@ -736,7 +736,7 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Não, manter como
                         está</button>
-                    <button type="button" class="btn btn-danger" id="btnConfirmarPendente">Sim, marcar Pendente</button>
+                    <button type="button" class="btn btn-danger" id="btnConfirmarPendente">Sim, marcar pendente</button>
                 </div>
             </div>
         </div>
@@ -748,7 +748,7 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title text-danger" id="estadualRsPositivaModalTitulo">Certidão Positiva Detectada</h5>
+                    <h5 class="modal-title text-danger" id="estadualRsPositivaModalTitulo">Certidão positiva detectada</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -774,7 +774,7 @@
                 <div class="modal-body" id="infoModalBody">
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-primary" id="btnInfoModalOK">OK, Abrir Site</button>
+                    <button type="button" class="btn btn-primary" id="btnInfoModalOK">OK, abrir site</button>
                 </div>
             </div>
         </div>

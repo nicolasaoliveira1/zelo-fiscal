@@ -1,15 +1,9 @@
 {% extends "base.html" %}
-{% from "_zelo.html" import zl_comp, zl_ficha, zl_bars, zl_page %}
+{% from "_zelo.html" import zl_comp, zl_ficha, zl_bars, zl_page, zl_secao %}
 {% block titulo %}Relatórios{% endblock %}
 
 {% block content %}
 <style>
-    .rel-section-title {
-        font-family: var(--zelo-font-display);
-        font-weight: 600;
-        font-size: 1.05rem;
-        margin-bottom: .25rem;
-    }
     .rel-num { font-family: var(--zelo-font-mono); }
     .rel-dot {
         display: inline-block;
@@ -218,7 +212,7 @@
 {% endmacro %}
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
-        <p class="rel-section-title mb-3">Últimos lotes emitidos</p>
+        {{ zl_secao('Últimos lotes emitidos') }}
         {% set lotes_pendentes = lotes_resumo | selectattr('pendentes') | list %}
         {% set lotes_gerais = lotes_resumo | selectattr('geral') | list %}
         {% if lotes_pendentes or lotes_gerais %}
@@ -241,7 +235,7 @@
    maior?"), que pede uma barra por categoria, não uma barra empilhada. #}
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
-        <p class="rel-section-title mb-3">Certidões por tipo</p>
+        {{ zl_secao('Certidões por tipo') }}
         {{ zl_bars(distribuicao_tipo, total_certidoes) }}
     </div>
 </div>
@@ -250,7 +244,7 @@
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
         <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-            <p class="rel-section-title mb-0">Evolução por status</p>
+            {{ zl_secao('Evolução por status') }}
             {% if serie_status|length >= 2 %}
             <div class="chart-periodo" id="chartStatusPeriodo" role="group" aria-label="Período do gráfico">
                 <button type="button" class="chart-periodo-btn" data-dias="7" aria-pressed="false">7 dias</button>
@@ -272,7 +266,7 @@
 {# ── Últimas certidões emitidas ─────────────────────────────────────── #}
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
-        <p class="rel-section-title">Últimas certidões emitidas</p>
+        {{ zl_secao('Últimas certidões emitidas') }}
         <p class="text-body-secondary small mb-3">{{ ultimas_emitidas|length }} certidão(ões) mais recentes.</p>
         {% if ultimas_emitidas %}
         <div class="rel-list-scroll table-responsive">
@@ -310,7 +304,7 @@
     <div class="col-12 col-lg-6">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body">
-                <p class="rel-section-title">Pendentes por tipo</p>
+                {{ zl_secao('Pendentes por tipo') }}
                 {% if pendentes_tipo_rank %}
                 {% for tipo, qtd in pendentes_tipo_rank %}
                 <div class="rel-rank-row">
@@ -327,7 +321,7 @@
     <div class="col-12 col-lg-6">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body">
-                <p class="rel-section-title">Pendentes por município</p>
+                {{ zl_secao('Pendentes por município') }}
                 {% if pendentes_cidade_rank %}
                 {% for cidade, qtd in pendentes_cidade_rank %}
                 <div class="rel-rank-row">
@@ -346,7 +340,7 @@
 {# ── Pendentes: lista completa ──────────────────────────────────────── #}
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
-        <p class="rel-section-title">Certidões pendentes</p>
+        {{ zl_secao('Certidões pendentes') }}
         <p class="text-body-secondary small mb-3">{{ lista_pendentes|length }} certidão(ões) aguardando resolução.</p>
         {% if lista_pendentes %}
         <div class="rel-list-scroll table-responsive">

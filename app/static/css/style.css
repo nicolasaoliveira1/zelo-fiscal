@@ -3192,3 +3192,21 @@ tr.filter-hidden {
 @media (min-width: 901px) and (max-width: 1199px) {
     body:not(.sidebar-open) .sidebar-recolher i { transform: rotate(180deg); }
 }
+
+/* Título de seção (.zl-secao) — o par do .zl-page, um nível abaixo.
+   Serif como todo cabeçalho da identidade, mas um degrau abaixo do título de
+   página na escala, para a hierarquia se ler sem depender da tag. */
+.zl-secao {
+    font-family: var(--zelo-font-display);
+    font-size: var(--zl-fs-4);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    color: var(--zelo-ink);
+    margin: 0 0 var(--zl-space-3);
+}
+
+.zl-secao + .nfse-hint,
+.zl-secao + .text-body-secondary {
+    margin-top: calc(var(--zl-space-2) * -1);
+}

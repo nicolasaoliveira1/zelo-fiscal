@@ -1,14 +1,9 @@
 {% extends "base.html" %}
-{% from "_zelo.html" import zl_page %}
+{% from "_zelo.html" import zl_page, zl_secao %}
 {% block titulo %}NFS-e{% endblock %}
 
 {% block content %}
 <style>
-    .nfse-title {
-        font-family: var(--zelo-font-display);
-        font-weight: 600;
-        letter-spacing: -0.01em;
-    }
     .nfse-card {
         background: var(--zelo-paper);
         border: 1px solid var(--zelo-line);
@@ -394,7 +389,7 @@
     <!-- Importacao do extrato -->
     <div class="col-lg-6">
         <div class="nfse-card h-100">
-            <h2 class="h6 nfse-title mb-2">Importar extrato</h2>
+            {{ zl_secao('Importar extrato') }}
             <p class="nfse-hint mb-3">
                 CSV de cobranças do Banrisul ou PDF do extrato do Inter.
                 Pode escolher vários de uma vez.
@@ -417,7 +412,7 @@
     <!-- Sessao do navegador -->
     <div class="col-lg-6">
         <div class="nfse-card h-100">
-            <h2 class="h6 nfse-title mb-2">Portal e alíquota</h2>
+            {{ zl_secao('Portal e alíquota') }}
             <p class="nfse-hint mb-3">
                 Abre o Emissor Nacional com o certificado. A alíquota do Simples
                 muda todo mês e sai na nota; confira antes de preencher.
@@ -484,7 +479,7 @@
 
 <!-- Modo de emissao -->
 <div class="nfse-card mb-3">
-    <h2 class="h6 nfse-title mb-2">Modo de emissão</h2>
+    {{ zl_secao('Modo de emissão') }}
 
     <div class="btn-group nfse-modo" role="group" aria-label="Modo de emissão">
         <input type="radio" class="btn-check" name="nfseModo" id="modoIndividual"
@@ -533,7 +528,7 @@
 <!-- Tabela de conferencia -->
 <div class="nfse-card">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-        <h2 class="h6 nfse-title mb-0">Conferir e preencher</h2>
+        {{ zl_secao('Conferir e preencher') }}
         <div class="d-flex align-items-center gap-2">
             <label class="nfse-hint mb-0" for="filtroCompetencia">Mostrar</label>
             <select class="form-select form-select-sm" id="filtroCompetencia"
@@ -599,7 +594,7 @@
 
 <!-- Conferencia contra o portal (NFSE-28) -->
 <div class="nfse-card mt-3">
-    <h2 class="h6 nfse-title mb-2">O que saiu no portal</h2>
+    {{ zl_secao('O que saiu no portal') }}
     <p class="nfse-hint mb-3">
         Lê as NFS-e emitidas no Emissor Nacional e soma o período. Só leitura.
     </p>
@@ -639,7 +634,7 @@
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 class="h6 nfse-title mb-0">Emitir sem conferir cada nota</h2>
+                {{ zl_secao('Emitir sem conferir cada nota') }}
                 <button type="button" class="btn-close" data-bs-dismiss="modal"
                         aria-label="Fechar"></button>
             </div>
@@ -671,7 +666,7 @@
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 class="h6 nfse-title mb-0">Alíquota não conferida</h2>
+                {{ zl_secao('Alíquota não conferida') }}
                 <button type="button" class="btn-close" data-bs-dismiss="modal"
                         aria-label="Fechar"></button>
             </div>

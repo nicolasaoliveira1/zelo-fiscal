@@ -474,7 +474,7 @@
                 const modalForm = editModal.querySelector('#editForm');
                 const pendenteForm = editModal.querySelector('#pendenteForm')
 
-                if (modalTitle) modalTitle.textContent = `Editar Validade: ${certidaoInfo}`;
+                if (modalTitle) modalTitle.textContent = `Editar validade: ${certidaoInfo}`;
                 if (modalForm) modalForm.action = `/certidao/atualizar/${certidaoId}`;
                 // #pendenteForm nao existe em nenhum template: "marcar pendente"
                 // roda por fetch (btnConfirmarPendente), nao por POST de form.
