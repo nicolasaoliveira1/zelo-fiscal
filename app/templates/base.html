@@ -18,6 +18,7 @@
          SVG primeiro para navegador moderno; .ico como fallback (Windows/navegador antigo). -->
     <link rel="icon" type="image/svg+xml" href="{{ static_versionado('images/zelo-mark.svg') }}">
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/zelo.ico') }}">
+    {% block head_extra %}{% endblock %}
 
     <style>
         /* cores de status das validades — banda suave (Zelo: a única cor é o status) */
@@ -133,6 +134,7 @@
 </head>
 
 <body>
+    {% block estrutura_pagina %}
     <a class="visually-hidden-focusable skip-link" href="#conteudo-principal">Pular para o conteúdo</a>
     <script>
         (function () {
@@ -319,9 +321,11 @@
     </div>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
+    {% endblock %}
     
     <script src="{{ static_versionado('vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
 
+    {% block scripts_aplicacao %}
     <script type="module">
         import { showToast } from "{{ url_for('static', filename='js/toasts.js') }}";
 
@@ -632,6 +636,8 @@
             document.addEventListener('visibilitychange', window.recarregarPendencias);
         })();
     </script>
+
+    {% endblock %}
 
     {% block scripts %}{% endblock %}
 
