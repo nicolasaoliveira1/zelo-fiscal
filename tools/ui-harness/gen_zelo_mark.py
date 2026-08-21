@@ -34,14 +34,21 @@ Duas regras de geometria que o codigo sozinho nao conta:
 
 Sao DOIS arquivos, mesma geometria:
 
-    zelo-mark.svg        chapa em tinta, vao em papel. O padrao.
-    zelo-mark-dark.svg   invertida -- chapa em papel, vao em tinta.
+    zelo-mark.svg            chapa em tinta, vao em papel
+    zelo-mark-invertida.svg  chapa em papel, vao em tinta
 
-A invertida existe porque no tema escuro a chapa (#16181C) encosta na cor da
-barra lateral (#16191D) e a silhueta some. O fio de contorno resolve isso ate
-uns 64px, mas a barra mostra a marca a 30px, e ali ele ja e um fio de 1px
-tentando separar duas cores quase iguais. Inverter resolve o problema em vez de
-compensa-lo -- e por isso a invertida nao leva fio nenhum.
+A invertida nasceu para o tema escuro da barra lateral: ali a chapa (#16181C)
+encosta na cor da barra (#16191D) e a silhueta some. O fio de contorno resolve
+isso ate uns 64px, mas a barra mostra a marca a 30px, e ali ele ja e um fio de
+1px tentando separar duas cores quase iguais. Inverter resolve o problema em vez
+de compensa-lo -- e por isso a invertida nao leva fio nenhum.
+
+Depois ela virou tambem o FAVICON PADRAO, e o nome diz a arte e nao o uso por
+causa disso. Medido a 16px sobre as cores reais da faixa de abas: a normal vira
+um borrao escuro na aba clara, enquanto a invertida perde a chapa (branco sobre
+branco) mas mantem o gesto em preto, que e a parte reconhecivel -- e na aba
+escura ela ganha de longe. Uma so serve nos dois, entao o favicon nao tem
+variante por tema.
 
 Nao ha dependencia de fonte nem de rede: o SVG sai so de aritmetica.
 
@@ -198,7 +205,7 @@ def _bloco():
 def main():
     raiz = Path(__file__).resolve().parents[2]
     imagens = raiz / "app" / "static" / "images"
-    for nome, kw in (("zelo-mark.svg", {}), ("zelo-mark-dark.svg", {"invertida": True})):
+    for nome, kw in (("zelo-mark.svg", {}), ("zelo-mark-invertida.svg", {"invertida": True})):
         destino = imagens / nome
         destino.write_text(marca(**kw), encoding="utf-8")
         print("marca:", destino, "({} bytes)".format(destino.stat().st_size))

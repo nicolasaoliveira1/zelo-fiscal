@@ -14,16 +14,18 @@
     <link rel="stylesheet" href="{{ static_versionado('vendor/fonts/ibm-plex.css') }}">
 
     <link rel="stylesheet" href="{{ static_versionado('css/style.css') }}">
-    <!-- O favicon é a marca do Zelo, a mesma que a barra lateral exibe.
-         SVG primeiro para navegador moderno; .ico como fallback (Windows/navegador antigo).
+    <!-- O favicon é a marca INVERTIDA, e sem variante por tema. Medido a 16px sobre as
+         cores reais da faixa de abas: a versão normal vira um borrão escuro na aba clara
+         (o desenho some justamente onde precisa aparecer), enquanto a invertida perde a
+         chapa — branco sobre branco — mas mantém o gesto em preto, que é a parte
+         reconhecível; e na aba escura ela ganha de longe. Uma só serve nos dois, então não
+         há `media` aqui: a aba do navegador segue o sistema, não o `data-bs-theme` do app,
+         e chavear por `prefers-color-scheme` só traria a versão pior de volta.
 
-         A variante escura vai por `prefers-color-scheme` e NÃO pelo `data-bs-theme` do app,
-         de propósito: o favicon é desenhado sobre a aba do navegador, cuja cor segue o
-         sistema — não o tema que o operador escolheu aqui dentro. Sem media primeiro, para
-         que navegador que ignora `media` em `rel=icon` fique com a versão padrão. -->
-    <link rel="icon" type="image/svg+xml" href="{{ static_versionado('images/zelo-mark.svg') }}">
-    <link rel="icon" type="image/svg+xml" media="(prefers-color-scheme: dark)"
-          href="{{ static_versionado('images/zelo-mark-dark.svg') }}">
+         SVG para navegador moderno; .ico como fallback (Windows/navegador antigo), gerado
+         da mesma arte invertida pelo mesmo motivo. -->
+    <link rel="icon" type="image/svg+xml"
+          href="{{ static_versionado('images/zelo-mark-invertida.svg') }}">
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/zelo.ico') }}">
     {% block head_extra %}{% endblock %}
 
@@ -202,7 +204,7 @@
             <img class="sidebar-logo-img is-claro" alt=""
                  src="{{ static_versionado('images/zelo-mark.svg') }}">
             <img class="sidebar-logo-img is-escuro" alt=""
-                 src="{{ static_versionado('images/zelo-mark-dark.svg') }}">
+                 src="{{ static_versionado('images/zelo-mark-invertida.svg') }}">
             <span class="sidebar-title">Zelo</span>
         </a>
 
