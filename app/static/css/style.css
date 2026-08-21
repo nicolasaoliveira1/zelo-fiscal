@@ -184,7 +184,7 @@
 }
 
 .toast-stack .stk-body {
-    padding: .85rem 2.3rem .85rem 1rem;
+    padding: var(--zl-space-3) var(--zl-space-6) var(--zl-space-3) var(--zl-space-4);
     font-size: 1rem;
     line-height: 1.3;
 }
@@ -193,7 +193,7 @@
     position: absolute;
     top: .3rem;
     right: .4rem;
-    padding: .1rem .4rem;
+    padding: var(--zl-space-1) var(--zl-space-2);
     border: 0;
     background: transparent;
     color: inherit;
@@ -401,7 +401,7 @@ h1, h2, .h1, .h2 {
     inset-block-start: 0.75rem;
     inset-inline-start: 0.75rem;
     z-index: 1100;
-    padding: 0.65rem 0.9rem;
+    padding: var(--zl-space-3) var(--zl-space-4);
     border: 2px solid var(--zelo-graphite);
     border-radius: var(--zl-radius-sm);
     background: var(--zelo-paper);
@@ -449,8 +449,8 @@ h1, h2, .h1, .h2 {
     --sidebar-width: 225px;
     --sidebar-collapsed-width: 54px;
     --navbar-height: 72px;
-    --sidebar-top-padding: calc(var(--navbar-height) + 1rem);
-    --sidebar-top-padding-hidden-nav: 0.7rem;
+    --sidebar-top-padding: calc(var(--navbar-height) + var(--zl-space-4));
+    --sidebar-top-padding-hidden-nav: var(--zl-space-3);
     --sidebar-transition: 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -961,7 +961,7 @@ footer {
 }
 
 .batch-modal-footer {
-    gap: 0.45rem;
+    gap: var(--zl-space-2);
 }
 
 /* Botao secundario "preenchido" (soft) para a acao "Emitir apenas esta":
@@ -1025,7 +1025,7 @@ footer {
 .zl-comp-fig {
     display: flex;
     align-items: baseline;
-    gap: 0.15rem;
+    gap: var(--zl-space-1);
     line-height: 1;
 }
 
@@ -1052,7 +1052,7 @@ footer {
 .zl-comp-bar {
     display: flex;
     height: 0.5rem;
-    margin-top: 0.65rem;
+    margin-top: var(--zl-space-3);
     border-radius: var(--zl-radius-pill);
     background: var(--zelo-line);
     overflow: hidden;
@@ -1094,14 +1094,14 @@ footer {
 .zl-comp-leg {
     display: flex;
     flex-wrap: wrap;
-    gap: 1rem;
-    margin-top: 0.8rem;
+    gap: var(--zl-space-4);
+    margin-top: var(--zl-space-3);
 }
 
 .zl-comp-stat {
     display: flex;
     align-items: baseline;
-    gap: 0.4rem;
+    gap: var(--zl-space-2);
     font-size: 0.82rem;
     color: var(--bs-secondary-color);
 }
@@ -1136,9 +1136,9 @@ footer {
 .zl-comp-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 1.6rem;
-    margin-top: 1rem;
-    padding-top: 0.8rem;
+    gap: var(--zl-space-5);
+    margin-top: var(--zl-space-4);
+    padding-top: var(--zl-space-3);
     border-top: 1px solid var(--zelo-line);
 }
 
@@ -1149,7 +1149,7 @@ footer {
 
 .zl-comp-meta b {
     display: block;
-    margin-top: 0.1rem;
+    margin-top: var(--zl-space-1);
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
     font-size: 1rem;
@@ -1166,8 +1166,8 @@ footer {
     display: grid;
     grid-template-columns: 8.5rem 1fr 3rem;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.3rem 0;
+    gap: var(--zl-space-3);
+    padding: var(--zl-space-1) 0;
 }
 
 .zl-bars-l {
@@ -1178,7 +1178,7 @@ footer {
     display: inline-block;
     width: 0.55rem;
     height: 0.55rem;
-    margin-right: 0.4rem;
+    margin-right: var(--zl-space-2);
     border-radius: var(--zl-radius-pill);
 }
 
@@ -1204,7 +1204,7 @@ footer {
 }
 
 @media (max-width: 575.98px) {
-    .zl-bars-row { grid-template-columns: 6.5rem 1fr 2.5rem; gap: 0.5rem; }
+    .zl-bars-row { grid-template-columns: 6.5rem 1fr 2.5rem; gap: var(--zl-space-2); }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1221,8 +1221,8 @@ footer {
     z-index: 1000;
     display: flex;
     align-items: center;
-    gap: 0.7rem;
-    padding: 0.55rem 0.7rem 0.55rem 0.85rem;
+    gap: var(--zl-space-3);
+    padding: var(--zl-space-2) var(--zl-space-3) var(--zl-space-2) var(--zl-space-3);
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-md);
     background: var(--bs-body-bg);
@@ -1335,7 +1335,7 @@ body.topo-visivel .zl-dock {
    seguido — a margem separa os dois blocos sem dobrar a régua */
 .zl-comp + .zl-ficha,
 .zl-comp-leg + .zl-ficha {
-    margin-top: 1rem;
+    margin-top: var(--zl-space-4);
 }
 
 .zl-ficha-row {
@@ -1343,8 +1343,8 @@ body.topo-visivel .zl-dock {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
-    padding: 0.6rem 0 0.6rem 0.7rem;
+    gap: var(--zl-space-4);
+    padding: var(--zl-space-2) 0 var(--zl-space-2) var(--zl-space-3);
     border-bottom: 1px solid var(--zelo-line);
 }
 
@@ -1381,8 +1381,8 @@ body.topo-visivel .zl-dock {
 .zl-ficha-row.is-total {
     border-top: 2px solid var(--zelo-ink);
     border-bottom: none;
-    margin-top: 0.15rem;
-    padding-top: 0.75rem;
+    margin-top: var(--zl-space-1);
+    padding-top: var(--zl-space-3);
 }
 
 .zl-ficha-row.is-total .zl-ficha-l { font-weight: 600; }
@@ -1403,7 +1403,7 @@ body.topo-visivel .zl-dock {
 
 @media (max-width: 576px) {
     .zl-comp-leg {
-        gap: 0.75rem;
+        gap: var(--zl-space-3);
     }
 }
 
@@ -1424,14 +1424,14 @@ body.topo-visivel .zl-dock {
     border-radius: var(--zl-radius-md);
     overflow: hidden;
     background: var(--bs-body-bg);
-    margin-bottom: 1.1rem;
+    margin-bottom: var(--zl-space-4);
 }
 
 .vg-faixa-h {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.6rem 0.95rem;
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-2) var(--zl-space-4);
     background: var(--zelo-danger-soft);
     color: var(--zelo-danger);
     font-weight: 600;
@@ -1446,8 +1446,8 @@ body.topo-visivel .zl-dock {
 .vg-faixa-item {
     display: flex;
     align-items: center;
-    gap: 0.8rem;
-    padding: 0.6rem 0.95rem;
+    gap: var(--zl-space-3);
+    padding: var(--zl-space-2) var(--zl-space-4);
     color: inherit;
     text-decoration: none;
 }
@@ -1466,7 +1466,7 @@ body.topo-visivel .zl-dock {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
+    gap: var(--zl-space-1);
 }
 
 .vg-faixa-t {
@@ -1496,15 +1496,15 @@ body.topo-visivel .zl-dock {
 .vg-faixa-nomes {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.25rem 0.4rem;
-    margin-top: 0.15rem;
+    gap: var(--zl-space-1) var(--zl-space-2);
+    margin-top: var(--zl-space-1);
 }
 
 .vg-faixa-nome,
 .vg-faixa-mais {
     font-size: 0.72rem;
     line-height: 1.5;
-    padding: 0 0.4rem;
+    padding: 0 var(--zl-space-2);
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-pill);
     color: var(--bs-secondary-color);
@@ -1531,7 +1531,7 @@ body.topo-visivel .zl-dock {
    alta (uma linha por empresa). Grade uniforme desperdiça as duas. */
 .vg-mosaico {
     display: grid;
-    gap: 0.9rem;
+    gap: var(--zl-space-4);
     grid-template-columns: repeat(4, minmax(0, 1fr));
     grid-template-areas:
         "cert cert cert a1"
@@ -1560,8 +1560,8 @@ body.topo-visivel .zl-dock {
 .vg-larga {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    column-gap: 1.6rem;
-    row-gap: 0.3rem;
+    column-gap: var(--zl-space-5);
+    row-gap: var(--zl-space-1);
     align-items: center;
 }
 
@@ -1594,7 +1594,7 @@ body.topo-visivel .zl-dock {
     grid-column: 2;
     grid-row: 2;
     align-self: start;
-    /* O `margin-top: .8rem` do componente separa a legenda da barra no arranjo
+/* O `margin-top` do componente separa a legenda da barra no arranjo
        EMPILHADO original. Aqui a separação é o `row-gap` da grade, e a margem
        herdada empurrava a legenda para baixo do rótulo em vez de emparelhá-la.
        Zerada só dentro do cartão largo — o arranjo empilhado segue intacto nas
@@ -1625,7 +1625,7 @@ body.topo-visivel .zl-dock {
     overflow-y: auto;
     /* respiro para a barra de rolagem não encostar na data: sem isto o valor
        fica colado no trilho, que é justamente a coluna que o operador lê */
-    padding-right: 0.6rem;
+    padding-right: var(--zl-space-2);
     scrollbar-gutter: stable;
 }
 
@@ -1635,13 +1635,13 @@ body.topo-visivel .zl-dock {
    pequena, em vez de disputar a horizontal com ele. */
 .vg-lista .zl-ficha-row {
     align-items: flex-start;
-    gap: 0.75rem;
+    gap: var(--zl-space-3);
 }
 
 .vg-lista .zl-ficha-l {
     display: flex;
     flex-direction: column;
-    gap: 0.05rem;
+    gap: var(--zl-space-1);
     min-width: 0;
 }
 
@@ -1691,8 +1691,8 @@ body.topo-visivel .zl-dock {
 .vg-card-h {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.7rem 0.95rem;
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-3) var(--zl-space-4);
     border-bottom: 1px solid var(--zelo-line);
 }
 
@@ -1707,11 +1707,11 @@ body.topo-visivel .zl-dock {
 }
 
 .vg-card-b {
-    padding: 0.9rem 0.95rem;
+    padding: var(--zl-space-4);
 }
 
 .vg-card-f {
-    padding: 0.5rem 0.95rem;
+    padding: var(--zl-space-2) var(--zl-space-4);
     border-top: 1px solid var(--zelo-line);
     background: var(--bs-tertiary-bg);
     font-size: 0.8rem;
@@ -1742,7 +1742,7 @@ body.topo-visivel .zl-dock {
 .vg-falha {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--zl-space-2);
     font-size: 0.84rem;
     color: var(--bs-secondary-color);
     margin: 0;
@@ -1772,11 +1772,11 @@ body.topo-visivel .zl-dock {
 }
 
 .batch-progress-head {
-    padding: 1.1rem 1.25rem 0.85rem;
+    padding: var(--zl-space-4) var(--zl-space-5) var(--zl-space-3);
 }
 
 .batch-progress-title {
-    margin: 0.15rem 0 0;
+    margin: var(--zl-space-1) 0 0;
     font-family: var(--zelo-font-display);
     font-size: 1.15rem;
     font-weight: 600;
@@ -1794,7 +1794,7 @@ body.topo-visivel .zl-dock {
 }
 
 .batch-progress-body {
-    padding: 0 1.25rem 1.1rem;
+    padding: 0 var(--zl-space-5) var(--zl-space-4);
 }
 
 /* linha viva: quem está sendo emitida agora. Vira o aviso do lote
@@ -1802,9 +1802,9 @@ body.topo-visivel .zl-dock {
 .batch-progress-live {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    margin-top: 1rem;
-    padding-top: 0.85rem;
+    gap: var(--zl-space-2);
+    margin-top: var(--zl-space-4);
+    padding-top: var(--zl-space-3);
     border-top: 1px solid var(--zelo-line);
     font-size: 0.84rem;
     color: var(--bs-secondary-color);
@@ -1852,7 +1852,7 @@ body.topo-visivel .zl-dock {
 
 /* Linha de apoio em mono (CNPJ sob o nome da empresa) */
 .zl-sub {
-    margin: 0.5rem 0 0 0.95rem;
+    margin: var(--zl-space-2) 0 0 var(--zl-space-4);
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
     font-size: 0.76rem;
@@ -1894,8 +1894,8 @@ body.topo-visivel .zl-dock {
 .batch-progress-footer {
     display: flex;
     justify-content: flex-end;
-    gap: 0.5rem;
-    padding: 0.85rem 1.25rem;
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-3) var(--zl-space-5);
     border-top: 1px solid var(--zelo-line);
     background: var(--zelo-mist);
 }
@@ -1904,8 +1904,8 @@ body.topo-visivel .zl-dock {
 }
 
 .px-6-custom {
-    padding-left: 2rem !important;
-    padding-right: 2rem !important;
+    padding-left: var(--zl-space-6) !important;
+    padding-right: var(--zl-space-6) !important;
 }
 
 @media (max-width: 1200px) {
@@ -1923,7 +1923,7 @@ body.topo-visivel .zl-dock {
 .nav-title {
     font-size: 1.6rem;
     font-weight: 600;
-    margin-right: 1.5rem;
+    margin-right: var(--zl-space-5);
     letter-spacing: 0.5px;
     line-height: 1.1;
     white-space: nowrap;
@@ -1935,21 +1935,21 @@ body.topo-visivel .zl-dock {
 @media (max-width: 1200px) {
     .nav-title {
         font-size: 1.0rem;
-        margin-right: 1rem;
+    margin-right: var(--zl-space-4);
     }
 }
 
 @media (max-width: 900px) {
     .nav-title {
         font-size: 1rem;
-        margin-right: 0.7rem;
+    margin-right: var(--zl-space-3);
     }
 }
 
 @media (max-width: 600px) {
     .nav-title {
         font-size: 0.75rem;
-        margin-right: 0.3rem;
+    margin-right: var(--zl-space-1);
     }
 }
 
@@ -2013,8 +2013,8 @@ body.topo-visivel .zl-dock {
 
 @media (max-width: 768px) {
     .px-6-custom {
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
+    padding-left: var(--zl-space-4) !important;
+    padding-right: var(--zl-space-4) !important;
     }
 }
 
@@ -2032,7 +2032,7 @@ body.topo-visivel .zl-dock {
     
     display: inline-flex;
     align-items: center;
-    gap: 0.2rem;
+    gap: var(--zl-space-1);
     vertical-align: middle;
     border: 0;
     cursor: pointer;
@@ -2098,24 +2098,24 @@ tr.status-cinza > td:nth-last-child(3) {
 /* tabelas responsividade */
 
 .table td.d-flex {
-    padding-left: 0.5rem !important;
-    padding-right: 0.5rem !important;
-    gap: 0.5rem;
+    padding-left: var(--zl-space-2) !important;
+    padding-right: var(--zl-space-2) !important;
+    gap: var(--zl-space-2);
 }
 
 @media (max-width: 1200px) {
     .table td, .table th {
         font-size: 0.9rem;
-        padding: 0.4rem !important;
+        padding: var(--zl-space-2) !important;
     }
     .btn-sm {
         font-size: 0.75rem;
-        padding: 0.2rem 0.4rem;
+        padding: var(--zl-space-1) var(--zl-space-2);
     }
     .table td.d-flex {
-        padding-left: 0.3rem !important;
-        padding-right: 0.3rem !important;
-        gap: 0.3rem;
+        padding-left: var(--zl-space-1) !important;
+        padding-right: var(--zl-space-1) !important;
+        gap: var(--zl-space-1);
     }
 }
 
@@ -2168,8 +2168,8 @@ tr.status-cinza > td:nth-last-child(3) {
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 0.5rem;
-    padding: 0.45rem 0.7rem;
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-2) var(--zl-space-3);
     font-size: 0.82rem;
     font-weight: 600;
     border-radius: var(--zl-radius-pill);
@@ -2211,14 +2211,14 @@ tr.status-cinza > td:nth-last-child(3) {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--zl-space-2);
     white-space: nowrap;
 }
 
 .filter-divider {
     flex: 0 0 1px;
     align-self: stretch;
-    margin: 1.8rem 1rem 0;
+    margin: var(--zl-space-6) var(--zl-space-4) 0;
     background-color: var(--zelo-line);
 }
 
@@ -2238,7 +2238,7 @@ tr.status-cinza > td:nth-last-child(3) {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 230px));
     justify-content: center;
-    gap: 0.5rem;
+    gap: var(--zl-space-2);
     width: 100%;
 }
 
@@ -2289,7 +2289,7 @@ tr.status-cinza > td:nth-last-child(3) {
     align-items: center;
     justify-content: center;
     min-width: 1.2rem;
-    padding: 0.1rem 0.35rem;
+    padding: var(--zl-space-1);
     border-radius: var(--zl-radius-pill);
     font-size: 0.7rem;
     font-weight: 700;
@@ -2304,9 +2304,9 @@ tr.status-cinza > td:nth-last-child(3) {
     }
 
     .filter-chip {
-        padding: 0.34rem 0.5rem;
+        padding: var(--zl-space-1) var(--zl-space-2);
         font-size: 0.74rem;
-        gap: 0.4rem;
+        gap: var(--zl-space-2);
     }
 
     .filter-chip i {
@@ -2316,7 +2316,7 @@ tr.status-cinza > td:nth-last-child(3) {
     .filter-chip .chip-count {
         font-size: 0.64rem;
         min-width: 1.5rem;
-        padding: 0.06rem 0.3rem;
+        padding: var(--zl-space-1);
     }
 }
 
@@ -2325,17 +2325,17 @@ tr.status-cinza > td:nth-last-child(3) {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.35rem;
+    gap: var(--zl-space-1);
 }
 
 .resumo-item {
     display: inline-flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: var(--zl-space-2);
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--zl-radius-pill);
-    padding: 0.3rem 0.7rem;
+    padding: var(--zl-space-1) var(--zl-space-3);
     cursor: pointer;
     color: var(--bs-body-color);
     font-size: 0.92rem;
@@ -2385,20 +2385,20 @@ tr.status-cinza > td:nth-last-child(3) {
     align-self: stretch;
     min-height: 1.2rem;
     background: var(--bs-border-color);
-    margin: 0.2rem 0.4rem;
+    margin: var(--zl-space-1) var(--zl-space-2);
 }
 
 .filtros-sep {
     height: 1px;
     background: var(--bs-border-color);
-    margin: 0.75rem 0;
+    margin: var(--zl-space-3) 0;
 }
 
 .filtros-toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.6rem;
+    gap: var(--zl-space-2);
 }
 
 .filtros-toolbar .busca { flex: 1 1 220px; min-width: 180px; }
@@ -2410,12 +2410,12 @@ tr.status-cinza > td:nth-last-child(3) {
 .filtro-dd-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: var(--zl-space-2);
     background: var(--bs-body-bg);
     border: 1px solid var(--bs-border-color);
     color: var(--bs-body-color);
     border-radius: var(--zl-radius-sm);
-    padding: 0.375rem 0.75rem;
+    padding: var(--zl-space-2) var(--zl-space-3);
     font-size: 0.9rem;
     cursor: pointer;
     white-space: nowrap;
@@ -2439,7 +2439,7 @@ tr.status-cinza > td:nth-last-child(3) {
    so aparece quando esse modo esta ativo. Ativo (recentes 1o) usa o realce de
    acao dos chips selecionados. */
 .ordem-dir[hidden] { display: none; }
-.ordem-dir { font-size: 0.8rem; padding: 0.375rem 0.6rem; font-weight: 600; }
+.ordem-dir { font-size: 0.8rem; padding: var(--zl-space-2); font-weight: 600; }
 .ordem-dir .bi-arrow-down-up { font-size: 0.82rem; opacity: 0.75; }
 .ordem-dir[aria-pressed="true"] {
     background: var(--zelo-action-bg);
@@ -2454,7 +2454,7 @@ tr.status-cinza > td:nth-last-child(3) {
     border-radius: var(--zl-radius-pill);
     font-size: 0.68rem;
     font-weight: 700;
-    padding: 0.05rem 0.45rem;
+    padding: var(--zl-space-1) var(--zl-space-2);
     min-width: 1.3rem;
     text-align: center;
 }
@@ -2468,10 +2468,10 @@ tr.status-cinza > td:nth-last-child(3) {
     border: 1px solid var(--bs-border-color);
     border-radius: var(--zl-radius-md);
     box-shadow: var(--zl-elev-2);
-    padding: 0.5rem;
+    padding: var(--zl-space-2);
     display: none;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: var(--zl-space-1);
 }
 
 .filtro-dd.open .dd-panel { display: flex; }
@@ -2490,7 +2490,7 @@ tr.status-cinza > td:nth-last-child(3) {
     flex: 1 1 auto;
     min-width: 0;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--zl-space-2);
 }
 
 /* nome da cidade trunca com reticências quando não cabe (ex.: "Capão da Canoa");
@@ -2506,7 +2506,7 @@ tr.status-cinza > td:nth-last-child(3) {
 .dd-panel .filter-chip .chip-count { flex: 0 0 auto; }
 
 @media (max-width: 575.98px) {
-    .resumo-item { font-size: 0.84rem; padding: 0.28rem 0.55rem; }
+    .resumo-item { font-size: 0.84rem; padding: var(--zl-space-1) var(--zl-space-2); }
     .filtros-toolbar .busca { flex: 1 1 100%; }
     .dd-panel { left: 0; right: auto; }
 }
@@ -2518,6 +2518,7 @@ tr.status-cinza > td:nth-last-child(3) {
 }
 
 .order-select-input {
+    /* Reserva óptica para a seta absoluta; 2rem encostaria o texto no ícone. */
     padding-right: 2.25rem;
     min-width: 220px;
     appearance: none;
@@ -2689,7 +2690,7 @@ td.cert-tipo-col {
     width: 1%;
     white-space: nowrap;
     position: relative;
-    padding-left: 1.85rem !important;
+    padding-left: var(--zl-space-6) !important;
 }
 
 /* O fio de status na borda esquerda. Ele responde a uma pergunta que o ícone
@@ -2830,7 +2831,8 @@ tr.filter-hidden {
 
 /* ── Zelo: hambúrguer da navbar alinhado à coluna do rail recolhido ──
    Caixa com a largura exata do rail, encostada na borda esquerda (a
-   margem negativa cancela o px-4 + mx-1 do container), ícone centrado.
+   margem negativa cancela exatamente o px-4 + mx-1 do container (1,75rem,
+   combinação estrutural que não é um degrau da escala), ícone centrado.
    Resultado: o botão fica na mesma coluna vertical dos ícones do rail
    (centro em --sidebar-collapsed-width / 2) e centrado na vertical. */
 @media (min-width: 901px) {
@@ -2893,9 +2895,9 @@ tr.filter-hidden {
 .manif-regua {
     display: flex;
     align-items: center;
-    gap: 0.9rem;
+    gap: var(--zl-space-4);
     flex-wrap: wrap;
-    padding: 0.55rem 0.9rem;
+    padding: var(--zl-space-2) var(--zl-space-4);
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-sm);
     background: var(--zelo-mist);
@@ -2916,16 +2918,16 @@ tr.filter-hidden {
     font-weight: 500;
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: var(--zl-space-1);
 }
 
 /* ── barra de trabalho ───────────────────────────────────────── */
 .manif-barra {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: var(--zl-space-2);
     flex-wrap: wrap;
-    padding: 0.75rem 0;
+    padding: var(--zl-space-3) 0;
 }
 
 .manif-busca {
@@ -2938,7 +2940,7 @@ tr.filter-hidden {
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--zl-space-2);
 }
 
 /* ── a mesa ──────────────────────────────────────────────────── */
@@ -2962,7 +2964,7 @@ tr.filter-hidden {
 .manif-motivo {
     color: var(--bs-secondary-color);
     font-size: 0.78rem;
-    margin-top: 0.15rem;
+    margin-top: var(--zl-space-1);
 }
 
 /* ── A ASSINATURA: a chave segmentada pelo significado ───────────
@@ -2998,8 +3000,8 @@ tr.filter-hidden {
     font-size: 0.68rem;
     color: var(--bs-secondary-color);
     display: flex;
-    gap: 1.1rem;
-    margin-top: 0.15rem;
+    gap: var(--zl-space-4);
+    margin-top: var(--zl-space-1);
 }
 
 .manif-chave-leg b { font-weight: 500; color: var(--bs-emphasis-color); }
@@ -3009,8 +3011,8 @@ tr.filter-hidden {
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-md);
     background: var(--zelo-paper);
-    padding: 0.8rem 0.95rem;
-    margin-bottom: 0.75rem;
+    padding: var(--zl-space-3) var(--zl-space-4);
+    margin-bottom: var(--zl-space-3);
 }
 
 .manif-andamento-linha { font-size: 0.88rem; font-weight: 500; }
@@ -3025,7 +3027,7 @@ tr.filter-hidden {
     background: var(--zelo-paper);
     border-top: 1px solid var(--zelo-line);
     box-shadow: var(--zl-elev-2);
-    padding: 1rem 1.25rem 1.25rem;
+    padding: var(--zl-space-4) var(--zl-space-5) var(--zl-space-5);
     /* Ancorado no rodapé, o painel cresce para CIMA: sem teto, uma lista de 26
        pastas empurrou o topo — e o botão de importar — para fora da tela, sem
        jeito de alcançá-los. A rolagem aqui é a rede de segurança; quem segura a
@@ -3041,7 +3043,7 @@ tr.filter-hidden {
     display: grid;
     grid-template-columns: 1fr 1fr;
     align-items: start;
-    gap: 1rem;
+    gap: var(--zl-space-4);
 }
 
 .manif-ta {
@@ -3054,9 +3056,9 @@ tr.filter-hidden {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
+    gap: var(--zl-space-2);
     text-align: center;
-    padding: 1.2rem;
+    padding: var(--zl-space-4);
     border: 1px dashed var(--zelo-line);
     border-radius: var(--zl-radius-sm);
     color: var(--bs-secondary-color);
@@ -3076,15 +3078,15 @@ tr.filter-hidden {
 
 .manif-solta-acoes {
     display: flex;
-    gap: 0.75rem;
-    margin-top: 0.2rem;
+    gap: var(--zl-space-3);
+    margin-top: var(--zl-space-1);
 }
 
 /* As fontes escolhidas. Uma linha por pasta, com a contagem à direita: é ela
    que responde "peguei a pasta certa?" antes de o operador importar. */
 .manif-fontes {
     list-style: none;
-    margin: 0.35rem 0 0;
+    margin: var(--zl-space-1) 0 0;
     padding: 0;
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-sm);
@@ -3098,8 +3100,8 @@ tr.filter-hidden {
 .manif-fontes li {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 0.4rem 0.3rem 0.6rem;
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-1) var(--zl-space-2) var(--zl-space-1) var(--zl-space-2);
     font-size: 0.8rem;
     border-top: 1px solid var(--zelo-line);
 }
@@ -3135,7 +3137,7 @@ tr.filter-hidden {
 }
 
 .manif-balanco { font-size: 0.8rem; }
-.manif-balanco div { margin-top: 0.15rem; }
+.manif-balanco div { margin-top: var(--zl-space-1); }
 
 @media (max-width: 820px) {
     .manif-entrada-in { grid-template-columns: 1fr; }
@@ -3150,7 +3152,7 @@ tr.filter-hidden {
     align-items: center;
     font-size: 0.78rem;
     font-weight: 500;
-    padding: 0.12rem 0.5rem;
+    padding: var(--zl-space-1) var(--zl-space-2);
     border-radius: var(--zl-radius-pill);
     white-space: nowrap;
 }
