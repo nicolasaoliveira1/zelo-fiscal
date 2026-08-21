@@ -2440,6 +2440,124 @@ import { showToast } from './toasts.js';
                 if (!algumaMarcada && cidadeTodasCheckbox) cidadeTodasCheckbox.checked = true;
             }
 
+            // A barra de composição do cabeçalho do cartão redesenhada a partir das
+            // linhas VISÍVEIS dele. Sem isto a barra é a foto do servidor e passa a
+            // contradizer a tela assim que um filtro entra: o cartão mostra 2 linhas
+            // vencidas e a barra segue dizendo 40% válidas. Foi esse descompasso que
+            // tirou a barra do cartão em E-08.
+            //
+            // `contagens` vem pronta do laço de aplicarFiltros, que já percorre cada
+            // linha do cartão — recontar aqui seria uma segunda passada pelo mesmo DOM.
+            const COMP_CHAVES = ['validas', 'a_vencer', 'vencidas', 'pendentes', 'nao_definida'];
+            const COMP_ROTULOS = {
+                validas: 'válidas', a_vencer: 'a vencer', vencidas: 'vencidas',
+                pendentes: 'pendentes', nao_definida: 'sem data'
+            };
+
+            function sincronizarBarraComposicao(card, contagens, total) {
+                const barra = card.querySelector('.zl-comp-bar.is-mini');
+                if (!barra) return;
+
+                // total 0 significa "nenhuma linha passou no filtro", e o cartão inteiro
+                // já está escondido nesse caso. Deixar a barra como está evita dividir
+                // por zero e evita o pisca de largura na volta do filtro.
+                if (!total) return;
+
+                barra.querySelectorAll('.zl-comp-seg').forEach(seg => {
+                    const n = contagens[seg.dataset.compChave] || 0;
+                    seg.style.width = ((n / total) * 100).toFixed(2) + '%';
+                    seg.classList.toggle('is-vazio', n === 0);
+                });
+
+                const partes = COMP_CHAVES.map(k => (contagens[k] || 0) + ' ' + COMP_ROTULOS[k]);
+                barra.setAttribute('aria-label', partes.join(', '));
+
+                // O tooltip do Bootstrap guarda o texto no init; mexer só no title não
+                // reflete num tooltip já criado. Quando existe instância, é ela que manda.
+                const texto = partes.join(' · ');
+                barra.setAttribute('title', texto);
+                const inst = window.bootstrap && bootstrap.Tooltip.getInstance(barra);
+                if (inst) inst.setContent({ '.tooltip-inner': texto });
+            }
+
+            // Põe a borda direita da barra de composição na MESMA vertical em que
+            // termina a coluna de validade da tabela logo abaixo. Alinhados, o resumo
+            // do cabeçalho e as datas que ele resume se leem como uma coluna só, de
+            // cima a baixo, em vez de duas réguas desencontradas.
+            //
+            // Por que medindo, e não em CSS: o recuo necessário é a largura da coluna
+            // de AÇÕES, que não é constante — operador e admin veem 4 botões por
+            // linha, o papel de consulta vê 2. Não existe identidade em CSS entre um
+            // item do flex do cabeçalho e uma coluna de <table>.
+            //
+            // Por que POR CARTÃO, e não uma medida para a página: cada cartão é uma
+            // <table> própria e `td.cert-data` é `width: 1%` (encolhe ao conteúdo).
+            // Um cartão com "Não definida" tem coluna de validade mais larga que um
+            // só com datas, e as datas dele terminam mais à esquerda. Uma medida
+            // global acertaria uns e erraria outros.
+            //
+            // As leituras vêm todas antes das escritas de propósito: intercalar
+            // getBoundingClientRect com style.setProperty força um reflow por cartão.
+            // Em três fases (zera tudo → mede tudo → aplica tudo) são dois flushes de
+            // layout, independentemente de quantos cartões a carteira tenha.
+            const COMP_FOLGA_MIN = 24;   // --zl-space-5: o nome da empresa nunca encosta na barra
+
+            function alinharBarraComValidade() {
+                const lista = document.getElementById('lista-empresas');
+                if (!lista) return;
+
+                const cards = Array.from(
+                    lista.querySelectorAll('.company-card:not(.status-hidden):not(.search-hidden)'));
+                if (!cards.length) return;
+
+                // Fase 1 — zerar. A medição tem de partir do estado sem recuo, senão
+                // cada chamada soma sobre a anterior e a barra caminha para a esquerda
+                // a cada resize.
+                const alvos = [];
+                cards.forEach(card => {
+                    const barra = card.querySelector('.zl-comp-bar.is-mini');
+                    const cabecalho = barra && barra.closest('.card-header');
+                    const blocoNome = cabecalho && cabecalho.firstElementChild;
+                    // o <span> do badge, não o <td>: o td tem padding-right, e é a
+                    // borda do texto da data que o olho usa como régua
+                    const validade = card.querySelector(
+                        'tr[data-tipo]:not(.filter-hidden) td.cert-data > span');
+                    if (!barra || !blocoNome || !validade) return;
+                    barra.style.marginRight = '0px';
+                    alvos.push({ barra, blocoNome, validade });
+                });
+                if (!alvos.length) return;
+
+                // Fase 2 — medir. Nenhuma escrita aqui dentro.
+                alvos.forEach(a => {
+                    const rBarra = a.barra.getBoundingClientRect();
+                    a.desloc = rBarra.right - a.validade.getBoundingClientRect().right;
+                    a.folga = rBarra.left - a.blocoNome.getBoundingClientRect().right;
+                });
+
+                // Fase 3 — aplicar. Só desloca o que couber: no cabeçalho estreito (ou
+                // quando ele quebra em duas linhas, que é `flex-wrap`) a folga fica
+                // negativa e a barra permanece onde está. Alinhar não vale atropelar o
+                // nome da empresa.
+                alvos.forEach(a => {
+                    const cabe = a.desloc > 0 && a.desloc <= a.folga - COMP_FOLGA_MIN;
+                    a.barra.style.marginRight = cabe ? a.desloc.toFixed(2) + 'px' : '';
+                });
+            }
+
+            // Uma única leitura por quadro, compartilhada por tudo que possa mexer na
+            // geometria: carga, resize e filtro (filtrar pode esconder a linha "Não
+            // definida" e estreitar a coluna de validade daquele cartão).
+            let alinhamentoAgendado = false;
+            function agendarAlinhamento() {
+                if (alinhamentoAgendado) return;
+                alinhamentoAgendado = true;
+                requestAnimationFrame(function () {
+                    alinhamentoAgendado = false;
+                    alinharBarraComValidade();
+                });
+            }
+
             function aplicarFiltros() {
                 const statusAtivos = getStatusAtivos();
                 const tiposAtivos = getTiposAtivos();
@@ -2459,13 +2577,19 @@ import { showToast } from './toasts.js';
                         return;
                     }
                     let linhasVisiveis = 0;
+                    const compCard = {};
                     card.querySelectorAll('tr[data-tipo]').forEach(row => {
                         const tipoOk = tiposAtivos.has('todas') || tiposAtivos.has(row.dataset.tipo);
                         const statusOk = statusAtivos.has('todas') || statusAtivos.has(row.dataset.statusCert);
                         const visivel = tipoOk && statusOk;
                         row.classList.toggle('filter-hidden', !visivel);
-                        if (visivel) linhasVisiveis++;
+                        if (visivel) {
+                            linhasVisiveis++;
+                            const s = row.dataset.statusCert;
+                            compCard[s] = (compCard[s] || 0) + 1;
+                        }
                     });
+                    sincronizarBarraComposicao(card, compCard, linhasVisiveis);
                     const cardVisivel = linhasVisiveis > 0;
                     card.classList.toggle('status-hidden', !cardVisivel);
                     if (cardVisivel) visiveis++;
@@ -2485,6 +2609,7 @@ import { showToast } from './toasts.js';
                 history.replaceState(null, '', url);
 
                 atualizarContagensChips();
+                agendarAlinhamento();
             }
 
             function compararUrgencia(a, b, nomeA, nomeB) {
@@ -2707,6 +2832,14 @@ import { showToast } from './toasts.js';
                 if (listaEl) listaEl.classList.remove('certidoes-loading');
                 if (filtrosEl) filtrosEl.classList.remove('chips-loading');
             })();
+
+            // Depois do reveal: o rAF garante que a remoção das classes acima já virou
+            // layout antes da primeira leitura.
+            agendarAlinhamento();
+
+            // O recuo é medida em px — acompanha a largura do cartão e a da coluna de
+            // ações, e as duas mudam com a janela.
+            window.addEventListener('resize', agendarAlinhamento);
 
             window.addEventListener('focus', function () {
                 cleanupUiLocks({ keepLoading: true, keepBatchOverlays: true });

@@ -511,21 +511,30 @@
                     </div>
                 </div>
                 <div class="d-flex align-items-center gap-2">
-                    {#- A barra de composição desta empresa SAIU (E-08).
+                    {#- Composição (A) das certidões desta empresa: as 5 categorias
+                        somam o total, então é barra + legenda, não contadores soltos.
 
-                        Ela resumia as cinco linhas que estão visíveis logo abaixo — a
-                        empresa tem exatamente cinco tipos de certidão, todos na tela, cada
-                        um com sua própria cor. É o "número derivado ao lado do número que o
-                        origina" que o design language proíbe, e a mesma duplicação que tirou
-                        o subtítulo de contagem da Visão Geral.
-
-                        E havia um agravante medido: a barra é renderizada no servidor e NÃO
-                        acompanha o filtro. Filtrando por "vencidas", o cartão passava a
-                        mostrar 2 linhas, todas vermelhas, enquanto a barra seguia dizendo
-                        40% válidas. Não era só ruído — contradizia a tela.
-
-                        Onde a composição se paga é na Visão Geral, que resume centenas de
-                        linhas de OUTRA página. Aqui as linhas são estas. -#}
+                        Os números iniciais vêm do servidor em `ct`, mas os segmentos são
+                        REDESENHADOS pelo filtro (`sincronizarBarraComposicao`, em
+                        certidoes.js), a partir das linhas visíveis do próprio cartão. Sem
+                        isso a barra contradiz a tela: filtrando por "vencidas", o cartão
+                        mostra 2 linhas vermelhas enquanto a barra segue dizendo 40%
+                        válidas. É o defeito que a tirou daqui em E-08 — a barra volta com
+                        ele corrigido, não sem ele. -#}
+                    {% if ct['total'] %}
+                    <span class="zl-comp-bar is-mini" role="img"
+                        aria-label="{{ ct['validas'] }} válidas, {{ ct['a_vencer'] }} a vencer, {{ ct['vencidas'] }} vencidas, {{ ct['pendentes'] }} pendentes, {{ ct['nao_definida'] }} sem data"
+                        data-bs-tooltip="true" data-bs-placement="top"
+                        title="{{ ct['validas'] }} válidas · {{ ct['a_vencer'] }} a vencer · {{ ct['vencidas'] }} vencidas · {{ ct['pendentes'] }} pendentes · {{ ct['nao_definida'] }} sem data">
+                        {%- for chave, classe in [('validas','is-ok'), ('a_vencer','is-warn'),
+                                                  ('vencidas','is-danger'), ('pendentes','is-pend'),
+                                                  ('nao_definida','is-muted')] -%}
+                        <i class="zl-comp-seg {{ classe }}{{ ' is-vazio' if not ct[chave] }}"
+                            data-comp-chave="{{ chave }}"
+                            style="width: {{ (ct[chave] / ct['total'] * 100) | round(2) }}%"></i>
+                        {%- endfor -%}
+                    </span>
+                    {% endif %}
                     <button type="button" class="btn btn-soft-primary btn-sm btn-abrir-pasta"
                         data-empresa-id="{{ empresa.id }}"
                         title="Abrir pasta de certidões na rede"

@@ -13,6 +13,12 @@ maioria delas, entao o wordmark cairia para uma serif qualquer do sistema.
 
 A marca vem de gen_zelo_mark.marca(), nao de uma copia: lockup e favicon tem que
 sair da mesma geometria.
+
+Nota (2026-08-21): os PNG em app/static/images/ desta troca de marca NAO sairam
+daqui -- nao havia Playwright na maquina. Foram compostos com sharp, mantendo o
+texto ja rasterizado dos PNG anteriores byte a byte e trocando so os 208x208 da
+marca, em (12, 18). O resultado e o mesmo desde que a caixa da marca nao mude;
+se o gabarito acima for alterado, este arquivo volta a ser a unica fonte.
 """
 import importlib.util
 from pathlib import Path
@@ -24,7 +30,9 @@ _spec = importlib.util.spec_from_file_location("gen_zelo_mark", AQUI / "gen_zelo
 _gm = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_gm)
 
-MARCA_KW = _gm.VARIANTES["f-carimbo"]["kw"]
+# A v3 da marca nao tem variantes: `marca()` sozinha ja e a marca. Ate a v2
+# isto apontava para VARIANTES["f-carimbo"], que sumiu junto com o Z.
+MARCA_KW = {}
 
 # Tokens do :root de app/static/css/style.css, por tema.
 TEMAS = {
