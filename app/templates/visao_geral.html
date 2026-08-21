@@ -41,9 +41,13 @@
     {#- Saudação pela hora do servidor. Sem subtítulo com contagem: quem conta é
         a faixa logo abaixo, e o mesmo número em duas alturas da tela é a
         duplicação que já tirou "Certidões por status" de Relatórios. -#}
-    {% call zl_page(saudacao ~ ', ' ~ current_user.username) %}
-    <span class="small text-secondary zl-num">{{ hoje_extenso }}</span>
-    {% endcall %}
+    {#- O h1 NOMEIA a tela; a saudação vira subtítulo, junto da data (que antes
+        flutuava sozinha à direita). Antes o cabeçalho principal da página era um
+        cumprimento: quem usa leitor de tela ouvia "Boa tarde, fulano" como
+        identificação da tela. E o nome é o MESMO do menu lateral — havia dois
+        nomes para esta tela ("Início" no menu, "Visão geral" no título, na rota
+        e no design language). -#}
+    {{ zl_page('Visão geral', saudacao ~ ', ' ~ current_user.username ~ ' · ' ~ hoje_extenso) }}
 
     {#- A FAIXA: UM componente que muda de estado, não dois blocos alternativos.
         É a diferença entre a página dizer "está tudo bem" e a página apenas
