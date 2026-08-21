@@ -136,3 +136,34 @@
 {% macro zl_secao(titulo, nivel=2) -%}
 <h{{ nivel }} class="zl-secao">{{ titulo }}</h{{ nivel }}>
 {%- endmacro %}
+
+{#- Selo de validade de uma certidão — a ESCALA DE STATUS do sistema.
+
+    Existiam DOIS macros com este nome, um em certidoes.html e outro em
+    empresa_detalhe.html, e eles já tinham divergido por completo: o primeiro
+    usava `.cert-status-*` (texto + ícone, a escala do Zelo) e o segundo
+    `badge rounded-pill text-bg-*` (a pílula do Bootstrap). O mesmo dado, em
+    duas linguagens visuais, na mesma carteira.
+
+    A decisão de 2026-08-20 já tinha migrado o chip da Visão Geral da pílula
+    para `.cert-status-*`, pelo mesmo motivo; o empresa_detalhe foi o que
+    sobrou. Agora há um macro só, e é este.
+
+    Peso ÚNICO: antes, vencida / a vencer / PENDENTE levavam `fw-semibold` e
+    válida / não definida ficavam em peso normal — o peso virava um terceiro
+    jeito de dizer o status que a cor e o ícone já dizem. E `fw-semibold` é
+    600, enquanto o Mono vendorizado só tem 400 e 500: aquelas datas saíam em
+    negrito SINTÉTICO. -#}
+{% macro render_badge(certidao, hoje) -%}
+{%- if certidao.status_especial and certidao.status_especial.value == 'Pendente' -%}
+<span class="cert-status-danger small d-inline-flex align-items-center gap-1"><i class="bi bi-exclamation-circle-fill"></i>PENDENTE</span>
+{%- elif not certidao.data_validade -%}
+<span class="cert-status-muted small d-inline-flex align-items-center gap-1"><i class="bi bi-question-circle"></i>Não definida</span>
+{%- elif certidao.data_validade < hoje -%}
+<span class="cert-status-danger small d-inline-flex align-items-center gap-1"><i class="bi bi-x-circle-fill"></i>{{ certidao.data_validade.strftime('%d/%m/%Y') }}</span>
+{%- elif certidao.status == 'amarelo' -%}
+<span class="cert-status-warn small d-inline-flex align-items-center gap-1"><i class="bi bi-exclamation-triangle-fill"></i>{{ certidao.data_validade.strftime('%d/%m/%Y') }}</span>
+{%- else -%}
+<span class="cert-status-ok small d-inline-flex align-items-center gap-1"><i class="bi bi-check-circle-fill"></i>{{ certidao.data_validade.strftime('%d/%m/%Y') }}</span>
+{%- endif -%}
+{%- endmacro %}

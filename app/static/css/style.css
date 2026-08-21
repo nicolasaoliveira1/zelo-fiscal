@@ -2758,12 +2758,20 @@ td.cert-data {
     padding-right: var(--zl-space-5);
 }
 
+/* Peso ÚNICO na coluna de validade. Antes, vencida / a vencer / PENDENTE
+   levavam `fw-semibold` e válida / não definida ficavam em peso normal — três
+   pesos numa coluna que existe para ser varrida na vertical, e o peso virava
+   um TERCEIRO jeito de dizer o mesmo status que a cor e o ícone já dizem.
+   Pior: `fw-semibold` é 600 e o Mono vendorizado só tem 400 e 500, então
+   aquelas datas saíam em negrito SINTÉTICO, com o traço engordado pelo
+   navegador. 500 é peso real, dá presença à coluna e não grita. */
 td.cert-data .cert-status-ok,
 td.cert-data .cert-status-warn,
 td.cert-data .cert-status-danger,
 td.cert-data .cert-status-muted {
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
+    font-weight: 500;
     justify-content: flex-end;
     min-width: 11ch;
 }

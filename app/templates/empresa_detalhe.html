@@ -1,31 +1,6 @@
 {% extends "base.html" %}
-{% from "_zelo.html" import zl_page, zl_secao %}
+{% from "_zelo.html" import zl_page, zl_secao, render_badge %}
 {% block titulo %}{{ empresa.nome }}{% endblock %}
-{% macro render_badge(certidao, hoje) -%}
-{%- set badge_class = 'text-bg-success' -%}
-{%- set icone_status = 'bi-check-circle-fill' -%}
-{%- if certidao.status_especial and certidao.status_especial.value == 'Pendente' -%}
-{%- set badge_class = 'text-bg-danger' -%}
-{%- set icone_status = 'bi-exclamation-circle-fill' -%}
-{%- elif not certidao.data_validade -%}
-{%- set badge_class = 'text-bg-secondary' -%}
-{%- set icone_status = 'bi-question-circle-fill' -%}
-{%- elif certidao.data_validade < hoje -%}
-{%- set badge_class = 'text-bg-danger' -%}
-{%- set icone_status = 'bi-x-circle-fill' -%}
-{%- elif certidao.status == 'amarelo' -%}
-{%- set badge_class = 'text-bg-warning' -%}
-{%- set icone_status = 'bi-exclamation-triangle-fill' -%}
-{%- endif -%}
-<span class="badge rounded-pill {{ badge_class }} fs-6 fw-normal px-3 py-2 d-inline-flex align-items-center gap-2">
-    <i class="bi {{ icone_status }}"></i>
-    {%- if certidao.status_especial and certidao.status_especial.value == 'Pendente' -%}
-    PENDENTE
-    {%- else -%}
-    {{ certidao.data_validade.strftime('%d/%m/%Y') if certidao.data_validade else 'Nao definida' }}
-    {%- endif -%}
-</span>
-{%- endmacro %}
 
 {% block content %}
 {% with messages = get_flashed_messages(with_categories=true) %}

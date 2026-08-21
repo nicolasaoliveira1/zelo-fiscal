@@ -1,19 +1,6 @@
 {% extends "base.html" %}
-{% from "_zelo.html" import zl_page, zl_secao %}
+{% from "_zelo.html" import zl_page, zl_secao, render_badge %}
 {% block titulo %}Certidões{% endblock %}
-{% macro render_badge(certidao, hoje) -%}
-{%- if certidao.status_especial and certidao.status_especial.value == 'Pendente' -%}
-<span class="cert-status-danger fw-semibold small d-inline-flex align-items-center gap-1"><i class="bi bi-exclamation-circle-fill"></i>PENDENTE</span>
-{%- elif not certidao.data_validade -%}
-<span class="cert-status-muted small d-inline-flex align-items-center gap-1"><i class="bi bi-question-circle"></i>Não definida</span>
-{%- elif certidao.data_validade < hoje -%}
-<span class="cert-status-danger fw-semibold small d-inline-flex align-items-center gap-1"><i class="bi bi-x-circle-fill"></i>{{ certidao.data_validade.strftime('%d/%m/%Y') }}</span>
-{%- elif certidao.status == 'amarelo' -%}
-<span class="cert-status-warn fw-semibold small d-inline-flex align-items-center gap-1"><i class="bi bi-exclamation-triangle-fill"></i>{{ certidao.data_validade.strftime('%d/%m/%Y') }}</span>
-{%- else -%}
-<span class="cert-status-ok small d-inline-flex align-items-center gap-1"><i class="bi bi-check-circle-fill"></i>{{ certidao.data_validade.strftime('%d/%m/%Y') }}</span>
-{%- endif -%}
-{%- endmacro %}
 
     {% macro resolve_data_url(certidao, sites_urls, urls_municipais) -%}
     {%- if certidao.tipo.name == 'MUNICIPAL' -%}
