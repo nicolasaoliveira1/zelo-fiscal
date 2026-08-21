@@ -594,8 +594,20 @@ main {
 .sidebar-marca:hover .sidebar-title { color: var(--zelo-ink); }
 .sidebar-marca:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: -2px; }
 
-.sidebar-logo { display: inline-flex; align-items: center; flex: none; }
-.sidebar-logo-img { width: 30px; height: 30px; object-fit: contain; }
+/* O carimbo tem fundo próprio (#16181C) e no tema escuro ele encosta na cor da
+   barra (#16191D). Um anel de 1px em --zelo-line devolve a borda do selo sem
+   precisar de um segundo arquivo por tema. */
+.sidebar-logo-img {
+    width: 30px;
+    height: 30px;
+    flex: none;
+    border-radius: 7px;
+    object-fit: contain;
+}
+
+[data-bs-theme="dark"] .sidebar-logo-img {
+    box-shadow: 0 0 0 1px var(--zelo-line);
+}
 
 .sidebar-title {
     font-family: var(--zelo-font-display);
@@ -1871,28 +1883,6 @@ body.topo-visivel .zl-dock {
     padding-right: 2rem !important;
 }
 
-/* logo única na navbar (.logo-brand); o swap claro/escuro fica nas regras .logo-light/.logo-dark abaixo */
-
-.logo-light, .logo-dark {
-    display: none !important;
-}
-
-[data-bs-theme="light"] .logo-light {
-    display: inline-block !important;
-}
-
-[data-bs-theme="dark"] .logo-dark {
-    display: inline-block !important;
-}
-
-/* logo circular da Assecon na navbar — dimensionada pela altura */
-.logo-navbar {
-    height: 38px;
-    width: auto;
-    max-width: none;
-    transition: height 0.2s;
-}
-
 @media (max-width: 1200px) {
     .logo-navbar {
         height: 32px;
@@ -1936,12 +1926,6 @@ body.topo-visivel .zl-dock {
         font-size: 0.75rem;
         margin-right: 0.3rem;
     }
-}
-
-.theme-toggle-svg {
-    width: 20px;
-    height: 20px;
-    transition: width 0.2s, height 0.2s;
 }
 
 @media (max-width: 1200px) {

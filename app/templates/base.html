@@ -18,7 +18,7 @@
         rel="stylesheet">
 
     <link rel="stylesheet" href="{{ static_versionado('css/style.css') }}">
-    <!-- Zelo nomeia o sistema (aba/wordmark); a marca Assecon segue na navbar e na sidebar.
+    <!-- O favicon é a marca do Zelo, a mesma que a barra lateral exibe.
          SVG primeiro para navegador moderno; .ico como fallback (Windows/navegador antigo). -->
     <link rel="icon" type="image/svg+xml" href="{{ static_versionado('images/zelo-mark.svg') }}">
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/zelo.ico') }}">
@@ -188,12 +188,12 @@
             enfeite repetido (antes aparecia aqui E na navbar). -#}
         <a class="sidebar-marca" href="{{ url_for('main.visao_geral_painel') }}"
            aria-label="Zelo — ir para a visão geral">
-            <span class="sidebar-logo" aria-hidden="true">
-                <img src="{{ url_for('static', filename='images/assecon_preto.png') }}"
-                    class="img-fluid logo-light sidebar-logo-img" alt="">
-                <img src="{{ url_for('static', filename='images/assecon_branco.png') }}"
-                    class="img-fluid logo-dark sidebar-logo-img" alt="">
-            </span>
+            {#- A marca do ZELO, não a da Assecon: o sistema tem nome próprio e é
+                ele que a navegação anuncia. O carimbo carrega o próprio fundo, então
+                serve nos dois temas sem variante — a marca da Assecon volta depois,
+                em lugar a definir. -#}
+            <img class="sidebar-logo-img" alt=""
+                 src="{{ static_versionado('images/zelo-mark.svg') }}">
             <span class="sidebar-title">Zelo</span>
         </a>
 
