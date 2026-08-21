@@ -429,18 +429,19 @@
                     <i class="bi bi-arrow-down-up" aria-hidden="true"></i>
                     <span id="ordem-atividade-dir-label">Paradas primeiro</span>
                 </button>
+                {#- Exportar pertence AQUI, e nao solto entre os cartoes: a
+                   propria acao diz que "respeita os filtros ativos", entao o
+                   comportamento dela e acoplado a esta barra (E-08). -#}
+                <a id="btn-exportar-carteira" class="btn btn-soft-primary btn-sm ms-auto"
+                    href="{{ url_for('main.exportar_carteira') }}"
+                    onclick="this.href='{{ url_for('main.exportar_carteira') }}'+window.location.search"
+                    title="Baixar planilha (respeita os filtros ativos)">
+                    <i class="bi bi-file-earmark-spreadsheet me-1"></i>Exportar carteira
+                </a>
             </div>
         </div>
     </div>
 
-    <div class="d-flex justify-content-end mb-3">
-        <a id="btn-exportar-carteira" class="btn btn-soft-primary btn-sm"
-            href="{{ url_for('main.exportar_carteira') }}"
-            onclick="this.href='{{ url_for('main.exportar_carteira') }}'+window.location.search"
-            title="Baixar planilha (respeita os filtros ativos)">
-            <i class="bi bi-file-earmark-spreadsheet me-1"></i>Exportar carteira
-        </a>
-    </div>
 
     <div id="skeleton-certidoes" aria-hidden="true" aria-label="Carregando empresas...">
         {% for _ in range(3) %}
@@ -500,10 +501,6 @@
             <div
                 class="card-header border-bottom py-3 d-flex flex-wrap justify-content-between align-items-center">
                 <div class="d-flex align-items-center gap-3">
-                    <div class="bg-primary bg-opacity-10 text-primary rounded p-2 d-flex align-items-center justify-content-center"
-                        style="width: 45px; height: 45px;">
-                        <i class="bi bi-building fs-4"></i>
-                    </div>
                     <div>
                         <h5 class="mb-0 fw-bold text-body">{{ empresa.nome }}</h5>
                         <div class="d-flex gap-3 text-muted small mt-1">
