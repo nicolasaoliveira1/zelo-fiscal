@@ -153,7 +153,7 @@
     box-sizing: border-box;
     border-radius: var(--zl-radius-md);
     color: var(--bs-white);
-    box-shadow: 0 .6rem 1.4rem rgba(0, 0, 0, .28);
+    box-shadow: var(--zl-elev-2);
     transform-origin: bottom right;
     transition: transform .35s cubic-bezier(.22, 1, .36, 1), opacity .3s ease;
     will-change: transform, opacity;
@@ -1226,7 +1226,7 @@ footer {
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-md);
     background: var(--bs-body-bg);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
+    box-shadow: var(--zl-elev-2);
     font-size: 0.82rem;
     transition: right .28s cubic-bezier(.4, 0, .2, 1);
 }
@@ -1292,12 +1292,12 @@ body.topo-visivel .zl-dock {
 
 @keyframes zlDockRecusa {
     0%, 100% {
-        box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
+        box-shadow: var(--zl-elev-2);
         border-color: var(--zelo-line);
     }
     15%, 45% {
         box-shadow: 0 0 0 4px color-mix(in srgb, var(--zelo-warn) 35%, transparent),
-                    0 6px 18px rgba(0, 0, 0, .12);
+                    var(--zl-elev-2);
         border-color: var(--zelo-warn);
     }
 }
@@ -1766,7 +1766,7 @@ body.topo-visivel .zl-dock {
        resumo do lote aparecem em sequência e não podem ter tons diferentes.
        Quem separa do app atrás é o scrim do .loading-overlay, não a cor. */
     background: var(--bs-body-bg);
-    box-shadow: 0 10px 24px rgba(0, 0, 0, .09);
+    box-shadow: var(--zl-elev-2);
     overflow: hidden;
     text-align: left;
 }
@@ -2022,7 +2022,7 @@ body.topo-visivel .zl-dock {
 .navbar-toggler:active,
 .navbar-toggler:focus-visible {
     outline: none !important;
-    box-shadow: none !important;
+    box-shadow: var(--zl-elev-0) !important;
 }
 
 .copy-cnpj {
@@ -2188,7 +2188,7 @@ tr.status-cinza > td:nth-last-child(3) {
 
 .btn-check:focus + .filter-chip {
     outline: none;
-    box-shadow: none;
+    box-shadow: var(--zl-elev-0);
 }
 
 /* foco de teclado visível no chip (a11y — Fase 5) */
@@ -2352,13 +2352,14 @@ tr.status-cinza > td:nth-last-child(3) {
     border-radius: var(--zl-radius-pill);
     flex: 0 0 auto;
     background: var(--cor, var(--zelo-muted));
+    /* Anel de estado, não elevação: acompanha a cor sem levantar o ponto. */
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--cor, transparent) 22%, transparent);
 }
 
 /* bolinha "apagada" quando a contagem é zero */
 .resumo-item.chip-empty .dot {
     background: var(--bs-border-color);
-    box-shadow: none;
+    box-shadow: var(--zl-elev-0);
 }
 
 .resumo-item:hover {
@@ -2536,42 +2537,42 @@ tr.status-cinza > td:nth-last-child(3) {
 .btn-check:checked + .chip-gray {
     background-color: var(--zelo-action-bg);
     color: var(--zelo-action-fg);
-    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-ink) 22%, transparent);
+    box-shadow: var(--zl-elev-1);
 }
 
 .btn-check:checked + .chip-green {
     background-color: var(--zelo-ok-soft);
     border-color: var(--zelo-ok);
     color: var(--zelo-ok);
-    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-ok) 30%, transparent);
+    box-shadow: var(--zl-elev-1);
 }
 
 .btn-check:checked + .chip-yellow {
     background-color: var(--zelo-warn-soft);
     border-color: var(--zelo-warn);
     color: var(--zelo-warn);
-    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-warn) 30%, transparent);
+    box-shadow: var(--zl-elev-1);
 }
 
 .btn-check:checked + .chip-red {
     background-color: var(--zelo-danger-soft);
     border-color: var(--zelo-danger);
     color: var(--zelo-danger);
-    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-danger) 30%, transparent);
+    box-shadow: var(--zl-elev-1);
 }
 
 .btn-check:checked + .chip-red-outline {
     background-color: var(--zelo-paper);
     border-color: var(--zelo-danger);
     color: var(--zelo-danger);
-    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-danger) 15%, transparent);
+    box-shadow: var(--zl-elev-1);
 }
 
 .btn-check:checked + .chip-nao-definida {
     background-color: var(--zelo-muted-soft);
     border-color: var(--zelo-muted);
     color: var(--zelo-ink);
-    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-muted) 30%, transparent);
+    box-shadow: var(--zl-elev-1);
 }
 
 /* Fase 3 — tipo é monocromático: a cor fica reservada ao status.
@@ -2586,7 +2587,7 @@ tr.status-cinza > td:nth-last-child(3) {
 .btn-check:checked + .chip-ordem {
     background-color: var(--zelo-action-bg);
     color: var(--zelo-action-fg);
-    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-ink) 22%, transparent);
+    box-shadow: var(--zl-elev-1);
 }
 
 /* item de cidade escondido pelo recorte "cidade segue o estado" */
@@ -2594,7 +2595,7 @@ tr.status-cinza > td:nth-last-child(3) {
 
 #filtroEmpresa:focus {
     outline: none;
-    box-shadow: none;
+    box-shadow: var(--zl-elev-0);
     border-color: inherit;
 }
 
@@ -2622,7 +2623,7 @@ tr.status-cinza > td:nth-last-child(3) {
     align-items: center;
     justify-content: center;
     font-size: clamp(0.8rem, 1.6vw, 1.35rem);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--zl-elev-2);
     transition: opacity 0.4s ease, width 0.3s ease, height 0.3s ease, bottom 0.3s ease, right 0.3s ease, font-size 0.3s ease;
     z-index: 999;
     opacity: 0;
@@ -2637,7 +2638,7 @@ tr.status-cinza > td:nth-last-child(3) {
 .btn-voltar-topo:hover {
     background-color: var(--zelo-fab-hover);
     transform: translateY(-3px);
-    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--zl-elev-2);
 }
 
 .btn-voltar-topo.visible {
@@ -3023,7 +3024,7 @@ tr.filter-hidden {
     z-index: 1040;
     background: var(--zelo-paper);
     border-top: 1px solid var(--zelo-line);
-    box-shadow: 0 -10px 30px -20px var(--zelo-ink);
+    box-shadow: var(--zl-elev-2);
     padding: 1rem 1.25rem 1.25rem;
     /* Ancorado no rodapé, o painel cresce para CIMA: sem teto, uma lista de 26
        pastas empurrou o topo — e o botão de importar — para fora da tela, sem
