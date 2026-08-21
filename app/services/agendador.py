@@ -25,6 +25,7 @@ _JOB_SNAPSHOT = 'agendador_snapshot_diario'
 _JOB_VERIF_MUNICIPIOS = 'agendador_verificacao_municipios'
 _JOB_RECHECK_RECEITA = 'agendador_recheck_receita'
 _JOB_INVENTARIO_COFRE = 'agendador_inventario_cofre'
+_JOB_RESUMO_DIARIO = 'agendador_resumo_diario'
 # Offset em horas para a verificacao de municipios nao concorrer com o lote da
 # renovacao (que roda na hora cheia e pode demorar): abre navegador, nao captcha.
 _OFFSET_VERIFICACAO_H = 3
@@ -34,6 +35,10 @@ _OFFSET_RECHECK_RECEITA_H = 5
 # O inventario percorre o drive de rede; fica em outra janela dos demais jobs
 # longos para nao concorrer com eles.
 _OFFSET_INVENTARIO_COFRE_H = 7
+# O resumo por e-mail e o ULTIMO da fila de propósito: cada job acima anota
+# achados na pauta, e sair antes deles significaria contar o dia pela metade e
+# empurrar o resto para o dia seguinte (AD-029).
+_OFFSET_RESUMO_DIARIO_H = 8
 # 6h: se o PC ligou depois do horário, o job ainda roda atrasado (catch-up).
 _MISFIRE_GRACE = 6 * 3600
 
@@ -159,6 +164,15 @@ def _agendar_jobs(app):
         args=[app], id=_JOB_INVENTARIO_COFRE, replace_existing=True,
         misfire_grace_time=_MISFIRE_GRACE, coalesce=True, max_instances=1)
 
+    # Resumo do dia: UM e-mail com a pauta acumulada + a contagem da carteira
+    # (AD-029). Roda sempre — nao emite nem gasta captcha — e depois de todos os
+    # produtores de achado.
+    _scheduler.add_job(
+        job_resumo_diario,
+        CronTrigger(hour=(hora + _OFFSET_RESUMO_DIARIO_H) % 24, minute=0),
+        args=[app], id=_JOB_RESUMO_DIARIO, replace_existing=True,
+        misfire_grace_time=_MISFIRE_GRACE, coalesce=True, max_instances=1)
+
     if ativo:
         _scheduler.add_job(
             job_renovacao_diaria, CronTrigger(hour=hora, minute=0),
@@ -173,15 +187,24 @@ def _agendar_jobs(app):
 def job_snapshot_diario(app):
     """Gera o snapshot diário por job real (SCHED-07). Idempotente.
 
-    Aproveita o tick diário (que roda mesmo com a emissão proativa desligada) para
-    enviar o digest de vencimentos quando a cadência vencer (spec 03, NOTIF-01)."""
+    Não envia mais e-mail: o digest de vencimentos virou uma seção do resumo do
+    dia, que sai num job próprio no fim da fila (`job_resumo_diario`, AD-029)."""
     with app.app_context():
         snapshot_service.garantir_snapshot_diario()
+
+
+def job_resumo_diario(app):
+    """Envia o ÚNICO e-mail do dia: pauta acumulada + carteira (spec 03, AD-029).
+
+    Best-effort como todo o resto da notificação (AD-011): falha de SMTP loga e
+    deixa a pauta intacta para o resumo seguinte, nunca derruba o job."""
+    with app.app_context():
         try:
             from app.services import notificacoes
-            notificacoes.enviar_digest_se_devido(app)
+            return notificacoes.enviar_resumo_diario(app)
         except Exception as exc:
-            log_event('notif_digest_job_falhou', level='ERROR', error=str(exc))
+            log_event('notif_resumo_job_falhou', level='ERROR', error=str(exc))
+            return False
 
 
 def job_verificacao_municipios(app):
@@ -287,8 +310,9 @@ def job_inventario_cofre(app):
         # falhou, quando o trabalho que importa ja estava feito.
         try:
             from app.services import notificacoes
-            dias = app.config.get('MANIF_CERT_ALERTA_DIAS', 30)
-            itens = manifestador_cofre.certificados_a_vencer(dias=dias)
+            # janela resolvida por `janela_alerta_dias` (config -> env -> piso),
+            # a mesma fonte que a Visao Geral usa (AD-029)
+            itens = manifestador_cofre.certificados_a_vencer()
             notificacoes.alertar_certificados_vencendo(app, itens)
         except Exception as exc:
             log_event('manifestador_inventario_alerta_falhou', level='ERROR',
@@ -339,11 +363,12 @@ def job_renovacao_diaria(app):
 
         execution_id = CorrelationContext.new_execution_id()
         _avisar_saldo_baixo(app)
-        # push por e-mail dos alertas (falha recorrente + saldo baixo), spec 03.
-        # Best-effort: no-op sem SMTP/destinatario; nunca derruba o job.
+        # anota os alertas (falha recorrente + saldo baixo) na pauta do dia,
+        # spec 03/AD-029. Quem envia e o `job_resumo_diario`. Best-effort:
+        # nunca derruba o job.
         try:
             from app.services import notificacoes
-            notificacoes.enviar_alertas(app)
+            notificacoes.apurar_alertas(app)
         except Exception as exc:
             log_event('notif_alertas_job_falhou', level='ERROR', error=str(exc),
                       execution_id=execution_id)

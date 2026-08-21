@@ -731,13 +731,12 @@ def test_rota_dryrun_exige_admin(app, login_as):
 
 # ---- Alerta + job diario (COV-05 A3) ----
 
-def _mocks_alerta(pilha, smtp=True, destinatarios=('op@escritorio.com',)):
+def _mocks_alerta(pilha):
+    """Espiona a ANOTACAO na pauta: o alerta nao manda mais e-mail proprio, quem
+    manda e o resumo do dia (AD-029)."""
     from app.services import notificacoes as nt
-    p = pilha.enter_context
-    p(patch.object(nt, '_config', return_value=object()))
-    p(patch.object(nt, '_destinatarios', return_value=list(destinatarios)))
-    p(patch.object(nt.email_sender, 'smtp_configurado', return_value=smtp))
-    return p(patch.object(nt, '_enviar_alerta', return_value=True))
+    return pilha.enter_context(patch.object(nt, '_anotar_alerta',
+                                            return_value=True))
 
 
 def test_alerta_so_para_quebrados(app):
@@ -756,10 +755,10 @@ def test_alerta_so_para_quebrados(app):
         enviar = _mocks_alerta(pilha)
         enviados = nt.alertar_municipios_quebrados(app, relatorios)
     assert enviados == 1
-    (_app, _dest, chave, tipo, assunto, corpo, _janela), _kw = enviar.call_args
+    (chave, tipo, titulo, corpo, _janela), _kw = enviar.call_args
     assert chave == 'municipio_quebrado:Imbé'   # anti-spam por municipio
     assert tipo == 'alerta_municipio'
-    assert 'Imbé' in assunto
+    assert 'Imbé' in titulo
     assert 'cnpj: id=campoCnpj' in corpo
     # Seletor quebrado -> conselho de seletor.
     assert 'config_automacao' in corpo
@@ -781,9 +780,9 @@ def test_alerta_de_portal_que_nao_abriu_manda_conferir_a_url(app):
         enviar = _mocks_alerta(pilha)
         enviados = nt.alertar_municipios_quebrados(app, [relatorio])
     assert enviados == 1
-    (_app, _dest, chave, _tipo, assunto, corpo, _janela), _kw = enviar.call_args
+    (chave, _tipo, titulo, corpo, _janela), _kw = enviar.call_args
     assert chave == 'municipio_quebrado:Xangri-Lá'
-    assert 'nao respondeu' in assunto
+    assert 'nao respondeu' in titulo
     assert 'url_certidao' in corpo
     assert 'config_automacao' not in corpo
 
@@ -801,19 +800,22 @@ def test_alerta_um_por_municipio(app):
         enviar = _mocks_alerta(pilha)
         enviados = nt.alertar_municipios_quebrados(app, relatorios)
     assert enviados == 2
-    chaves = {c.args[2] for c in enviar.call_args_list}
+    chaves = {c.args[0] for c in enviar.call_args_list}
     assert chaves == {'municipio_quebrado:Imbé', 'municipio_quebrado:Canoas'}
 
 
-def test_alerta_sem_smtp_nao_envia(app):
+def test_alerta_nao_manda_email_proprio(app):
+    """A anotacao acontece; o e-mail e do resumo do dia, nao daqui (AD-029)."""
     from contextlib import ExitStack
 
     from app.services import notificacoes as nt
     with ExitStack() as pilha:
-        enviar = _mocks_alerta(pilha, smtp=False)
+        _mocks_alerta(pilha)
+        enviar = pilha.enter_context(
+            patch.object(nt.email_sender, 'enviar', return_value=True))
         enviados = nt.alertar_municipios_quebrados(
             app, [{'municipio': 'Imbé', 'resultado': dr.QUEBRADO, 'quebrados': [], 'mensagem': ''}])
-    assert enviados == 0
+    assert enviados == 1
     enviar.assert_not_called()
 
 

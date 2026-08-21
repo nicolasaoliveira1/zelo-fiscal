@@ -469,8 +469,43 @@ def estado_da_carteira():
     return {estado: total for estado, total in linhas}
 
 
-def certificados_a_vencer(dias=30):
+# Ultimo recurso da janela de aviso, quando nao ha nem linha de configuracao nem
+# app context (job fora de request, teste sem config). Vale como piso, nao como
+# politica: quem manda e o campo em Configuracoes.
+_JANELA_ALERTA_PADRAO = 10
+
+
+def janela_alerta_dias():
+    """Dias de antecedencia do aviso de vencimento de certificado (AD-029).
+
+    Fonte unica das DUAS telas que perguntam isso — a Visao Geral e o alerta do
+    resumo diario. Ordem: campo em Configuracoes -> `MANIF_CERT_ALERTA_DIAS` do
+    env (default de instalacao) -> `_JANELA_ALERTA_PADRAO`. Nunca levanta: uma
+    leitura de config quebrada nao pode derrubar o job do agendador nem a home.
+    """
+    from app import db
+    from app.models import ConfiguracaoSistema
+
+    try:
+        cfg = db.session.get(ConfiguracaoSistema, 1)
+        if cfg is not None and cfg.cert_alerta_dias:
+            return int(cfg.cert_alerta_dias)
+    except Exception:
+        pass
+
+    try:
+        from flask import current_app
+        return int(current_app.config.get('MANIF_CERT_ALERTA_DIAS')
+                   or _JANELA_ALERTA_PADRAO)
+    except Exception:
+        return _JANELA_ALERTA_PADRAO
+
+
+def certificados_a_vencer(dias=None):
     """Certificados vencidos ou dentro da janela, lidos somente do banco.
+
+    `dias=None` (o normal) resolve a janela por `janela_alerta_dias()`; o
+    parametro so existe para quem ja tem o valor em maos e para teste.
 
     O estado gravado pelo inventario e apenas informativo para este alerta: a
     data de vencimento e a fonte de verdade. Assim um certificado vencido entra
@@ -483,6 +518,9 @@ def certificados_a_vencer(dias=30):
     from app import db
     from app.models import CertificadoEmpresa, Empresa
     from app.services.receita_service import empresa_ativa
+
+    if dias is None:
+        dias = janela_alerta_dias()
 
     linhas = (db.session.query(CertificadoEmpresa, Empresa)
               .join(Empresa, Empresa.id == CertificadoEmpresa.empresa_id)

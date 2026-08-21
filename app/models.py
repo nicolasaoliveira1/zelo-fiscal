@@ -372,6 +372,43 @@ class NotificacaoLog(db.Model):
         return f'<NotificacaoLog {self.chave} {self.enviada_em}>'
 
 
+class PautaNotificacao(db.Model):
+    """Fila do que ainda NAO foi contado no resumo diario (AD-029).
+
+    Os jobs nao mandam mais um e-mail por achado: eles *anotam* o achado aqui, e
+    um unico job diario junta tudo num so e-mail. A tabela existe porque os
+    produtores rodam em horarios diferentes (verificacao de municipios, recheck
+    da Receita, inventario do cofre) e o breaker abre no meio de um lote — um
+    buffer em memoria perderia o achado no primeiro restart, que e justamente
+    quando ha mais o que contar.
+
+    `enviada_em` NULL = pendente; preenchida = ja saiu num resumo (vira historico,
+    nao e apagada). O anti-spam continua no `NotificacaoLog`, gravado no momento
+    do envio: aqui a chave serve para nao anotar o MESMO achado duas vezes
+    enquanto ele espera o proximo resumo.
+
+    Carimbos em hora local naive (AD-004), como o NotificacaoLog."""
+    __tablename__ = 'pauta_notificacao'
+
+    id = db.Column(db.Integer, primary_key=True)
+    # Mesmo vocabulario de chave do NotificacaoLog (é a mesma identidade de
+    # achado): 'certificado_vencido:<empresa_id>' | 'municipio_quebrado:<nome>' ...
+    chave = db.Column(db.String(120), nullable=False, index=True)
+    # Mesmo vocabulario de tipo do NotificacaoLog, e pela mesma razao a mesma
+    # folga de tamanho: gravacao best-effort que estoura a coluna some em
+    # silencio no MySQL e o achado nunca chega ao resumo.
+    tipo = db.Column(db.String(40), nullable=False)
+    # Titulo curto (uma linha na secao do resumo) e corpo com o detalhe. Text no
+    # corpo porque alerta de municipio ja carrega lista de seletores.
+    titulo = db.Column(db.String(200), nullable=False)
+    corpo = db.Column(db.Text, nullable=True)
+    criada_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    enviada_em = db.Column(db.DateTime, nullable=True, index=True)
+
+    def __repr__(self):
+        return f'<PautaNotificacao {self.chave} {self.criada_em}>'
+
+
 class PapelUsuario:
     """Papéis fixos (String, não db.Enum — portabilidade SQLite↔MySQL; ver AD-005).
 
@@ -476,6 +513,10 @@ class ConfiguracaoSistema(db.Model):
     # ficam em env (config.py), nunca aqui.
     notif_destinatarios = db.Column(db.String(1000), nullable=True)
     notif_cadencia = db.Column(db.String(10), nullable=False, default='semanal')
+    # Janela (dias) de antecedencia do aviso de vencimento de certificado digital
+    # (AD-029). Estava so no env (MANIF_CERT_ALERTA_DIAS), fora do alcance de quem
+    # opera; a coluna passa a mandar e o env vira apenas o default de instalacao.
+    cert_alerta_dias = db.Column(db.Integer, nullable=False, default=10)
     # Recheck da situacao cadastral na Receita (spec 08, DATA-02.6/02.7). O job
     # e fatiado de proposito: a ReceitaWS aceita ~3 req/min, entao a carteira
     # gira em alguns dias em vez de estourar cota num dia so.

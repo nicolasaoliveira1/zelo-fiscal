@@ -5,7 +5,8 @@ import pytest
 
 from app import db
 from app.models import (CertificadoEmpresa, ConfiguracaoSistema, DadosReceita,
-                        Empresa, EstadoCertificado, NotificacaoLog)
+                        Empresa, EstadoCertificado, NotificacaoLog,
+                        PautaNotificacao)
 from app.services import manifestador_cofre, notificacoes
 
 
@@ -112,13 +113,14 @@ def test_ordena_do_mais_critico_para_o_menos(app, ids):
             mais_critica.id, proxima.id]
 
 
-# --- alerta por e-mail (T2) -----------------------------------------------
+# --- alerta no resumo do dia (T2, AD-029) ---------------------------------
 
 @pytest.fixture()
 def ctx_alerta(app):
     with app.app_context():
         db.create_all()
-        db.session.add(ConfiguracaoSistema(id=1, notif_destinatarios='op@x.com'))
+        db.session.add(ConfiguracaoSistema(id=1, notif_destinatarios='op@x.com',
+                                           notif_cadencia='diaria'))
         db.session.commit()
         app.config.update(SMTP_HOST='smtp', SMTP_FROM='f@x.com',
                           NOTIF_ALERTA_JANELA_HORAS=24)
@@ -140,6 +142,7 @@ def _item_alerta(empresa_id, causa='vencendo', dias_restantes=10):
 
 
 def _mock_envio(monkeypatch):
+    """Captura os e-mails que o RESUMO mandar (os alertas nao mandam nenhum)."""
     enviados = []
     monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
     monkeypatch.setattr(notificacoes.email_sender, 'enviar',
@@ -148,74 +151,118 @@ def _mock_envio(monkeypatch):
     return enviados
 
 
-def test_alerta_certificado_envia_um_por_empresa_e_causa(ctx_alerta, monkeypatch):
+def _resumir(ctx):
+    """Fecha o dia: manda o resumo, o que carimba a pauta e grava o anti-spam."""
+    return notificacoes.enviar_resumo_diario(ctx)
+
+
+def test_anota_um_por_empresa_e_causa(ctx_alerta, monkeypatch):
     enviados = _mock_envio(monkeypatch)
     item = _item_alerta(101)
 
     assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
+    # 2o job antes do resumo: o achado ja esta na pauta, nao duplica
     assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 0
+    assert enviados == []
+
+    assert _resumir(ctx_alerta) is True
     assert len(enviados) == 1
     assert NotificacaoLog.query.filter_by(
         chave='certificado_vencendo:101', tipo='alerta_certificado').count() == 1
 
 
-def test_alerta_certificado_uma_empresa_nao_silencia_outra(ctx_alerta, monkeypatch):
+def test_dez_certificados_saem_num_unico_email(ctx_alerta, monkeypatch):
+    """O pedido que originou o AD-029: a carteira inteira num e-mail so.
+
+    Antes eram dez e-mails no mesmo minuto — volume que faz o aviso ser ignorado,
+    o oposto do que o alerta existe para fazer."""
     enviados = _mock_envio(monkeypatch)
+    itens = [_item_alerta(100 + i) for i in range(10)]
+
+    assert notificacoes.alertar_certificados_vencendo(ctx_alerta, itens) == 10
+    assert _resumir(ctx_alerta) is True
+
+    assert len(enviados) == 1
+    assunto, corpo = enviados[0]
+    assert '10 aviso' in assunto
+    assert 'CERTIFICADOS DIGITAIS (10)' in corpo
+    for item in itens:
+        assert item['empresa_nome'] in corpo
+
+
+def test_uma_empresa_nao_silencia_outra(ctx_alerta, monkeypatch):
+    _mock_envio(monkeypatch)
 
     assert notificacoes.alertar_certificados_vencendo(
         ctx_alerta, [_item_alerta(101), _item_alerta(202)]) == 2
 
-    assert len(enviados) == 2
-    assert {registro.chave for registro in NotificacaoLog.query.all()} == {
+    assert {p.chave for p in PautaNotificacao.query.all()} == {
         'certificado_vencendo:101', 'certificado_vencendo:202'}
 
 
 def test_transicao_para_vencido_realerta_com_chave_propria(ctx_alerta, monkeypatch):
-    enviados = _mock_envio(monkeypatch)
+    _mock_envio(monkeypatch)
     vencendo = _item_alerta(101)
     vencido = _item_alerta(101, causa='vencido', dias_restantes=-1)
     vencido['not_after'] = datetime.now() - timedelta(days=1)
 
     assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [vencendo]) == 1
     assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [vencido]) == 1
-    assert len(enviados) == 2
-    assert {registro.chave for registro in NotificacaoLog.query.all()} == {
+    assert {p.chave for p in PautaNotificacao.query.all()} == {
         'certificado_vencendo:101', 'certificado_vencido:101'}
 
 
 def test_texto_de_vencido_diz_que_manifestacao_esta_parada(ctx_alerta, monkeypatch):
-    enviados = _mock_envio(monkeypatch)
+    _mock_envio(monkeypatch)
     item = _item_alerta(101, causa='vencido', dias_restantes=-2)
     item['not_after'] = datetime.now() - timedelta(days=2)
 
     notificacoes.alertar_certificados_vencendo(ctx_alerta, [item])
 
-    assunto, corpo = enviados[0]
-    assert 'vencido' in assunto.lower()
-    assert 'manifestacao dessa empresa esta parada' in corpo
+    anotado = PautaNotificacao.query.one()
+    assert 'vencido' in anotado.titulo.lower()
+    assert 'manifestacao dessa empresa esta parada' in anotado.corpo
 
 
-def test_texto_de_vencendo_tem_data_e_dias_restantes(ctx_alerta, monkeypatch):
-    enviados = _mock_envio(monkeypatch)
+def test_texto_de_vencendo_tem_data_e_dias_restantes_no_titulo(ctx_alerta,
+                                                               monkeypatch):
+    """Uma linha por certificado: o titulo carrega data, empresa e quanto falta."""
+    _mock_envio(monkeypatch)
     item = _item_alerta(101, dias_restantes=7)
 
     notificacoes.alertar_certificados_vencendo(ctx_alerta, [item])
 
-    _, corpo = enviados[0]
-    assert item['not_after'].strftime('%d/%m/%Y') in corpo
-    assert 'Faltam 7 dia(s)' in corpo
+    anotado = PautaNotificacao.query.one()
+    assert item['not_after'].strftime('%d/%m/%Y') in anotado.titulo
+    assert 'faltam 7 dia(s)' in anotado.titulo
+    assert 'EMPRESA 101' in anotado.titulo
 
 
-def test_sem_smtp_nao_envia_nem_levanta(ctx_alerta, monkeypatch):
+def test_conselho_de_renovacao_aparece_uma_vez_por_secao(ctx_alerta, monkeypatch):
+    """Dez vencimentos nao viram dez copias do mesmo conselho: ele fecha a secao.
+
+    Repetir por item trocaria o spam de e-mails por spam dentro do e-mail."""
+    enviados = _mock_envio(monkeypatch)
+    notificacoes.alertar_certificados_vencendo(
+        ctx_alerta, [_item_alerta(100 + i) for i in range(10)])
+    assert _resumir(ctx_alerta) is True
+
+    corpo = enviados[0][1]
+    assert corpo.count('rode o inventario do cofre') == 1
+
+
+def test_sem_smtp_ainda_anota_e_nao_levanta(ctx_alerta, monkeypatch):
+    """O achado espera na pauta ate o SMTP voltar, em vez de se perder."""
     chamou = []
     monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: False)
     monkeypatch.setattr(notificacoes.email_sender, 'enviar',
                         lambda *args: chamou.append(args) or True)
 
     assert notificacoes.alertar_certificados_vencendo(
-        ctx_alerta, [_item_alerta(101)]) == 0
+        ctx_alerta, [_item_alerta(101)]) == 1
     assert chamou == []
     assert NotificacaoLog.query.count() == 0
+    assert len(notificacoes.pauta_pendente()) == 1
 
 
 def test_sem_destinatario_nao_envia_nem_levanta(ctx_alerta, monkeypatch):
@@ -226,8 +273,9 @@ def test_sem_destinatario_nao_envia_nem_levanta(ctx_alerta, monkeypatch):
     monkeypatch.setattr(notificacoes.email_sender, 'enviar',
                         lambda *args: chamou.append(args) or True)
 
-    assert notificacoes.alertar_certificados_vencendo(
-        ctx_alerta, [_item_alerta(101)]) == 0
+    notificacoes.alertar_certificados_vencendo(ctx_alerta, [_item_alerta(101)])
+
+    assert _resumir(ctx_alerta) is False
     assert chamou == []
     assert NotificacaoLog.query.count() == 0
 
@@ -251,16 +299,15 @@ def test_vencendo_hoje_no_limite_do_dia_ja_conta_como_vencido(app, ids):
 
 def test_janela_do_alerta_e_maior_que_o_intervalo_do_job_diario(ctx_alerta,
                                                                 monkeypatch):
-    """Quem alimenta este alerta e um job DIARIO: com a janela global de 24h o
-    anti-spam nunca segura, e um certificado renderia ~30 e-mails ao longo da
-    janela de 30 dias."""
-    enviados = []
-    monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
-    monkeypatch.setattr(notificacoes.email_sender, 'enviar',
-                        lambda cfg, dest, assunto, corpo: enviados.append(assunto) or True)
-
+    """Quem alimenta este alerta e um job DIARIO. Com o resumo do dia a janela nao
+    decide mais quantos e-mails saem (sai um so), e sim quantas vezes o MESMO
+    certificado reaparece nele: com 24h ele voltaria em todo resumo ate a
+    renovacao, e a lista de repetidos afogaria o que mudou naquele dia."""
+    enviados = _mock_envio(monkeypatch)
     item = _item_alerta(201)
+
     assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
+    assert _resumir(ctx_alerta) is True
 
     # um dia depois (a janela global de 24h ja teria expirado)
     registro = NotificacaoLog.query.filter_by(
@@ -272,24 +319,21 @@ def test_janela_do_alerta_e_maior_que_o_intervalo_do_job_diario(ctx_alerta,
     assert len(enviados) == 1
 
     # uma semana depois, volta a avisar
-    registro = NotificacaoLog.query.filter_by(
-        chave='certificado_vencendo:201').first()
     registro.enviada_em = datetime.now() - timedelta(hours=24 * 7 + 1)
     db.session.commit()
 
     assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
+    assert _resumir(ctx_alerta) is True
     assert len(enviados) == 2
 
 
 def test_vencido_repete_antes_de_vencendo(ctx_alerta, monkeypatch):
     """Vencido tem janela mais curta: ali a manifestacao esta parada."""
-    enviados = []
-    monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
-    monkeypatch.setattr(notificacoes.email_sender, 'enviar',
-                        lambda cfg, dest, assunto, corpo: enviados.append(assunto) or True)
-
+    enviados = _mock_envio(monkeypatch)
     item = _item_alerta(202, causa='vencido', dias_restantes=-2)
+
     assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
+    assert _resumir(ctx_alerta) is True
 
     registro = NotificacaoLog.query.filter_by(
         chave='certificado_vencido:202').first()
@@ -298,4 +342,5 @@ def test_vencido_repete_antes_de_vencendo(ctx_alerta, monkeypatch):
 
     # 3 dias bastam para o vencido; para o vencendo ainda nao bastariam
     assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
+    assert _resumir(ctx_alerta) is True
     assert len(enviados) == 2

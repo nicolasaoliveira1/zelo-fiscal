@@ -6,7 +6,8 @@ nunca dorme de verdade nem bate em rede.
 from datetime import date, datetime, timedelta
 
 from app import db
-from app.models import ConfiguracaoSistema, DadosReceita, Empresa, NotificacaoLog
+from app.models import (ConfiguracaoSistema, DadosReceita, Empresa,
+                        NotificacaoLog, PautaNotificacao)
 from app.services import agendador, notificacoes, receita_client, receita_service
 
 
@@ -177,6 +178,8 @@ def test_api_fora_nao_derruba_o_job(app, ids, monkeypatch):
 # --- alerta de empresa baixada (DATA-02.9) -----------------------------------
 
 def _com_smtp(app, monkeypatch, destinatarios='fiscal@escritorio.test'):
+    """Prepara o envio do RESUMO. O alerta em si nao manda e-mail: anota na
+    pauta, e o resumo do dia leva tudo junto (AD-029)."""
     monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado',
                         lambda _cfg: True)
     enviados = []
@@ -184,76 +187,105 @@ def _com_smtp(app, monkeypatch, destinatarios='fiscal@escritorio.test'):
                         lambda cfg, dest, assunto, corpo: (
                             enviados.append((dest, assunto, corpo)) or True))
     with app.app_context():
-        _config(notif_destinatarios=destinatarios)
+        _config(notif_destinatarios=destinatarios, notif_cadencia='diaria')
     return enviados
 
 
-def test_alerta_enviado_por_empresa(app, ids, monkeypatch):
+def _anotados():
+    return PautaNotificacao.query.filter(
+        PautaNotificacao.enviada_em.is_(None)).all()
+
+
+def test_alerta_anotado_por_empresa(app, ids, monkeypatch):
     enviados = _com_smtp(app, monkeypatch)
     with app.app_context():
         total = notificacoes.alertar_empresas_baixadas(
             app, [(1, 'Alpha LTDA', 'BAIXADA'), (2, 'Beta ME', 'SUSPENSA')])
 
-    assert total == 2
-    assert len(enviados) == 2
-    assuntos = ' '.join(a for _d, a, _c in enviados)
-    assert 'Alpha LTDA' in assuntos and 'Beta ME' in assuntos
+        assert total == 2
+        assert enviados == []           # nenhum e-mail avulso
+        titulos = ' '.join(p.titulo for p in _anotados())
+        assert 'Alpha LTDA' in titulos and 'Beta ME' in titulos
+
+
+def test_as_duas_empresas_saem_num_unico_email(app, ids, monkeypatch):
+    enviados = _com_smtp(app, monkeypatch)
+    with app.app_context():
+        notificacoes.alertar_empresas_baixadas(
+            app, [(1, 'Alpha LTDA', 'BAIXADA'), (2, 'Beta ME', 'SUSPENSA')])
+        assert notificacoes.enviar_resumo_diario(app) is True
+
+    assert len(enviados) == 1
+    corpo = enviados[0][2]
+    assert 'SITUACAO NA RECEITA (2)' in corpo
+    assert 'Alpha LTDA' in corpo and 'Beta ME' in corpo
 
 
 def test_alerta_explica_a_consequencia(app, ids, monkeypatch):
-    enviados = _com_smtp(app, monkeypatch)
+    _com_smtp(app, monkeypatch)
     with app.app_context():
         notificacoes.alertar_empresas_baixadas(app, [(1, 'Alpha LTDA', 'BAIXADA')])
 
-    corpo = enviados[0][2]
-    assert 'FORA do lote automatico' in corpo
-    assert 'emissao individual' in corpo
+        corpo = _anotados()[0].corpo
+        assert 'FORA do lote automatico' in corpo
+        assert 'emissao individual' in corpo
 
 
-def test_alerta_nao_reenvia_na_mesma_janela(app, ids, monkeypatch):
+def test_alerta_nao_repete_na_mesma_janela(app, ids, monkeypatch):
     """Anti-spam duravel (AD-011): sobrevive a restart."""
-    enviados = _com_smtp(app, monkeypatch)
+    _com_smtp(app, monkeypatch)
     with app.app_context():
         notificacoes.alertar_empresas_baixadas(app, [(1, 'Alpha LTDA', 'BAIXADA')])
-        total = notificacoes.alertar_empresas_baixadas(app, [(1, 'Alpha LTDA', 'BAIXADA')])
-
-    assert total == 0
-    assert len(enviados) == 1
+        # antes do resumo: ja esta na pauta
+        assert notificacoes.alertar_empresas_baixadas(
+            app, [(1, 'Alpha LTDA', 'BAIXADA')]) == 0
+        # depois do resumo: a janela do NotificacaoLog e que segura
+        notificacoes.enviar_resumo_diario(app)
+        assert notificacoes.alertar_empresas_baixadas(
+            app, [(1, 'Alpha LTDA', 'BAIXADA')]) == 0
+        assert PautaNotificacao.query.count() == 1
 
 
 def test_alerta_de_uma_empresa_nao_silencia_outra(app, ids, monkeypatch):
     """Chave anti-spam POR empresa, como no alerta de municipio."""
-    enviados = _com_smtp(app, monkeypatch)
+    _com_smtp(app, monkeypatch)
     with app.app_context():
         notificacoes.alertar_empresas_baixadas(app, [(1, 'Alpha LTDA', 'BAIXADA')])
         notificacoes.alertar_empresas_baixadas(app, [(2, 'Beta ME', 'BAIXADA')])
 
-    assert len(enviados) == 2
+        assert {p.chave for p in _anotados()} == {
+            'empresa_baixada:1', 'empresa_baixada:2'}
 
 
-def test_alerta_registra_no_log_duravel(app, ids, monkeypatch):
+def test_alerta_registra_no_log_duravel_apos_o_resumo(app, ids, monkeypatch):
     _com_smtp(app, monkeypatch)
     with app.app_context():
         notificacoes.alertar_empresas_baixadas(app, [(7, 'Gama SA', 'INAPTA')])
+        notificacoes.enviar_resumo_diario(app)
         registro = NotificacaoLog.query.filter_by(chave='empresa_baixada:7').first()
 
         assert registro is not None
         assert registro.tipo == 'alerta_empresa_baixada'
 
 
-def test_sem_smtp_e_no_op_silencioso(app, ids, monkeypatch):
+def test_sem_smtp_ainda_anota(app, ids, monkeypatch):
+    """O achado espera na pauta ate o SMTP voltar, em vez de se perder."""
     monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado',
                         lambda _cfg: False)
     with app.app_context():
+        _config(notif_destinatarios='fiscal@escritorio.test')
         assert notificacoes.alertar_empresas_baixadas(
-            app, [(1, 'Alpha', 'BAIXADA')]) == 0
+            app, [(1, 'Alpha', 'BAIXADA')]) == 1
+        assert notificacoes.enviar_resumo_diario(app) is False
+        assert len(_anotados()) == 1
 
 
-def test_lista_vazia_nao_envia(app, ids, monkeypatch):
+def test_lista_vazia_nao_anota(app, ids, monkeypatch):
     enviados = _com_smtp(app, monkeypatch)
     with app.app_context():
         assert notificacoes.alertar_empresas_baixadas(app, []) == 0
         assert notificacoes.alertar_empresas_baixadas(app, None) == 0
+        assert _anotados() == []
     assert enviados == []
 
 
@@ -271,7 +303,9 @@ def test_job_alerta_apenas_a_transicao(app, ids, monkeypatch):
         _empresa('Vai Baixar', '11.222.333/0001-81', situacao='ATIVA')
 
     agendador.job_recheck_receita(app)
+    with app.app_context():
+        notificacoes.enviar_resumo_diario(app)
 
-    assuntos = ' '.join(a for _d, a, _c in enviados)
-    assert 'Vai Baixar' in assuntos
-    assert 'Ja Baixada' not in assuntos
+    corpos = ' '.join(c for _d, _a, c in enviados)
+    assert 'Vai Baixar' in corpos
+    assert 'Ja Baixada' not in corpos
