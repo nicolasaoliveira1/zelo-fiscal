@@ -630,15 +630,24 @@ main {
 
 /* A marca é um OCTÓGONO, não mais um quadrado arredondado: o anel em CSS que
    antes devolvia a borda no tema escuro sairia como retângulo em volta de uma
-   forma de oito lados, encostando nela só em oito pontos. O fio de contorno
-   passou para dentro do próprio SVG (`gen_zelo_mark.FIO`), onde acompanha a
-   silhueta — e por isso não há mais regra por tema aqui. */
+   forma de oito lados, encostando nela só em oito pontos.
+
+   O fio de contorno passou para dentro do próprio SVG (`gen_zelo_mark.FIO`),
+   onde acompanha a silhueta. Ele resolve o tema escuro até uns 64px — mas aqui
+   a marca aparece a 30px, e ali o fio vira 1px tentando separar #16181C de
+   #16191D. Por isso o tema escuro usa a marca INVERTIDA (chapa em papel, vão em
+   tinta), que não precisa de fio nenhum: são duas imagens no base.html e só uma
+   fica visível. Trocar `src` por JS custaria um flash a cada troca de tema. */
 .sidebar-logo-img {
     width: 30px;
     height: 30px;
     flex: none;
     object-fit: contain;
 }
+
+.sidebar-logo-img.is-escuro { display: none; }
+[data-bs-theme="dark"] .sidebar-logo-img.is-claro { display: none; }
+[data-bs-theme="dark"] .sidebar-logo-img.is-escuro { display: block; }
 
 .sidebar-title {
     font-family: var(--zelo-font-display);

@@ -15,8 +15,15 @@
 
     <link rel="stylesheet" href="{{ static_versionado('css/style.css') }}">
     <!-- O favicon é a marca do Zelo, a mesma que a barra lateral exibe.
-         SVG primeiro para navegador moderno; .ico como fallback (Windows/navegador antigo). -->
+         SVG primeiro para navegador moderno; .ico como fallback (Windows/navegador antigo).
+
+         A variante escura vai por `prefers-color-scheme` e NÃO pelo `data-bs-theme` do app,
+         de propósito: o favicon é desenhado sobre a aba do navegador, cuja cor segue o
+         sistema — não o tema que o operador escolheu aqui dentro. Sem media primeiro, para
+         que navegador que ignora `media` em `rel=icon` fique com a versão padrão. -->
     <link rel="icon" type="image/svg+xml" href="{{ static_versionado('images/zelo-mark.svg') }}">
+    <link rel="icon" type="image/svg+xml" media="(prefers-color-scheme: dark)"
+          href="{{ static_versionado('images/zelo-mark-dark.svg') }}">
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/zelo.ico') }}">
     {% block head_extra %}{% endblock %}
 
@@ -187,11 +194,15 @@
         <a class="sidebar-marca" href="{{ url_for('main.visao_geral_painel') }}"
            aria-label="Zelo — ir para a visão geral">
             {#- A marca do ZELO, não a da Assecon: o sistema tem nome próprio e é
-                ele que a navegação anuncia. O octógono carrega o próprio fundo e o
-                próprio fio de contorno, então serve nos dois temas sem variante — a
-                marca da Assecon volta depois, em lugar a definir. -#}
-            <img class="sidebar-logo-img" alt=""
+                ele que a navegação anuncia. São DUAS imagens, uma por tema, e só
+                uma fica visível (ver `.sidebar-logo-img` no style.css): a 30px o fio
+                de contorno já não separa a chapa escura da barra escura, e inverter
+                resolve o problema em vez de compensá-lo. A marca da Assecon volta
+                depois, em lugar a definir. -#}
+            <img class="sidebar-logo-img is-claro" alt=""
                  src="{{ static_versionado('images/zelo-mark.svg') }}">
+            <img class="sidebar-logo-img is-escuro" alt=""
+                 src="{{ static_versionado('images/zelo-mark-dark.svg') }}">
             <span class="sidebar-title">Zelo</span>
         </a>
 

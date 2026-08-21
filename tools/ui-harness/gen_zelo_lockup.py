@@ -17,7 +17,8 @@ sair da mesma geometria.
 Nota (2026-08-21): os PNG em app/static/images/ desta troca de marca NAO sairam
 daqui -- nao havia Playwright na maquina. Foram compostos com sharp, mantendo o
 texto ja rasterizado dos PNG anteriores byte a byte e trocando so os 208x208 da
-marca, em (12, 18). O resultado e o mesmo desde que a caixa da marca nao mude;
+marca, em (12, 18) -- a invertida no tema escuro. O resultado e o mesmo desde
+que a caixa da marca nao mude;
 se o gabarito acima for alterado, este arquivo volta a ser a unica fonte.
 """
 import importlib.util
@@ -32,7 +33,11 @@ _spec.loader.exec_module(_gm)
 
 # A v3 da marca nao tem variantes: `marca()` sozinha ja e a marca. Ate a v2
 # isto apontava para VARIANTES["f-carimbo"], que sumiu junto com o Z.
-MARCA_KW = {}
+#
+# Uma excecao por tema: o lockup escuro leva a marca INVERTIDA. O fundo escuro do
+# GitHub (#0d1117) e quase a cor da chapa (#16181C), entao a versao normal ali e
+# um octogono que so se ve pelo fio.
+MARCA_KW = {"light": {}, "dark": {"invertida": True}}
 
 # Tokens do :root de app/static/css/style.css, por tema.
 TEMAS = {
@@ -78,11 +83,10 @@ def main():
     saida = Path(__file__).resolve().parents[2] / "app" / "static" / "images"
     tmp = AQUI / "shots" / "_lockup.html"
     tmp.parent.mkdir(exist_ok=True)
-    svg = _gm.marca(**MARCA_KW)
-
     with sync_playwright() as pw:
         navegador = pw.chromium.launch()
         for tema, cores in TEMAS.items():
+            svg = _gm.marca(**MARCA_KW[tema])
             tmp.write_text(GABARITO.format(fontes=FONTES, svg=svg, **cores), encoding="utf-8")
             pagina = navegador.new_page(viewport={"width": 900, "height": 300},
                                         device_scale_factor=2)
