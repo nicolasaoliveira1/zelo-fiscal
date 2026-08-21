@@ -628,19 +628,16 @@ main {
 .sidebar-marca:hover .sidebar-title { color: var(--zelo-ink); }
 .sidebar-marca:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: -2px; }
 
-/* O carimbo tem fundo próprio (#16181C) e no tema escuro ele encosta na cor da
-   barra (#16191D). Um anel de 1px em --zelo-line devolve a borda do selo sem
-   precisar de um segundo arquivo por tema. */
+/* A marca é um OCTÓGONO, não mais um quadrado arredondado: o anel em CSS que
+   antes devolvia a borda no tema escuro sairia como retângulo em volta de uma
+   forma de oito lados, encostando nela só em oito pontos. O fio de contorno
+   passou para dentro do próprio SVG (`gen_zelo_mark.FIO`), onde acompanha a
+   silhueta — e por isso não há mais regra por tema aqui. */
 .sidebar-logo-img {
     width: 30px;
     height: 30px;
     flex: none;
-    border-radius: var(--zl-radius-sm);
     object-fit: contain;
-}
-
-[data-bs-theme="dark"] .sidebar-logo-img {
-    box-shadow: 0 0 0 1px var(--zelo-line);
 }
 
 .sidebar-title {
