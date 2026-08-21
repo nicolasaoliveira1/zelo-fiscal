@@ -182,9 +182,30 @@
                     <option value="semanal" {% if notif_cadencia == 'semanal' %}selected{% endif %}>Semanal</option>
                     <option value="diaria" {% if notif_cadencia == 'diaria' %}selected{% endif %}>Diária</option>
                 </select>
+                <div class="form-text mb-3">
+                    Com que frequência sai o resumo <strong>de rotina</strong>, quando não há
+                    nada a avisar. Havendo aviso, o resumo sai no mesmo dia.
+                </div>
+
+                <label class="form-label fw-semibold mb-1" for="cert-alerta-dias">
+                    Aviso de vencimento de certificado
+                </label>
+                <div class="input-group input-group-sm" style="max-width: 11rem;">
+                    <input
+                        type="number"
+                        class="form-control"
+                        id="cert-alerta-dias"
+                        name="cert_alerta_dias"
+                        min="1"
+                        max="90"
+                        step="1"
+                        value="{{ cert_alerta_dias }}"
+                    >
+                    <span class="input-group-text">dias</span>
+                </div>
                 <div class="form-text">
-                    Frequência do resumo de vencimentos (a vencer / vencidas / pendentes).
-                    Alertas de falha e de saldo baixo saem assim que detectados.
+                    Antecedência com que um certificado digital passa a aparecer no resumo
+                    e na Visão Geral. Vale para os dois — reduzir aqui reduz nos dois.
                 </div>
             </div>
         </div>

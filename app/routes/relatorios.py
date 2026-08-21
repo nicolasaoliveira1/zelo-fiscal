@@ -34,6 +34,7 @@ from app.services import (
     auditoria,
     dossie_service,
     export_service,
+    manifestador_cofre,
 )
 from app.services.execution_logger import log_event
 from app.services.snapshot_service import (
@@ -316,6 +317,23 @@ def configuracoes():
             destinatarios = (request.form.get('notif_destinatarios') or '').strip()
             config.notif_destinatarios = destinatarios or None
 
+        # Janela de aviso de vencimento de certificado (AD-029). Guarda propria,
+        # como as outras secoes: um POST que nao traz o campo nao mexe no valor
+        # salvo (o formulario de Configuracoes traz sempre).
+        if (request.form.get('cert_alerta_dias') or '').strip():
+            cert_dias_raw = request.form['cert_alerta_dias'].strip()
+            try:
+                cert_dias = int(cert_dias_raw)
+            except (TypeError, ValueError):
+                flash('Informe um numero inteiro entre 1 e 90 para o aviso de '
+                      'vencimento de certificado.', 'warning')
+                return redirect(url_for('main.configuracoes'))
+            if not 1 <= cert_dias <= 90:
+                flash('O aviso de vencimento de certificado deve ficar entre 1 e '
+                      '90 dias.', 'warning')
+                return redirect(url_for('main.configuracoes'))
+            config.cert_alerta_dias = cert_dias
+
         salvou = False
         try:
             db.session.commit()
@@ -353,6 +371,7 @@ def configuracoes():
         agendador_hora=(config.agendador_hora if config else 3),
         notif_destinatarios=(config.notif_destinatarios if config else None) or '',
         notif_cadencia=(config.notif_cadencia if config else 'semanal'),
+        cert_alerta_dias=manifestador_cofre.janela_alerta_dias(),
     )
 
 

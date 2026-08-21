@@ -1,8 +1,9 @@
-"""Testes do digest periodico e do anti-spam durável (spec 03, NOTIF-01/04).
+"""Testes do resumo diario e do anti-spam durável (spec 03, NOTIF-01/04, AD-029).
 
-Os numeros do digest batem com a classificacao do painel; a cadencia decide se
-envia; sem SMTP nao envia (loga); 0/0/0 envia "tudo em dia" salvo flag; envio so
-e registrado quando de fato ocorre.
+Um e-mail por dia com tudo dentro: os numeros da carteira batem com a
+classificacao do painel; a cadencia decide o resumo DE ROTINA mas nunca segura um
+aviso; sem SMTP nao envia (loga) e a pauta fica intacta; 0/0/0 envia "tudo em
+dia" salvo flag; envio so e registrado quando de fato ocorre.
 """
 from datetime import date, datetime, timedelta
 
@@ -10,7 +11,7 @@ import pytest
 
 from app import db
 from app.models import (Certidao, ConfiguracaoSistema, Empresa, NotificacaoLog,
-                        StatusEspecial, TipoCertidao)
+                        PautaNotificacao, StatusEspecial, TipoCertidao)
 from app.services import notificacoes
 from app.services.snapshot_service import classificar_status_certidao
 
@@ -37,6 +38,12 @@ def _config(destinatarios='op@x.com', cadencia='semanal'):
     db.session.add(cfg)
     db.session.commit()
     return cfg
+
+
+def _pauta(tipo='alerta_certificado', titulo='Vencido — X', chave='k1'):
+    db.session.add(PautaNotificacao(chave=chave, tipo=tipo, titulo=titulo,
+                                    corpo='detalhe do aviso'))
+    db.session.commit()
 
 
 @pytest.fixture()
@@ -73,7 +80,7 @@ def test_contagem_bate_com_classificacao_do_painel(ctx):
     _cert(emp, TipoCertidao.TRABALHISTA, pendente=True)                  # pendente
     _cert(emp, TipoCertidao.FGTS, validade=hoje + timedelta(days=365))   # valida (nao conta)
 
-    _, _, resumo = notificacoes.montar_digest()
+    _, _, resumo = notificacoes.montar_resumo()
 
     # referencia independente: reclassifica a carteira do zero
     esperado = {'a_vencer': 0, 'vencidas': 0, 'pendentes': 0}
@@ -85,31 +92,81 @@ def test_contagem_bate_com_classificacao_do_painel(ctx):
     assert resumo == {'a_vencer': 2, 'vencidas': 1, 'pendentes': 2}
 
 
+# --- montagem do corpo -----------------------------------------------------
+
+def test_corpo_agrupa_avisos_por_secao_na_ordem_declarada(ctx):
+    _config()
+    _pauta(tipo='alerta_saldo', titulo='Saldo baixo', chave='saldo_baixo')
+    _pauta(tipo='alerta_certificado', titulo='Vencido — Alfa', chave='c:1')
+    _pauta(tipo='alerta_municipio', titulo='Tramandai — quebrou', chave='m:T')
+
+    _, corpo, _ = notificacoes.montar_resumo(notificacoes.pauta_pendente())
+
+    posicoes = [corpo.index(rotulo) for rotulo in
+                ('CERTIFICADOS DIGITAIS (1)', 'MUNICIPIOS (1)', 'SALDO DO 2CAPTCHA (1)')]
+    assert posicoes == sorted(posicoes)  # ordem de _SECOES, nao de insercao
+    assert 'detalhe do aviso' in corpo
+
+
+def test_tipo_sem_secao_conhecida_cai_em_outros(ctx):
+    _config()
+    _pauta(tipo='alerta_novo_em_folha', titulo='Coisa nova', chave='x:1')
+
+    _, corpo, _ = notificacoes.montar_resumo(notificacoes.pauta_pendente())
+    assert 'OUTROS AVISOS (1)' in corpo
+    assert 'Coisa nova' in corpo
+
+
+def test_assunto_conta_avisos_quando_ha_pauta(ctx):
+    _config()
+    _pauta(chave='c:1')
+    _pauta(chave='c:2', titulo='Vencido — Y')
+
+    assunto, _, _ = notificacoes.montar_resumo(notificacoes.pauta_pendente())
+    assert '2 aviso' in assunto
+
+
 # --- cadencia / dedup ------------------------------------------------------
 
-def test_digest_devido_quando_nunca_enviado(ctx):
-    assert notificacoes._digest_devido(_config(cadencia='semanal')) is True
+def test_resumo_devido_quando_nunca_enviado(ctx):
+    assert notificacoes._resumo_devido(_config(cadencia='semanal'), []) is True
 
 
-def test_digest_nao_devido_dentro_da_semana(ctx):
+def test_resumo_de_rotina_nao_devido_dentro_da_semana(ctx):
     _config(cadencia='semanal')
     db.session.add(NotificacaoLog(
         chave='digest', tipo='digest',
         enviada_em=datetime.now() - timedelta(days=3)))
     db.session.commit()
-    assert notificacoes._digest_devido(notificacoes._config()) is False
+    assert notificacoes._resumo_devido(notificacoes._config(), []) is False
 
 
-def test_digest_devido_apos_intervalo_diario(ctx):
+def test_resumo_devido_apos_intervalo_diario(ctx):
     _config(cadencia='diaria')
     db.session.add(NotificacaoLog(
         chave='digest', tipo='digest',
         enviada_em=datetime.now() - timedelta(days=1, hours=1)))
     db.session.commit()
-    assert notificacoes._digest_devido(notificacoes._config()) is True
+    assert notificacoes._resumo_devido(notificacoes._config(), []) is True
 
 
-# --- enviar_digest_se_devido -----------------------------------------------
+def test_cadencia_nunca_segura_um_aviso(ctx, monkeypatch):
+    """Cadencia semanal, resumo enviado ontem — mas ha aviso na pauta.
+
+    A cadencia existe para nao encher a caixa com resumo de rotina. Aplicar ela a
+    um alerta trocaria spam por silencio de ate uma semana, que e pior."""
+    _config(cadencia='semanal')
+    db.session.add(NotificacaoLog(
+        chave='digest', tipo='digest',
+        enviada_em=datetime.now() - timedelta(days=1)))
+    db.session.commit()
+    _pauta()
+
+    assert notificacoes._resumo_devido(notificacoes._config(),
+                                       notificacoes.pauta_pendente()) is True
+
+
+# --- enviar_resumo_diario --------------------------------------------------
 
 def test_sem_smtp_nao_envia_e_loga(ctx, monkeypatch):
     _config()
@@ -117,7 +174,7 @@ def test_sem_smtp_nao_envia_e_loga(ctx, monkeypatch):
     chamou = []
     monkeypatch.setattr(notificacoes.email_sender, 'enviar',
                         lambda *a, **k: chamou.append(1) or True)
-    assert notificacoes.enviar_digest_se_devido(ctx) is False
+    assert notificacoes.enviar_resumo_diario(ctx) is False
     assert chamou == []  # nao tentou enviar (AC P1.3)
 
 
@@ -130,7 +187,7 @@ def test_vazio_envia_tudo_em_dia_por_padrao(ctx, monkeypatch):
     monkeypatch.setattr(notificacoes.email_sender, 'enviar',
                         lambda cfg, dest, assunto, corpo: capturado.update(
                             assunto=assunto, corpo=corpo) or True)
-    assert notificacoes.enviar_digest_se_devido(ctx) is True
+    assert notificacoes.enviar_resumo_diario(ctx) is True
     assert 'tudo em dia' in capturado['assunto']
 
 
@@ -142,33 +199,69 @@ def test_vazio_omitido_quando_flag_desligada(ctx, monkeypatch):
     monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
     monkeypatch.setattr(notificacoes.email_sender, 'enviar',
                         lambda *a, **k: chamou.append(1) or True)
-    assert notificacoes.enviar_digest_se_devido(ctx) is False
+    assert notificacoes.enviar_resumo_diario(ctx) is False
     assert chamou == []
+
+
+def test_flag_de_vazio_nao_cala_um_resumo_com_aviso(ctx, monkeypatch):
+    """"Vazio" e carteira 0/0/0 E pauta vazia: um aviso torna o resumo nao-vazio."""
+    _config()
+    ctx.config.update(SMTP_HOST='smtp', SMTP_FROM='f@x.com',
+                      NOTIF_DIGEST_ENVIAR_VAZIO=False)
+    _pauta()
+    monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
+    monkeypatch.setattr(notificacoes.email_sender, 'enviar', lambda *a, **k: True)
+
+    assert notificacoes.enviar_resumo_diario(ctx) is True
 
 
 def test_envio_ok_registra_e_nao_reenvia_na_cadencia(ctx, monkeypatch):
     _config(cadencia='semanal')
     _cert(_empresa(), TipoCertidao.FGTS,
-          validade=date.today() + timedelta(days=3))  # digest nao-vazio
+          validade=date.today() + timedelta(days=3))  # resumo nao-vazio
     ctx.config.update(SMTP_HOST='smtp', SMTP_FROM='f@x.com')
     monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
     monkeypatch.setattr(notificacoes.email_sender, 'enviar', lambda *a, **k: True)
 
-    assert notificacoes.enviar_digest_se_devido(ctx) is True
+    assert notificacoes.enviar_resumo_diario(ctx) is True
     assert NotificacaoLog.query.filter_by(chave='digest').count() == 1
-    # 2a chamada no mesmo dia: cadencia semanal nao venceu -> nao reenvia
-    assert notificacoes.enviar_digest_se_devido(ctx) is False
+    # 2a chamada no mesmo dia, sem aviso novo: cadencia semanal nao venceu
+    assert notificacoes.enviar_resumo_diario(ctx) is False
     assert NotificacaoLog.query.filter_by(chave='digest').count() == 1
 
 
 def test_envio_falho_nao_registra_permanece_devido(ctx, monkeypatch):
     _config(cadencia='semanal')
     _cert(_empresa(), TipoCertidao.FGTS,
-          validade=date.today() + timedelta(days=3))  # digest nao-vazio
+          validade=date.today() + timedelta(days=3))  # resumo nao-vazio
     ctx.config.update(SMTP_HOST='smtp', SMTP_FROM='f@x.com')
     monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
     monkeypatch.setattr(notificacoes.email_sender, 'enviar', lambda *a, **k: False)
 
-    assert notificacoes.enviar_digest_se_devido(ctx) is False
+    assert notificacoes.enviar_resumo_diario(ctx) is False
     assert NotificacaoLog.query.filter_by(chave='digest').count() == 0
-    assert notificacoes._digest_devido(notificacoes._config()) is True
+    assert notificacoes._resumo_devido(notificacoes._config(), []) is True
+
+
+def test_pauta_fechada_vira_historico_e_nao_volta_ao_proximo_resumo(ctx, monkeypatch):
+    _config(cadencia='diaria')
+    ctx.config.update(SMTP_HOST='smtp', SMTP_FROM='f@x.com')
+    corpos = []
+    monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
+    monkeypatch.setattr(notificacoes.email_sender, 'enviar',
+                        lambda cfg, dest, assunto, corpo: corpos.append(corpo) or True)
+    _pauta(titulo='Vencido — Alfa', chave='certificado_vencido:1')
+
+    assert notificacoes.enviar_resumo_diario(ctx) is True
+    assert 'Vencido — Alfa' in corpos[0]
+    # a linha continua no banco (historico), mas carimbada
+    item = PautaNotificacao.query.one()
+    assert item.enviada_em is not None
+    assert notificacoes.pauta_pendente() == []
+
+
+def test_registrar_pauta_nao_duplica_enquanto_o_achado_espera(ctx):
+    _config()
+    assert notificacoes.registrar_pauta('k', 'alerta_falha', 'T', 'c') is True
+    assert notificacoes.registrar_pauta('k', 'alerta_falha', 'T', 'c') is False
+    assert PautaNotificacao.query.count() == 1

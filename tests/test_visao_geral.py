@@ -82,14 +82,14 @@ def test_contagem_aceita_a_data_de_referencia(app, ids):
             hoje=vence + timedelta(days=1))['vencidas'] == 1
 
 
-def test_digest_e_tela_leem_a_mesma_funcao(app, ids):
-    """A prova da extracao: o digest nao tem mais laco proprio de contagem."""
+def test_resumo_e_tela_leem_a_mesma_funcao(app, ids):
+    """A prova da extracao: o resumo nao tem mais laco proprio de contagem."""
     import inspect
 
     from app.services import notificacoes
 
     assert not hasattr(notificacoes, '_contagem_carteira')
-    assert 'contagem_carteira' in inspect.getsource(notificacoes.montar_digest)
+    assert 'contagem_carteira' in inspect.getsource(notificacoes.montar_resumo)
 
 
 def _usuario(papel=PapelUsuario.OPERADOR):

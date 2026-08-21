@@ -1,21 +1,59 @@
-"""Orquestracao das notificacoes por e-mail (spec 03, AD-011).
+"""Orquestracao das notificacoes por e-mail (spec 03, AD-011, AD-029).
 
-Decide O QUE enviar (digest periodico de vencimentos; alertas de falha recorrente
-e de saldo baixo) e aplica anti-spam DURAVEL via `NotificacaoLog` (chave + janela),
-que sobrevive a restart. O transporte fica em `email_sender` (best-effort). Nada
-aqui pode derrubar o job do agendador — falhas sao logadas, nao propagadas.
+**Um e-mail por dia, nao um por achado.** Cada `alertar_*` daqui NAO envia nada:
+anota o achado na `PautaNotificacao` e volta. Um unico job diario
+(`enviar_resumo_diario`) junta a pauta pendente com a contagem da carteira e
+manda **um** e-mail com tudo. Antes cada certificado vencido virava um e-mail
+proprio, e a caixa do operador recebia dezenas por dia — o volume fazia o aviso
+ser ignorado, que e o oposto do que o alerta existe para fazer.
+
+O anti-spam DURAVEL continua no `NotificacaoLog` (chave + janela, sobrevive a
+restart) e agora ganha um segundo guarda: enquanto um achado espera na pauta, a
+mesma chave nao e anotada de novo. O transporte fica em `email_sender`
+(best-effort). Nada aqui pode derrubar o job do agendador — falhas sao logadas,
+nao propagadas.
+
+Anotar na pauta NAO depende de SMTP configurado, de proposito: o achado e real
+mesmo sem transporte, e guardado ele sai no primeiro resumo depois que o SMTP
+voltar. Recusar a anotacao perderia em silencio exatamente o que o operador
+precisava saber.
 
 Este modulo NAO importa `agendador` (evita ciclo): os jobs e que chamam este.
 """
 from datetime import date, datetime, timedelta
 
 from app import captcha_solver, db
-from app.models import ConfiguracaoSistema, NotificacaoLog
+from app.models import ConfiguracaoSistema, NotificacaoLog, PautaNotificacao
 from app.services import diagnostics, email_sender, snapshot_service
 from app.services.execution_logger import log_event
 
-# Cadencia do digest -> intervalo minimo entre envios (dias).
+# Cadencia do resumo -> intervalo minimo entre envios (dias). Vale so para o
+# resumo DE ROTINA (nada pendente na pauta): com aviso anotado o resumo sai no
+# mesmo dia, independente da cadencia — segurar um alerta por uma semana seria
+# trocar spam por silencio.
 _CADENCIA_DIAS = {'semanal': 7, 'diaria': 1}
+
+# Secoes do resumo, na ordem em que aparecem no corpo. A chave e o `tipo` gravado
+# na pauta (mesmo vocabulario do NotificacaoLog); tipo desconhecido cai em Outros.
+_SECOES = (
+    ('alerta_certificado', 'Certificados digitais'),
+    ('alerta_empresa_baixada', 'Situacao na Receita'),
+    ('alerta_municipio', 'Municipios'),
+    ('alerta_portal', 'Portais pausados'),
+    ('alerta_solver', 'Captcha / solver'),
+    ('alerta_falha', 'Falhas recorrentes'),
+    ('alerta_saldo', 'Saldo do 2captcha'),
+)
+_SECAO_OUTROS = 'Outros avisos'
+
+# Conselho que vale para a SECAO inteira, impresso uma vez no fim dela. Repetir
+# "providencie a renovacao" embaixo de cada certificado transformava um dia com
+# dez vencimentos em quarenta linhas de texto identico — trocaria o spam de
+# e-mails por spam dentro do e-mail, sem resolver nada.
+_RODAPE_SECAO = {
+    'alerta_certificado': ('Renove o certificado e rode o inventario do cofre '
+                           'para o sistema reconhecer o arquivo novo.'),
+}
 
 
 # --- config / destinatarios ------------------------------------------------
@@ -72,35 +110,152 @@ def _registrar_envio(chave, tipo, detalhe=None):
         log_event('notif_log_falhou', level='WARNING', chave=chave, error=str(exc))
 
 
-# --- digest ----------------------------------------------------------------
+# --- pauta do dia (o que ainda nao foi contado) ----------------------------
 
-def montar_digest():
-    """(assunto, corpo, resumo) do digest a partir da contagem da carteira."""
+def _pauta_pendente_chave(chave):
+    """True se essa chave ja esta anotada e esperando o proximo resumo."""
+    try:
+        return db.session.query(
+            PautaNotificacao.query
+            .filter(PautaNotificacao.chave == chave,
+                    PautaNotificacao.enviada_em.is_(None))
+            .exists()).scalar()
+    except Exception:
+        return False
+
+
+def registrar_pauta(chave, tipo, titulo, corpo=None, janela_horas=None):
+    """Anota um achado para o proximo resumo diario. True se anotou agora.
+
+    Dois guardas, e os dois precisam existir: a janela do `NotificacaoLog` evita
+    repetir um achado que JA SAIU num resumo recente, e o `_pauta_pendente_chave`
+    evita anotar duas vezes um achado que ainda NAO saiu (o produtor pode rodar
+    mais de uma vez entre dois resumos). Best-effort: falha de gravacao loga e
+    retorna False, nunca propaga (AD-011)."""
+    if janela_horas and _deduplicado(chave, janela_horas):
+        return False
+    if _pauta_pendente_chave(chave):
+        return False
+    try:
+        db.session.add(PautaNotificacao(
+            chave=chave[:120], tipo=tipo[:40],
+            titulo=(titulo or '')[:200], corpo=corpo))
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        log_event('notif_pauta_falhou', level='WARNING', chave=chave, error=str(exc))
+        return False
+    return True
+
+
+def pauta_pendente():
+    """Achados anotados e ainda nao enviados, mais antigo primeiro."""
+    try:
+        return (PautaNotificacao.query
+                .filter(PautaNotificacao.enviada_em.is_(None))
+                .order_by(PautaNotificacao.criada_em.asc(),
+                          PautaNotificacao.id.asc())
+                .all())
+    except Exception as exc:
+        log_event('notif_pauta_leitura_falhou', level='WARNING', error=str(exc))
+        return []
+
+
+def _fechar_pauta(itens):
+    """Carimba os itens como enviados e alimenta o anti-spam, num commit so.
+
+    Um commit por item custaria N round-trips e deixaria a pauta meio fechada se
+    algum falhasse no meio — como o e-mail JA SAIU, meio fechado significa
+    repetir os itens restantes no resumo seguinte."""
+    if not itens:
+        return
+    agora = datetime.now()
+    try:
+        for item in itens:
+            item.enviada_em = agora
+            db.session.add(NotificacaoLog(
+                chave=item.chave, tipo=item.tipo,
+                detalhe=(item.titulo or '')[:500], enviada_em=agora))
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        log_event('notif_pauta_fechar_falhou', level='WARNING',
+                  itens=len(itens), error=str(exc))
+
+
+# --- resumo diario ---------------------------------------------------------
+
+def _agrupar_por_secao(itens):
+    """[(rotulo, [item, ...]), ...] na ordem de `_SECOES`, sem secao vazia."""
+    por_tipo = {}
+    for item in itens:
+        por_tipo.setdefault(item.tipo, []).append(item)
+
+    secoes = []
+    for tipo, rotulo in _SECOES:
+        do_tipo = por_tipo.pop(tipo, None)
+        if do_tipo:
+            secoes.append((rotulo, do_tipo))
+    restantes = [i for grupo in por_tipo.values() for i in grupo]
+    if restantes:
+        secoes.append((_SECAO_OUTROS, restantes))
+    return secoes
+
+
+def montar_resumo(itens=None):
+    """(assunto, corpo, resumo) do resumo do dia: carteira + pauta pendente.
+
+    O assunto diz o que manda a atencao: havendo aviso, o numero de avisos vem
+    primeiro; sem aviso, a contagem da carteira; sem nada, "tudo em dia"."""
+    itens = list(itens or [])
     resumo = snapshot_service.contagem_carteira()
     a_vencer, vencidas, pendentes = (
         resumo['a_vencer'], resumo['vencidas'], resumo['pendentes'])
-    vazio = (a_vencer == 0 and vencidas == 0 and pendentes == 0)
+    carteira_vazia = (a_vencer == 0 and vencidas == 0 and pendentes == 0)
 
-    if vazio:
-        assunto = '[Zelo] Digest — tudo em dia'
-    else:
-        assunto = (f'[Zelo] Digest — {a_vencer} a vencer, '
+    if itens:
+        assunto = f'[Zelo] Resumo do dia — {len(itens)} aviso(s)'
+    elif not carteira_vazia:
+        assunto = (f'[Zelo] Resumo do dia — {a_vencer} a vencer, '
                    f'{vencidas} vencidas, {pendentes} pendentes')
+    else:
+        assunto = '[Zelo] Resumo do dia — tudo em dia'
 
     linhas = [
-        f'Resumo da carteira de certidoes — {datetime.now():%d/%m/%Y %H:%M}',
+        f'Resumo do dia — {datetime.now():%d/%m/%Y %H:%M}',
         '',
-        f'A vencer (na janela): {a_vencer}',
-        f'Vencidas: {vencidas}',
-        f'Pendentes: {pendentes}',
+        'CARTEIRA DE CERTIDOES',
+        f'  A vencer (na janela): {a_vencer}',
+        f'  Vencidas: {vencidas}',
+        f'  Pendentes: {pendentes}',
     ]
-    if vazio:
-        linhas += ['', 'Tudo em dia — nenhuma certidao a vencer, vencida ou pendente.']
+    if carteira_vazia:
+        linhas.append('  Tudo em dia — nada a vencer, vencido ou pendente.')
+
+    for rotulo, do_tipo in _agrupar_por_secao(itens):
+        linhas += ['', f'{rotulo.upper()} ({len(do_tipo)})']
+        for item in do_tipo:
+            linhas.append(f'  - {item.titulo}')
+            for linha in (item.corpo or '').splitlines():
+                linhas.append(f'    {linha}' if linha else '')
+        rodape = _RODAPE_SECAO.get(do_tipo[0].tipo)
+        if rodape:
+            linhas.append(f'  {rodape}')
+
+    if not itens:
+        linhas += ['', 'Nenhum alerta novo desde o ultimo resumo.']
+    linhas += ['', 'Este e o unico e-mail do dia: os avisos sao acumulados e',
+               'enviados juntos. A janela e os destinatarios ficam em Configuracoes.']
     return assunto, '\n'.join(linhas), resumo
 
 
-def _digest_devido(cfg):
-    """True se ja passou o intervalo da cadencia desde o ultimo digest enviado."""
+def _resumo_devido(cfg, itens):
+    """True se o resumo deve sair agora.
+
+    Com aviso na pauta sai sempre — a cadencia existe para nao encher a caixa com
+    resumo de rotina, nao para segurar alerta. Sem aviso, respeita a cadencia."""
+    if itens:
+        return True
     ultimo = _ultimo_envio('digest')
     if ultimo is None:
         return True
@@ -109,64 +264,60 @@ def _digest_devido(cfg):
     return (date.today() - ultimo.date()).days >= dias
 
 
-def enviar_digest_se_devido(app):
-    """Envia o digest se a cadencia venceu. Retorna True se enviou.
+def enviar_resumo_diario(app):
+    """Envia UM e-mail com a pauta do dia + a carteira. True se enviou.
 
-    - Sem SMTP/destinatario: nao envia e loga aviso acionavel (AC P1.3).
-    - 0/0/0: envia "tudo em dia", salvo NOTIF_DIGEST_ENVIAR_VAZIO=false (AC P1.5).
-    - So registra no NotificacaoLog quando o envio de fato ocorre (retry no proximo
-      tick se o SMTP estiver fora)."""
+    - Sem SMTP/destinatario: nao envia, loga aviso acionavel e **deixa a pauta
+      intacta** (sai no proximo resumo que der certo).
+    - Nada pendente e carteira 0/0/0: envia "tudo em dia", salvo
+      NOTIF_DIGEST_ENVIAR_VAZIO=false.
+    - So fecha a pauta e registra o envio quando o e-mail de fato saiu."""
     cfg = _config()
-    if not _digest_devido(cfg):
+    itens = pauta_pendente()
+    if not _resumo_devido(cfg, itens):
         return False
 
     destinatarios = _destinatarios(cfg)
     if not email_sender.smtp_configurado(app.config) or not destinatarios:
-        log_event('notif_digest_sem_smtp', level='WARNING',
+        log_event('notif_resumo_sem_smtp', level='WARNING',
                   tem_smtp=email_sender.smtp_configurado(app.config),
-                  destinatarios=len(destinatarios))
+                  destinatarios=len(destinatarios), pendentes=len(itens))
         return False
 
-    assunto, corpo, resumo = montar_digest()
-    vazio = not any(resumo.values())
+    assunto, corpo, resumo = montar_resumo(itens)
+    vazio = not itens and not any(resumo.values())
     if vazio and not app.config.get('NOTIF_DIGEST_ENVIAR_VAZIO', True):
-        log_event('notif_digest_omitido_vazio')
+        log_event('notif_resumo_omitido_vazio')
         return False
 
-    enviado = email_sender.enviar(app.config, destinatarios, assunto, corpo)
-    if enviado:
-        _registrar_envio('digest', 'digest', detalhe=str(resumo))
-    return enviado
+    if not email_sender.enviar(app.config, destinatarios, assunto, corpo):
+        return False
+
+    _registrar_envio('digest', 'digest', detalhe=str(resumo))
+    _fechar_pauta(itens)
+    log_event('notif_resumo_enviado', status='ok', avisos=len(itens), **resumo)
+    return True
 
 
 # --- alertas (falha recorrente + saldo 2captcha) ---------------------------
 
-def _enviar_alerta(app, destinatarios, chave, tipo, assunto, corpo, janela, detalhe):
-    """Envia um alerta respeitando o anti-spam. Retorna True se enviou agora."""
-    if _deduplicado(chave, janela):
-        return False
-    if email_sender.enviar(app.config, destinatarios, assunto, corpo):
-        _registrar_envio(chave, tipo, detalhe)
-        return True
-    return False
+def _anotar_alerta(chave, tipo, titulo, corpo, janela):
+    """Anota um alerta na pauta respeitando o anti-spam. True se anotou agora.
+
+    Ponto unico por onde TODO alerta passa: era aqui que ficava o envio imediato,
+    e trocar o envio pela anotacao num lugar so e o que garante que nenhum
+    caminho continue mandando e-mail avulso (AD-029)."""
+    return registrar_pauta(chave, tipo, titulo, corpo, janela_horas=janela)
 
 
-def enviar_alertas(app):
-    """Empurra alertas de falha recorrente (via diagnostics) e de saldo baixo do
-    2captcha, com a janela anti-spam. Retorna quantos alertas enviou agora.
+def apurar_alertas(app):
+    """Anota alertas de falha recorrente (via diagnostics) e de saldo baixo do
+    2captcha, com a janela anti-spam. Retorna quantos anotou agora.
 
-    - Falha recorrente: um alerta por (error_type, alvo) ativo; reenvio bloqueado
-      dentro da janela (AC P2 falha).
+    - Falha recorrente: um alerta por (error_type, alvo) ativo; repeticao
+      bloqueada dentro da janela (AC P2 falha).
     - Saldo: alerta so quando abaixo do limiar; saldo None (API fora) NAO gera
       falso-baixo; mantem tambem o WARNING no painel de diagnostico (spec 02)."""
-    cfg = _config()
-    destinatarios = _destinatarios(cfg)
-    if not email_sender.smtp_configurado(app.config) or not destinatarios:
-        log_event('notif_alertas_sem_smtp', level='WARNING',
-                  tem_smtp=email_sender.smtp_configurado(app.config),
-                  destinatarios=len(destinatarios))
-        return 0
-
     janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
     enviados = 0
 
@@ -174,15 +325,14 @@ def enviar_alertas(app):
         error_type = alerta.get('error_type')
         alvo = alerta.get('alvo')
         chave = f'falha:{error_type}:{alvo}'
-        assunto = f'[Zelo] Alerta: falha recorrente {error_type} em {alvo}'
+        titulo = f'{alvo} — {error_type} ({alerta.get("ocorrencias")}x)'
         corpo = '\n'.join([
             f'Falha recorrente detectada em {alvo}.',
             f'Tipo de erro: {error_type}',
             f'Ocorrencias: {alerta.get("ocorrencias")}',
             f'Hipotese: {alerta.get("hipotese")}',
         ])
-        if _enviar_alerta(app, destinatarios, chave, 'alerta_falha', assunto,
-                          corpo, janela, detalhe=str(alerta)):
+        if _anotar_alerta(chave, 'alerta_falha', titulo, corpo, janela):
             enviados += 1
 
     saldo = captcha_solver.consultar_saldo(app.config)
@@ -190,14 +340,13 @@ def enviar_alertas(app):
     if saldo is not None and saldo < minimo:
         # o aviso no painel de diagnostico e responsabilidade do agendador
         # (_avisar_saldo_baixo, spec 02); aqui so cuidamos do push por e-mail.
-        assunto = '[Zelo] Alerta: saldo 2captcha baixo'
+        titulo = f'Saldo baixo: {saldo:.2f} USD (minimo {minimo:.2f})'
         corpo = '\n'.join([
             f'Saldo atual do 2captcha: {saldo:.2f} USD',
             f'Limiar minimo configurado: {minimo:.2f} USD',
             'Recarregue para nao interromper os lotes automatizados.',
         ])
-        if _enviar_alerta(app, destinatarios, 'saldo_baixo', 'alerta_saldo',
-                          assunto, corpo, janela, detalhe=f'saldo={saldo}'):
+        if _anotar_alerta('saldo_baixo', 'alerta_saldo', titulo, corpo, janela):
             enviados += 1
 
     return enviados
@@ -210,22 +359,16 @@ def alertar_empresas_baixadas(app, baixadas):
     que ja estava baixada nao realerta todo dia, e ligar a feature nao dispara um
     alerta retroativo para a carteira inteira.
 
-    Um alerta POR EMPRESA (chave anti-spam propria), como o de municipio: resolver
-    uma nao pode silenciar as outras dentro da janela. Retorna quantos foram
-    enviados agora."""
-    cfg = _config()
-    destinatarios = _destinatarios(cfg)
-    if not email_sender.smtp_configurado(app.config) or not destinatarios:
-        log_event('notif_baixadas_sem_smtp', level='WARNING',
-                  destinatarios=len(destinatarios))
-        return 0
-
+    Uma ENTRADA POR EMPRESA na pauta (chave anti-spam propria), como a de
+    municipio: resolver uma nao pode silenciar as outras dentro da janela. Todas
+    saem juntas na secao "Situacao na Receita" do resumo do dia (AD-029). Retorna
+    quantas foram anotadas agora."""
     janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
     enviados = 0
 
     for empresa_id, nome, situacao in baixadas or []:
         situacao_txt = situacao or 'nao ativa'
-        assunto = f'[Zelo] {nome} consta como {situacao_txt} na Receita'
+        titulo = f'{nome} consta como {situacao_txt}'
         corpo = '\n'.join([
             f'A verificacao diaria detectou que "{nome}" deixou de constar como',
             f'ATIVA na Receita. Situacao atual: {situacao_txt}.',
@@ -237,20 +380,20 @@ def alertar_empresas_baixadas(app, baixadas):
             '',
             'Confira a situacao na tela da empresa e decida se ela sai da carteira.',
         ])
-        if _enviar_alerta(app, destinatarios, f'empresa_baixada:{empresa_id}',
-                          'alerta_empresa_baixada', assunto, corpo, janela,
-                          detalhe=situacao_txt):
+        if _anotar_alerta(f'empresa_baixada:{empresa_id}',
+                          'alerta_empresa_baixada', titulo, corpo, janela):
             enviados += 1
 
     return enviados
 
 
-# A JANELA anti-spam deste alerta e propria, e nao a global de 24h: quem o
-# alimenta e um job DIARIO, entao uma janela de 24h nunca segura nada — cada
-# certificado renderia ~30 e-mails ao longo da janela de 30 dias, e um vencido
-# nao renovado renderia um por dia para sempre. O alerta de empresa baixada nao
-# tem esse problema porque recebe so TRANSICOES; aqui a condicao persiste por
-# semanas, entao quem espaca e a janela.
+# A JANELA anti-spam deste alerta e propria, e nao a global de 24h. Com o resumo
+# diario (AD-029) ela nao decide mais QUANTOS e-mails saem — sai um so, com tudo
+# dentro —, mas decide quantas vezes o mesmo certificado volta a aparecer nesse
+# e-mail. Sem ela, todo certificado da janela reapareceria em TODO resumo ate a
+# renovacao, e a lista de repetidos afogaria o que mudou naquele dia. O alerta de
+# empresa baixada nao precisa disso porque recebe so TRANSICOES; aqui a condicao
+# persiste por semanas.
 #
 # Vencendo repete por semana (ha tempo de agir); vencido repete a cada 3 dias,
 # porque ali a manifestacao da empresa esta parada e o silencio custa caro.
@@ -261,44 +404,35 @@ _ALERTA_CERTIFICADO_POR_CAUSA = {
     'vencido': {
         'janela': _JANELA_VENCIDO_H,
         'chave': 'certificado_vencido:{empresa_id}',
-        'assunto': '[Zelo] Alerta: certificado vencido de {empresa_nome}',
-        'linhas': [
-            'O certificado da empresa {empresa_nome} venceu em {data_vencimento}.',
-            '',
-            'A manifestacao dessa empresa esta parada ate renovar o certificado.',
-            'Renove o certificado e atualize o inventario do cofre antes de retomar.',
-        ],
+        'titulo': 'Vencido em {data_vencimento} — {empresa_nome}',
+        # So o que e proprio DESTE item; o conselho comum esta no _RODAPE_SECAO.
+        'linhas': ['A manifestacao dessa empresa esta parada ate renovar.'],
     },
     'vencendo': {
         'janela': _JANELA_VENCENDO_H,
         'chave': 'certificado_vencendo:{empresa_id}',
-        'assunto': '[Zelo] Alerta: certificado vencendo de {empresa_nome}',
-        'linhas': [
-            'O certificado da empresa {empresa_nome} vence em {data_vencimento}.',
-            'Faltam {dias_restantes} dia(s) para o vencimento.',
-            '',
-            'Providencie a renovacao para evitar a interrupcao da manifestacao.',
-        ],
+        'titulo': ('Vence em {data_vencimento} — {empresa_nome} '
+                   '(faltam {dias_restantes} dia(s))'),
+        # O titulo ja diz tudo: data, empresa e quanto falta. Uma segunda linha
+        # aqui so repetiria o que o operador acabou de ler.
+        'linhas': [],
     },
 }
 
 
 def alertar_certificados_vencendo(app, itens):
-    """Alerta certificados vencidos ou proximos de vencer, um por empresa/causa.
+    """Anota certificados vencidos ou proximos de vencer, um por empresa/causa.
+
+    Este era o maior gerador de spam do sistema: uma carteira com dezenas de
+    certificados na janela rendia dezenas de e-mails no mesmo minuto. Agora cada
+    um vira uma LINHA da secao "Certificados digitais" do resumo do dia (AD-029);
+    a chave anti-spam por empresa/causa continua igual, so muda o que ela guarda.
 
     Recebe a selecao ja pronta de ``manifestador_cofre.certificados_a_vencer``:
     consultar o banco e responsabilidade do chamador. A chave separa vencido de
     vencendo porque a transicao entre os estados pede novo alerta, mas mantem o
     anti-spam duravel para cada empresa dentro da mesma causa.
     """
-    cfg = _config()
-    destinatarios = _destinatarios(cfg)
-    tem_smtp = email_sender.smtp_configurado(app.config)
-    if not tem_smtp or not destinatarios:
-        log_event('notif_certificados_sem_smtp', level='WARNING',
-                  tem_smtp=tem_smtp, destinatarios=len(destinatarios))
-        return 0
-
     enviados = 0
     for item in itens or []:
         modelo = _ALERTA_CERTIFICADO_POR_CAUSA.get(item.get('causa'))
@@ -315,10 +449,9 @@ def alertar_certificados_vencendo(app, itens):
             'dias_restantes': item.get('dias_restantes'),
         }
         corpo = '\n'.join(linha.format(**dados) for linha in modelo['linhas'])
-        if _enviar_alerta(
-                app, destinatarios, modelo['chave'].format(**dados),
-                'alerta_certificado', modelo['assunto'].format(**dados), corpo,
-                modelo['janela'], detalhe=item['causa']):
+        if _anotar_alerta(modelo['chave'].format(**dados), 'alerta_certificado',
+                          modelo['titulo'].format(**dados), corpo,
+                          modelo['janela']):
             enviados += 1
 
     return enviados
@@ -333,7 +466,7 @@ _ALERTA_POR_CAUSA = {
     'portal': {
         'chave': 'portal_fora:{alvo}',
         'tipo': 'alerta_portal',
-        'assunto': '[Zelo] Alerta: portal {alvo} pausado (fora do ar)',
+        'titulo': 'Portal {alvo} pausado (fora do ar)',
         'linhas': [
             'O sistema detectou falhas seguidas no portal {alvo} e pausou a emissao',
             'nele para nao gastar creditos de captcha contra um portal fora.',
@@ -342,7 +475,7 @@ _ALERTA_POR_CAUSA = {
     'captcha': {
         'chave': 'solver_captcha:{alvo}',
         'tipo': 'alerta_solver',
-        'assunto': '[Zelo] Alerta: captcha falhando em {alvo} (emissao pausada)',
+        'titulo': 'Captcha falhando em {alvo} (emissao pausada)',
         'linhas': [
             'O sistema detectou falhas seguidas de CAPTCHA em {alvo} e pausou a',
             'emissao para nao queimar mais chamadas pagas do solver.',
@@ -360,15 +493,12 @@ def alertar_portal_fora(app, alvo, motivo=None, causa='portal'):
     `causa` escolhe a mensagem: 'portal' (o site nao respondeu) ou 'captcha' (o
     solver falhou; o portal pode estar de pe). Cada causa tem chave anti-spam
     propria — sao problemas diferentes, com acoes diferentes, e um nao pode
-    silenciar o outro dentro da janela. Best-effort (AD-011): sem SMTP nao envia,
-    nao levanta e o breaker abre do mesmo jeito. Retorna True se enviou agora."""
-    cfg = _config()
-    destinatarios = _destinatarios(cfg)
-    if not email_sender.smtp_configurado(app.config) or not destinatarios:
-        log_event('notif_portal_sem_smtp', level='WARNING', alvo=alvo,
-                  destinatarios=len(destinatarios))
-        return False
+    silenciar o outro dentro da janela. Best-effort (AD-011): nao levanta, e o
+    breaker abre do mesmo jeito. Retorna True se anotou agora.
 
+    Unico produtor que NAO roda no agendador — o breaker abre no meio de um lote,
+    a qualquer hora. Por isso a pauta e tabela e nao buffer em memoria (AD-029):
+    o achado precisa sobreviver ate o resumo da madrugada seguinte."""
     modelo = _ALERTA_POR_CAUSA.get(causa) or _ALERTA_POR_CAUSA['portal']
     janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
     corpo = '\n'.join(
@@ -378,28 +508,21 @@ def alertar_portal_fora(app, alvo, motivo=None, causa='portal'):
             f'Ultimo erro: {motivo or "-"}',
             '',
             'Nada precisa ser religado: o bloqueio expira sozinho e o proximo ciclo',
-            'tenta de novo. Se o problema seguir, o alerta se repete na proxima janela.',
+            'tenta de novo. Se o problema seguir, o aviso volta no proximo resumo.',
         ])
-    return _enviar_alerta(app, destinatarios, modelo['chave'].format(alvo=alvo),
-                          modelo['tipo'], modelo['assunto'].format(alvo=alvo),
-                          corpo, janela, detalhe=motivo)
+    return _anotar_alerta(modelo['chave'].format(alvo=alvo), modelo['tipo'],
+                          modelo['titulo'].format(alvo=alvo), corpo, janela)
 
 
 def alertar_municipios_quebrados(app, relatorios):
     """Alerta os municipios cujo dry-run acusou seletor quebrado (COV-05 A3).
 
-    Um alerta POR MUNICIPIO (chave anti-spam propria), para que consertar um nao
-    silencie os demais dentro da janela. So `quebrado` alerta: `erro` e infra
-    (driver/perfil ocupado) e `parcial` e captcha — nenhum dos dois e drift.
-    Retorna quantos alertas foram enviados agora."""
+    Uma entrada POR MUNICIPIO (chave anti-spam propria), para que consertar um nao
+    silencie os demais dentro da janela; todas saem na secao "Municipios" do
+    resumo do dia (AD-029). So `quebrado` alerta: `erro` e infra (driver/perfil
+    ocupado) e `parcial` e captcha — nenhum dos dois e drift. Retorna quantos
+    foram anotados agora."""
     from app.services.dryrun_municipio import QUEBRADO, falhou_ao_abrir
-
-    cfg = _config()
-    destinatarios = _destinatarios(cfg)
-    if not email_sender.smtp_configurado(app.config) or not destinatarios:
-        log_event('notif_municipios_sem_smtp', level='WARNING',
-                  destinatarios=len(destinatarios))
-        return 0
 
     janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
     enviados = 0
@@ -416,7 +539,7 @@ def alertar_municipios_quebrados(app, relatorios):
         # config_automacao. Mandar revisar seletor de um portal inalcançavel faz
         # o operador depurar o lugar errado (mesma razao do alerta_solver).
         if falhou_ao_abrir(relatorio):
-            assunto = f'[Zelo] Alerta: portal do municipio {nome} nao respondeu'
+            titulo = f'{nome} — portal nao respondeu'
             fecho = [
                 'O portal nao chegou a abrir: o endereco pode ter mudado ou o site',
                 'esta fora do ar. Confira a URL do municipio (tabela municipio,',
@@ -424,7 +547,7 @@ def alertar_municipios_quebrados(app, relatorios):
                 'novamente. Enquanto isso a emissao deste municipio nao funciona.',
             ]
         else:
-            assunto = f'[Zelo] Alerta: automacao do municipio {nome} pode ter quebrado'
+            titulo = f'{nome} — automacao pode ter quebrado'
             fecho = [
                 'Provavel mudanca de layout do portal. Revise os seletores do municipio',
                 '(tabela municipio / config_automacao) e rode a verificacao novamente.',
@@ -435,8 +558,8 @@ def alertar_municipios_quebrados(app, relatorios):
             f'Detalhe: {relatorio.get("mensagem") or "-"}',
             '',
         ] + fecho)
-        if _enviar_alerta(app, destinatarios, f'municipio_quebrado:{nome}',
-                          'alerta_municipio', assunto, corpo, janela, detalhe=detalhe):
+        if _anotar_alerta(f'municipio_quebrado:{nome}', 'alerta_municipio',
+                          titulo, corpo, janela):
             enviados += 1
 
     return enviados

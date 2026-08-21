@@ -97,8 +97,10 @@ class Config:
     # segredo —, mas gravar e ler senha e recusado com mensagem acionavel.
     MANIF_VAULT_KEY = os.environ.get('MANIF_VAULT_KEY') or ''
     # Janela em dias para alertar certificados do cofre que ja venceram ou estao
-    # proximos do vencimento. Fica em config, sem dado novo no dominio.
-    MANIF_CERT_ALERTA_DIAS = _env_int('MANIF_CERT_ALERTA_DIAS', 30)
+    # proximos do vencimento. Vale como DEFAULT DE INSTALACAO: quem manda em
+    # runtime e `ConfiguracaoSistema.cert_alerta_dias`, editavel em Configuracoes
+    # (AD-029). Resolvido num lugar so: `manifestador_cofre.janela_alerta_dias`.
+    MANIF_CERT_ALERTA_DIAS = _env_int('MANIF_CERT_ALERTA_DIAS', 10)
 
     RS_ALTCHA_AUTOSOLVE_ENABLED = _env_bool('RS_ALTCHA_AUTOSOLVE_ENABLED', False)
     RS_ALTCHA_MANUAL_FALLBACK = _env_bool('RS_ALTCHA_MANUAL_FALLBACK', True)

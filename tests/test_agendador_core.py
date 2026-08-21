@@ -41,8 +41,8 @@ def test_init_idempotente_nao_duplica(app, ids, sched_limpo):
     s2 = agendador.init(app)
     assert s1 is s2
     # snapshot + renovacao (ativa por padrao) + verificacao de municipios (COV-05)
-    # + recheck da situacao cadastral na Receita (spec 08) + inventario do cofre.
-    # A invariante e "nao duplica": ids unicos, um job por id.
+    # + recheck da situacao cadastral na Receita (spec 08) + inventario do cofre
+    # + resumo do dia (AD-029). A invariante e "nao duplica": um job por id.
     ids_jobs = [j.id for j in s1.get_jobs()]
     assert sorted(ids_jobs) == sorted(set(ids_jobs))
     assert set(ids_jobs) == {
@@ -51,6 +51,7 @@ def test_init_idempotente_nao_duplica(app, ids, sched_limpo):
         agendador._JOB_VERIF_MUNICIPIOS,
         agendador._JOB_RECHECK_RECEITA,
         agendador._JOB_INVENTARIO_COFRE,
+        agendador._JOB_RESUMO_DIARIO,
     }
 
 
