@@ -1,18 +1,6 @@
 {% extends "base.html" %}
+{% from "_zelo.html" import zl_page, zl_secao, render_badge %}
 {% block titulo %}Certidões{% endblock %}
-{% macro render_badge(certidao, hoje) -%}
-{%- if certidao.status_especial and certidao.status_especial.value == 'Pendente' -%}
-<span class="cert-status-danger fw-semibold small d-inline-flex align-items-center gap-1"><i class="bi bi-exclamation-circle-fill"></i>PENDENTE</span>
-{%- elif not certidao.data_validade -%}
-<span class="cert-status-muted small d-inline-flex align-items-center gap-1"><i class="bi bi-question-circle"></i>Não definida</span>
-{%- elif certidao.data_validade < hoje -%}
-<span class="cert-status-danger fw-semibold small d-inline-flex align-items-center gap-1"><i class="bi bi-x-circle-fill"></i>{{ certidao.data_validade.strftime('%d/%m/%Y') }}</span>
-{%- elif certidao.status == 'amarelo' -%}
-<span class="cert-status-warn fw-semibold small d-inline-flex align-items-center gap-1"><i class="bi bi-exclamation-triangle-fill"></i>{{ certidao.data_validade.strftime('%d/%m/%Y') }}</span>
-{%- else -%}
-<span class="cert-status-ok small d-inline-flex align-items-center gap-1"><i class="bi bi-check-circle-fill"></i>{{ certidao.data_validade.strftime('%d/%m/%Y') }}</span>
-{%- endif -%}
-{%- endmacro %}
 
     {% macro resolve_data_url(certidao, sites_urls, urls_municipais) -%}
     {%- if certidao.tipo.name == 'MUNICIPAL' -%}
@@ -220,6 +208,8 @@
     {% endif %}
     {% endwith %}
 
+    {{ zl_page('Certidões') }}
+
     <div id="filtros-card" class="card shadow-sm border-0 mb-3 bg-body-tertiary rounded-3 chips-loading">
         <div class="card-body p-3">
             <form action="{{ url_for('main.certidoes') }}" method="GET" class="mb-0" id="filtro-form">
@@ -278,7 +268,7 @@
             <!-- Barra de controles -->
             <div class="filtros-toolbar">
                 <div class="input-group busca">
-                    <span class="input-group-text bg-body border-end-0"><i class="bi bi-search text-muted"></i></span>
+                    <span class="input-group-text border-end-0"><i class="bi bi-search text-muted"></i></span>
                     <input type="search" class="form-control border-start-0 ps-1" id="filtroEmpresa"
                         placeholder="Buscar empresa...">
                 </div>
@@ -429,23 +419,24 @@
                     <i class="bi bi-arrow-down-up" aria-hidden="true"></i>
                     <span id="ordem-atividade-dir-label">Paradas primeiro</span>
                 </button>
+                {#- Exportar pertence AQUI, e nao solto entre os cartoes: a
+                   propria acao diz que "respeita os filtros ativos", entao o
+                   comportamento dela e acoplado a esta barra (E-08). -#}
+                <a id="btn-exportar-carteira" class="btn btn-soft-primary btn-sm ms-auto"
+                    href="{{ url_for('main.exportar_carteira') }}"
+                    onclick="this.href='{{ url_for('main.exportar_carteira') }}'+window.location.search"
+                    title="Baixar planilha (respeita os filtros ativos)">
+                    <i class="bi bi-file-earmark-spreadsheet me-1"></i>Exportar carteira
+                </a>
             </div>
         </div>
     </div>
 
-    <div class="d-flex justify-content-end mb-3">
-        <a id="btn-exportar-carteira" class="btn btn-soft-primary btn-sm"
-            href="{{ url_for('main.exportar_carteira') }}"
-            onclick="this.href='{{ url_for('main.exportar_carteira') }}'+window.location.search"
-            title="Baixar planilha (respeita os filtros ativos)">
-            <i class="bi bi-file-earmark-spreadsheet me-1"></i>Exportar carteira
-        </a>
-    </div>
 
     <div id="skeleton-certidoes" aria-hidden="true" aria-label="Carregando empresas...">
         {% for _ in range(3) %}
         <div class="card mb-4 shadow-sm border-0">
-            <div class="card-header bg-body border-bottom py-3 d-flex align-items-center gap-3">
+            <div class="card-header d-flex align-items-center gap-3 py-3">
                 <div class="sk-bloco rounded" style="width:45px;height:45px;flex-shrink:0;border-radius:8px!important"></div>
                 <div class="flex-grow-1">
                     <div class="sk-bloco mb-2" style="height:17px;width:38%"></div>
@@ -498,12 +489,8 @@
             data-count-tipo-municipal="{{ ct['tipo_municipal'] }}" data-count-tipo-trabalhista="{{ ct['tipo_trabalhista'] }}">
 
             <div
-                class="card-header bg-body border-bottom py-3 d-flex flex-wrap justify-content-between align-items-center">
+                class="card-header d-flex flex-wrap justify-content-between align-items-center py-3">
                 <div class="d-flex align-items-center gap-3">
-                    <div class="bg-primary bg-opacity-10 text-primary rounded p-2 d-flex align-items-center justify-content-center"
-                        style="width: 45px; height: 45px;">
-                        <i class="bi bi-building fs-4"></i>
-                    </div>
                     <div>
                         <h5 class="mb-0 fw-bold text-body">{{ empresa.nome }}</h5>
                         <div class="d-flex gap-3 text-muted small mt-1">
@@ -561,8 +548,30 @@
 
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0">
-<tbody>
+                    {#- O nome acessivel vai em aria-label, e nao num <caption
+                        class="visually-hidden">: aquele utilitario usa `height: 1px`, e num
+                        <caption> isso PERMANECE no fluxo. Como o .table-responsive tem
+                        `overflow-x: auto` — e pela regra do CSS o overflow-y computa como
+                        `auto` junto — aquele 1px bastava para uma barra de rolagem vertical
+                        aparecer dentro do cartao. Medido: scrollHeight 275 contra
+                        clientHeight 274, e zero ao tirar o caption. -#}
+                    <table class="table table-hover align-middle mb-0"
+                           aria-label="Certidões de {{ empresa.nome }}">
+                        {#- Legenda e cabeçalho existem para o leitor de tela, não para a
+                            tela (A-17/A-18). Um <thead> VISÍVEL seria repetido uma vez por
+                            empresa — dezenas de vezes na página — para nomear colunas que a
+                            linha de razão já torna evidentes. Escondê-lo com
+                            `visually-hidden` dá a associação célula/cabeçalho a quem navega
+                            por tabela, sem cobrar nada de quem enxerga. -#}
+                        <thead class="visually-hidden">
+                            <tr>
+                                <th scope="col">Tipo de certidão</th>
+                                <th scope="col" aria-hidden="true"></th>{#- a guia é decorativa; o td dela também é aria-hidden -#}
+                                <th scope="col">Validade</th>
+                                <th scope="col">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
                             {% for certidao in certidoes_por_empresa[empresa.id] %}
                             {% set data_url_final = resolve_data_url(certidao, sites_urls, urls_municipais) %}
 
@@ -574,15 +583,23 @@
 
                             <tr data-tipo="{{ certidao.tipo.name | lower }}" data-status-cert="{{ status_por_cert[certidao.id] }}"
                                 data-estado="{{ empresa.estado }}" data-cidade-key="{{ cidade_key_por_empresa[empresa.id] }}">
-                                <td class="cert-tipo-col fw-medium" style="width: 1%; white-space: nowrap;">{{ tipo_exibicao }}</td>
+                                {#- LINHA DE RAZÃO (E-09). O tipo à esquerda, a guia
+                                    atravessando o vão, a validade em coluna fixa à direita.
+                                    Antes havia um <td style="width:100%"> vazio aqui: ~900px
+                                    de nada entre a data e as ações, e o olho cruzava meia
+                                    tela para ligar "Municipal - Mobiliário" ao botão que
+                                    emite "Municipal - Mobiliário". A guia é a mesma coisa
+                                    que um livro razão, um sumário e um balanço fazem com
+                                    essa distância: em vez de combater o vão, usa ele. -#}
+                                <td class="cert-tipo-col fw-medium">{{ tipo_exibicao }}</td>
 
-                                <td style="width: 1%; white-space: nowrap; padding-left: 2.5rem;">
+                                <td class="cert-guia" aria-hidden="true"></td>
+
+                                <td class="cert-data">
                                     {{ render_badge(certidao, hoje) }}
                                 </td>
 
-                                <td style="width: 100%;"></td>
-
-                                <td class="text-end pe-4" style="white-space: nowrap; width: 1%;">
+                                <td class="cert-acoes">
                                     <div class="d-flex justify-content-end gap-2">
                                         <button type="button" class="btn btn-sm btn-outline-secondary border-0 btn-abrir-site"
                                             title="Abrir Site"
@@ -669,7 +686,7 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="editModalLabel">Editar Validade</h5>
+                    <h5 class="modal-title" id="editModalLabel">Editar validade</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -685,7 +702,7 @@
                         Pendente</button>
                     <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
 
-                    <button type="button" class="btn btn-primary" id="btnSalvarManual">Salvar Alterações</button>
+                    <button type="button" class="btn btn-primary" id="btnSalvarManual">Salvar alterações</button>
                 </div>
             </div>
         </div>
@@ -697,7 +714,7 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="confirmarDataModalTitulo">Confirmar Atualização</h5>
+                    <h5 class="modal-title" id="confirmarDataModalTitulo">Confirmar atualização</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -712,7 +729,7 @@
                     <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancelar</button>
                     <a class="btn btn-soft-primary d-none btn-visualizar-certidao"
                         id="btnVisualizarPdf">Visualizar</a>
-                    <button type="button" class="btn btn-success" id="btnConfirmarSalvar">Confirmar e Salvar</button>
+                    <button type="button" class="btn btn-success" id="btnConfirmarSalvar">Confirmar e salvar</button>
                 </div>
             </div>
         </div>
@@ -736,7 +753,7 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Não, manter como
                         está</button>
-                    <button type="button" class="btn btn-danger" id="btnConfirmarPendente">Sim, marcar Pendente</button>
+                    <button type="button" class="btn btn-danger" id="btnConfirmarPendente">Sim, marcar pendente</button>
                 </div>
             </div>
         </div>
@@ -748,7 +765,7 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title text-danger" id="estadualRsPositivaModalTitulo">Certidão Positiva Detectada</h5>
+                    <h5 class="modal-title text-danger" id="estadualRsPositivaModalTitulo">Certidão positiva detectada</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -774,7 +791,7 @@
                 <div class="modal-body" id="infoModalBody">
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-primary" id="btnInfoModalOK">OK, Abrir Site</button>
+                    <button type="button" class="btn btn-primary" id="btnInfoModalOK">OK, abrir site</button>
                 </div>
             </div>
         </div>

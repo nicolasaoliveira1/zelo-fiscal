@@ -26,7 +26,7 @@ def test_raiz_abre_a_visao_geral_e_nao_a_tabela(app, ids, client, monkeypatch):
     corpo = resposta.get_data(as_text=True)
 
     assert resposta.status_code == 200
-    assert 'Início' in corpo
+    assert 'Visão geral' in corpo
     # a tabela de certidoes tem filtros por status; a Visao Geral nao
     assert 'id="tabelaCertidoes"' not in corpo
 
@@ -100,11 +100,19 @@ def test_cofre_nunca_inventariado_nao_diz_zero_vencendo(app, ids, client,
     assert 'Nenhum vencendo' not in corpo
 
 
-def test_menu_tem_inicio_e_certidoes(app, ids, client, monkeypatch):
+def test_menu_usa_um_nome_so_para_a_pagina_inicial(app, ids, client, monkeypatch):
+    """O item do menu e o titulo da pagina dizem a MESMA coisa.
+
+    Havia dois nomes para a mesma tela: o menu dizia "Início" e o <title>,
+    o design language e a propria rota (visao_geral_painel) diziam "Visão
+    geral". "Início" nomeia onde a tela FICA; "Visão geral" nomeia o que
+    ela E — e e o nome que o resto do projeto ja usava.
+    """
     _sem_fontes(monkeypatch)
 
     corpo = client.get('/').get_data(as_text=True)
 
-    assert '<span>Início</span>' in corpo
+    assert '<span class="sidebar-rotulo">Visão geral</span>' in corpo
+    assert '<span class="sidebar-rotulo">Certidões</span>' in corpo
     assert 'Dashboard' not in corpo
-    assert '<span>Certidões</span>' in corpo
+    assert 'Início' not in corpo

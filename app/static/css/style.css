@@ -44,6 +44,58 @@
     --zelo-font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --zelo-font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
 
+    /* ══════════════════════════════════════════════════════════════
+       ESCALA DE FORMA (Onda 0 da auditoria de UI — achados E-01..E-04)
+       O Zelo tinha sistema de COR e de TIPO, os dois bons, e nenhum
+       sistema de FORMA: tamanho, espaço, raio e elevação vinham do
+       padrão do Bootstrap mais valores decididos caso a caso. Medido
+       antes desta mudança: 33 font-sizes, 15 raios, ~20 sombras, zero
+       token de espaço. É disso que vem a sensação de tela "montada"
+       e não "composta".
+       Estes tokens são a RÉGUA. Componente novo puxa daqui; o legado
+       migra aos poucos (não force num diff só).
+       ══════════════════════════════════════════════════════════════ */
+
+    /* Tipo — 7 degraus, razão ~1.2. Antes eram 33 valores, dez deles
+       entre 0.64rem e 0.82rem, separados por 0.02rem (0,32px): abaixo
+       do limiar de percepção, então não eram hierarquia, eram ruído.
+       Toda aquela banda colapsa em --zl-fs-1 e --zl-fs-2. */
+    --zl-fs-1: 0.75rem;      /* 12px — metadado, eyebrow, contador */
+    --zl-fs-2: 0.875rem;     /* 14px — rótulo, texto secundário */
+    --zl-fs-3: 1rem;         /* 16px — corpo */
+    --zl-fs-4: 1.125rem;     /* 18px — destaque, título de cartão */
+    --zl-fs-5: 1.375rem;     /* 22px — título de seção */
+    --zl-fs-6: 1.75rem;      /* 28px — título de página */
+    --zl-fs-7: 2.25rem;      /* 36px — figura grande (zl-comp) */
+
+    /* Espaço — base 4px. Não existia nenhum token: o ritmo vertical
+       vinha de utilitário Bootstrap misturado com rem decidido no
+       componente, e por isso nenhum bloco respirava no mesmo múltiplo. */
+    --zl-space-1: 0.25rem;   /*  4px */
+    --zl-space-2: 0.5rem;    /*  8px */
+    --zl-space-3: 0.75rem;   /* 12px */
+    --zl-space-4: 1rem;      /* 16px */
+    --zl-space-5: 1.5rem;    /* 24px */
+    --zl-space-6: 2rem;      /* 32px */
+    --zl-space-7: 3rem;      /* 48px */
+
+    /* Raio — TRÊS, sem exceção. Eram 15, com nove "médios" entre
+       0.25rem e 0.85rem, porque a regra anterior mandava "seguir os
+       valores vizinhos do componente" e cada vizinho ajustava um
+       pouco. A deriva nunca fechava. */
+    --zl-radius-sm: 0.5rem;    /* controle: botão, input, chip retangular */
+    --zl-radius-md: 0.75rem;   /* superfície: card, modal, painel */
+    --zl-radius-pill: 999px;   /* pílula: badge, chip de status */
+
+    /* Elevação — TRÊS alturas, porque só existem três: o que está na
+       página, o que está levantado e o que está por cima de tudo.
+       Com ~20 sombras diferentes a elevação não conseguia dizer o que
+       está sobre o quê. No tema claro a separação é do FIO
+       (--zelo-line), não da sombra: ver E-07. */
+    --zl-elev-0: none;
+    --zl-elev-1: 0 1px 2px rgba(16, 18, 28, 0.06);
+    --zl-elev-2: 0 10px 24px rgba(16, 18, 28, 0.12);
+
     /* mapeamento Bootstrap → Zelo */
     --bs-body-font-family: var(--zelo-font-body);
     --bs-primary: #2B2F36;
@@ -99,9 +151,9 @@
     bottom: 0;
     width: 100%;
     box-sizing: border-box;
-    border-radius: .55rem;
+    border-radius: var(--zl-radius-md);
     color: var(--bs-white);
-    box-shadow: 0 .6rem 1.4rem rgba(0, 0, 0, .28);
+    box-shadow: var(--zl-elev-2);
     transform-origin: bottom right;
     transition: transform .35s cubic-bezier(.22, 1, .36, 1), opacity .3s ease;
     will-change: transform, opacity;
@@ -132,8 +184,8 @@
 }
 
 .toast-stack .stk-body {
-    padding: .85rem 2.3rem .85rem 1rem;
-    font-size: 1rem;
+    padding: var(--zl-space-3) var(--zl-space-6) var(--zl-space-3) var(--zl-space-4);
+    font-size: var(--zl-fs-3);
     line-height: 1.3;
 }
 
@@ -141,12 +193,12 @@
     position: absolute;
     top: .3rem;
     right: .4rem;
-    padding: .1rem .4rem;
+    padding: var(--zl-space-1) var(--zl-space-2);
     border: 0;
     background: transparent;
     color: inherit;
     opacity: .75;
-    font-size: 1.15rem;
+    font-size: var(--zl-fs-4);
     line-height: 1;
     cursor: pointer;
 }
@@ -186,6 +238,20 @@
 
     --zelo-fab-bg: #343A40;
     --zelo-fab-hover: #424A52;
+
+    /* Elevação no escuro: a sombra clara do tema light desaparece sobre
+       superfície escura, então precisa de mais peso. Tipo e espaço não
+       mudam por tema; raio também não. Só a elevação. */
+    --zl-elev-1: 0 1px 2px rgba(0, 0, 0, 0.40);
+    --zl-elev-2: 0 12px 28px rgba(0, 0, 0, 0.55);
+
+    /* E-07 no escuro: chão e superfície levantada em tons distintos. No escuro
+       a peça levantada é MAIS CLARA que o chão (o oposto do claro), então aqui
+       o cartão é --zelo-mist e o chão é --zelo-paper — que no escuro é o tom
+       mais fundo. Os *-soft de status seguem misturando sobre --zelo-paper. */
+    --bs-body-bg: var(--zelo-paper);
+    --bs-body-bg-rgb: 15, 17, 21;
+    --bs-card-bg: var(--zelo-mist);
 
     --bs-primary: #AEB6C0;
     --bs-primary-rgb: 174, 182, 192;
@@ -294,10 +360,28 @@
     --bs-btn-disabled-border-color: #B23A33;
 }
 
+/* Controles leem a paleta Zelo diretamente. O Bootstrap já troca seus tokens
+   globais por tema, mas estes valores deixam o componente independente da
+   paleta paralela que existia no antigo remendo escuro. */
+.form-control,
+.form-select {
+    background-color: var(--zelo-paper);
+    border-color: var(--zelo-line);
+    color: var(--zelo-ink);
+}
+
+.input-group-text {
+    background-color: var(--zelo-mist);
+    border-color: var(--zelo-line);
+    color: var(--zelo-slate);
+}
+
 /* foco de inputs em grafite (remove o glow azul estático do Bootstrap) */
 .form-control:focus,
 .form-select:focus {
+    background-color: var(--zelo-paper);
     border-color: var(--bs-primary);
+    color: var(--zelo-ink);
     box-shadow: 0 0 0 0.2rem rgba(var(--bs-primary-rgb), 0.18);
 }
 
@@ -317,9 +401,9 @@ h1, h2, .h1, .h2 {
     inset-block-start: 0.75rem;
     inset-inline-start: 0.75rem;
     z-index: 1100;
-    padding: 0.65rem 0.9rem;
+    padding: var(--zl-space-3) var(--zl-space-4);
     border: 2px solid var(--zelo-graphite);
-    border-radius: 0.5rem;
+    border-radius: var(--zl-radius-sm);
     background: var(--zelo-paper);
     color: var(--zelo-ink);
     font-weight: 600;
@@ -354,23 +438,6 @@ h1, h2, .h1, .h2 {
     border: 1px solid rgba(33, 37, 41, 0.15);
 }
 
-.menu-button,
-.sidebar-toggle-menu {
-    color: #2f343a;
-}
-
-.menu-button:focus-visible,
-.sidebar-toggle-menu:focus-visible,
-.navbar-toggler:focus-visible {
-    outline: 2px solid var(--bs-primary);
-    outline-offset: 2px;
-}
-
-[data-bs-theme="dark"] .menu-button,
-[data-bs-theme="dark"] .sidebar-toggle-menu {
-    color: #e9ecef;
-}
-
 .navbar {
     position: sticky;
     top: 0;
@@ -378,32 +445,101 @@ h1, h2, .h1, .h2 {
     transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
 }
 
-body.navbar-hidden .navbar {
-    transform: translateY(calc(-100% - 6px));
-    opacity: 0.96;
-    pointer-events: none;
-}
-
 :root {
     --sidebar-width: 225px;
     --sidebar-collapsed-width: 54px;
     --navbar-height: 72px;
-    --sidebar-top-padding: calc(var(--navbar-height) + 1rem);
-    --sidebar-top-padding-hidden-nav: 0.7rem;
+    --sidebar-top-padding: calc(var(--navbar-height) + var(--zl-space-4));
+    --sidebar-top-padding-hidden-nav: var(--zl-space-3);
     --sidebar-transition: 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Substitui os fundos padrão do Bootstrap (levemente amarelados em certos monitores)
    por tons frios e neutros, padrão em sites modernos como GitHub e Stripe */
 [data-bs-theme="light"] {
-    --bs-body-bg: #ffffff;
-    --bs-body-bg-rgb: 255, 255, 255;
-    --bs-secondary-bg: #f0f3f7;
+    /* E-07 — convicção de superfície. O Bootstrap declara
+       `--bs-card-bg: var(--bs-body-bg)`: cartão e fundo da página saem da
+       MESMA variável. Com o corpo em #ffffff o resultado era papel branco
+       sobre papel branco, separado só por uma sombra difusa que quase não
+       aparece — e é daí que vinha a sensação de página lavada, em que tudo
+       flutua e nada é superfície.
+       Agora o chão da página é --zelo-mist e o cartão é --zelo-paper: a
+       separação passa a ser ESTRUTURAL (dois tons + fio), não atmosférica
+       (sombra). O tema escuro já fazia isso e por isso lia melhor. */
+    --bs-body-bg: var(--zelo-mist);
+    --bs-body-bg-rgb: 245, 246, 248;
+    --bs-secondary-bg: color-mix(in srgb, var(--zelo-ink) 3%, var(--zelo-mist));
     --bs-secondary-bg-rgb: 240, 243, 247;
-    --bs-tertiary-bg: #f6f8fb;
+    --bs-tertiary-bg: color-mix(in srgb, var(--zelo-paper) 35%, var(--zelo-mist));
     --bs-tertiary-bg-rgb: 246, 248, 251;
-    --bs-border-color: #d0d7de;
+    --bs-border-color: var(--zelo-line);
     --bs-border-color-translucent: rgba(31, 35, 40, 0.15);
+
+    /* o cartão deixa de herdar o fundo do corpo */
+    --bs-card-bg: var(--zelo-paper);
+}
+
+/* Superfícies levantadas: fio + elevação da escala, nos dois temas. A sombra
+   do Bootstrap (.shadow-sm) lê variável, ao contrário das variantes de botão,
+   então remapear aqui alcança os 30 usos nos templates sem tocar em markup. */
+:root {
+    --bs-box-shadow-sm: var(--zl-elev-1);
+    --bs-box-shadow: var(--zl-elev-2);
+    --bs-border-radius: var(--zl-radius-md);
+    --bs-border-radius-sm: var(--zl-radius-sm);
+    --bs-border-radius-lg: var(--zl-radius-md);
+    --bs-border-radius-pill: var(--zl-radius-pill);
+}
+
+/* ATENÇÃO — mesma armadilha do R-01, terceira ocorrência. O Bootstrap declara
+   `--bs-card-bg: var(--bs-body-bg)` DENTRO da regra `.card`, então definir
+   --bs-card-bg no :root é sombreado pela declaração mais próxima e não tem
+   efeito nenhum. Medido: com o token só no :root, cartão (#f5f6f8) e chão
+   (#f3f4f6) continuavam no mesmo tom.
+   Regra geral: variável que o Bootstrap declara no COMPONENTE tem de ser
+   redeclarada no componente. No :root só funciona o que ele lê de lá. */
+.card {
+    --bs-card-bg: var(--zelo-paper);
+    --bs-card-border-color: var(--zelo-line);
+    /* cabeçalho no mesmo papel do corpo: quem separa é o fio, não um segundo
+       tom. Dois tons dentro do mesmo cartão competiam com a separação real,
+       que é cartão × chão. */
+    --bs-card-cap-bg: transparent;
+}
+
+[data-bs-theme="dark"] .card {
+    --bs-card-bg: var(--zelo-mist);
+}
+
+/* Quarta ocorrência da armadilha (btn-outline, card, card-header e agora
+   table): o Bootstrap declara `--bs-table-bg: var(--bs-body-bg)` DENTRO de
+   `.table`. Toda tabela pintava o chão da PÁGINA por cima da superfície em que
+   está. Ficava invisível enquanto o corpo era branco; ao dar tom ao chão
+   (E-07), cada tabela virou um retângulo cinza dentro de um cartão branco.
+   Transparente é o certo: a tabela mostra a superfície que a sustenta. */
+.table {
+    --bs-table-color: var(--zelo-ink);
+    --bs-table-bg: transparent;
+    --bs-table-border-color: var(--zelo-line);
+}
+
+/* `table-light` também declara a paleta dentro do componente no Bootstrap.
+   A mistura parte dos tokens de cada tema e mantém o cabeçalho destacado sem
+   uma segunda coleção de cinzas codificada à mão. */
+.table-light {
+    --bs-table-color: var(--zelo-slate);
+    --bs-table-bg: color-mix(in srgb, var(--zelo-ink) 6%, var(--zelo-mist));
+    --bs-table-border-color: var(--zelo-line);
+    --bs-table-striped-color: var(--zelo-ink);
+    --bs-table-striped-bg: color-mix(in srgb, var(--zelo-ink) 9%, var(--zelo-mist));
+    --bs-table-active-color: var(--zelo-ink);
+    --bs-table-active-bg: color-mix(in srgb, var(--zelo-ink) 12%, var(--zelo-mist));
+    --bs-table-hover-color: var(--zelo-ink);
+    --bs-table-hover-bg: color-mix(in srgb, var(--zelo-ink) 9%, var(--zelo-mist));
+}
+
+.card-header .text-dark {
+    color: var(--zelo-ink) !important;
 }
 
 html, body {
@@ -420,6 +556,28 @@ main {
     flex: 1;
 }
 
+/* ══════════════════════════════════════════════════════════════
+   BARRA LATERAL (Onda 2 — A-01, A-03, A-06..A-09, R-02)
+
+   Três estados, e o padrão do desktop MUDOU:
+     ≥1200px  aberta   (era o rail — a NN/g mediu queda de quase
+                        metade na descoberta com nav escondida)
+     901–1199 rail 64px (espaço apertado; o rótulo sai da tela mas
+                        FICA na árvore de acessibilidade)
+     <901px   off-canvas, com a navbar móvel como gatilho
+
+   O item ativo é marcado por RÉGUA DUPLA preenchida: a mesma régua
+   de fechamento de coluna contábil do .zl-ficha-row.is-total, que é
+   o vocabulário que este projeto inventou. Antes o ativo era só
+   --bs-primary-bg-subtle sobre branco: 1.16:1, invisível (R-02).
+   ══════════════════════════════════════════════════════════════ */
+:root {
+    --sidebar-width: 248px;
+    --sidebar-rail: 64px;
+    --sidebar-transition: 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    --navbar-height: 0px;
+}
+
 .page-content {
     display: flex;
     flex-direction: column;
@@ -432,8 +590,8 @@ main {
 
 .sidebar-backdrop {
     position: fixed;
-    inset: var(--navbar-height) 0 0 0;
-    background: rgba(0, 0, 0, 0.28) !important;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.32);
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--sidebar-transition);
@@ -445,360 +603,296 @@ main {
     left: 0;
     top: 0;
     bottom: 0;
-    width: var(--sidebar-width);
-    padding: var(--sidebar-top-padding) 0.75rem 1rem;
-    border-right: 1px solid var(--bs-border-color);
-    background-color: var(--bs-body-bg);
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.09);
-    transform: translateX(calc(var(--sidebar-width) * -1));
-    transition: transform var(--sidebar-transition), padding-top var(--sidebar-transition);
     z-index: 1035;
-    overflow-y: auto;
+    width: var(--sidebar-width);
     display: flex;
     flex-direction: column;
+    background: var(--bs-card-bg);
+    border-right: 1px solid var(--zelo-line);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    transition: width var(--sidebar-transition), transform var(--sidebar-transition);
 }
 
-body.navbar-hidden .app-sidebar {
-    padding-top: var(--sidebar-top-padding-hidden-nav);
-}
-
-.sidebar-header {
+/* ---- marca: é o atalho para a página inicial ---- */
+.sidebar-marca {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.35rem 0.4rem 1rem;
-    border-bottom: 1px solid var(--bs-border-color-translucent);
-    transition: padding-top var(--sidebar-transition);
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-4) var(--zl-space-3);
+    text-decoration: none;
+    color: var(--zelo-ink);
+    border-bottom: 1px solid var(--zelo-line);
+    min-height: 60px;
 }
 
-.sidebar-toggle-menu {
-    margin-left: auto;
-    width: 36px;
-    height: 36px;
-    border-radius: 0.55rem;
-    padding: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--bs-body-color);
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(-2px);
-    transition: opacity var(--sidebar-transition), transform var(--sidebar-transition), background-color var(--sidebar-transition);
-}
+.sidebar-marca:hover .sidebar-title { color: var(--zelo-ink); }
+.sidebar-marca:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: -2px; }
 
-.sidebar-toggle-menu:hover {
-    background: var(--bs-tertiary-bg);
-    color: var(--bs-emphasis-color);
-}
-
-body.navbar-hidden.sidebar-open .sidebar-toggle-menu {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateY(0);
-}
-
-.sidebar-logo {
-    width: 44px;
-    height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-
+/* O carimbo tem fundo próprio (#16181C) e no tema escuro ele encosta na cor da
+   barra (#16191D). Um anel de 1px em --zelo-line devolve a borda do selo sem
+   precisar de um segundo arquivo por tema. */
 .sidebar-logo-img {
-    width: 36px;
-    height: 36px;
+    width: 30px;
+    height: 30px;
+    flex: none;
+    border-radius: var(--zl-radius-sm);
     object-fit: contain;
+}
+
+[data-bs-theme="dark"] .sidebar-logo-img {
+    box-shadow: 0 0 0 1px var(--zelo-line);
 }
 
 .sidebar-title {
     font-family: var(--zelo-font-display);
-    font-size: 1.15rem;
+    font-size: var(--zl-fs-4);
     font-weight: 600;
     letter-spacing: 0.04em;
-    color: var(--bs-emphasis-color);
     line-height: 1;
+    color: var(--zelo-ink);
 }
 
+/* ---- navegação ---- */
 .sidebar-nav {
+    flex: 1;
+    padding: var(--zl-space-2) var(--zl-space-2) var(--zl-space-2) 0;
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
-    padding-top: 1rem;
-    flex: 1;
+    gap: 1px;
 }
 
-.sidebar-nav-footer {
-    margin-top: auto;
-    padding-top: 0.5rem;
-    border-top: 1px solid var(--bs-border-color-translucent);
+.sidebar-grupo {
+    font-family: var(--zelo-font-mono);
+    font-size: var(--zl-fs-1);
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--zelo-slate);
+    margin: var(--zl-space-4) 0 var(--zl-space-1);
+    padding: 0 var(--zl-space-3) var(--zl-space-1);
+    border-bottom: 1px solid var(--zelo-line);
 }
 
 .sidebar-link {
-    position: relative;
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.7rem 0.75rem;
-    color: var(--bs-body-color);
+    gap: var(--zl-space-3);
+    min-height: 44px;                        /* A-09: era 38px */
+    padding: 0 var(--zl-space-3);
+    color: var(--zelo-ink);
     text-decoration: none;
-    border-radius: 0.65rem;
-    border: 1px solid transparent;
-    font-weight: 500;
-    transition: background-color var(--sidebar-transition), border-color var(--sidebar-transition), color var(--sidebar-transition), transform var(--sidebar-transition);
+    font-size: var(--zl-fs-2);
+    border-radius: 0 var(--zl-radius-sm) var(--zl-radius-sm) 0;
+    border-left: 2px solid transparent;
+    transition: background-color var(--sidebar-transition), border-color var(--sidebar-transition);
 }
 
 .sidebar-link i {
-    width: 1.35rem;
-    min-width: 1.35rem;
+    width: 1.25rem;
+    min-width: 1.25rem;
     text-align: center;
-    font-size: 1.12rem;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
+    font-size: var(--zl-fs-4);
+    color: var(--zelo-slate);
+    flex: none;
 }
 
 .sidebar-link:hover {
-    background: var(--bs-tertiary-bg);
-    border-color: var(--bs-border-color-translucent);
-    color: var(--bs-emphasis-color);
-    transform: translateX(2px);
+    background: var(--bs-body-bg);
+    border-left-color: var(--zelo-line);
 }
+.sidebar-link:hover i { color: var(--zelo-ink); }
 
+/* A RÉGUA DUPLA, preenchida. Três faixas empilhadas por box-shadow:
+   tinta (0–2px) · vão na cor do preenchimento (2–4px) · tinta (4–6px).
+   `border-left: double` não serve: em 3px o navegador desenha 1-1-1 e
+   some no antialiasing. O raio é só à direita, para a régua encostar
+   na margem como linha de razão. */
 .sidebar-link.active {
-    background: var(--bs-primary-bg-subtle);
-    color: var(--bs-primary-text-emphasis);
-    border-color: var(--bs-primary-border-subtle);
+    /* O preenchimento tem de ser PERCEPTIVEL, senao repete o defeito que este
+       trabalho conserta: o ativo antigo era --bs-primary-bg-subtle sobre branco,
+       1.16:1. Usar --zelo-mist aqui dava 1.08:1 contra a barra — invisivel, e a
+       regua ficava carregando o sinal sozinha. Uma pitada de tinta sobre a
+       propria superficie da barra da um degrau que se ve sem gritar.
+       O VAO da regua usa o mesmo token: se divergir, as duas linhas deixam de
+       ler como regua dupla e viram uma barra grossa. */
+    --zl-sel-bg: color-mix(in srgb, var(--zelo-ink) 10%, var(--bs-card-bg));
+    background: var(--zl-sel-bg);
+    font-weight: 600;
+    border-left-color: transparent;
+    box-shadow:
+        inset 2px 0 0 0 var(--zelo-ink),
+        inset 4px 0 0 0 var(--zl-sel-bg),
+        inset 6px 0 0 0 var(--zelo-ink);
 }
 
-.sidebar-link.active::before {
-    content: "";
-    position: absolute;
-    inset-block: 0.35rem;
-    inset-inline-start: 0;
-    width: 3px;
-    border-radius: 999px;
-    background: var(--zelo-graphite);
-}
+.sidebar-link.active i { color: var(--zelo-ink); }
 
 .sidebar-link:focus-visible {
     outline: 2px solid var(--bs-primary);
-    outline-offset: 3px;
+    outline-offset: -2px;
 }
 
-body.sidebar-open .app-sidebar {
-    width: var(--sidebar-width);
-    transform: translateX(0);
+/* ---- rodapé: usuário, tema, sair, recolher ---- */
+.sidebar-pe {
+    border-top: 1px solid var(--zelo-line);
+    padding: var(--zl-space-2);
+    margin-top: auto;
 }
 
-body.navbar-hidden.sidebar-open .app-sidebar {
-    padding-top: var(--sidebar-top-padding-hidden-nav);
+.sidebar-usuario {
+    display: flex;
+    align-items: center;
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-2);
+    border-radius: var(--zl-radius-sm);
+    min-width: 0;
 }
 
-body.sidebar-open .page-content {
-    margin-left: var(--sidebar-width);
-    width: calc(100% - var(--sidebar-width));
+.sidebar-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--zl-radius-pill);
+    background: var(--bs-body-bg);
+    border: 1px solid var(--zelo-line);
+    display: grid;
+    place-items: center;
+    font-family: var(--zelo-font-mono);
+    font-size: var(--zl-fs-1);
+    color: var(--zelo-slate);
+    flex: none;
 }
 
-body.sidebar-open .sidebar-backdrop {
-    opacity: 1;
-    pointer-events: auto;
+.sidebar-quem { min-width: 0; line-height: 1.2; }
+
+.sidebar-nome {
+    display: block;
+    font-size: var(--zl-fs-2);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-@media (min-width: 901px) {
-    body.sidebar-open .sidebar-backdrop {
-        opacity: 0;
-        pointer-events: none;
-    }
+.sidebar-papel {
+    display: block;
+    font-family: var(--zelo-font-mono);
+    font-size: var(--zl-fs-1);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--zelo-slate);
 }
 
-.app-main {
-    width: 100%;
-    max-width: 1394px;
-    margin-left: auto;
-    margin-right: auto;
-    padding-left: 1rem !important;
-    padding-right: 1rem !important;
+.sidebar-acoes { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+
+.sidebar-mini {
+    width: 32px;
+    height: 32px;
+    border: 0;
+    background: transparent;
+    border-radius: var(--zl-radius-sm);
+    color: var(--zelo-slate);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    padding: 0;
 }
 
-@media (min-width: 901px) {
-    .app-main {
-        padding-left: 1.25rem !important;
-        padding-right: 1.25rem !important;
-    }
-}
+.sidebar-mini:hover { background: var(--bs-body-bg); color: var(--zelo-ink); }
+.sidebar-mini:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 1px; }
 
+/* ---- navbar: só no mobile ---- */
+.navbar-movel {
+    display: none;
+    position: sticky;
+    top: 0;
+    z-index: 1045;
+    background: var(--bs-card-bg);
+    border-bottom: 1px solid var(--zelo-line);
+    min-height: 56px;
+}
+/* ══════════ ≥1200px — ABERTA por padrão (A-01) ══════════ */
 @media (min-width: 1200px) {
-    .app-main {
-        padding-left: 1.5rem !important;
-        padding-right: 1.5rem !important;
+    .page-content { margin-left: var(--sidebar-width); width: calc(100% - var(--sidebar-width)); }
+    .sidebar-backdrop { display: none; }
+
+    /* recolher é ESCOLHA do operador, não o padrão */
+    body.sidebar-rail .app-sidebar { width: var(--sidebar-rail); }
+    body.sidebar-rail .page-content {
+        margin-left: var(--sidebar-rail);
+        width: calc(100% - var(--sidebar-rail));
     }
 }
 
+/* ══════════ 901–1199px — rail ══════════ */
+@media (min-width: 901px) and (max-width: 1199px) {
+    .app-sidebar { width: var(--sidebar-rail); }
+    .page-content { margin-left: var(--sidebar-rail); width: calc(100% - var(--sidebar-rail)); }
+    .sidebar-backdrop { display: none; }
 
-@media (min-width: 901px) {
-    .app-sidebar {
-        width: var(--sidebar-collapsed-width);
-        transform: translateX(0);
-        padding: calc(var(--navbar-height) + 1rem) 0.2rem 1rem;
-    }
-
-    .page-content {
-        margin-left: var(--sidebar-collapsed-width);
-        width: calc(100% - var(--sidebar-collapsed-width));
-    }
-
-    .sidebar-header {
-        position: relative;
-        flex-direction: row;
-        justify-content: center;
-        gap: 0;
-        padding: 0.4rem 0.1rem 0.9rem;
-    }
-
-    body:not(.sidebar-open) .sidebar-header > div:nth-child(2) {
-        display: none;
-    }
-
-    .sidebar-logo {
-        width: 36px;
-        height: 36px;
-    }
-
-    .sidebar-logo-img {
-        width: 28px;
-        height: 28px;
-    }
-
-    .sidebar-link span {
-        display: none;
-    }
-
-    .sidebar-toggle-menu {
-        display: none;
-    }
-
-    body.navbar-hidden:not(.sidebar-open) .sidebar-header {
-        padding-top: 2.25rem;
-    }
-
-    body.navbar-hidden:not(.sidebar-open) .sidebar-logo {
-        margin-top: 0.5rem;
-    }
-
-    body:not(.navbar-hidden):not(.sidebar-open) .sidebar-logo {
-        margin-top: 0;
-    }
-
-    body.navbar-hidden:not(.sidebar-open) .sidebar-toggle-menu {
-        display: inline-flex;
-        position: absolute;
-        top: 0.05rem;
-        left: 50%;
-        margin-left: 0;
-        transform: translateX(-50%);
-        opacity: 1;
-        pointer-events: auto;
-    }
-
-    .sidebar-nav {
-        align-items: center;
-        padding-top: 1rem;
-    }
-
-    .sidebar-nav-footer {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-    }
-
-    .sidebar-link {
-        justify-content: center;
-        width: 38px;
-        height: 38px;
-        padding: 0;
-        margin: 0 auto;
-        border-radius: 0.7rem;
-        transform: none;
-    }
-
-    .sidebar-link:hover {
-        transform: none;
-    }
-
-    body.sidebar-open .app-sidebar {
-        width: var(--sidebar-width);
-        padding: var(--sidebar-top-padding) 0.75rem 1rem;
-    }
-
+    body.sidebar-open .app-sidebar { width: var(--sidebar-width); }
     body.sidebar-open .page-content {
         margin-left: var(--sidebar-width);
         width: calc(100% - var(--sidebar-width));
     }
+}
 
-    body.sidebar-open .sidebar-header {
-        flex-direction: row;
-        justify-content: flex-start;
-        gap: 0.75rem;
-        padding: 0.35rem 0.4rem 1rem;
+/* ---- aparência do rail (vale nas duas faixas em que ele existe) ----
+   O rótulo sai da TELA mas permanece na árvore de acessibilidade: com
+   `display: none` o leitor de tela perdia o nome do item e sobrava só o
+   atributo title, que é o jeito mais fraco de nomear (A-03). */
+@media (min-width: 901px) and (max-width: 1199px) {
+    body:not(.sidebar-open) .sidebar-rotulo,
+    body:not(.sidebar-open) .sidebar-grupo,
+    body:not(.sidebar-open) .sidebar-title,
+    body:not(.sidebar-open) .sidebar-quem { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    body:not(.sidebar-open) .sidebar-grupo { border: 0; margin: var(--zl-space-2) 0; }
+    body:not(.sidebar-open) .sidebar-link { justify-content: center; padding: 0; }
+    body:not(.sidebar-open) .sidebar-marca { justify-content: center; padding: var(--zl-space-3) 0; }
+    body:not(.sidebar-open) .sidebar-usuario { justify-content: center; padding: var(--zl-space-1); }
+    /* As acoes NAO somem no rail: sem elas o operador recolhe e fica preso —
+       sem voltar a expandir, sem trocar tema e sem sair, ja que a navbar
+       deixou de existir no desktop. Empilham em coluna, que cabe nos 64px. */
+    body:not(.sidebar-open) .sidebar-usuario { flex-direction: column; gap: var(--zl-space-1); }
+    body:not(.sidebar-open) .sidebar-acoes { margin: 0; flex-direction: column; }
+}
+
+@media (min-width: 1200px) {
+    body.sidebar-rail .sidebar-rotulo,
+    body.sidebar-rail .sidebar-grupo,
+    body.sidebar-rail .sidebar-title,
+    body.sidebar-rail .sidebar-quem { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    body.sidebar-rail .sidebar-grupo { border: 0; margin: var(--zl-space-2) 0; }
+    body.sidebar-rail .sidebar-link { justify-content: center; padding: 0; }
+    body.sidebar-rail .sidebar-marca { justify-content: center; padding: var(--zl-space-3) 0; }
+    body.sidebar-rail .sidebar-usuario { justify-content: center; padding: var(--zl-space-1); }
+    /* As acoes NAO somem no rail: sem elas o operador recolhe e fica preso —
+       sem voltar a expandir, sem trocar tema e sem sair, ja que a navbar
+       deixou de existir no desktop. Empilham em coluna, que cabe nos 64px. */
+    body.sidebar-rail .sidebar-usuario { flex-direction: column; gap: var(--zl-space-1); }
+    body.sidebar-rail .sidebar-acoes { margin: 0; flex-direction: column; }
+    body.sidebar-rail .sidebar-recolher i { transform: rotate(180deg); }
+}
+
+/* ══════════ <901px — off-canvas ══════════ */
+@media (max-width: 900px) {
+    :root { --sidebar-width: min(84vw, 300px); }
+
+    .navbar-movel { display: block; }
+
+    .app-sidebar {
+        width: var(--sidebar-width);
+        transform: translateX(-100%);
     }
+    body.sidebar-open .app-sidebar { transform: translateX(0); }
+    body.sidebar-open .sidebar-backdrop { opacity: 1; pointer-events: auto; }
+    body.sidebar-open { overflow: hidden; }
+    .page-content { margin-left: 0; width: 100%; }
+    .sidebar-recolher { display: none; }
+}
 
-    body.navbar-hidden.sidebar-open .sidebar-header {
-        padding-top: 0.1rem;
-    }
-
-    body.sidebar-open .sidebar-toggle-menu {
-        display: inline-flex;
-        opacity: 0;
-        pointer-events: none;
-    }
-
-    body.navbar-hidden.sidebar-open .sidebar-toggle-menu {
-        opacity: 1;
-        pointer-events: auto;
-    }
-
-    body.sidebar-open .sidebar-header > div:nth-child(2) {
-        display: block;
-    }
-
-    body.sidebar-open .sidebar-logo {
-        width: 44px;
-        height: 44px;
-    }
-
-    body.sidebar-open .sidebar-logo-img {
-        width: 36px;
-        height: 36px;
-    }
-
-    body.sidebar-open .sidebar-link span {
-        display: inline;
-    }
-
-    body.sidebar-open .sidebar-nav {
-        align-items: stretch;
-    }
-
-    body.sidebar-open .sidebar-nav-footer {
-        align-items: stretch;
-    }
-
-    body.sidebar-open .sidebar-link {
-        justify-content: flex-start;
-        width: 100%;
-        height: auto;
-        padding: 0.7rem 0.75rem;
-        border-radius: 0.65rem;
-    }
-
+@media (min-width: 901px) {
     /* garante que tabelas largas nunca ultrapassem o sidebar */
-    .table-responsive {
-        overflow-x: auto;
-    }
+    .table-responsive { overflow-x: auto; }
 }
 
 body.sidebar-preload .page-content,
@@ -823,7 +917,7 @@ footer {
 }
 .batch-summary-modal {
     border: 1px solid var(--bs-border-color-translucent);
-    border-radius: 0.85rem;
+    border-radius: var(--zl-radius-md);
 }
 
 .modal-dialog.modal-shake {
@@ -858,7 +952,7 @@ footer {
 
 .batch-action-modal {
     border: 1px solid var(--bs-border-color-translucent);
-    border-radius: 0.85rem;
+    border-radius: var(--zl-radius-md);
 }
 
 .batch-modal-intro {
@@ -867,7 +961,7 @@ footer {
 }
 
 .batch-modal-footer {
-    gap: 0.45rem;
+    gap: var(--zl-space-2);
 }
 
 /* Botao secundario "preenchido" (soft) para a acao "Emitir apenas esta":
@@ -931,35 +1025,35 @@ footer {
 .zl-comp-fig {
     display: flex;
     align-items: baseline;
-    gap: 0.15rem;
+    gap: var(--zl-space-1);
     line-height: 1;
 }
 
 .zl-comp-n {
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 2.4rem;
+    font-size: var(--zl-fs-7);
     font-weight: 500;
     color: var(--bs-emphasis-color);
 }
 
 .zl-comp-d {
     font-family: var(--zelo-font-mono);
-    font-size: 1.1rem;
+    font-size: var(--zl-fs-4);
     color: var(--bs-secondary-color);
 }
 
 .zl-comp-u {
     margin-left: auto;
-    font-size: 0.8rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
 }
 
 .zl-comp-bar {
     display: flex;
     height: 0.5rem;
-    margin-top: 0.65rem;
-    border-radius: 999px;
+    margin-top: var(--zl-space-3);
+    border-radius: var(--zl-radius-pill);
     background: var(--zelo-line);
     overflow: hidden;
 }
@@ -1000,15 +1094,15 @@ footer {
 .zl-comp-leg {
     display: flex;
     flex-wrap: wrap;
-    gap: 1rem;
-    margin-top: 0.8rem;
+    gap: var(--zl-space-4);
+    margin-top: var(--zl-space-3);
 }
 
 .zl-comp-stat {
     display: flex;
     align-items: baseline;
-    gap: 0.4rem;
-    font-size: 0.82rem;
+    gap: var(--zl-space-2);
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
 }
 
@@ -1016,7 +1110,7 @@ footer {
     content: "";
     width: 0.5rem;
     height: 0.5rem;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     background: var(--zelo-muted);
 }
 
@@ -1042,23 +1136,23 @@ footer {
 .zl-comp-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 1.6rem;
-    margin-top: 1rem;
-    padding-top: 0.8rem;
+    gap: var(--zl-space-5);
+    margin-top: var(--zl-space-4);
+    padding-top: var(--zl-space-3);
     border-top: 1px solid var(--zelo-line);
 }
 
 .zl-comp-meta > div {
-    font-size: 0.78rem;
+    font-size: var(--zl-fs-1);
     color: var(--bs-secondary-color);
 }
 
 .zl-comp-meta b {
     display: block;
-    margin-top: 0.1rem;
+    margin-top: var(--zl-space-1);
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 1rem;
+    font-size: var(--zl-fs-3);
     font-weight: 600;
     color: var(--bs-emphasis-color);
 }
@@ -1072,25 +1166,25 @@ footer {
     display: grid;
     grid-template-columns: 8.5rem 1fr 3rem;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.3rem 0;
+    gap: var(--zl-space-3);
+    padding: var(--zl-space-1) 0;
 }
 
 .zl-bars-l {
-    font-size: 0.875rem;
+    font-size: var(--zl-fs-2);
 }
 
 .zl-bars-dot {
     display: inline-block;
     width: 0.55rem;
     height: 0.55rem;
-    margin-right: 0.4rem;
-    border-radius: 999px;
+    margin-right: var(--zl-space-2);
+    border-radius: var(--zl-radius-pill);
 }
 
 .zl-bars-track {
     height: 0.55rem;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     background: var(--zelo-line);
     overflow: hidden;
 }
@@ -1098,19 +1192,19 @@ footer {
 .zl-bars-fill {
     display: block;
     height: 100%;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     min-width: 2px;
 }
 
 .zl-bars-v {
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 0.875rem;
+    font-size: var(--zl-fs-2);
     text-align: right;
 }
 
 @media (max-width: 575.98px) {
-    .zl-bars-row { grid-template-columns: 6.5rem 1fr 2.5rem; gap: 0.5rem; }
+    .zl-bars-row { grid-template-columns: 6.5rem 1fr 2.5rem; gap: var(--zl-space-2); }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1127,13 +1221,13 @@ footer {
     z-index: 1000;
     display: flex;
     align-items: center;
-    gap: 0.7rem;
-    padding: 0.55rem 0.7rem 0.55rem 0.85rem;
+    gap: var(--zl-space-3);
+    padding: var(--zl-space-2) var(--zl-space-3) var(--zl-space-2) var(--zl-space-3);
     border: 1px solid var(--zelo-line);
-    border-radius: 0.75rem;
+    border-radius: var(--zl-radius-md);
     background: var(--bs-body-bg);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
-    font-size: 0.82rem;
+    box-shadow: var(--zl-elev-2);
+    font-size: var(--zl-fs-2);
     transition: right .28s cubic-bezier(.4, 0, .2, 1);
 }
 
@@ -1175,7 +1269,7 @@ body.topo-visivel .zl-dock {
 .zl-dock-dot {
     width: 0.45rem;
     height: 0.45rem;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     background: var(--zelo-ok);
     flex: 0 0 auto;
     animation: batchPulse 1.6s ease-in-out infinite;
@@ -1198,12 +1292,12 @@ body.topo-visivel .zl-dock {
 
 @keyframes zlDockRecusa {
     0%, 100% {
-        box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
+        box-shadow: var(--zl-elev-2);
         border-color: var(--zelo-line);
     }
     15%, 45% {
         box-shadow: 0 0 0 4px color-mix(in srgb, var(--zelo-warn) 35%, transparent),
-                    0 6px 18px rgba(0, 0, 0, .12);
+                    var(--zl-elev-2);
         border-color: var(--zelo-warn);
     }
 }
@@ -1212,7 +1306,7 @@ body.topo-visivel .zl-dock {
    que momento a tela está — "Emissão em lote", "Lote concluído", "Confirmar". */
 .zl-eyebrow {
     display: block;
-    font-size: 0.68rem;
+    font-size: var(--zl-fs-1);
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--bs-secondary-color);
@@ -1241,7 +1335,7 @@ body.topo-visivel .zl-dock {
    seguido — a margem separa os dois blocos sem dobrar a régua */
 .zl-comp + .zl-ficha,
 .zl-comp-leg + .zl-ficha {
-    margin-top: 1rem;
+    margin-top: var(--zl-space-4);
 }
 
 .zl-ficha-row {
@@ -1249,14 +1343,16 @@ body.topo-visivel .zl-dock {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
-    padding: 0.6rem 0 0.6rem 0.7rem;
+    gap: var(--zl-space-4);
+    padding: var(--zl-space-2) 0 var(--zl-space-2) var(--zl-space-3);
     border-bottom: 1px solid var(--zelo-line);
 }
 
-/* O fio de status na borda é a única cor da ficha — mesma escala das linhas da
-   tabela de certidões (td.cert-tipo-col::before), para "vencida" ter a mesma
-   cor aqui e lá. Linha sem classe de status não ganha fio nenhum. */
+/* O fio de status na borda é a única cor da ficha, na mesma escala de
+   --zelo-ok/-warn/-danger que a tabela de certidões usa, para "vencida" ter a
+   mesma cor aqui e lá. Linha sem classe de status não ganha fio nenhum.
+   (A linha da tabela deixou de ter fio próprio no E-09: lá o status é dito
+   pelo ícone e pela data, e três sinais para a mesma coisa competiam.) */
 .zl-ficha-row::before {
     content: "";
     position: absolute;
@@ -1264,7 +1360,7 @@ body.topo-visivel .zl-dock {
     top: 0.55rem;
     bottom: 0.55rem;
     width: 3px;
-    border-radius: 2px;
+    border-radius: var(--zl-radius-pill);
     background: transparent;
 }
 
@@ -1285,29 +1381,29 @@ body.topo-visivel .zl-dock {
 .zl-ficha-row.is-total {
     border-top: 2px solid var(--zelo-ink);
     border-bottom: none;
-    margin-top: 0.15rem;
-    padding-top: 0.75rem;
+    margin-top: var(--zl-space-1);
+    padding-top: var(--zl-space-3);
 }
 
 .zl-ficha-row.is-total .zl-ficha-l { font-weight: 600; }
-.zl-ficha-row.is-total .zl-ficha-v { font-size: 1.3rem; }
+.zl-ficha-row.is-total .zl-ficha-v { font-size: var(--zl-fs-5); }
 
 .zl-ficha-l {
-    font-size: 0.86rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-body-color);
 }
 
 .zl-ficha-v {
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 1.02rem;
+    font-size: var(--zl-fs-3);
     font-weight: 600;
     color: var(--bs-emphasis-color);
 }
 
 @media (max-width: 576px) {
     .zl-comp-leg {
-        gap: 0.75rem;
+        gap: var(--zl-space-3);
     }
 }
 
@@ -1325,21 +1421,21 @@ body.topo-visivel .zl-dock {
    deixar de dizer que está mal. */
 .vg-faixa {
     border: 1px solid var(--zelo-line);
-    border-radius: 0.65rem;
+    border-radius: var(--zl-radius-md);
     overflow: hidden;
     background: var(--bs-body-bg);
-    margin-bottom: 1.1rem;
+    margin-bottom: var(--zl-space-4);
 }
 
 .vg-faixa-h {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.6rem 0.95rem;
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-2) var(--zl-space-4);
     background: var(--zelo-danger-soft);
     color: var(--zelo-danger);
     font-weight: 600;
-    font-size: 0.86rem;
+    font-size: var(--zl-fs-2);
 }
 
 .vg-faixa-h.is-calmo {
@@ -1350,8 +1446,8 @@ body.topo-visivel .zl-dock {
 .vg-faixa-item {
     display: flex;
     align-items: center;
-    gap: 0.8rem;
-    padding: 0.6rem 0.95rem;
+    gap: var(--zl-space-3);
+    padding: var(--zl-space-2) var(--zl-space-4);
     color: inherit;
     text-decoration: none;
 }
@@ -1370,15 +1466,15 @@ body.topo-visivel .zl-dock {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
+    gap: var(--zl-space-1);
 }
 
 .vg-faixa-t {
-    font-size: 0.92rem;
+    font-size: var(--zl-fs-3);
 }
 
 .vg-faixa-s {
-    font-size: 0.78rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
 }
 
@@ -1390,7 +1486,7 @@ body.topo-visivel .zl-dock {
     text-align: right;
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 1.25rem;
+    font-size: var(--zl-fs-5);
     font-weight: 600;
     line-height: 1.1;
 }
@@ -1400,17 +1496,17 @@ body.topo-visivel .zl-dock {
 .vg-faixa-nomes {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.25rem 0.4rem;
-    margin-top: 0.15rem;
+    gap: var(--zl-space-1) var(--zl-space-2);
+    margin-top: var(--zl-space-1);
 }
 
 .vg-faixa-nome,
 .vg-faixa-mais {
-    font-size: 0.72rem;
+    font-size: var(--zl-fs-1);
     line-height: 1.5;
-    padding: 0 0.4rem;
+    padding: 0 var(--zl-space-2);
     border: 1px solid var(--zelo-line);
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     color: var(--bs-secondary-color);
     white-space: nowrap;
     max-width: 22ch;
@@ -1426,7 +1522,7 @@ body.topo-visivel .zl-dock {
 .vg-faixa-ir {
     flex: none;
     color: var(--bs-secondary-color);
-    font-size: 0.8rem;
+    font-size: var(--zl-fs-2);
 }
 
 /* ── 2. O mosaico ─────────────────────────────────────────────
@@ -1435,7 +1531,7 @@ body.topo-visivel .zl-dock {
    alta (uma linha por empresa). Grade uniforme desperdiça as duas. */
 .vg-mosaico {
     display: grid;
-    gap: 0.9rem;
+    gap: var(--zl-space-4);
     grid-template-columns: repeat(4, minmax(0, 1fr));
     grid-template-areas:
         "cert cert cert a1"
@@ -1464,8 +1560,8 @@ body.topo-visivel .zl-dock {
 .vg-larga {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    column-gap: 1.6rem;
-    row-gap: 0.3rem;
+    column-gap: var(--zl-space-5);
+    row-gap: var(--zl-space-1);
     align-items: center;
 }
 
@@ -1482,7 +1578,7 @@ body.topo-visivel .zl-dock {
     grid-column: 1;
     grid-row: 2;
     align-self: start;
-    font-size: 0.82rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
     line-height: 1.2;
 }
@@ -1498,7 +1594,7 @@ body.topo-visivel .zl-dock {
     grid-column: 2;
     grid-row: 2;
     align-self: start;
-    /* O `margin-top: .8rem` do componente separa a legenda da barra no arranjo
+/* O `margin-top` do componente separa a legenda da barra no arranjo
        EMPILHADO original. Aqui a separação é o `row-gap` da grade, e a margem
        herdada empurrava a legenda para baixo do rótulo em vez de emparelhá-la.
        Zerada só dentro do cartão largo — o arranjo empilhado segue intacto nas
@@ -1529,7 +1625,7 @@ body.topo-visivel .zl-dock {
     overflow-y: auto;
     /* respiro para a barra de rolagem não encostar na data: sem isto o valor
        fica colado no trilho, que é justamente a coluna que o operador lê */
-    padding-right: 0.6rem;
+    padding-right: var(--zl-space-2);
     scrollbar-gutter: stable;
 }
 
@@ -1539,13 +1635,13 @@ body.topo-visivel .zl-dock {
    pequena, em vez de disputar a horizontal com ele. */
 .vg-lista .zl-ficha-row {
     align-items: flex-start;
-    gap: 0.75rem;
+    gap: var(--zl-space-3);
 }
 
 .vg-lista .zl-ficha-l {
     display: flex;
     flex-direction: column;
-    gap: 0.05rem;
+    gap: var(--zl-space-1);
     min-width: 0;
 }
 
@@ -1556,7 +1652,7 @@ body.topo-visivel .zl-dock {
 }
 
 .vg-cert-quando {
-    font-size: 0.7rem;
+    font-size: var(--zl-fs-1);
     font-weight: 600;
     letter-spacing: 0.02em;
     text-transform: uppercase;
@@ -1595,8 +1691,8 @@ body.topo-visivel .zl-dock {
 .vg-card-h {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.7rem 0.95rem;
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-3) var(--zl-space-4);
     border-bottom: 1px solid var(--zelo-line);
 }
 
@@ -1606,19 +1702,19 @@ body.topo-visivel .zl-dock {
 
 .vg-card-h-extra {
     margin-left: auto;
-    font-size: 0.8rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
 }
 
 .vg-card-b {
-    padding: 0.9rem 0.95rem;
+    padding: var(--zl-space-4);
 }
 
 .vg-card-f {
-    padding: 0.5rem 0.95rem;
+    padding: var(--zl-space-2) var(--zl-space-4);
     border-top: 1px solid var(--zelo-line);
     background: var(--bs-tertiary-bg);
-    font-size: 0.8rem;
+    font-size: var(--zl-fs-2);
 }
 
 .vg-card-f a {
@@ -1635,7 +1731,7 @@ body.topo-visivel .zl-dock {
    uma linha própria com texto no lugar do valor. */
 .vg-ficha-sub {
     display: block;
-    font-size: 0.72rem;
+    font-size: var(--zl-fs-1);
     color: var(--bs-secondary-color);
     line-height: 1.3;
 }
@@ -1646,8 +1742,8 @@ body.topo-visivel .zl-dock {
 .vg-falha {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    font-size: 0.84rem;
+    gap: var(--zl-space-2);
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
     margin: 0;
 }
@@ -1665,24 +1761,24 @@ body.topo-visivel .zl-dock {
 .batch-progress-panel {
     width: min(27rem, calc(100vw - 2rem));
     border: 1px solid var(--zelo-line);
-    border-radius: 0.85rem;
+    border-radius: var(--zl-radius-md);
     /* Mesmo fundo dos modais (--bs-modal-bg cai em --bs-body-bg): o painel e o
        resumo do lote aparecem em sequência e não podem ter tons diferentes.
        Quem separa do app atrás é o scrim do .loading-overlay, não a cor. */
     background: var(--bs-body-bg);
-    box-shadow: 0 10px 24px rgba(0, 0, 0, .09);
+    box-shadow: var(--zl-elev-2);
     overflow: hidden;
     text-align: left;
 }
 
 .batch-progress-head {
-    padding: 1.1rem 1.25rem 0.85rem;
+    padding: var(--zl-space-4) var(--zl-space-5) var(--zl-space-3);
 }
 
 .batch-progress-title {
-    margin: 0.15rem 0 0;
+    margin: var(--zl-space-1) 0 0;
     font-family: var(--zelo-font-display);
-    font-size: 1.15rem;
+    font-size: var(--zl-fs-4);
     font-weight: 600;
     line-height: 1.2;
     color: var(--bs-emphasis-color);
@@ -1692,13 +1788,13 @@ body.topo-visivel .zl-dock {
    números a cada 1,5s e sem largura fixa a linha "dança" na tela. */
 .batch-progress-clock {
     font-family: var(--zelo-font-mono);
-    font-size: 0.85rem;
+    font-size: var(--zl-fs-2);
     font-variant-numeric: tabular-nums;
     color: var(--bs-secondary-color);
 }
 
 .batch-progress-body {
-    padding: 0 1.25rem 1.1rem;
+    padding: 0 var(--zl-space-5) var(--zl-space-4);
 }
 
 /* linha viva: quem está sendo emitida agora. Vira o aviso do lote
@@ -1706,11 +1802,11 @@ body.topo-visivel .zl-dock {
 .batch-progress-live {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    margin-top: 1rem;
-    padding-top: 0.85rem;
+    gap: var(--zl-space-2);
+    margin-top: var(--zl-space-4);
+    padding-top: var(--zl-space-3);
     border-top: 1px solid var(--zelo-line);
-    font-size: 0.84rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
     min-height: 2.4rem;
 }
@@ -1719,7 +1815,7 @@ body.topo-visivel .zl-dock {
     flex: 0 0 auto;
     width: 0.45rem;
     height: 0.45rem;
-    border-radius: 999px;
+    border-radius: var(--zl-radius-pill);
     background: var(--zelo-ok);
     animation: batchPulse 1.6s ease-in-out infinite;
 }
@@ -1742,7 +1838,7 @@ body.topo-visivel .zl-dock {
     height: 0.85rem;
     border: 2px solid var(--zelo-line);
     border-top-color: var(--zelo-ok);
-    border-radius: 50%;
+    border-radius: var(--zl-radius-pill);
     animation: zlSpin .7s linear infinite;
 }
 
@@ -1756,10 +1852,10 @@ body.topo-visivel .zl-dock {
 
 /* Linha de apoio em mono (CNPJ sob o nome da empresa) */
 .zl-sub {
-    margin: 0.5rem 0 0 0.95rem;
+    margin: var(--zl-space-2) 0 0 var(--zl-space-4);
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 0.76rem;
+    font-size: var(--zl-fs-1);
     color: var(--bs-secondary-color);
 }
 
@@ -1798,8 +1894,8 @@ body.topo-visivel .zl-dock {
 .batch-progress-footer {
     display: flex;
     justify-content: flex-end;
-    gap: 0.5rem;
-    padding: 0.85rem 1.25rem;
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-3) var(--zl-space-5);
     border-top: 1px solid var(--zelo-line);
     background: var(--zelo-mist);
 }
@@ -1808,30 +1904,8 @@ body.topo-visivel .zl-dock {
 }
 
 .px-6-custom {
-    padding-left: 2rem !important;
-    padding-right: 2rem !important;
-}
-
-/* logo única na navbar (.logo-brand); o swap claro/escuro fica nas regras .logo-light/.logo-dark abaixo */
-
-.logo-light, .logo-dark {
-    display: none !important;
-}
-
-[data-bs-theme="light"] .logo-light {
-    display: inline-block !important;
-}
-
-[data-bs-theme="dark"] .logo-dark {
-    display: inline-block !important;
-}
-
-/* logo circular da Assecon na navbar — dimensionada pela altura */
-.logo-navbar {
-    height: 38px;
-    width: auto;
-    max-width: none;
-    transition: height 0.2s;
+    padding-left: var(--zl-space-6) !important;
+    padding-right: var(--zl-space-6) !important;
 }
 
 @media (max-width: 1200px) {
@@ -1847,9 +1921,9 @@ body.topo-visivel .zl-dock {
 }
 
 .nav-title {
-    font-size: 1.6rem;
+    font-size: var(--zl-fs-6);
     font-weight: 600;
-    margin-right: 1.5rem;
+    margin-right: var(--zl-space-5);
     letter-spacing: 0.5px;
     line-height: 1.1;
     white-space: nowrap;
@@ -1860,29 +1934,23 @@ body.topo-visivel .zl-dock {
 
 @media (max-width: 1200px) {
     .nav-title {
-        font-size: 1.0rem;
-        margin-right: 1rem;
+        font-size: var(--zl-fs-3);
+    margin-right: var(--zl-space-4);
     }
 }
 
 @media (max-width: 900px) {
     .nav-title {
-        font-size: 1rem;
-        margin-right: 0.7rem;
+        font-size: var(--zl-fs-3);
+    margin-right: var(--zl-space-3);
     }
 }
 
 @media (max-width: 600px) {
     .nav-title {
-        font-size: 0.75rem;
-        margin-right: 0.3rem;
+        font-size: var(--zl-fs-1);
+    margin-right: var(--zl-space-1);
     }
-}
-
-.theme-toggle-svg {
-    width: 20px;
-    height: 20px;
-    transition: width 0.2s, height 0.2s;
 }
 
 @media (max-width: 1200px) {
@@ -1914,22 +1982,9 @@ body.topo-visivel .zl-dock {
     border: 0px;
 }
 
-.menu-button .menu-icon,
-.sidebar-toggle-menu .menu-icon {
-    line-height: 1;
-    display: inline-block;
-    transform: scaleX(1.15);
-    transform-origin: center;
-    transition: font-size 0.2s, transform 0.2s;
-}
-
 .menu-button .menu-icon {
-    font-size: 1.45rem;
+    font-size: var(--zl-fs-5);
     margin-top: 0;
-}
-
-.sidebar-toggle-menu .menu-icon {
-    font-size: 1.45rem;
 }
 
 @media (max-width: 1200px) {
@@ -1938,7 +1993,7 @@ body.topo-visivel .zl-dock {
         height: 30px;
     }
     .menu-button .menu-icon {
-        font-size: 1.35rem;
+        font-size: var(--zl-fs-5);
         margin-top: 0;
         margin-bottom: 0px;
     }
@@ -1950,67 +2005,16 @@ body.topo-visivel .zl-dock {
         height: 22px;
     }
     .menu-button .menu-icon {
-        font-size: 1.05rem;
+        font-size: var(--zl-fs-4);
         margin-bottom: 3.2px;
     }
 }
 
-@media (max-width: 900px) {
-    :root {
-        --sidebar-width: min(82vw, 300px);
-    }
-
-    .app-sidebar {
-        width: var(--sidebar-width);
-        padding: var(--sidebar-top-padding) 0.75rem 1rem;
-        padding-bottom: 2rem;
-        transform: translateX(calc(var(--sidebar-width) * -1));
-    }
-
-    .sidebar-header {
-        flex-direction: row;
-        gap: 0.75rem;
-        padding: 0.35rem 0.4rem 1rem;
-    }
-
-    .sidebar-title,
-    .sidebar-header small,
-    .sidebar-link span {
-        opacity: 1;
-        width: auto;
-        transform: none;
-        pointer-events: auto;
-    }
-
-    .sidebar-nav {
-        align-items: stretch;
-    }
-
-    .sidebar-link {
-        justify-content: flex-start;
-        width: 100%;
-        height: auto;
-        padding: 0.7rem 0.75rem;
-    }
-
-    .sidebar-toggle-menu {
-        display: inline-flex;
-    }
-
-    body.sidebar-open .page-content {
-        margin-left: 0;
-        width: 100%;
-    }
-
-    body.sidebar-open {
-        overflow: hidden;
-    }
-}
 
 @media (max-width: 768px) {
     .px-6-custom {
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
+    padding-left: var(--zl-space-4) !important;
+    padding-right: var(--zl-space-4) !important;
     }
 }
 
@@ -2018,7 +2022,7 @@ body.topo-visivel .zl-dock {
 .navbar-toggler:active,
 .navbar-toggler:focus-visible {
     outline: none !important;
-    box-shadow: none !important;
+    box-shadow: var(--zl-elev-0) !important;
 }
 
 .copy-cnpj {
@@ -2028,7 +2032,7 @@ body.topo-visivel .zl-dock {
     
     display: inline-flex;
     align-items: center;
-    gap: 0.2rem;
+    gap: var(--zl-space-1);
     vertical-align: middle;
     border: 0;
     cursor: pointer;
@@ -2044,117 +2048,75 @@ body.topo-visivel .zl-dock {
 .copy-cnpj:focus-visible {
     outline: 2px solid rgba(var(--bs-primary-rgb), 0.35);
     outline-offset: 2px;
-    border-radius: 0.25rem;
+    border-radius: var(--zl-radius-sm);
 }
 
 .copy-cnpj i {
+    /* Ajuste óptico relativo ao texto mono adjacente; não é um papel tipográfico. */
     font-size: 0.95em;
     line-height: 1.5;
 }
 
-/* dark mode */
-
-[data-bs-theme="dark"] .table-bordered,
-[data-bs-theme="dark"] .table-bordered > :not(caption) > * > * {
-    border-color: #495057 !important;
-    border-width: 1px !important;
+/* Linhas legadas ainda recebem estas classes do JS após uma atualização. A
+   banda usa as variáveis locais da tabela, em vez de disputar especificidade
+   com o Bootstrap por `background-color !important`. */
+tr[class*="status-"] > td,
+tr[class*="status-"] > th {
+    --bs-table-color: var(--zelo-ink);
+    --bs-table-bg: transparent;
 }
 
-[data-bs-theme="dark"] tr[class*="status-"] > td,
-[data-bs-theme="dark"] tr[class*="status-"] > th {
-    background-color: transparent !important;
-    color: var(--bs-body-color) !important;
+tr.status-verde > td:nth-last-child(2),
+tr.status-verde > td:nth-last-child(3) {
+    --bs-table-bg: var(--zelo-ok-soft);
+    --bs-table-bg-state: var(--zelo-ok-soft);
 }
 
-/* banda de status no dark: a cor está no fundo; o texto fica neutro (herda body) */
-[data-bs-theme="dark"] tr.status-verde > td:nth-last-child(2),
-[data-bs-theme="dark"] tr.status-verde > td:nth-last-child(3) {
-    background-color: var(--zelo-ok-soft) !important;
+tr.status-vermelho > td:nth-last-child(2),
+tr.status-vermelho > td:nth-last-child(3) {
+    --bs-table-bg: var(--zelo-danger-soft);
+    --bs-table-bg-state: var(--zelo-danger-soft);
 }
 
-[data-bs-theme="dark"] tr.status-vermelho > td:nth-last-child(2),
-[data-bs-theme="dark"] tr.status-vermelho > td:nth-last-child(3) {
-    background-color: var(--zelo-danger-soft) !important;
+tr.status-amarelo > td:nth-last-child(2),
+tr.status-amarelo > td:nth-last-child(3) {
+    --bs-table-bg: var(--zelo-warn-soft);
+    --bs-table-bg-state: var(--zelo-warn-soft);
 }
 
-[data-bs-theme="dark"] tr.status-amarelo > td:nth-last-child(2),
-[data-bs-theme="dark"] tr.status-amarelo > td:nth-last-child(3) {
-    background-color: var(--zelo-warn-soft) !important;
-}
-
-[data-bs-theme="dark"] tr.status-cinza > td:nth-last-child(2),
-[data-bs-theme="dark"] tr.status-cinza > td:nth-last-child(3) {
-    background-color: var(--zelo-muted-soft) !important;
+tr.status-cinza > td:nth-last-child(2),
+tr.status-cinza > td:nth-last-child(3) {
+    --bs-table-bg: var(--zelo-muted-soft);
+    --bs-table-bg-state: var(--zelo-muted-soft);
 }
 
 [data-bs-theme="dark"] .app-sidebar {
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
-}
-
-[data-bs-theme="dark"] .table td[rowspan] {
-    background-color: var(--bs-table-bg) !important;
-}
-
-[data-bs-theme="dark"] .card {
-    background-color: #212529 !important;
-    border: 1px solid #373b3e !important;
-}
-
-[data-bs-theme="dark"] .card-header {
-    background-color: #2c3034 !important;
-    border-bottom-color: #373b3e !important;
-    color: #e0e0e0 !important;
-}
-
-[data-bs-theme="dark"] .card-header .text-dark {
-    color: #fff !important;
-}
-
-[data-bs-theme="dark"] .input-group-text {
-    background-color: #2c3034 !important;
-    border-color: #373b3e !important;
-    color: #adb5bd !important;
-}
-
-[data-bs-theme="dark"] .form-control {
-    background-color: #212529;
-    border-color: #373b3e;
-    color: #fff;
-}
-
-[data-bs-theme="dark"] .table-light {
-    background-color: #2c3034 !important;
-    color: #adb5bd !important;
-    border-color: #373b3e !important;
-}
-
-[data-bs-theme="dark"] .table-light th {
-    background-color: #292d30 !important;
-    color: #b6bec6 !important;
-    border-bottom: 1px solid #373b3e !important;
+    /* No escuro, o fio sozinho não separa a barra do chão. A elevação é o
+       único comportamento temático; o valor continua vindo do token. */
+    box-shadow: var(--zl-elev-2);
 }
 
 /* tabelas responsividade */
 
 .table td.d-flex {
-    padding-left: 0.5rem !important;
-    padding-right: 0.5rem !important;
-    gap: 0.5rem;
+    padding-left: var(--zl-space-2) !important;
+    padding-right: var(--zl-space-2) !important;
+    gap: var(--zl-space-2);
 }
 
 @media (max-width: 1200px) {
     .table td, .table th {
-        font-size: 0.9rem;
-        padding: 0.4rem !important;
+        font-size: var(--zl-fs-2);
+        padding: var(--zl-space-2) !important;
     }
     .btn-sm {
-        font-size: 0.75rem;
-        padding: 0.2rem 0.4rem;
+        font-size: var(--zl-fs-2);
+        padding: var(--zl-space-1) var(--zl-space-2);
     }
     .table td.d-flex {
-        padding-left: 0.3rem !important;
-        padding-right: 0.3rem !important;
-        gap: 0.3rem;
+        padding-left: var(--zl-space-1) !important;
+        padding-right: var(--zl-space-1) !important;
+        gap: var(--zl-space-1);
     }
 }
 
@@ -2207,27 +2169,27 @@ body.topo-visivel .zl-dock {
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 0.5rem;
-    padding: 0.45rem 0.7rem;
-    font-size: 0.82rem;
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-2) var(--zl-space-3);
+    font-size: var(--zl-fs-2);
     font-weight: 600;
-    border-radius: 50px;
+    border-radius: var(--zl-radius-pill);
     border: 1px solid transparent;
     cursor: pointer;
     transition: transform 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
-    background-color: #f0f3f7;
-    color: #6c757d;
+    background-color: var(--zelo-mist);
+    color: var(--zelo-slate);
     user-select: none;
 }
 
 .filter-chip:hover {
     transform: translateY(-1px);
-    background-color: #e4e9f0;
+    background-color: color-mix(in srgb, var(--zelo-ink) 8%, var(--zelo-mist));
 }
 
 .btn-check:focus + .filter-chip {
     outline: none;
-    box-shadow: none;
+    box-shadow: var(--zl-elev-0);
 }
 
 /* foco de teclado visível no chip (a11y — Fase 5) */
@@ -2241,7 +2203,7 @@ body.topo-visivel .zl-dock {
 }
 
 .filter-chip i {
-    font-size: 1rem;
+    font-size: var(--zl-fs-3);
 }
 
 .filter-chip .chip-label {
@@ -2250,15 +2212,15 @@ body.topo-visivel .zl-dock {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--zl-space-2);
     white-space: nowrap;
 }
 
 .filter-divider {
     flex: 0 0 1px;
     align-self: stretch;
-    margin: 1.8rem 1rem 0;
-    background-color: rgba(0, 0, 0, 0.12);
+    margin: var(--zl-space-6) var(--zl-space-4) 0;
+    background-color: var(--zelo-line);
 }
 
 .filter-group {
@@ -2277,7 +2239,7 @@ body.topo-visivel .zl-dock {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 230px));
     justify-content: center;
-    gap: 0.5rem;
+    gap: var(--zl-space-2);
     width: 100%;
 }
 
@@ -2328,12 +2290,12 @@ body.topo-visivel .zl-dock {
     align-items: center;
     justify-content: center;
     min-width: 1.2rem;
-    padding: 0.1rem 0.35rem;
-    border-radius: 999px;
-    font-size: 0.7rem;
+    padding: var(--zl-space-1);
+    border-radius: var(--zl-radius-pill);
+    font-size: var(--zl-fs-1);
     font-weight: 700;
     line-height: 1;
-    background-color: rgba(0, 0, 0, 0.12);
+    background-color: color-mix(in srgb, var(--zelo-ink) 12%, transparent);
     color: inherit;
 }
 
@@ -2343,19 +2305,19 @@ body.topo-visivel .zl-dock {
     }
 
     .filter-chip {
-        padding: 0.34rem 0.5rem;
-        font-size: 0.74rem;
-        gap: 0.4rem;
+        padding: var(--zl-space-1) var(--zl-space-2);
+        font-size: var(--zl-fs-2);
+        gap: var(--zl-space-2);
     }
 
     .filter-chip i {
-        font-size: 0.88rem;
+        font-size: var(--zl-fs-3);
     }
 
     .filter-chip .chip-count {
-        font-size: 0.64rem;
+        font-size: var(--zl-fs-1);
         min-width: 1.5rem;
-        padding: 0.06rem 0.3rem;
+        padding: var(--zl-space-1);
     }
 }
 
@@ -2364,20 +2326,20 @@ body.topo-visivel .zl-dock {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.35rem;
+    gap: var(--zl-space-1);
 }
 
 .resumo-item {
     display: inline-flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: var(--zl-space-2);
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 999px;
-    padding: 0.3rem 0.7rem;
+    border-radius: var(--zl-radius-pill);
+    padding: var(--zl-space-1) var(--zl-space-3);
     cursor: pointer;
     color: var(--bs-body-color);
-    font-size: 0.92rem;
+    font-size: var(--zl-fs-2);
     line-height: 1;
     transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -2388,16 +2350,17 @@ body.topo-visivel .zl-dock {
 .resumo-item .dot {
     width: 0.62rem;
     height: 0.62rem;
-    border-radius: 50%;
+    border-radius: var(--zl-radius-pill);
     flex: 0 0 auto;
-    background: var(--cor, #adb5bd);
+    background: var(--cor, var(--zelo-muted));
+    /* Anel de estado, não elevação: acompanha a cor sem levantar o ponto. */
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--cor, transparent) 22%, transparent);
 }
 
 /* bolinha "apagada" quando a contagem é zero */
 .resumo-item.chip-empty .dot {
     background: var(--bs-border-color);
-    box-shadow: none;
+    box-shadow: var(--zl-elev-0);
 }
 
 .resumo-item:hover {
@@ -2406,8 +2369,8 @@ body.topo-visivel .zl-dock {
 }
 
 .btn-check:checked + .resumo-item {
-    background: color-mix(in srgb, var(--cor, #6c757d) 18%, transparent);
-    border-color: color-mix(in srgb, var(--cor, #6c757d) 50%, transparent);
+    background: color-mix(in srgb, var(--cor, var(--zelo-slate)) 18%, transparent);
+    border-color: color-mix(in srgb, var(--cor, var(--zelo-slate)) 50%, transparent);
 }
 
 .btn-check:focus-visible + .resumo-item {
@@ -2423,20 +2386,20 @@ body.topo-visivel .zl-dock {
     align-self: stretch;
     min-height: 1.2rem;
     background: var(--bs-border-color);
-    margin: 0.2rem 0.4rem;
+    margin: var(--zl-space-1) var(--zl-space-2);
 }
 
 .filtros-sep {
     height: 1px;
     background: var(--bs-border-color);
-    margin: 0.75rem 0;
+    margin: var(--zl-space-3) 0;
 }
 
 .filtros-toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.6rem;
+    gap: var(--zl-space-2);
 }
 
 .filtros-toolbar .busca { flex: 1 1 220px; min-width: 180px; }
@@ -2448,13 +2411,13 @@ body.topo-visivel .zl-dock {
 .filtro-dd-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: var(--zl-space-2);
     background: var(--bs-body-bg);
     border: 1px solid var(--bs-border-color);
     color: var(--bs-body-color);
-    border-radius: 0.375rem;
-    padding: 0.375rem 0.75rem;
-    font-size: 0.9rem;
+    border-radius: var(--zl-radius-sm);
+    padding: var(--zl-space-2) var(--zl-space-3);
+    font-size: var(--zl-fs-2);
     cursor: pointer;
     white-space: nowrap;
 }
@@ -2466,7 +2429,7 @@ body.topo-visivel .zl-dock {
 }
 
 .filtro-dd-toggle .bi-chevron-down {
-    font-size: 0.72rem;
+    font-size: var(--zl-fs-1);
     opacity: 0.7;
     transition: transform 0.15s ease;
 }
@@ -2477,8 +2440,8 @@ body.topo-visivel .zl-dock {
    so aparece quando esse modo esta ativo. Ativo (recentes 1o) usa o realce de
    acao dos chips selecionados. */
 .ordem-dir[hidden] { display: none; }
-.ordem-dir { font-size: 0.8rem; padding: 0.375rem 0.6rem; font-weight: 600; }
-.ordem-dir .bi-arrow-down-up { font-size: 0.82rem; opacity: 0.75; }
+.ordem-dir { font-size: var(--zl-fs-2); padding: var(--zl-space-2); font-weight: 600; }
+.ordem-dir .bi-arrow-down-up { font-size: var(--zl-fs-2); opacity: 0.75; }
 .ordem-dir[aria-pressed="true"] {
     background: var(--zelo-action-bg);
     color: var(--zelo-action-fg);
@@ -2489,10 +2452,10 @@ body.topo-visivel .zl-dock {
 .filtro-dd-toggle .dd-badge {
     background: var(--zelo-action-bg);
     color: var(--zelo-action-fg);
-    border-radius: 999px;
-    font-size: 0.68rem;
+    border-radius: var(--zl-radius-pill);
+    font-size: var(--zl-fs-1);
     font-weight: 700;
-    padding: 0.05rem 0.45rem;
+    padding: var(--zl-space-1) var(--zl-space-2);
     min-width: 1.3rem;
     text-align: center;
 }
@@ -2504,12 +2467,12 @@ body.topo-visivel .zl-dock {
     z-index: 1030;
     background: var(--bs-body-bg);
     border: 1px solid var(--bs-border-color);
-    border-radius: 0.6rem;
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
-    padding: 0.5rem;
+    border-radius: var(--zl-radius-md);
+    box-shadow: var(--zl-elev-2);
+    padding: var(--zl-space-2);
     display: none;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: var(--zl-space-1);
 }
 
 .filtro-dd.open .dd-panel { display: flex; }
@@ -2528,7 +2491,7 @@ body.topo-visivel .zl-dock {
     flex: 1 1 auto;
     min-width: 0;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--zl-space-2);
 }
 
 /* nome da cidade trunca com reticências quando não cabe (ex.: "Capão da Canoa");
@@ -2544,7 +2507,7 @@ body.topo-visivel .zl-dock {
 .dd-panel .filter-chip .chip-count { flex: 0 0 auto; }
 
 @media (max-width: 575.98px) {
-    .resumo-item { font-size: 0.84rem; padding: 0.28rem 0.55rem; }
+    .resumo-item { font-size: var(--zl-fs-2); padding: var(--zl-space-1) var(--zl-space-2); }
     .filtros-toolbar .busca { flex: 1 1 100%; }
     .dd-panel { left: 0; right: auto; }
 }
@@ -2556,6 +2519,7 @@ body.topo-visivel .zl-dock {
 }
 
 .order-select-input {
+    /* Reserva óptica para a seta absoluta; 2rem encostaria o texto no ícone. */
     padding-right: 2.25rem;
     min-width: 220px;
     appearance: none;
@@ -2568,45 +2532,49 @@ body.topo-visivel .zl-dock {
     position: absolute;
     right: 0.75rem;
     pointer-events: none;
-    font-size: 0.9rem;
-    color: #6c757d;
+    font-size: var(--zl-fs-2);
+    color: var(--zelo-slate);
 }
 
 .btn-check:checked + .chip-gray {
-    background-color: #343a40 !important;
-    color: #fff;
-    box-shadow: 0 4px 10px rgba(52, 58, 64, 0.3);
+    background-color: var(--zelo-action-bg);
+    color: var(--zelo-action-fg);
+    box-shadow: var(--zl-elev-1);
 }
 
 .btn-check:checked + .chip-green {
-    background-color: var(--zelo-ok) !important;
-    color: #fff;
-    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-ok) 30%, transparent);
+    background-color: var(--zelo-ok-soft);
+    border-color: var(--zelo-ok);
+    color: var(--zelo-ok);
+    box-shadow: var(--zl-elev-1);
 }
 
 .btn-check:checked + .chip-yellow {
-    background-color: var(--zelo-warn) !important;
-    color: #fff;
-    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-warn) 30%, transparent);
+    background-color: var(--zelo-warn-soft);
+    border-color: var(--zelo-warn);
+    color: var(--zelo-warn);
+    box-shadow: var(--zl-elev-1);
 }
 
 .btn-check:checked + .chip-red {
-    background-color: var(--zelo-danger) !important;
-    color: #fff;
-    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-danger) 30%, transparent);
+    background-color: var(--zelo-danger-soft);
+    border-color: var(--zelo-danger);
+    color: var(--zelo-danger);
+    box-shadow: var(--zl-elev-1);
 }
 
 .btn-check:checked + .chip-red-outline {
-    background-color: var(--zelo-paper) !important;
+    background-color: var(--zelo-paper);
     border-color: var(--zelo-danger);
     color: var(--zelo-danger);
-    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-danger) 15%, transparent);
+    box-shadow: var(--zl-elev-1);
 }
 
 .btn-check:checked + .chip-nao-definida {
-    background-color: var(--zelo-muted) !important;
-    color: #fff;
-    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-muted) 30%, transparent);
+    background-color: var(--zelo-muted-soft);
+    border-color: var(--zelo-muted);
+    color: var(--zelo-ink);
+    box-shadow: var(--zl-elev-1);
 }
 
 /* Fase 3 — tipo é monocromático: a cor fica reservada ao status.
@@ -2619,53 +2587,17 @@ body.topo-visivel .zl-dock {
 .btn-check:checked + .chip-estado,
 .btn-check:checked + .chip-cidade,
 .btn-check:checked + .chip-ordem {
-    background-color: var(--zelo-action-bg) !important;
+    background-color: var(--zelo-action-bg);
     color: var(--zelo-action-fg);
-    box-shadow: 0 4px 10px color-mix(in srgb, var(--zelo-ink) 22%, transparent);
+    box-shadow: var(--zl-elev-1);
 }
 
 /* item de cidade escondido pelo recorte "cidade segue o estado" */
 .dd-cidade-item.dd-hidden { display: none; }
 
-[data-bs-theme="dark"] .filter-chip {
-    background-color: #2b3035;
-    color: #adb5bd;
-}
-
-[data-bs-theme="dark"] .filter-chip .chip-count {
-    background-color: rgba(0, 0, 0, 0.4);
-}
-
-[data-bs-theme="dark"] .order-select .bi {
-    color: #adb5bd;
-}
-
-[data-bs-theme="dark"] .filter-divider {
-    background-color: rgba(255, 255, 255, 0.12);
-}
-
-[data-bs-theme="dark"] .filter-chip:hover {
-    background-color: #343a40;
-}
-
-[data-bs-theme="dark"] .btn-check:checked + .filter-chip:hover {
-    transform: translateY(-1px);
-}
-
-[data-bs-theme="dark"] .btn-check:checked + .chip-gray {
-    background-color: #495057 !important;
-}
-
-
-[data-bs-theme="dark"] .form-select {
-    background-color: #212529;
-    border-color: #373b3e;
-    color: #fff;
-}
-
 #filtroEmpresa:focus {
     outline: none;
-    box-shadow: none;
+    box-shadow: var(--zl-elev-0);
     border-color: inherit;
 }
 
@@ -2684,7 +2616,7 @@ body.topo-visivel .zl-dock {
     right: clamp(10px, 2.5vw, 22px);
     width: clamp(32px, 4vw, 52px);
     height: clamp(32px, 4vw, 52px);
-    border-radius: 50%;
+    border-radius: var(--zl-radius-pill);
     background-color: var(--zelo-fab-bg);
     color: white;
     border: none;
@@ -2692,8 +2624,9 @@ body.topo-visivel .zl-dock {
     display: flex;
     align-items: center;
     justify-content: center;
+    /* Ícone responsivo preso ao diâmetro fluido do FAB; não é texto hierárquico. */
     font-size: clamp(0.8rem, 1.6vw, 1.35rem);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--zl-elev-2);
     transition: opacity 0.4s ease, width 0.3s ease, height 0.3s ease, bottom 0.3s ease, right 0.3s ease, font-size 0.3s ease;
     z-index: 999;
     opacity: 0;
@@ -2708,7 +2641,7 @@ body.topo-visivel .zl-dock {
 .btn-voltar-topo:hover {
     background-color: var(--zelo-fab-hover);
     transform: translateY(-3px);
-    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--zl-elev-2);
 }
 
 .btn-voltar-topo.visible {
@@ -2728,14 +2661,6 @@ body.topo-visivel .zl-dock {
     }
 }
 
-[data-bs-theme="dark"] .btn-voltar-topo {
-    background-color: var(--zelo-fab-bg);
-}
-
-[data-bs-theme="dark"] .btn-voltar-topo:hover {
-    background-color: var(--zelo-fab-hover);
-}
-
 .company-card.search-hidden,
 .company-card.status-hidden {
     display: none;
@@ -2747,12 +2672,36 @@ body.topo-visivel .zl-dock {
 .cert-status-danger  { color: var(--zelo-danger); }
 .cert-status-muted   { color: var(--zelo-muted); }
 
-/* ── Barra lateral de status por linha ── */
+/* ══════════════════════════════════════════════════════════════
+   LINHA DE RAZÃO (E-09) — tipo · guia · validade · ações
+
+   O vão de ~900px entre a data e as ações era o defeito de composição
+   dominante da tela mais usada. Num livro razão, num sumário e num
+   balanço, EXATAMENTE essa distância é atravessada por uma guia:
+   rótulo à esquerda, fio percorrendo o vão, cifra alinhada à direita
+   em coluna fixa. Em vez de combater o vão, usa ele.
+
+   O fio colorido à esquerda e o ícone FICAM os dois, e não são
+   redundância: o fio serve à leitura VERTICAL (varrendo o cartão de
+   uma empresa, a coluna de fios dá a saúde dela num relance) e o
+   ícone à leitura HORIZONTAL da linha. O ícone é, além disso, o
+   único sinal que não é cor — sem ele o status dependeria só de cor,
+   falha de WCAG 1.4.1 para quem não distingue verde de vermelho.
+   ══════════════════════════════════════════════════════════════ */
 td.cert-tipo-col {
+    width: 1%;
+    white-space: nowrap;
     position: relative;
-    padding-left: 1.85rem !important;
+    padding-left: var(--zl-space-6) !important;
 }
 
+/* O fio de status na borda esquerda. Ele responde a uma pergunta que o ícone
+   lá na direita não responde: varrendo o cartão de uma empresa na VERTICAL, a
+   coluna de fios dá a saúde dela num relance, sem ler nada. Ícone e data ficam
+   longe demais um do outro para isso.
+   (Cheguei a tirá-lo em nome de "um sinal por linha". Era argumento demais: o
+   fio serve à leitura vertical e o ícone à horizontal — não são o mesmo sinal
+   dito duas vezes, são duas leituras diferentes do mesmo dado.) */
 td.cert-tipo-col::before {
     content: '';
     position: absolute;
@@ -2760,10 +2709,9 @@ td.cert-tipo-col::before {
     top: 18%;
     bottom: 18%;
     width: 3px;
-    border-radius: 3px;
+    border-radius: var(--zl-radius-pill);
 }
 
-/* espinha-assinatura: tokens Zelo (trocam por tema sozinhos) */
 tr[data-status-cert="validas"]      td.cert-tipo-col::before { background: var(--zelo-ok); }
 tr[data-status-cert="a_vencer"]     td.cert-tipo-col::before { background: var(--zelo-warn); }
 tr[data-status-cert="vencidas"]     td.cert-tipo-col::before,
@@ -2771,22 +2719,90 @@ tr[data-status-cert="pendentes"]    td.cert-tipo-col::before { background: var(-
 tr[data-status-cert="nao_definida"] td.cert-tipo-col::before,
 tr[data-status-cert="cinza"]        td.cert-tipo-col::before { background: var(--zelo-muted); }
 
+/* A guia. 1px, ponto de 2px e vão de 5px, na cor do fio do sistema —
+   discreta o bastante para não virar sumário de livro, e ganha
+   presença só quando a linha está sob o cursor. */
+td.cert-guia {
+    width: 100%;
+    padding: 0 var(--zl-space-3);
+}
+
+td.cert-guia::after {
+    content: '';
+    display: block;
+    height: 1px;
+    background: repeating-linear-gradient(to right,
+        var(--zelo-line) 0 2px, transparent 2px 7px);
+}
+
+.table-hover tbody tr:hover td.cert-guia::after {
+    background: repeating-linear-gradient(to right,
+        var(--zelo-slate) 0 2px, transparent 2px 7px);
+}
+
+/* No escuro a guia precisa de mais tinta, e a razão de contraste NÃO explica
+   por quê: medida, ela é 1.31:1 no escuro contra 1.25:1 no claro — ou seja, o
+   número diz que a do escuro é a mais forte, e o olho diz o contrário. Em
+   luminância baixa a fórmula não captura a percepção de um fio pontilhado de
+   1px. Aqui o olho decide, e a medida serve para não exagerar. */
+[data-bs-theme="dark"] td.cert-guia::after {
+    background: repeating-linear-gradient(to right,
+        color-mix(in srgb, var(--zelo-ink) 18%, var(--zelo-mist)) 0 2px,
+        transparent 2px 7px);
+}
+
+/* A validade em COLUNA fixa e alinhada à direita: é o que faz o
+   tabular-nums (já adotado) render de verdade. As datas passam a
+   formar uma coluna legível na vertical, e "o que vence antes" se lê
+   na rolagem, sem ler número por número. */
+td.cert-data {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+    padding-right: var(--zl-space-5);
+}
+
+/* Peso ÚNICO na coluna de validade. Antes, vencida / a vencer / PENDENTE
+   levavam `fw-semibold` e válida / não definida ficavam em peso normal — três
+   pesos numa coluna que existe para ser varrida na vertical, e o peso virava
+   um TERCEIRO jeito de dizer o mesmo status que a cor e o ícone já dizem.
+   Pior: `fw-semibold` é 600 e o Mono vendorizado só tem 400 e 500, então
+   aquelas datas saíam em negrito SINTÉTICO, com o traço engordado pelo
+   navegador. 500 é peso real, dá presença à coluna e não grita. */
+td.cert-data .cert-status-ok,
+td.cert-data .cert-status-warn,
+td.cert-data .cert-status-danger,
+td.cert-data .cert-status-muted {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    justify-content: flex-end;
+    min-width: 11ch;
+}
+
+td.cert-acoes {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+    padding-right: var(--zl-space-4);
+}
+
 tr.filter-hidden {
     display: none;
 }
 
 /* ── Skeleton de Certidões ─────────────────────────────────── */
 .sk-bloco {
-    background: linear-gradient(90deg, #e4e9f0 25%, #d5dce9 50%, #e4e9f0 75%);
+    background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--zelo-ink) 7%, var(--zelo-mist)) 25%,
+        color-mix(in srgb, var(--zelo-ink) 14%, var(--zelo-mist)) 50%,
+        color-mix(in srgb, var(--zelo-ink) 7%, var(--zelo-mist)) 75%
+    );
     background-size: 400% 100%;
     animation: sk-wave 1.4s ease infinite;
-    border-radius: 4px;
+    border-radius: var(--zl-radius-sm);
     display: block;
-}
-
-[data-bs-theme="dark"] .sk-bloco {
-    background: linear-gradient(90deg, #2a2f34 25%, #343a40 50%, #2a2f34 75%);
-    background-size: 400% 100%;
 }
 
 @keyframes sk-wave {
@@ -2815,43 +2831,10 @@ tr.filter-hidden {
     opacity: 0;
 }
 
-/* ══════════════════════════════════════════════════════════════
-   Zelo — header da sidebar é contextual
-   Recolhe quando a navbar está à vista (ela já carrega marca + controle);
-   reaparece quando a navbar some no scroll, trazendo logo + "Zelo" + botão.
-   Assim não há "Zelo" duplicado em nenhum estado.
-   ══════════════════════════════════════════════════════════════ */
-.sidebar-header {
-    overflow: hidden;
-    transition: max-height var(--sidebar-transition),
-                opacity var(--sidebar-transition),
-                padding-top var(--sidebar-transition),
-                padding-bottom var(--sidebar-transition);
-}
-
-/* navbar visível → header recolhido e fora da ordem de foco */
-body:not(.navbar-hidden) .sidebar-header {
-    max-height: 0;
-    padding-top: 0;
-    padding-bottom: 0;
-    border-bottom-width: 0;
-    opacity: 0;
-    pointer-events: none;
-}
-
-body:not(.navbar-hidden) .sidebar-toggle-menu {
-    display: none !important;
-}
-
-/* navbar escondida → header revela com transição suave */
-body.navbar-hidden .sidebar-header {
-    max-height: 120px;
-    opacity: 1;
-}
-
 /* ── Zelo: hambúrguer da navbar alinhado à coluna do rail recolhido ──
    Caixa com a largura exata do rail, encostada na borda esquerda (a
-   margem negativa cancela o px-4 + mx-1 do container), ícone centrado.
+   margem negativa cancela exatamente o px-4 + mx-1 do container (1,75rem,
+   combinação estrutural que não é um degrau da escala), ícone centrado.
    Resultado: o botão fica na mesma coluna vertical dos ícones do rail
    (centro em --sidebar-collapsed-width / 2) e centrado na vertical. */
 @media (min-width: 901px) {
@@ -2903,7 +2886,7 @@ body.navbar-hidden .sidebar-header {
 }
 
 .manif-eyebrow {
-    font-size: 0.68rem;
+    font-size: var(--zl-fs-1);
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--bs-secondary-color);
@@ -2914,13 +2897,13 @@ body.navbar-hidden .sidebar-header {
 .manif-regua {
     display: flex;
     align-items: center;
-    gap: 0.9rem;
+    gap: var(--zl-space-4);
     flex-wrap: wrap;
-    padding: 0.55rem 0.9rem;
+    padding: var(--zl-space-2) var(--zl-space-4);
     border: 1px solid var(--zelo-line);
-    border-radius: 0.55rem;
+    border-radius: var(--zl-radius-sm);
     background: var(--zelo-mist);
-    font-size: 0.86rem;
+    font-size: var(--zl-fs-2);
 }
 
 .manif-regua-bar {
@@ -2933,20 +2916,20 @@ body.navbar-hidden .sidebar-header {
     border: 0;
     padding: 0;
     color: var(--bs-emphasis-color);
-    font-size: 0.82rem;
+    font-size: var(--zl-fs-2);
     font-weight: 500;
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: var(--zl-space-1);
 }
 
 /* ── barra de trabalho ───────────────────────────────────────── */
 .manif-barra {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: var(--zl-space-2);
     flex-wrap: wrap;
-    padding: 0.75rem 0;
+    padding: var(--zl-space-3) 0;
 }
 
 .manif-busca {
@@ -2959,7 +2942,7 @@ body.navbar-hidden .sidebar-header {
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--zl-space-2);
 }
 
 /* ── a mesa ──────────────────────────────────────────────────── */
@@ -2968,7 +2951,7 @@ body.navbar-hidden .sidebar-header {
 }
 
 .manif-tbl th {
-    font-size: 0.68rem;
+    font-size: var(--zl-fs-1);
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--bs-secondary-color);
@@ -2982,8 +2965,8 @@ body.navbar-hidden .sidebar-header {
 
 .manif-motivo {
     color: var(--bs-secondary-color);
-    font-size: 0.78rem;
-    margin-top: 0.15rem;
+    font-size: var(--zl-fs-2);
+    margin-top: var(--zl-space-1);
 }
 
 /* ── A ASSINATURA: a chave segmentada pelo significado ───────────
@@ -2995,7 +2978,7 @@ body.navbar-hidden .sidebar-header {
 .manif-chave {
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 0.82rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
     white-space: nowrap;
 }
@@ -3016,11 +2999,11 @@ body.navbar-hidden .sidebar-header {
 .manif-chave .f-dv { color: var(--zelo-muted); }
 
 .manif-chave-leg {
-    font-size: 0.68rem;
+    font-size: var(--zl-fs-1);
     color: var(--bs-secondary-color);
     display: flex;
-    gap: 1.1rem;
-    margin-top: 0.15rem;
+    gap: var(--zl-space-4);
+    margin-top: var(--zl-space-1);
 }
 
 .manif-chave-leg b { font-weight: 500; color: var(--bs-emphasis-color); }
@@ -3028,13 +3011,13 @@ body.navbar-hidden .sidebar-header {
 /* ── andamento do lote ───────────────────────────────────────── */
 .manif-andamento {
     border: 1px solid var(--zelo-line);
-    border-radius: 0.55rem;
+    border-radius: var(--zl-radius-md);
     background: var(--zelo-paper);
-    padding: 0.8rem 0.95rem;
-    margin-bottom: 0.75rem;
+    padding: var(--zl-space-3) var(--zl-space-4);
+    margin-bottom: var(--zl-space-3);
 }
 
-.manif-andamento-linha { font-size: 0.88rem; font-weight: 500; }
+.manif-andamento-linha { font-size: var(--zl-fs-2); font-weight: 500; }
 .manif-andamento-linha.is-warning { color: var(--zelo-warn); }
 .manif-andamento-linha.is-error { color: var(--zelo-danger); }
 
@@ -3045,8 +3028,8 @@ body.navbar-hidden .sidebar-header {
     z-index: 1040;
     background: var(--zelo-paper);
     border-top: 1px solid var(--zelo-line);
-    box-shadow: 0 -10px 30px -20px var(--zelo-ink);
-    padding: 1rem 1.25rem 1.25rem;
+    box-shadow: var(--zl-elev-2);
+    padding: var(--zl-space-4) var(--zl-space-5) var(--zl-space-5);
     /* Ancorado no rodapé, o painel cresce para CIMA: sem teto, uma lista de 26
        pastas empurrou o topo — e o botão de importar — para fora da tela, sem
        jeito de alcançá-los. A rolagem aqui é a rede de segurança; quem segura a
@@ -3062,12 +3045,12 @@ body.navbar-hidden .sidebar-header {
     display: grid;
     grid-template-columns: 1fr 1fr;
     align-items: start;
-    gap: 1rem;
+    gap: var(--zl-space-4);
 }
 
 .manif-ta {
     font-family: var(--zelo-font-mono);
-    font-size: 0.78rem;
+    font-size: var(--zl-fs-2);
 }
 
 .manif-solta {
@@ -3075,16 +3058,16 @@ body.navbar-hidden .sidebar-header {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
+    gap: var(--zl-space-2);
     text-align: center;
-    padding: 1.2rem;
+    padding: var(--zl-space-4);
     border: 1px dashed var(--zelo-line);
-    border-radius: 0.5rem;
+    border-radius: var(--zl-radius-sm);
     color: var(--bs-secondary-color);
-    font-size: 0.82rem;
+    font-size: var(--zl-fs-2);
 }
 
-.manif-solta i { font-size: 1.6rem; }
+.manif-solta i { font-size: var(--zl-fs-6); }
 .manif-solta:hover { border-color: var(--zelo-graphite); }
 
 /* Arrastando por cima: o traço fecha e o fundo levanta um degrau. Sem cor —
@@ -3097,18 +3080,18 @@ body.navbar-hidden .sidebar-header {
 
 .manif-solta-acoes {
     display: flex;
-    gap: 0.75rem;
-    margin-top: 0.2rem;
+    gap: var(--zl-space-3);
+    margin-top: var(--zl-space-1);
 }
 
 /* As fontes escolhidas. Uma linha por pasta, com a contagem à direita: é ela
    que responde "peguei a pasta certa?" antes de o operador importar. */
 .manif-fontes {
     list-style: none;
-    margin: 0.35rem 0 0;
+    margin: var(--zl-space-1) 0 0;
     padding: 0;
     border: 1px solid var(--zelo-line);
-    border-radius: 0.5rem;
+    border-radius: var(--zl-radius-sm);
     /* Rola dentro da própria caixa: são 26 pastas num mês normal, e o botão de
        importar tem de continuar visível logo abaixo delas. */
     max-height: 13.5rem;
@@ -3119,9 +3102,9 @@ body.navbar-hidden .sidebar-header {
 .manif-fontes li {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 0.4rem 0.3rem 0.6rem;
-    font-size: 0.8rem;
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-1) var(--zl-space-2) var(--zl-space-1) var(--zl-space-2);
+    font-size: var(--zl-fs-2);
     border-top: 1px solid var(--zelo-line);
 }
 
@@ -3138,7 +3121,7 @@ body.navbar-hidden .sidebar-header {
 
 .manif-fonte-num {
     font-family: var(--zelo-font-mono);
-    font-size: 0.74rem;
+    font-size: var(--zl-fs-1);
     color: var(--bs-secondary-color);
     white-space: nowrap;
 }
@@ -3146,21 +3129,21 @@ body.navbar-hidden .sidebar-header {
 /* Quantas pastas — o número que a lista rolada esconde. O total de XML já está
    no botão; repeti-lo aqui seria dizer a mesma coisa duas vezes. */
 .manif-fontes-resumo {
-    font-size: 0.78rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
 }
 
 .manif-progresso {
-    font-size: 0.78rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
 }
 
-.manif-balanco { font-size: 0.8rem; }
-.manif-balanco div { margin-top: 0.15rem; }
+.manif-balanco { font-size: var(--zl-fs-2); }
+.manif-balanco div { margin-top: var(--zl-space-1); }
 
 @media (max-width: 820px) {
     .manif-entrada-in { grid-template-columns: 1fr; }
-    .manif-chave { white-space: normal; font-size: 0.74rem; }
+    .manif-chave { white-space: normal; font-size: var(--zl-fs-2); }
     .manif-barra-acao { margin-left: 0; width: 100%; }
 }
 
@@ -3169,10 +3152,10 @@ body.navbar-hidden .sidebar-header {
 .manif-st {
     display: inline-flex;
     align-items: center;
-    font-size: 0.78rem;
+    font-size: var(--zl-fs-2);
     font-weight: 500;
-    padding: 0.12rem 0.5rem;
-    border-radius: 999px;
+    padding: var(--zl-space-1) var(--zl-space-2);
+    border-radius: var(--zl-radius-pill);
     white-space: nowrap;
 }
 
@@ -3183,4 +3166,153 @@ body.navbar-hidden .sidebar-header {
 .manif-st.is-pend {
     background: color-mix(in srgb, var(--zelo-pend) 16%, var(--zelo-paper));
     color: var(--zelo-pend);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Cabeçalho de página (.zl-page) — achados A-14 e A-04
+   Primeiro consumidor da escala de forma da Onda 0: tamanho, espaço
+   e cor saem todos de token, nenhum valor decidido aqui.
+   O serif vem da CLASSE, não da tag: enquanto dependia de `h1, h2`,
+   seis páginas exibiam o título no papel tipográfico errado só por
+   terem escolhido <h4>.
+   ══════════════════════════════════════════════════════════════ */
+.zl-page {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--zl-space-4);
+    margin-bottom: var(--zl-space-5);
+}
+
+.zl-page-titulo {
+    font-family: var(--zelo-font-display);
+    font-size: var(--zl-fs-6);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+    color: var(--zelo-ink);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--zl-space-3);
+}
+
+.zl-page-sub {
+    font-size: var(--zl-fs-2);
+    color: var(--zelo-slate);
+    margin: var(--zl-space-1) 0 0;
+    max-width: 68ch;
+}
+
+.zl-page-acoes {
+    display: flex;
+    align-items: center;
+    gap: var(--zl-space-2);
+    flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+    .zl-page-titulo { font-size: var(--zl-fs-5); }
+}
+
+/* O botao de recolher/expandir e o mesmo, e o icone diz para onde ele leva. */
+.sidebar-recolher i { transition: transform var(--sidebar-transition); }
+
+@media (min-width: 901px) and (max-width: 1199px) {
+    body:not(.sidebar-open) .sidebar-recolher i { transform: rotate(180deg); }
+}
+
+/* Título de seção (.zl-secao) — o par do .zl-page, um nível abaixo.
+   Serif como todo cabeçalho da identidade, mas um degrau abaixo do título de
+   página na escala, para a hierarquia se ler sem depender da tag. */
+.zl-secao {
+    font-family: var(--zelo-font-display);
+    font-size: var(--zl-fs-4);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    color: var(--zelo-ink);
+    margin: 0 0 var(--zl-space-3);
+}
+
+.zl-secao + .nfse-hint,
+.zl-secao + .text-body-secondary {
+    margin-top: calc(var(--zl-space-2) * -1);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CABEÇALHO DE TABELA FIXO NA ROLAGEM (A-19)
+
+   Em 3.026 linhas de CSS existia UM `position: sticky`, e era a
+   navbar. Rolar Relatórios, Auditoria, Empresas ou Produtividade
+   levava embora os nomes das colunas, e a partir daí cada célula
+   virava um número sem rótulo.
+
+   NÃO se aplica à tabela de Certidões, e é decisão, não esquecimento:
+   lá o cabeçalho é `visually-hidden` (A-17) porque a linha de razão
+   já nomeia o que mostra, e cada cartão tem ~5 linhas — o cabeçalho
+   do cartão praticamente não sai da tela enquanto suas linhas estão
+   nela. Fixar coisa que não some é peso sem ganho.
+   ══════════════════════════════════════════════════════════════ */
+.table > thead:not(.visually-hidden) th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    /* opaco de propósito: o padrão do Bootstrap é transparente, e a
+       linha rolaria POR BAIXO do cabeçalho, visível através dele. */
+    background: var(--bs-card-bg, var(--zelo-paper));
+    box-shadow: inset 0 -1px 0 var(--zelo-line);
+}
+
+/* O `.table-responsive` do Bootstrap cria contexto de rolagem próprio
+   (`overflow-x: auto`), e dentro dele o sticky se prende ao topo do
+   CONTAINER, não da janela — o cabeçalho fica parado onde está. Como
+   estas tabelas não estouram a largura, `visible` devolve o sticky ao
+   comportamento da página. */
+@media (min-width: 901px) {
+    .table-responsive:has(> .table > thead:not(.visually-hidden)) {
+        overflow-x: visible;
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ERRO DE CAMPO (A-20)
+
+   O sistema tinha 100 campos de entrada e ZERO ocorrências de
+   `is-invalid`, `invalid-feedback` ou `was-validated`: não existia
+   validação inline em lugar nenhum. O erro de preenchimento chegava
+   por balão nativo do navegador (só para `required`), por flash no
+   topo (que perde o vínculo com o campo) ou por toast — que até há
+   pouco nem aparecia fora de uma tela.
+
+   Reusa o estado que o Bootstrap já tem, em vez de inventar um: aqui
+   as variáveis SÃO lidas do :root (ao contrário de `.btn-outline-*`,
+   que trazem hex literal), então remapear alcança tudo.
+   ══════════════════════════════════════════════════════════════ */
+:root {
+    --bs-form-invalid-color: var(--zelo-danger);
+    --bs-form-invalid-border-color: var(--zelo-danger);
+}
+
+/* O ícone que o Bootstrap embute no campo traz #dc3545 CRAVADO num
+   data-URI, fora da escala do Zelo e imune a remapeamento. Sai: quem
+   carrega o sinal sem depender de cor é a mensagem abaixo do campo. */
+.form-control.is-invalid,
+.was-validated .form-control:invalid,
+.form-select.is-invalid,
+.was-validated .form-select:invalid {
+    background-image: none;
+    padding-right: var(--zl-space-3);
+}
+
+.invalid-feedback {
+    font-size: var(--zl-fs-1);
+    margin-top: var(--zl-space-1);
+}
+
+/* A mensagem aparece porque o JS a insere; não depende de `.was-validated`
+   no formulário, que é o modo "valide tudo de uma vez" do Bootstrap. */
+.invalid-feedback.zl-erro-campo {
+    display: block;
 }

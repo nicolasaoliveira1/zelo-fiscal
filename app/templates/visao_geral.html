@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_zelo.html" import zl_comp, zl_ficha %}
+{% from "_zelo.html" import zl_comp, zl_ficha, zl_page %}
 {% block titulo %}Visão geral{% endblock %}
 
 {#- Um cartão por frente. O cabeçalho nomeia a frente, o corpo vem de quem
@@ -41,10 +41,13 @@
     {#- Saudação pela hora do servidor. Sem subtítulo com contagem: quem conta é
         a faixa logo abaixo, e o mesmo número em duas alturas da tela é a
         duplicação que já tirou "Certidões por status" de Relatórios. -#}
-    <header class="d-flex align-items-end flex-wrap gap-3 mb-3">
-        <h1 class="h3 mb-0">{{ saudacao }}, {{ current_user.username }}</h1>
-        <span class="ms-auto small text-secondary zl-num">{{ hoje_extenso }}</span>
-    </header>
+    {#- O h1 NOMEIA a tela; a saudação vira subtítulo, junto da data (que antes
+        flutuava sozinha à direita). Antes o cabeçalho principal da página era um
+        cumprimento: quem usa leitor de tela ouvia "Boa tarde, fulano" como
+        identificação da tela. E o nome é o MESMO do menu lateral — havia dois
+        nomes para esta tela ("Início" no menu, "Visão geral" no título, na rota
+        e no design language). -#}
+    {{ zl_page('Visão geral', saudacao ~ ', ' ~ current_user.username ~ ' · ' ~ hoje_extenso) }}
 
     {#- A FAIXA: UM componente que muda de estado, não dois blocos alternativos.
         É a diferença entre a página dizer "está tudo bem" e a página apenas
@@ -141,11 +144,11 @@
         {%- endif %}
         {% endcall %}
 
-        {#- NFSe: componente B. Só para quem pode abrir a tela de destino. -#}
+        {#- NFS-e: componente B. Só para quem pode abrir a tela de destino. -#}
         {% if 'nfse' in blocos %}
         {% set bloco = blocos.nfse %}
-        {% call vg_card('nfse', 'receipt', 'NFSe',
-                        url_for('main.nfse_painel'), 'Abrir NFSe') %}
+        {% call vg_card('nfse', 'receipt', 'NFS-e',
+                        url_for('main.nfse_painel'), 'Abrir NFS-e') %}
         {%- if bloco.erro or bloco.vazio %}
         {{ vg_estado(bloco, 'Nada a fazer aqui hoje.') }}
         {%- else %}

@@ -1,16 +1,11 @@
 {% extends "base.html" %}
 {% block titulo %}Produtividade{% endblock %}
-{% from "_zelo.html" import zl_ficha %}
+{% from "_zelo.html" import zl_ficha, zl_page, zl_secao %}
 
 {% block content %}
-<div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
-    <div>
-        <h4 class="mb-1 fw-bold">Produtividade</h4>
-        <p class="text-body-secondary mb-0">
-            Emissões, taxa de sucesso e tempo de lote nos últimos {{ dias }} dias.
-        </p>
-    </div>
-    <div class="d-flex align-items-center gap-2 flex-wrap">
+{% call zl_page('Produtividade',
+        'Emissões, taxa de sucesso e tempo de lote nos últimos ' ~ dias ~ ' dias.') %}
+<div class="d-flex align-items-center gap-2 flex-wrap">
         <div class="btn-group" role="group" aria-label="Período">
             {% for preset in presets %}
             <a class="btn btn-sm {{ 'btn-primary' if preset == dias else 'btn-soft-primary' }}"
@@ -21,7 +16,7 @@
             <i class="bi bi-file-earmark-spreadsheet"></i> Exportar XLSX
         </a>
     </div>
-</div>
+{% endcall %}
 
 <p class="text-body-secondary small mb-4">
     <i class="bi bi-info-circle"></i>
@@ -46,7 +41,7 @@
 <div class="row g-3">
     <div class="col-12 col-lg-7">
         <div class="card border-0 shadow-sm h-100">
-            <div class="card-header bg-body-tertiary border-bottom"><strong>Por tipo</strong></div>
+            <div class="card-header">{{ zl_secao('Por tipo') }}</div>
             <div class="card-body p-0">
                 {% if dados.por_tipo %}
                 <div class="table-responsive">
@@ -85,7 +80,7 @@
     </div>
     <div class="col-12 col-lg-5">
         <div class="card border-0 shadow-sm mb-3">
-            <div class="card-header bg-body-tertiary border-bottom"><strong>Origem dos lotes</strong></div>
+            <div class="card-header">{{ zl_secao('Origem dos lotes') }}</div>
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <table class="table table-sm mb-0 align-middle">
@@ -113,7 +108,7 @@
             </div>
         </div>
         <div class="card border-0 shadow-sm">
-            <div class="card-header bg-body-tertiary border-bottom"><strong>Emissões por dia</strong></div>
+            <div class="card-header">{{ zl_secao('Emissões por dia') }}</div>
             <div class="card-body p-0">
                 {% if dados.emissoes_por_dia %}
                 <div class="table-responsive">

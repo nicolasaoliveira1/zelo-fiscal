@@ -31,6 +31,15 @@ def test_get_login_e_publico(client_anon):
     assert resp.status_code == 200
 
 
+def test_login_herda_base_sem_navegacao_autenticada(client_anon):
+    corpo = client_anon.get('/login').get_data(as_text=True)
+
+    assert '<title>Entrar · Zelo</title>' in corpo
+    assert '/static/vendor/bootstrap/css/bootstrap.min.css' in corpo
+    assert 'app-sidebar' not in corpo
+    assert 'navbar-movel' not in corpo
+
+
 # --- AUTH-01.2 / 01.3: login válido e inválido ---
 
 def test_login_valido_cria_sessao(client_anon):

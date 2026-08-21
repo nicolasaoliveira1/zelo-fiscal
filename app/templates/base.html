@@ -7,21 +7,18 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{% if pendencias_total and pendencias_total > 0 %}({{ pendencias_total }}) {% endif %}{% block titulo %}Certidões{% endblock %} · Zelo</title>
 
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="{{ static_versionado('vendor/bootstrap/css/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ static_versionado('vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
 
     <!-- Zelo — superfamília IBM Plex (serif: wordmark/títulos; sans: UI; mono: dados) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap"
-        rel="stylesheet">
+    <link rel="stylesheet" href="{{ static_versionado('vendor/fonts/ibm-plex.css') }}">
 
     <link rel="stylesheet" href="{{ static_versionado('css/style.css') }}">
-    <!-- Zelo nomeia o sistema (aba/wordmark); a marca Assecon segue na navbar e na sidebar.
+    <!-- O favicon é a marca do Zelo, a mesma que a barra lateral exibe.
          SVG primeiro para navegador moderno; .ico como fallback (Windows/navegador antigo). -->
     <link rel="icon" type="image/svg+xml" href="{{ static_versionado('images/zelo-mark.svg') }}">
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/zelo.ico') }}">
+    {% block head_extra %}{% endblock %}
 
     <style>
         /* cores de status das validades — banda suave (Zelo: a única cor é o status) */
@@ -137,6 +134,7 @@
 </head>
 
 <body>
+    {% block estrutura_pagina %}
     <a class="visually-hidden-focusable skip-link" href="#conteudo-principal">Pular para o conteúdo</a>
     <script>
         (function () {
@@ -146,127 +144,162 @@
             }
 
             bodyEl.classList.add('sidebar-preload');
-            if (localStorage.getItem('sidebar-open') === '1') {
-                bodyEl.classList.add('sidebar-open');
-            }
+            // Evita flash de layout: aplica o estado ANTES do CSS pintar. Em
+            // tela larga o padrao e ABERTA, entao a classe a marcar e o rail
+            // (a escolha do operador de recolher), nao o contrario.
+            try {
+                if (window.matchMedia('(min-width: 1200px)').matches) {
+                    if (localStorage.getItem('sidebar-rail') === '1') {
+                        bodyEl.classList.add('sidebar-rail');
+                    }
+                } else if (window.matchMedia('(min-width: 901px)').matches
+                           && localStorage.getItem('sidebar-open') === '1') {
+                    bodyEl.classList.add('sidebar-open');
+                }
+            } catch (e) { /* localStorage bloqueado: fica no padrao */ }
         })();
     </script>
 
     {% set current_endpoint = request.endpoint or '' %}
 
-    <nav class="navbar navbar-expand-lg bg-body-tertiary mb-4">
-        <div class="container-fluid mx-1 px-4 d-flex align-items-center flex-nowrap justify-content-between">
-            <div class="d-flex align-items-center flex-nowrap gap-0">
-                <button class="navbar-toggler me-1 order-1 menu-button" type="button" id="sidebarToggle"
-                    aria-controls="appSidebar" aria-expanded="false" aria-label="Toggle navigation">
-                    <i class="bi bi-list menu-icon" aria-hidden="true"></i>
-                </button>
-                <a class="navbar-brand fw-semibold nav-title order-2 mb-0 ms-3" href="/">Zelo</a>
-            </div>
-            <div class="d-flex align-items-center flex-nowrap gap-2">
-                <span class="navbar-brand order-3 mb-0 me-1 logo-brand"
-                    title="Assecon Assessoria e Contabilidade">
-                    <img src="{{ url_for('static', filename='images/assecon_preto.png') }}"
-                        class="d-inline-block align-top img-fluid logo-light logo-navbar" alt="Assecon">
-                    <img src="{{ url_for('static', filename='images/assecon_branco.png') }}"
-                        class="d-inline-block align-top img-fluid logo-dark logo-navbar" alt="Assecon">
-                </span>
-                <li class="nav-item ms-0 order-4 list-unstyled mb-0">
-                    <button class="btn btn-link nav-link pt-1 py-2 px-0 px-lg-2" onclick="toggleTheme()" type="button"
-                        title="Alternar tema" aria-label="Alternar tema">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor"
-                            class="bi theme-toggle-svg" viewBox="0 0 16 16" id="theme-icon" style="fill: currentColor;">
-                        </svg>
-                    </button>
-                </li>
-                {% if current_user.is_authenticated %}
-                <span class="navbar-text order-5 small ms-1 me-1 d-flex align-items-center gap-1"
-                    title="Usuário autenticado">
-                    <i class="bi bi-person-circle" aria-hidden="true"></i>
-                    <span class="d-none d-sm-inline">{{ current_user.username }}</span>
-                    <span class="badge rounded-pill text-bg-secondary text-uppercase">{{ current_user.papel }}</span>
-                </span>
-                <li class="nav-item order-6 list-unstyled mb-0">
-                    <form method="post" action="{{ url_for('auth.logout') }}" class="mb-0">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button class="btn btn-link nav-link py-2 px-0 px-lg-2" type="submit" title="Sair"
-                            aria-label="Sair">
-                            <i class="bi bi-box-arrow-right" aria-hidden="true"></i>
-                        </button>
-                    </form>
-                </li>
-                {% endif %}
-            </div>
+    {#- A navbar existe SÓ no mobile, onde a barra lateral é off-canvas e
+        precisa de um gatilho. No desktop ela foi removida: marca, usuário, tema
+        e sair migraram para a barra lateral, e com isso some também o
+        esconder-ao-rolar, que era metade do problema de orientação (A-04) —
+        rolar a lista de certidões levava embora o nome do sistema, o usuário e
+        o tema, sem deixar nada dizendo em que página o operador estava. -#}
+    <nav class="navbar navbar-movel">
+        <div class="container-fluid px-3 d-flex align-items-center gap-2">
+            <button class="navbar-toggler menu-button" type="button" id="sidebarToggle"
+                aria-controls="appSidebar" aria-expanded="false" aria-label="Abrir menu">
+                <i class="bi bi-list menu-icon" aria-hidden="true"></i>
+            </button>
+            <a class="navbar-brand nav-title mb-0" href="{{ url_for('main.visao_geral_painel') }}">Zelo</a>
         </div>
     </nav>
 
     <div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true"></div>
 
     <aside class="app-sidebar" id="appSidebar">
-        <div class="sidebar-header">
-            <div class="sidebar-logo" aria-hidden="true">
-                <img src="{{ url_for('static', filename='images/assecon_preto.png') }}"
-                    class="img-fluid logo-light sidebar-logo-img" alt="Logo Assecon">
-                <img src="{{ url_for('static', filename='images/assecon_branco.png') }}"
-                    class="img-fluid logo-dark sidebar-logo-img" alt="Logo Assecon">
-            </div>
-            <div>
-                <span class="sidebar-title mb-0">Zelo</span>
-            </div>
-            <button class="btn btn-link sidebar-toggle-menu" type="button" id="sidebarToggleMenu"
-                aria-controls="appSidebar" aria-expanded="false" aria-label="Fechar menu">
-                <i class="bi bi-list menu-icon" aria-hidden="true"></i>
-            </button>
-        </div>
+        {#- A marca leva para a visão geral: o logo de uma barra lateral é o
+            atalho universal para a página inicial, e assim ele deixa de ser
+            enfeite repetido (antes aparecia aqui E na navbar). -#}
+        <a class="sidebar-marca" href="{{ url_for('main.visao_geral_painel') }}"
+           aria-label="Zelo — ir para a visão geral">
+            {#- A marca do ZELO, não a da Assecon: o sistema tem nome próprio e é
+                ele que a navegação anuncia. O carimbo carrega o próprio fundo, então
+                serve nos dois temas sem variante — a marca da Assecon volta depois,
+                em lugar a definir. -#}
+            <img class="sidebar-logo-img" alt=""
+                 src="{{ static_versionado('images/zelo-mark.svg') }}">
+            <span class="sidebar-title">Zelo</span>
+        </a>
 
+        {#- Agrupada pelos TRÊS PILARES do sistema (certidões, NFS-e,
+            manifestador). A estrutura existia no domínio e a navegação nunca a
+            mostrava: eram 8 itens planos onde os pilares eram irmãos de
+            "Relatórios" e de um verbo ("Nova Empresa", que já saiu). -#}
         <nav class="sidebar-nav" aria-label="Menu lateral">
-            <a class="sidebar-link {% if current_endpoint == 'main.visao_geral_painel' %}active{% endif %}" href="{{ url_for('main.visao_geral_painel') }}" title="Início">
-                <i class="bi bi-columns-gap"></i>
-                <span>Início</span>
+            <a class="sidebar-link {% if current_endpoint in ['main.visao_geral_painel'] %}active{% endif %}"
+               href="{{ url_for('main.visao_geral_painel') }}">
+                <i class="bi bi-columns-gap" aria-hidden="true"></i>
+                <span class="sidebar-rotulo">Visão geral</span>
             </a>
-            <a class="sidebar-link {% if current_endpoint == 'main.certidoes' %}active{% endif %}" href="{{ url_for('main.certidoes') }}" title="Certidões">
-                <i class="bi bi-file-earmark-check"></i>
-                <span>Certidões</span>
+
+            <p class="sidebar-grupo" id="grp-trabalho">Trabalho</p>
+            <div role="group" aria-labelledby="grp-trabalho">
+            <a class="sidebar-link {% if current_endpoint in ['main.certidoes'] %}active{% endif %}"
+               href="{{ url_for('main.certidoes') }}">
+                <i class="bi bi-file-earmark-check" aria-hidden="true"></i>
+                <span class="sidebar-rotulo">Certidões</span>
             </a>
-            <a class="sidebar-link {% if current_endpoint in ['main.empresas', 'main.empresa_detalhe', 'main.nova_empresa'] %}active{% endif %}" href="{{ url_for('main.empresas') }}" title="Empresas">
-                <i class="bi bi-buildings"></i>
-                <span>Empresas</span>
+            <a class="sidebar-link {% if current_endpoint in ['main.nfse_painel'] %}active{% endif %}"
+               href="{{ url_for('main.nfse_painel') }}">
+                <i class="bi bi-receipt" aria-hidden="true"></i>
+                <span class="sidebar-rotulo">NFS-e</span>
             </a>
-            <a class="sidebar-link {% if current_endpoint == 'main.relatorios' %}active{% endif %}" href="{{ url_for('main.relatorios') }}" title="Relatórios">
-                <i class="bi bi-bar-chart-line-fill"></i>
-                <span>Relatórios</span>
+            <a class="sidebar-link {% if current_endpoint in ['main.manifestador_painel'] %}active{% endif %}"
+               href="{{ url_for('main.manifestador_painel') }}">
+                <i class="bi bi-patch-check" aria-hidden="true"></i>
+                <span class="sidebar-rotulo">Manifestador</span>
             </a>
-            <a class="sidebar-link {% if current_endpoint == 'main.nfse_painel' %}active{% endif %}" href="{{ url_for('main.nfse_painel') }}" title="NFSe">
-                <i class="bi bi-receipt"></i>
-                <span>NFSe</span>
+            </div>
+
+            <p class="sidebar-grupo" id="grp-carteira">Carteira</p>
+            <div role="group" aria-labelledby="grp-carteira">
+            <a class="sidebar-link {% if current_endpoint in ['main.empresas', 'main.empresa_detalhe', 'main.nova_empresa'] %}active{% endif %}"
+               href="{{ url_for('main.empresas') }}">
+                <i class="bi bi-buildings" aria-hidden="true"></i>
+                <span class="sidebar-rotulo">Empresas</span>
             </a>
-            <a class="sidebar-link {% if current_endpoint == 'main.manifestador_painel' %}active{% endif %}" href="{{ url_for('main.manifestador_painel') }}" title="Manifestador">
-                <i class="bi bi-patch-check"></i>
-                <span>Manifestador</span>
+            <a class="sidebar-link {% if current_endpoint in ['main.relatorios'] %}active{% endif %}"
+               href="{{ url_for('main.relatorios') }}">
+                <i class="bi bi-bar-chart-line-fill" aria-hidden="true"></i>
+                <span class="sidebar-rotulo">Relatórios</span>
             </a>
-            <a class="sidebar-link {% if current_endpoint == 'main.produtividade' %}active{% endif %}" href="{{ url_for('main.produtividade') }}" title="Produtividade">
-                <i class="bi bi-graph-up-arrow"></i>
-                <span>Produtividade</span>
+            <a class="sidebar-link {% if current_endpoint in ['main.produtividade'] %}active{% endif %}"
+               href="{{ url_for('main.produtividade') }}">
+                <i class="bi bi-graph-up-arrow" aria-hidden="true"></i>
+                <span class="sidebar-rotulo">Produtividade</span>
             </a>
-        </nav>
-        <div class="sidebar-nav-footer">
+            </div>
+
             {% if current_user.papel == 'admin' %}
-            <a class="sidebar-link {% if current_endpoint == 'auth.usuarios_painel' %}active{% endif %}" href="{{ url_for('auth.usuarios_painel') }}" title="Usuários">
-                <i class="bi bi-people-fill"></i>
-                <span>Usuários</span>
+            <p class="sidebar-grupo" id="grp-sistema">Sistema</p>
+            <div role="group" aria-labelledby="grp-sistema">
+            <a class="sidebar-link {% if current_endpoint in ['auth.usuarios_painel'] %}active{% endif %}"
+               href="{{ url_for('auth.usuarios_painel') }}">
+                <i class="bi bi-people-fill" aria-hidden="true"></i>
+                <span class="sidebar-rotulo">Usuários</span>
             </a>
-            <a class="sidebar-link {% if current_endpoint == 'auth.auditoria_painel' %}active{% endif %}" href="{{ url_for('auth.auditoria_painel') }}" title="Auditoria">
-                <i class="bi bi-shield-check"></i>
-                <span>Auditoria</span>
+            <a class="sidebar-link {% if current_endpoint in ['auth.auditoria_painel'] %}active{% endif %}"
+               href="{{ url_for('auth.auditoria_painel') }}">
+                <i class="bi bi-shield-check" aria-hidden="true"></i>
+                <span class="sidebar-rotulo">Auditoria</span>
             </a>
-            <a class="sidebar-link {% if current_endpoint == 'main.diagnostico' %}active{% endif %}" href="{{ url_for('main.diagnostico') }}" title="Diagnóstico">
-                <i class="bi bi-activity"></i>
-                <span>Diagnóstico</span>
+            <a class="sidebar-link {% if current_endpoint in ['main.diagnostico'] %}active{% endif %}"
+               href="{{ url_for('main.diagnostico') }}">
+                <i class="bi bi-activity" aria-hidden="true"></i>
+                <span class="sidebar-rotulo">Diagnóstico</span>
             </a>
-            <a class="sidebar-link {% if current_endpoint == 'main.configuracoes' %}active{% endif %}" href="{{ url_for('main.configuracoes') }}" title="Configurações">
-                <i class="bi bi-gear-fill"></i>
-                <span>Configurações</span>
+            <a class="sidebar-link {% if current_endpoint in ['main.configuracoes'] %}active{% endif %}"
+               href="{{ url_for('main.configuracoes') }}">
+                <i class="bi bi-gear-fill" aria-hidden="true"></i>
+                <span class="sidebar-rotulo">Configurações</span>
             </a>
+            </div>
+            {% endif %}
+        </nav>
+
+        {#- Usuário, tema e sair moram AQUI e não mais na navbar, que se escondia
+            ao rolar: numa tela longa, sair exigia rolar até o topo primeiro. -#}
+        <div class="sidebar-pe">
+            {% if current_user.is_authenticated %}
+            <div class="sidebar-usuario">
+                <span class="sidebar-avatar" aria-hidden="true">{{ current_user.username[:2] | upper }}</span>
+                <span class="sidebar-quem">
+                    <span class="sidebar-nome">{{ current_user.username }}</span>
+                    <span class="sidebar-papel">{{ current_user.papel }}</span>
+                </span>
+                <span class="sidebar-acoes">
+                    <button class="sidebar-mini" type="button" onclick="toggleTheme()"
+                            title="Alternar tema" aria-label="Alternar tema">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                             class="bi" viewBox="0 0 16 16" id="theme-icon"></svg>
+                    </button>
+                    <form method="post" action="{{ url_for('auth.logout') }}" class="d-inline m-0">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="sidebar-mini" type="submit" title="Sair" aria-label="Sair">
+                            <i class="bi bi-box-arrow-right" aria-hidden="true"></i>
+                        </button>
+                    </form>
+                    <button class="sidebar-mini sidebar-recolher" type="button" id="sidebarToggleMenu"
+                            aria-controls="appSidebar" aria-expanded="true"
+                            title="Recolher ou expandir o menu" aria-label="Recolher ou expandir o menu">
+                        <i class="bi bi-chevron-double-left" aria-hidden="true"></i>
+                    </button>
+                </span>
+            </div>
             {% endif %}
         </div>
     </aside>
@@ -288,9 +321,11 @@
     </div>
 
     <div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
+    {% endblock %}
     
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ static_versionado('vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
 
+    {% block scripts_aplicacao %}
     <script type="module">
         import { showToast } from "{{ url_for('static', filename='js/toasts.js') }}";
 
@@ -336,122 +371,79 @@
         document.addEventListener('DOMContentLoaded', function () {
             const bodyEl = document.body;
             const sidebarEl = document.getElementById('appSidebar');
-            const toggleButton = document.getElementById('sidebarToggle');
-            const toggleButtonMenu = document.getElementById('sidebarToggleMenu');
+            const toggleButton = document.getElementById('sidebarToggle');       // navbar movel
+            const toggleButtonMenu = document.getElementById('sidebarToggleMenu'); // recolher, no rodape
             const backdropEl = document.getElementById('sidebarBackdrop');
-            const navEl = document.querySelector('.navbar');
             const menuLinks = document.querySelectorAll('.sidebar-link');
-            const mobileMedia = window.matchMedia('(max-width: 900px)');
-            const sidebarStateKey = 'sidebar-open';
+            const movel = window.matchMedia('(max-width: 900px)');
+            const larga = window.matchMedia('(min-width: 1200px)');
+            const CHAVE_RAIL = 'sidebar-rail';
+            const CHAVE_ABERTA = 'sidebar-open';
 
-            if (!sidebarEl || !toggleButton || !backdropEl || !navEl) {
+            if (!sidebarEl || !backdropEl) {
                 return;
             }
 
-            function isSidebarOpen() {
-                return bodyEl.classList.contains('sidebar-open');
-            }
-
-            function isMobile() {
-                return mobileMedia.matches;
-            }
-
-            function syncNavbarHeight() {
-                const navHeight = navEl.offsetHeight || 72;
-                document.documentElement.style.setProperty('--navbar-height', `${navHeight}px`);
-            }
-
-            function applySidebarState(open, persist = true) {
-                bodyEl.classList.toggle('sidebar-open', open);
-                const hidden = isMobile() ? !open : false;
-                sidebarEl.toggleAttribute('inert', hidden);
-                toggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
-                if (toggleButtonMenu) {
-                    toggleButtonMenu.setAttribute('aria-expanded', open ? 'true' : 'false');
-                }
-
-                if (persist) {
-                    localStorage.setItem(sidebarStateKey, open ? '1' : '0');
-                }
-            }
-
-            const storedSidebarState = bodyEl.classList.contains('sidebar-open') || localStorage.getItem(sidebarStateKey) === '1';
-            applySidebarState(storedSidebarState, false);
-            syncNavbarHeight();
-
-            requestAnimationFrame(() => {
-                bodyEl.classList.remove('sidebar-preload');
-            });
-
-            toggleButton.addEventListener('click', function () {
-                applySidebarState(!isSidebarOpen());
-            });
-
-            if (toggleButtonMenu) {
-                toggleButtonMenu.addEventListener('click', function () {
-                    applySidebarState(!isSidebarOpen());
-                });
-            }
-
-            backdropEl.addEventListener('click', function () {
-                applySidebarState(false);
-            });
-
-            menuLinks.forEach(link => {
-                link.addEventListener('click', function () {
-                    if (isMobile()) {
-                        applySidebarState(false);
+            /* Aberta por padrao em tela larga (A-01). O rail deixou de ser o
+               padrao e virou escolha, guardada em 'sidebar-rail'. Em tela media
+               vale o inverso: rail por padrao, abre sob demanda. */
+            function aplicar(estado, persistir) {
+                if (larga.matches) {
+                    bodyEl.classList.toggle('sidebar-rail', estado === 'rail');
+                    bodyEl.classList.remove('sidebar-open');
+                    if (persistir) localStorage.setItem(CHAVE_RAIL, estado === 'rail' ? '1' : '0');
+                } else {
+                    bodyEl.classList.remove('sidebar-rail');
+                    bodyEl.classList.toggle('sidebar-open', estado === 'aberta');
+                    if (persistir && !movel.matches) {
+                        localStorage.setItem(CHAVE_ABERTA, estado === 'aberta' ? '1' : '0');
                     }
-                });
-            });
-
-            document.addEventListener('keydown', function (event) {
-                if (event.key === 'Escape' && isSidebarOpen()) {
-                    applySidebarState(false);
                 }
-            });
-
-            window.addEventListener('resize', function () {
-                syncNavbarHeight();
-                applySidebarState(isSidebarOpen(), false);
-            });
-
-            let lastScrollY = window.scrollY;
-            let tickingNavbar = false;
-            const HIDE_SCROLL_START = 18;
-            const MIN_DELTA = 4;
-
-            if (window.scrollY > HIDE_SCROLL_START) {
-                bodyEl.classList.add('navbar-hidden');
-            } else {
-                bodyEl.classList.remove('navbar-hidden');
+                /* inert so quando ela esta REALMENTE fora de alcance: no movel
+                   fechada. No desktop o rail e visivel e navegavel (D-03). */
+                const forasDeAlcance = movel.matches && !bodyEl.classList.contains('sidebar-open');
+                sidebarEl.toggleAttribute('inert', forasDeAlcance);
+                const aberta = larga.matches
+                    ? !bodyEl.classList.contains('sidebar-rail')
+                    : bodyEl.classList.contains('sidebar-open');
+                if (toggleButton) toggleButton.setAttribute('aria-expanded', aberta ? 'true' : 'false');
+                if (toggleButtonMenu) toggleButtonMenu.setAttribute('aria-expanded', aberta ? 'true' : 'false');
             }
 
-            function updateNavbarByScroll() {
-                const currentY = window.scrollY;
-                const delta = currentY - lastScrollY;
-
-                if (Math.abs(delta) < MIN_DELTA) {
-                    tickingNavbar = false;
-                    return;
-                }
-
-                if (currentY <= 8) {
-                    bodyEl.classList.remove('navbar-hidden');
-                } else if (delta > 0 && currentY > HIDE_SCROLL_START) {
-                    bodyEl.classList.add('navbar-hidden');
-                }
-
-                lastScrollY = currentY;
-                tickingNavbar = false;
+            function estadoInicial() {
+                if (movel.matches) return 'fechada';
+                if (larga.matches) return localStorage.getItem(CHAVE_RAIL) === '1' ? 'rail' : 'aberta';
+                return localStorage.getItem(CHAVE_ABERTA) === '1' ? 'aberta' : 'rail';
             }
 
-            window.addEventListener('scroll', function () {
-                if (!tickingNavbar) {
-                    window.requestAnimationFrame(updateNavbarByScroll);
-                    tickingNavbar = true;
+            function alternar() {
+                if (larga.matches) {
+                    aplicar(bodyEl.classList.contains('sidebar-rail') ? 'aberta' : 'rail', true);
+                } else {
+                    aplicar(bodyEl.classList.contains('sidebar-open') ? 'fechada' : 'aberta', true);
                 }
-            }, { passive: true });
+            }
+
+            aplicar(estadoInicial(), false);
+            requestAnimationFrame(() => bodyEl.classList.remove('sidebar-preload'));
+
+            if (toggleButton) toggleButton.addEventListener('click', alternar);
+            if (toggleButtonMenu) toggleButtonMenu.addEventListener('click', alternar);
+            backdropEl.addEventListener('click', () => aplicar('fechada', true));
+
+            menuLinks.forEach(l => l.addEventListener('click', function () {
+                if (movel.matches) aplicar('fechada', false);
+            }));
+
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && movel.matches && bodyEl.classList.contains('sidebar-open')) {
+                    aplicar('fechada', true);
+                }
+            });
+
+            /* A faixa muda de significado ao redimensionar: o que era "aberta"
+               em 1400px vira off-canvas em 800px. Reavalia em vez de manter. */
+            [movel, larga].forEach(mq => mq.addEventListener('change', () => aplicar(estadoInicial(), false)));
 
             function cleanupModalArtifacts() {
                 if (document.querySelector('.modal.show')) {
@@ -482,7 +474,7 @@
                 const modalForm = editModal.querySelector('#editForm');
                 const pendenteForm = editModal.querySelector('#pendenteForm')
 
-                if (modalTitle) modalTitle.textContent = `Editar Validade: ${certidaoInfo}`;
+                if (modalTitle) modalTitle.textContent = `Editar validade: ${certidaoInfo}`;
                 if (modalForm) modalForm.action = `/certidao/atualizar/${certidaoId}`;
                 // #pendenteForm nao existe em nenhum template: "marcar pendente"
                 // roda por fetch (btnConfirmarPendente), nao por POST de form.
@@ -644,6 +636,8 @@
             document.addEventListener('visibilitychange', window.recarregarPendencias);
         })();
     </script>
+
+    {% endblock %}
 
     {% block scripts %}{% endblock %}
 

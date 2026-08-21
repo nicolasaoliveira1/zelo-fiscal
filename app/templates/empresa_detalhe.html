@@ -1,30 +1,6 @@
 {% extends "base.html" %}
+{% from "_zelo.html" import zl_page, zl_secao, render_badge %}
 {% block titulo %}{{ empresa.nome }}{% endblock %}
-{% macro render_badge(certidao, hoje) -%}
-{%- set badge_class = 'text-bg-success' -%}
-{%- set icone_status = 'bi-check-circle-fill' -%}
-{%- if certidao.status_especial and certidao.status_especial.value == 'Pendente' -%}
-{%- set badge_class = 'text-bg-danger' -%}
-{%- set icone_status = 'bi-exclamation-circle-fill' -%}
-{%- elif not certidao.data_validade -%}
-{%- set badge_class = 'text-bg-secondary' -%}
-{%- set icone_status = 'bi-question-circle-fill' -%}
-{%- elif certidao.data_validade < hoje -%}
-{%- set badge_class = 'text-bg-danger' -%}
-{%- set icone_status = 'bi-x-circle-fill' -%}
-{%- elif certidao.status == 'amarelo' -%}
-{%- set badge_class = 'text-bg-warning' -%}
-{%- set icone_status = 'bi-exclamation-triangle-fill' -%}
-{%- endif -%}
-<span class="badge rounded-pill {{ badge_class }} fs-6 fw-normal px-3 py-2 d-inline-flex align-items-center gap-2">
-    <i class="bi {{ icone_status }}"></i>
-    {%- if certidao.status_especial and certidao.status_especial.value == 'Pendente' -%}
-    PENDENTE
-    {%- else -%}
-    {{ certidao.data_validade.strftime('%d/%m/%Y') if certidao.data_validade else 'Nao definida' }}
-    {%- endif -%}
-</span>
-{%- endmacro %}
 
 {% block content %}
 {% with messages = get_flashed_messages(with_categories=true) %}
@@ -38,12 +14,8 @@
   {% endif %}
 {% endwith %}
 
-<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
-    <div>
-        <h4 class="mb-1 fw-bold">{{ empresa.nome }}</h4>
-        <p class="text-muted mb-0">CNPJ: {{ empresa.cnpj }}</p>
-    </div>
-    <div class="d-flex flex-wrap gap-2">
+{% call zl_page(empresa.nome, 'CNPJ: ' ~ empresa.cnpj) %}
+<div class="d-flex flex-wrap gap-2">
         <button type="button" class="btn btn-soft-primary btn-abrir-pasta" data-empresa-id="{{ empresa.id }}"
             aria-label="Abrir pasta de certidões da empresa {{ empresa.nome }}">
             <i class="bi bi-folder2-open me-1"></i>Abrir pasta
@@ -51,11 +23,11 @@
         <a class="btn btn-outline-secondary" href="{{ url_for('main.empresas') }}" aria-label="Voltar para lista de empresas">Voltar</a>
         <a class="btn btn-success" href="{{ url_for('main.nova_empresa') }}" aria-label="Cadastrar nova empresa">Nova Empresa</a>
     </div>
-</div>
+{% endcall %}
 
 <div class="card shadow-sm border-0 mb-4">
-    <div class="card-header bg-body-tertiary">
-        <h6 class="mb-0 fw-bold">Dados da empresa</h6>
+    <div class="card-header">
+        {{ zl_secao('Dados da empresa') }}
     </div>
     <div class="card-body">
         <form method="POST" action="{{ url_for('main.empresa_editar', empresa_id=empresa.id) }}" class="row g-3" id="empresa-editar-form">
@@ -121,7 +93,7 @@
         </form>
         <div class="d-flex flex-wrap gap-2">
             {% if current_user.papel in ['operador', 'admin'] %}
-            <button type="submit" class="btn btn-primary" form="empresa-editar-form" aria-label="Salvar alteracoes da empresa">Salvar alteracoes</button>
+            <button type="submit" class="btn btn-primary" form="empresa-editar-form" aria-label="Salvar alterações da empresa">Salvar alterações</button>
             {% endif %}
             {% if current_user.papel == 'admin' %}
             <a class="btn btn-outline-danger" aria-label="Remover empresa"
@@ -134,8 +106,8 @@
 </div>
 
 <div class="card shadow-sm border-0 mb-4" id="card-receita" data-empresa-id="{{ empresa.id }}">
-    <div class="card-header bg-body-tertiary d-flex flex-wrap align-items-center justify-content-between gap-2">
-        <h6 class="mb-0 fw-bold">Dados da Receita</h6>
+    <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+        {{ zl_secao('Dados da Receita') }}
         <div class="d-flex align-items-center gap-2">
             {% if dados_receita and dados_receita.verificado_em %}
             <span class="text-muted small date-cell">
@@ -249,8 +221,8 @@
 </div>
 
 <div class="card shadow-sm border-0">
-    <div class="card-header bg-body-tertiary">
-        <h6 class="mb-0 fw-bold">Certidoes</h6>
+    <div class="card-header">
+        {{ zl_secao('Certidões') }}
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">

@@ -1,12 +1,11 @@
 {% extends "base.html" %}
+{% from "_zelo.html" import zl_page %}
 
 {% block titulo %}Auditoria{% endblock %}
 
 {% block content %}
 <div class="container-fluid px-0">
-    <div class="d-flex align-items-center justify-content-between mb-3">
-        <h1 class="h4 mb-0">Trilha de auditoria</h1>
-    </div>
+    {{ zl_page('Trilha de auditoria') }}
 
     <div class="card mb-3">
         <div class="card-body">
