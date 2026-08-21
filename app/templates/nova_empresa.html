@@ -26,7 +26,7 @@
 
                     <div class="col-12">
                         <label for="nome" class="form-label">Nome da Empresa</label>
-                        <input type="text" class="form-control" id="nome" name="nome" required
+                        <input type="text" class="form-control{% if campo_com_erro == 'nome' %} is-invalid{% endif %}" id="nome" name="nome" required
                                maxlength="120" autocomplete="organization"
                                value="{{ nome_inicial | default('', true) }}">
                     </div>
@@ -34,7 +34,7 @@
                     <div class="col-12 col-lg-6">
                         <label for="cnpj" class="form-label">CNPJ</label>
                         <div class="input-group">
-                            <input type="text" class="form-control" id="cnpj" name="cnpj"
+                            <input type="text" class="form-control{% if campo_com_erro == 'cnpj' %} is-invalid{% endif %}" id="cnpj" name="cnpj"
                                    value="{{ cnpj_inicial | default('', true) }}"
                                    placeholder="XX.XXX.XXX/XXXX-XX" required
                                    oninput="mascaraCnpj(this)" maxlength="18"
@@ -52,52 +52,53 @@
 
                     <div class="col-12 col-lg-6">
                         <label for="estado" class="form-label">Estado (UF)</label>
-                        <select class="form-select" id="estado" name="estado" required>
+                        <select class="form-select{% if campo_com_erro == 'estado' %} is-invalid{% endif %}" id="estado" name="estado" required>
                             <option value="">Selecione...</option>
-                            <option value="AC">Acre</option>
-                            <option value="AL">Alagoas</option>
-                            <option value="AP">Amapá</option>
-                            <option value="AM">Amazonas</option>
-                            <option value="BA">Bahia</option>
-                            <option value="CE">Ceará</option>
-                            <option value="DF">Distrito Federal</option>
-                            <option value="ES">Espírito Santo</option>
-                            <option value="GO">Goiás</option>
-                            <option value="MA">Maranhão</option>
-                            <option value="MT">Mato Grosso</option>
-                            <option value="MS">Mato Grosso do Sul</option>
-                            <option value="MG">Minas Gerais</option>
-                            <option value="PA">Pará</option>
-                            <option value="PB">Paraíba</option>
-                            <option value="PR">Paraná</option>
-                            <option value="PE">Pernambuco</option>
-                            <option value="PI">Piauí</option>
-                            <option value="RJ">Rio de Janeiro</option>
-                            <option value="RN">Rio Grande do Norte</option>
+                            <option value="AC"{{ ' selected' if estado_inicial == 'AC' }}>Acre</option>
+                            <option value="AL"{{ ' selected' if estado_inicial == 'AL' }}>Alagoas</option>
+                            <option value="AP"{{ ' selected' if estado_inicial == 'AP' }}>Amapá</option>
+                            <option value="AM"{{ ' selected' if estado_inicial == 'AM' }}>Amazonas</option>
+                            <option value="BA"{{ ' selected' if estado_inicial == 'BA' }}>Bahia</option>
+                            <option value="CE"{{ ' selected' if estado_inicial == 'CE' }}>Ceará</option>
+                            <option value="DF"{{ ' selected' if estado_inicial == 'DF' }}>Distrito Federal</option>
+                            <option value="ES"{{ ' selected' if estado_inicial == 'ES' }}>Espírito Santo</option>
+                            <option value="GO"{{ ' selected' if estado_inicial == 'GO' }}>Goiás</option>
+                            <option value="MA"{{ ' selected' if estado_inicial == 'MA' }}>Maranhão</option>
+                            <option value="MT"{{ ' selected' if estado_inicial == 'MT' }}>Mato Grosso</option>
+                            <option value="MS"{{ ' selected' if estado_inicial == 'MS' }}>Mato Grosso do Sul</option>
+                            <option value="MG"{{ ' selected' if estado_inicial == 'MG' }}>Minas Gerais</option>
+                            <option value="PA"{{ ' selected' if estado_inicial == 'PA' }}>Pará</option>
+                            <option value="PB"{{ ' selected' if estado_inicial == 'PB' }}>Paraíba</option>
+                            <option value="PR"{{ ' selected' if estado_inicial == 'PR' }}>Paraná</option>
+                            <option value="PE"{{ ' selected' if estado_inicial == 'PE' }}>Pernambuco</option>
+                            <option value="PI"{{ ' selected' if estado_inicial == 'PI' }}>Piauí</option>
+                            <option value="RJ"{{ ' selected' if estado_inicial == 'RJ' }}>Rio de Janeiro</option>
+                            <option value="RN"{{ ' selected' if estado_inicial == 'RN' }}>Rio Grande do Norte</option>
                             <option value="RS" selected>Rio Grande do Sul</option>
-                            <option value="RO">Rondônia</option>
-                            <option value="RR">Roraima</option>
-                            <option value="SC">Santa Catarina</option>
-                            <option value="SP">São Paulo</option>
-                            <option value="SE">Sergipe</option>
-                            <option value="TO">Tocantins</option>
+                            <option value="RO"{{ ' selected' if estado_inicial == 'RO' }}>Rondônia</option>
+                            <option value="RR"{{ ' selected' if estado_inicial == 'RR' }}>Roraima</option>
+                            <option value="SC"{{ ' selected' if estado_inicial == 'SC' }}>Santa Catarina</option>
+                            <option value="SP"{{ ' selected' if estado_inicial == 'SP' }}>São Paulo</option>
+                            <option value="SE"{{ ' selected' if estado_inicial == 'SE' }}>Sergipe</option>
+                            <option value="TO"{{ ' selected' if estado_inicial == 'TO' }}>Tocantins</option>
                         </select>
                     </div>
 
                     <div class="col-12 col-lg-6">
                         <label for="cidade" class="form-label">Cidade</label>
-                        <select class="form-select" id="cidade" name="cidade" required
+                        <select class="form-select{% if campo_com_erro == 'cidade' %} is-invalid{% endif %}" id="cidade" name="cidade" required
                                 onchange="atualizarCidadeSelecionada()">
-                            <option value="" disabled selected>Selecione...</option>
+                            <option value="" disabled {{ '' if cidade_inicial else 'selected' }}>Selecione...</option>
                             {% for valor, exibicao in municipios %}
-                            <option value="{{ valor }}">{{ exibicao }}</option>
+                            <option value="{{ valor }}"{{ ' selected' if cidade_inicial == valor }}>{{ exibicao }}</option>
                             {% endfor %}
                         </select>
                     </div>
 
                     <div class="col-12 col-lg-6" id="inscricao_mobiliaria_wrapper" style="display:none">
                         <label for="inscricao_mobiliaria" class="form-label">Inscrição Mobiliária</label>
-                        <input type="text" class="form-control" id="inscricao_mobiliaria" name="inscricao_mobiliaria"
+                        <input type="text" class="form-control{% if campo_com_erro == 'inscricao_mobiliaria' %} is-invalid{% endif %}" id="inscricao_mobiliaria" name="inscricao_mobiliaria"
+                               value="{{ inscricao_inicial | default('', true) }}"
                                maxlength="6" inputmode="numeric" autocomplete="off">
                         <div class="form-text">Opcional. Até 6 caracteres.</div>
                     </div>

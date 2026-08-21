@@ -12,7 +12,7 @@ from flask import (
     redirect,
     render_template,
     request,
-    url_for,
+    url_for, session
 )
 
 from app import db, file_manager
@@ -348,11 +348,21 @@ def pagina_nova_empresa():
     # Pre-preenchimento opcional vindo da NFSe (NFSE-23): a linha do extrato ja
     # tem nome e CNPJ, entao o operador nao redigita. Sem querystring, a pagina
     # se comporta exatamente como antes.
+    # Volta de uma falha de validacao: `pop` porque o formulario preservado vale
+    # para ESTA visita e nao para a proxima — deixa-lo na sessao faria a tela
+    # reaparecer preenchida dias depois, sem o operador entender por que.
+    preservado = session.pop('empresa_form', None) or {}
     return render_template(
         'nova_empresa.html',
         municipios=municipios,
-        nome_inicial=(request.args.get('nome') or '').strip(),
-        cnpj_inicial=(request.args.get('cnpj') or '').strip(),
+        # a querystring segue valendo para o pre-preenchimento vindo da NFSe
+        # (NFSE-23); o formulario preservado tem prioridade porque e mais recente.
+        nome_inicial=preservado.get('nome') or (request.args.get('nome') or '').strip(),
+        cnpj_inicial=preservado.get('cnpj') or (request.args.get('cnpj') or '').strip(),
+        estado_inicial=preservado.get('estado', ''),
+        cidade_inicial=preservado.get('cidade', ''),
+        inscricao_inicial=preservado.get('inscricao_mobiliaria', ''),
+        campo_com_erro=preservado.get('campo'),
     )
 
 
@@ -367,34 +377,52 @@ def adicionar_empresa():
     inscricao = (request.form.get('inscricao_mobiliaria') or '').strip()
     origem = (request.form.get('origem') or '').strip()
 
-    def _redirect_apos_cadastro():
+    def _redirect_apos_cadastro(preservar=False, campo=None):
+        """Volta para a tela de origem.
+
+        Em FALHA de validacao (`preservar=True`) leva junto o que foi digitado.
+        Sem isso o redirect descartava o formulario inteiro: trocar um digito do
+        CNPJ custava redigitar tudo — e a falha que so o servidor conhece
+        (CNPJ ja cadastrado) e justamente uma das que mais acontecem.
+
+        Vai pela SESSAO, nao pela querystring: CNPJ em URL cai no log do
+        servidor, no historico do navegador e no Referer. A sessao e assinada,
+        so vai para o proprio navegador do operador, e e consumida no proximo
+        GET (`pop`).
+        """
+        if preservar and origem == 'nova_empresa':
+            session['empresa_form'] = {
+                'nome': nome, 'cnpj': cnpj, 'estado': estado,
+                'cidade': cidade, 'inscricao_mobiliaria': inscricao,
+                'campo': campo,
+            }
         if origem == 'nova_empresa':
             return redirect(url_for('main.nova_empresa'))
         return redirect(url_for('main.certidoes'))
 
     if not nome:
         flash('Nome da empresa é obrigatório.', 'warning')
-        return _redirect_apos_cadastro()
+        return _redirect_apos_cadastro(preservar=True, campo='nome')
 
     cnpj_limpo = _normalizar_cnpj(cnpj)
     if len(cnpj_limpo) != 14:
         flash('CNPJ inválido: informe os 14 dígitos.', 'warning')
-        return _redirect_apos_cadastro()
+        return _redirect_apos_cadastro(preservar=True, campo='cnpj')
 
     # DATA-01.1: contar 14 digitos deixava passar erro de digitacao. O criterio
     # e o digito verificador, pelo mesmo nucleo que a NFSe ja usa (app/utils.py).
     if not cnpj_valido(cnpj_limpo):
         flash('CNPJ inválido: o dígito verificador não confere. Confira a digitação.',
               'warning')
-        return _redirect_apos_cadastro()
+        return _redirect_apos_cadastro(preservar=True, campo='cnpj')
 
     if not estado or not re.match(r'^[A-Z]{2}$', estado):
         flash('Estado inválido. Use a sigla com 2 letras (ex: RS).', 'warning')
-        return _redirect_apos_cadastro()
+        return _redirect_apos_cadastro(preservar=True, campo='estado')
 
     if not cidade:
         flash('Cidade é obrigatória.', 'warning')
-        return _redirect_apos_cadastro()
+        return _redirect_apos_cadastro(preservar=True, campo='cidade')
 
     # DATA-04.1: mesma canonicalizacao da edicao — a cidade entra no banco na
     # grafia de exibicao correta desde o cadastro.
@@ -402,7 +430,7 @@ def adicionar_empresa():
 
     if inscricao and len(inscricao) > 6:
         flash('Inscrição municipal deve ter até 6 caracteres.', 'warning')
-        return _redirect_apos_cadastro()
+        return _redirect_apos_cadastro(preservar=True, campo='inscricao_mobiliaria')
 
     cnpj_formatado = _formatar_cnpj(cnpj_limpo) or cnpj
     cnpj = cnpj_formatado
@@ -417,7 +445,7 @@ def adicionar_empresa():
     empresa_existente = Empresa.query.filter(Empresa.cnpj.in_(cnpj_variantes)).first()
     if empresa_existente:
         flash(f'Empresa com CNPJ {cnpj} já está cadastrada.', 'warning')
-        return _redirect_apos_cadastro()
+        return _redirect_apos_cadastro(preservar=True, campo='cnpj')
 
     # Cria objeto empresa
     empresa_nova = Empresa(
