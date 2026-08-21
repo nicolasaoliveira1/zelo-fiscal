@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_zelo.html" import zl_page %}
-{% block titulo %}NFSe{% endblock %}
+{% block titulo %}NFS-e{% endblock %}
 
 {% block content %}
 <style>
@@ -321,7 +321,7 @@
     #nfseAliquota { font-family: var(--zelo-font-mono); font-weight: 600; }
 </style>
 
-{% call zl_page('Emissão de NFSe') %}
+{% call zl_page('Emissão de NFS-e') %}
 <button class="btn btn-ghost btn-sm" type="button" id="btnConfigNfse"
         data-bs-toggle="collapse" data-bs-target="#painelConfig">
     <i class="bi bi-sliders"></i> Configurações da nota
@@ -394,7 +394,7 @@
     <!-- Importacao do extrato -->
     <div class="col-lg-6">
         <div class="nfse-card h-100">
-            <h2 class="h6 nfse-title mb-2">1. Importar o extrato do banco</h2>
+            <h2 class="h6 nfse-title mb-2">Importar extrato</h2>
             <p class="nfse-hint mb-3">
                 CSV de cobranças do Banrisul ou PDF do extrato do Inter.
                 Pode escolher vários de uma vez.
@@ -417,7 +417,7 @@
     <!-- Sessao do navegador -->
     <div class="col-lg-6">
         <div class="nfse-card h-100">
-            <h2 class="h6 nfse-title mb-2">2. Abrir o portal e conferir a alíquota</h2>
+            <h2 class="h6 nfse-title mb-2">Portal e alíquota</h2>
             <p class="nfse-hint mb-3">
                 Abre o Emissor Nacional com o certificado. A alíquota do Simples
                 muda todo mês e sai na nota; confira antes de preencher.
@@ -484,7 +484,7 @@
 
 <!-- Modo de emissao -->
 <div class="nfse-card mb-3">
-    <h2 class="h6 nfse-title mb-2">3. Como emitir</h2>
+    <h2 class="h6 nfse-title mb-2">Modo de emissão</h2>
 
     <div class="btn-group nfse-modo" role="group" aria-label="Modo de emissão">
         <input type="radio" class="btn-check" name="nfseModo" id="modoIndividual"
@@ -533,7 +533,7 @@
 <!-- Tabela de conferencia -->
 <div class="nfse-card">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-        <h2 class="h6 nfse-title mb-0">4. Conferir e preencher</h2>
+        <h2 class="h6 nfse-title mb-0">Conferir e preencher</h2>
         <div class="d-flex align-items-center gap-2">
             <label class="nfse-hint mb-0" for="filtroCompetencia">Mostrar</label>
             <select class="form-select form-select-sm" id="filtroCompetencia"
@@ -599,7 +599,7 @@
 
 <!-- Conferencia contra o portal (NFSE-28) -->
 <div class="nfse-card mt-3">
-    <h2 class="h6 nfse-title mb-2">5. Conferir com o que saiu no portal</h2>
+    <h2 class="h6 nfse-title mb-2">O que saiu no portal</h2>
     <p class="nfse-hint mb-3">
         Lê as NFS-e emitidas no Emissor Nacional e soma o período. Só leitura.
     </p>

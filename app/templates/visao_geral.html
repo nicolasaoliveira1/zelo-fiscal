@@ -144,11 +144,11 @@
         {%- endif %}
         {% endcall %}
 
-        {#- NFSe: componente B. Só para quem pode abrir a tela de destino. -#}
+        {#- NFS-e: componente B. Só para quem pode abrir a tela de destino. -#}
         {% if 'nfse' in blocos %}
         {% set bloco = blocos.nfse %}
-        {% call vg_card('nfse', 'receipt', 'NFSe',
-                        url_for('main.nfse_painel'), 'Abrir NFSe') %}
+        {% call vg_card('nfse', 'receipt', 'NFS-e',
+                        url_for('main.nfse_painel'), 'Abrir NFS-e') %}
         {%- if bloco.erro or bloco.vazio %}
         {{ vg_estado(bloco, 'Nada a fazer aqui hoje.') }}
         {%- else %}
