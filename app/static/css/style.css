@@ -185,7 +185,7 @@
 
 .toast-stack .stk-body {
     padding: var(--zl-space-3) var(--zl-space-6) var(--zl-space-3) var(--zl-space-4);
-    font-size: 1rem;
+    font-size: var(--zl-fs-3);
     line-height: 1.3;
 }
 
@@ -198,7 +198,7 @@
     background: transparent;
     color: inherit;
     opacity: .75;
-    font-size: 1.15rem;
+    font-size: var(--zl-fs-4);
     line-height: 1;
     cursor: pointer;
 }
@@ -664,7 +664,7 @@ main {
 
 .sidebar-grupo {
     font-family: var(--zelo-font-mono);
-    font-size: 0.6875rem;
+    font-size: var(--zl-fs-1);
     text-transform: uppercase;
     letter-spacing: 0.09em;
     color: var(--zelo-slate);
@@ -691,7 +691,7 @@ main {
     width: 1.25rem;
     min-width: 1.25rem;
     text-align: center;
-    font-size: 1.05rem;
+    font-size: var(--zl-fs-4);
     color: var(--zelo-slate);
     flex: none;
 }
@@ -757,7 +757,7 @@ main {
     display: grid;
     place-items: center;
     font-family: var(--zelo-font-mono);
-    font-size: 0.7rem;
+    font-size: var(--zl-fs-1);
     color: var(--zelo-slate);
     flex: none;
 }
@@ -776,7 +776,7 @@ main {
 .sidebar-papel {
     display: block;
     font-family: var(--zelo-font-mono);
-    font-size: 0.65rem;
+    font-size: var(--zl-fs-1);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--zelo-slate);
@@ -1032,20 +1032,20 @@ footer {
 .zl-comp-n {
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 2.4rem;
+    font-size: var(--zl-fs-7);
     font-weight: 500;
     color: var(--bs-emphasis-color);
 }
 
 .zl-comp-d {
     font-family: var(--zelo-font-mono);
-    font-size: 1.1rem;
+    font-size: var(--zl-fs-4);
     color: var(--bs-secondary-color);
 }
 
 .zl-comp-u {
     margin-left: auto;
-    font-size: 0.8rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
 }
 
@@ -1102,7 +1102,7 @@ footer {
     display: flex;
     align-items: baseline;
     gap: var(--zl-space-2);
-    font-size: 0.82rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
 }
 
@@ -1143,7 +1143,7 @@ footer {
 }
 
 .zl-comp-meta > div {
-    font-size: 0.78rem;
+    font-size: var(--zl-fs-1);
     color: var(--bs-secondary-color);
 }
 
@@ -1152,7 +1152,7 @@ footer {
     margin-top: var(--zl-space-1);
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 1rem;
+    font-size: var(--zl-fs-3);
     font-weight: 600;
     color: var(--bs-emphasis-color);
 }
@@ -1171,7 +1171,7 @@ footer {
 }
 
 .zl-bars-l {
-    font-size: 0.875rem;
+    font-size: var(--zl-fs-2);
 }
 
 .zl-bars-dot {
@@ -1199,7 +1199,7 @@ footer {
 .zl-bars-v {
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 0.875rem;
+    font-size: var(--zl-fs-2);
     text-align: right;
 }
 
@@ -1227,7 +1227,7 @@ footer {
     border-radius: var(--zl-radius-md);
     background: var(--bs-body-bg);
     box-shadow: var(--zl-elev-2);
-    font-size: 0.82rem;
+    font-size: var(--zl-fs-2);
     transition: right .28s cubic-bezier(.4, 0, .2, 1);
 }
 
@@ -1306,7 +1306,7 @@ body.topo-visivel .zl-dock {
    que momento a tela está — "Emissão em lote", "Lote concluído", "Confirmar". */
 .zl-eyebrow {
     display: block;
-    font-size: 0.68rem;
+    font-size: var(--zl-fs-1);
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--bs-secondary-color);
@@ -1386,17 +1386,17 @@ body.topo-visivel .zl-dock {
 }
 
 .zl-ficha-row.is-total .zl-ficha-l { font-weight: 600; }
-.zl-ficha-row.is-total .zl-ficha-v { font-size: 1.3rem; }
+.zl-ficha-row.is-total .zl-ficha-v { font-size: var(--zl-fs-5); }
 
 .zl-ficha-l {
-    font-size: 0.86rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-body-color);
 }
 
 .zl-ficha-v {
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 1.02rem;
+    font-size: var(--zl-fs-3);
     font-weight: 600;
     color: var(--bs-emphasis-color);
 }
@@ -1435,7 +1435,7 @@ body.topo-visivel .zl-dock {
     background: var(--zelo-danger-soft);
     color: var(--zelo-danger);
     font-weight: 600;
-    font-size: 0.86rem;
+    font-size: var(--zl-fs-2);
 }
 
 .vg-faixa-h.is-calmo {
@@ -1470,11 +1470,11 @@ body.topo-visivel .zl-dock {
 }
 
 .vg-faixa-t {
-    font-size: 0.92rem;
+    font-size: var(--zl-fs-3);
 }
 
 .vg-faixa-s {
-    font-size: 0.78rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
 }
 
@@ -1486,7 +1486,7 @@ body.topo-visivel .zl-dock {
     text-align: right;
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 1.25rem;
+    font-size: var(--zl-fs-5);
     font-weight: 600;
     line-height: 1.1;
 }
@@ -1502,7 +1502,7 @@ body.topo-visivel .zl-dock {
 
 .vg-faixa-nome,
 .vg-faixa-mais {
-    font-size: 0.72rem;
+    font-size: var(--zl-fs-1);
     line-height: 1.5;
     padding: 0 var(--zl-space-2);
     border: 1px solid var(--zelo-line);
@@ -1522,7 +1522,7 @@ body.topo-visivel .zl-dock {
 .vg-faixa-ir {
     flex: none;
     color: var(--bs-secondary-color);
-    font-size: 0.8rem;
+    font-size: var(--zl-fs-2);
 }
 
 /* ── 2. O mosaico ─────────────────────────────────────────────
@@ -1578,7 +1578,7 @@ body.topo-visivel .zl-dock {
     grid-column: 1;
     grid-row: 2;
     align-self: start;
-    font-size: 0.82rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
     line-height: 1.2;
 }
@@ -1652,7 +1652,7 @@ body.topo-visivel .zl-dock {
 }
 
 .vg-cert-quando {
-    font-size: 0.7rem;
+    font-size: var(--zl-fs-1);
     font-weight: 600;
     letter-spacing: 0.02em;
     text-transform: uppercase;
@@ -1702,7 +1702,7 @@ body.topo-visivel .zl-dock {
 
 .vg-card-h-extra {
     margin-left: auto;
-    font-size: 0.8rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
 }
 
@@ -1714,7 +1714,7 @@ body.topo-visivel .zl-dock {
     padding: var(--zl-space-2) var(--zl-space-4);
     border-top: 1px solid var(--zelo-line);
     background: var(--bs-tertiary-bg);
-    font-size: 0.8rem;
+    font-size: var(--zl-fs-2);
 }
 
 .vg-card-f a {
@@ -1731,7 +1731,7 @@ body.topo-visivel .zl-dock {
    uma linha própria com texto no lugar do valor. */
 .vg-ficha-sub {
     display: block;
-    font-size: 0.72rem;
+    font-size: var(--zl-fs-1);
     color: var(--bs-secondary-color);
     line-height: 1.3;
 }
@@ -1743,7 +1743,7 @@ body.topo-visivel .zl-dock {
     display: flex;
     align-items: center;
     gap: var(--zl-space-2);
-    font-size: 0.84rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
     margin: 0;
 }
@@ -1778,7 +1778,7 @@ body.topo-visivel .zl-dock {
 .batch-progress-title {
     margin: var(--zl-space-1) 0 0;
     font-family: var(--zelo-font-display);
-    font-size: 1.15rem;
+    font-size: var(--zl-fs-4);
     font-weight: 600;
     line-height: 1.2;
     color: var(--bs-emphasis-color);
@@ -1788,7 +1788,7 @@ body.topo-visivel .zl-dock {
    números a cada 1,5s e sem largura fixa a linha "dança" na tela. */
 .batch-progress-clock {
     font-family: var(--zelo-font-mono);
-    font-size: 0.85rem;
+    font-size: var(--zl-fs-2);
     font-variant-numeric: tabular-nums;
     color: var(--bs-secondary-color);
 }
@@ -1806,7 +1806,7 @@ body.topo-visivel .zl-dock {
     margin-top: var(--zl-space-4);
     padding-top: var(--zl-space-3);
     border-top: 1px solid var(--zelo-line);
-    font-size: 0.84rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
     min-height: 2.4rem;
 }
@@ -1855,7 +1855,7 @@ body.topo-visivel .zl-dock {
     margin: var(--zl-space-2) 0 0 var(--zl-space-4);
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 0.76rem;
+    font-size: var(--zl-fs-1);
     color: var(--bs-secondary-color);
 }
 
@@ -1921,7 +1921,7 @@ body.topo-visivel .zl-dock {
 }
 
 .nav-title {
-    font-size: 1.6rem;
+    font-size: var(--zl-fs-6);
     font-weight: 600;
     margin-right: var(--zl-space-5);
     letter-spacing: 0.5px;
@@ -1934,21 +1934,21 @@ body.topo-visivel .zl-dock {
 
 @media (max-width: 1200px) {
     .nav-title {
-        font-size: 1.0rem;
+        font-size: var(--zl-fs-3);
     margin-right: var(--zl-space-4);
     }
 }
 
 @media (max-width: 900px) {
     .nav-title {
-        font-size: 1rem;
+        font-size: var(--zl-fs-3);
     margin-right: var(--zl-space-3);
     }
 }
 
 @media (max-width: 600px) {
     .nav-title {
-        font-size: 0.75rem;
+        font-size: var(--zl-fs-1);
     margin-right: var(--zl-space-1);
     }
 }
@@ -1983,7 +1983,7 @@ body.topo-visivel .zl-dock {
 }
 
 .menu-button .menu-icon {
-    font-size: 1.45rem;
+    font-size: var(--zl-fs-5);
     margin-top: 0;
 }
 
@@ -1993,7 +1993,7 @@ body.topo-visivel .zl-dock {
         height: 30px;
     }
     .menu-button .menu-icon {
-        font-size: 1.35rem;
+        font-size: var(--zl-fs-5);
         margin-top: 0;
         margin-bottom: 0px;
     }
@@ -2005,7 +2005,7 @@ body.topo-visivel .zl-dock {
         height: 22px;
     }
     .menu-button .menu-icon {
-        font-size: 1.05rem;
+        font-size: var(--zl-fs-4);
         margin-bottom: 3.2px;
     }
 }
@@ -2052,6 +2052,7 @@ body.topo-visivel .zl-dock {
 }
 
 .copy-cnpj i {
+    /* Ajuste óptico relativo ao texto mono adjacente; não é um papel tipográfico. */
     font-size: 0.95em;
     line-height: 1.5;
 }
@@ -2105,11 +2106,11 @@ tr.status-cinza > td:nth-last-child(3) {
 
 @media (max-width: 1200px) {
     .table td, .table th {
-        font-size: 0.9rem;
+        font-size: var(--zl-fs-2);
         padding: var(--zl-space-2) !important;
     }
     .btn-sm {
-        font-size: 0.75rem;
+        font-size: var(--zl-fs-2);
         padding: var(--zl-space-1) var(--zl-space-2);
     }
     .table td.d-flex {
@@ -2170,7 +2171,7 @@ tr.status-cinza > td:nth-last-child(3) {
     justify-content: flex-start;
     gap: var(--zl-space-2);
     padding: var(--zl-space-2) var(--zl-space-3);
-    font-size: 0.82rem;
+    font-size: var(--zl-fs-2);
     font-weight: 600;
     border-radius: var(--zl-radius-pill);
     border: 1px solid transparent;
@@ -2202,7 +2203,7 @@ tr.status-cinza > td:nth-last-child(3) {
 }
 
 .filter-chip i {
-    font-size: 1rem;
+    font-size: var(--zl-fs-3);
 }
 
 .filter-chip .chip-label {
@@ -2291,7 +2292,7 @@ tr.status-cinza > td:nth-last-child(3) {
     min-width: 1.2rem;
     padding: var(--zl-space-1);
     border-radius: var(--zl-radius-pill);
-    font-size: 0.7rem;
+    font-size: var(--zl-fs-1);
     font-weight: 700;
     line-height: 1;
     background-color: color-mix(in srgb, var(--zelo-ink) 12%, transparent);
@@ -2305,16 +2306,16 @@ tr.status-cinza > td:nth-last-child(3) {
 
     .filter-chip {
         padding: var(--zl-space-1) var(--zl-space-2);
-        font-size: 0.74rem;
+        font-size: var(--zl-fs-2);
         gap: var(--zl-space-2);
     }
 
     .filter-chip i {
-        font-size: 0.88rem;
+        font-size: var(--zl-fs-3);
     }
 
     .filter-chip .chip-count {
-        font-size: 0.64rem;
+        font-size: var(--zl-fs-1);
         min-width: 1.5rem;
         padding: var(--zl-space-1);
     }
@@ -2338,7 +2339,7 @@ tr.status-cinza > td:nth-last-child(3) {
     padding: var(--zl-space-1) var(--zl-space-3);
     cursor: pointer;
     color: var(--bs-body-color);
-    font-size: 0.92rem;
+    font-size: var(--zl-fs-2);
     line-height: 1;
     transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -2416,7 +2417,7 @@ tr.status-cinza > td:nth-last-child(3) {
     color: var(--bs-body-color);
     border-radius: var(--zl-radius-sm);
     padding: var(--zl-space-2) var(--zl-space-3);
-    font-size: 0.9rem;
+    font-size: var(--zl-fs-2);
     cursor: pointer;
     white-space: nowrap;
 }
@@ -2428,7 +2429,7 @@ tr.status-cinza > td:nth-last-child(3) {
 }
 
 .filtro-dd-toggle .bi-chevron-down {
-    font-size: 0.72rem;
+    font-size: var(--zl-fs-1);
     opacity: 0.7;
     transition: transform 0.15s ease;
 }
@@ -2439,8 +2440,8 @@ tr.status-cinza > td:nth-last-child(3) {
    so aparece quando esse modo esta ativo. Ativo (recentes 1o) usa o realce de
    acao dos chips selecionados. */
 .ordem-dir[hidden] { display: none; }
-.ordem-dir { font-size: 0.8rem; padding: var(--zl-space-2); font-weight: 600; }
-.ordem-dir .bi-arrow-down-up { font-size: 0.82rem; opacity: 0.75; }
+.ordem-dir { font-size: var(--zl-fs-2); padding: var(--zl-space-2); font-weight: 600; }
+.ordem-dir .bi-arrow-down-up { font-size: var(--zl-fs-2); opacity: 0.75; }
 .ordem-dir[aria-pressed="true"] {
     background: var(--zelo-action-bg);
     color: var(--zelo-action-fg);
@@ -2452,7 +2453,7 @@ tr.status-cinza > td:nth-last-child(3) {
     background: var(--zelo-action-bg);
     color: var(--zelo-action-fg);
     border-radius: var(--zl-radius-pill);
-    font-size: 0.68rem;
+    font-size: var(--zl-fs-1);
     font-weight: 700;
     padding: var(--zl-space-1) var(--zl-space-2);
     min-width: 1.3rem;
@@ -2506,7 +2507,7 @@ tr.status-cinza > td:nth-last-child(3) {
 .dd-panel .filter-chip .chip-count { flex: 0 0 auto; }
 
 @media (max-width: 575.98px) {
-    .resumo-item { font-size: 0.84rem; padding: var(--zl-space-1) var(--zl-space-2); }
+    .resumo-item { font-size: var(--zl-fs-2); padding: var(--zl-space-1) var(--zl-space-2); }
     .filtros-toolbar .busca { flex: 1 1 100%; }
     .dd-panel { left: 0; right: auto; }
 }
@@ -2531,7 +2532,7 @@ tr.status-cinza > td:nth-last-child(3) {
     position: absolute;
     right: 0.75rem;
     pointer-events: none;
-    font-size: 0.9rem;
+    font-size: var(--zl-fs-2);
     color: var(--zelo-slate);
 }
 
@@ -2623,6 +2624,7 @@ tr.status-cinza > td:nth-last-child(3) {
     display: flex;
     align-items: center;
     justify-content: center;
+    /* Ícone responsivo preso ao diâmetro fluido do FAB; não é texto hierárquico. */
     font-size: clamp(0.8rem, 1.6vw, 1.35rem);
     box-shadow: var(--zl-elev-2);
     transition: opacity 0.4s ease, width 0.3s ease, height 0.3s ease, bottom 0.3s ease, right 0.3s ease, font-size 0.3s ease;
@@ -2884,7 +2886,7 @@ tr.filter-hidden {
 }
 
 .manif-eyebrow {
-    font-size: 0.68rem;
+    font-size: var(--zl-fs-1);
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--bs-secondary-color);
@@ -2901,7 +2903,7 @@ tr.filter-hidden {
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-sm);
     background: var(--zelo-mist);
-    font-size: 0.86rem;
+    font-size: var(--zl-fs-2);
 }
 
 .manif-regua-bar {
@@ -2914,7 +2916,7 @@ tr.filter-hidden {
     border: 0;
     padding: 0;
     color: var(--bs-emphasis-color);
-    font-size: 0.82rem;
+    font-size: var(--zl-fs-2);
     font-weight: 500;
     display: inline-flex;
     align-items: center;
@@ -2949,7 +2951,7 @@ tr.filter-hidden {
 }
 
 .manif-tbl th {
-    font-size: 0.68rem;
+    font-size: var(--zl-fs-1);
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--bs-secondary-color);
@@ -2963,7 +2965,7 @@ tr.filter-hidden {
 
 .manif-motivo {
     color: var(--bs-secondary-color);
-    font-size: 0.78rem;
+    font-size: var(--zl-fs-2);
     margin-top: var(--zl-space-1);
 }
 
@@ -2976,7 +2978,7 @@ tr.filter-hidden {
 .manif-chave {
     font-family: var(--zelo-font-mono);
     font-variant-numeric: tabular-nums;
-    font-size: 0.82rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
     white-space: nowrap;
 }
@@ -2997,7 +2999,7 @@ tr.filter-hidden {
 .manif-chave .f-dv { color: var(--zelo-muted); }
 
 .manif-chave-leg {
-    font-size: 0.68rem;
+    font-size: var(--zl-fs-1);
     color: var(--bs-secondary-color);
     display: flex;
     gap: var(--zl-space-4);
@@ -3015,7 +3017,7 @@ tr.filter-hidden {
     margin-bottom: var(--zl-space-3);
 }
 
-.manif-andamento-linha { font-size: 0.88rem; font-weight: 500; }
+.manif-andamento-linha { font-size: var(--zl-fs-2); font-weight: 500; }
 .manif-andamento-linha.is-warning { color: var(--zelo-warn); }
 .manif-andamento-linha.is-error { color: var(--zelo-danger); }
 
@@ -3048,7 +3050,7 @@ tr.filter-hidden {
 
 .manif-ta {
     font-family: var(--zelo-font-mono);
-    font-size: 0.78rem;
+    font-size: var(--zl-fs-2);
 }
 
 .manif-solta {
@@ -3062,10 +3064,10 @@ tr.filter-hidden {
     border: 1px dashed var(--zelo-line);
     border-radius: var(--zl-radius-sm);
     color: var(--bs-secondary-color);
-    font-size: 0.82rem;
+    font-size: var(--zl-fs-2);
 }
 
-.manif-solta i { font-size: 1.6rem; }
+.manif-solta i { font-size: var(--zl-fs-6); }
 .manif-solta:hover { border-color: var(--zelo-graphite); }
 
 /* Arrastando por cima: o traço fecha e o fundo levanta um degrau. Sem cor —
@@ -3102,7 +3104,7 @@ tr.filter-hidden {
     align-items: center;
     gap: var(--zl-space-2);
     padding: var(--zl-space-1) var(--zl-space-2) var(--zl-space-1) var(--zl-space-2);
-    font-size: 0.8rem;
+    font-size: var(--zl-fs-2);
     border-top: 1px solid var(--zelo-line);
 }
 
@@ -3119,7 +3121,7 @@ tr.filter-hidden {
 
 .manif-fonte-num {
     font-family: var(--zelo-font-mono);
-    font-size: 0.74rem;
+    font-size: var(--zl-fs-1);
     color: var(--bs-secondary-color);
     white-space: nowrap;
 }
@@ -3127,21 +3129,21 @@ tr.filter-hidden {
 /* Quantas pastas — o número que a lista rolada esconde. O total de XML já está
    no botão; repeti-lo aqui seria dizer a mesma coisa duas vezes. */
 .manif-fontes-resumo {
-    font-size: 0.78rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
 }
 
 .manif-progresso {
-    font-size: 0.78rem;
+    font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
 }
 
-.manif-balanco { font-size: 0.8rem; }
+.manif-balanco { font-size: var(--zl-fs-2); }
 .manif-balanco div { margin-top: var(--zl-space-1); }
 
 @media (max-width: 820px) {
     .manif-entrada-in { grid-template-columns: 1fr; }
-    .manif-chave { white-space: normal; font-size: 0.74rem; }
+    .manif-chave { white-space: normal; font-size: var(--zl-fs-2); }
     .manif-barra-acao { margin-left: 0; width: 100%; }
 }
 
@@ -3150,7 +3152,7 @@ tr.filter-hidden {
 .manif-st {
     display: inline-flex;
     align-items: center;
-    font-size: 0.78rem;
+    font-size: var(--zl-fs-2);
     font-weight: 500;
     padding: var(--zl-space-1) var(--zl-space-2);
     border-radius: var(--zl-radius-pill);
