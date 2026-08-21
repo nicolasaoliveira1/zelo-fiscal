@@ -434,8 +434,11 @@ h1, h2, .h1, .h2 {
 }
 
 .navbar-toggler {
-    display: block !important;
-    border: 1px solid rgba(33, 37, 41, 0.15);
+    /* sem !important: o `display:none` que isto vencia vinha de
+       `.navbar-expand-lg .navbar-toggler`, e a navbar deixou de usar essa
+       classe na Onda 2 — ela agora só existe no mobile. */
+    display: block;
+    border: 1px solid var(--zelo-line);
 }
 
 .navbar {
@@ -536,10 +539,6 @@ h1, h2, .h1, .h2 {
     --bs-table-active-bg: color-mix(in srgb, var(--zelo-ink) 12%, var(--zelo-mist));
     --bs-table-hover-color: var(--zelo-ink);
     --bs-table-hover-bg: color-mix(in srgb, var(--zelo-ink) 9%, var(--zelo-mist));
-}
-
-.card-header .text-dark {
-    color: var(--zelo-ink) !important;
 }
 
 html, body {
@@ -2018,11 +2017,20 @@ body.topo-visivel .zl-dock {
     }
 }
 
+/* Tira só a sombra pesada que o Bootstrap põe no clique — mas NÃO o foco.
+   `:focus-visible` estava aqui junto com `outline: none !important`, e este é o
+   único gatilho do menu no mobile: sem anel, quem navega por teclado abria a
+   navegação às cegas. O design language proíbe remover foco visível. */
 .navbar-toggler:focus,
-.navbar-toggler:active,
+.navbar-toggler:active {
+    outline: none;
+    box-shadow: var(--zl-elev-0);
+}
+
 .navbar-toggler:focus-visible {
-    outline: none !important;
-    box-shadow: var(--zl-elev-0) !important;
+    outline: 2px solid var(--bs-primary);
+    outline-offset: 2px;
+    box-shadow: var(--zl-elev-0);
 }
 
 .copy-cnpj {
@@ -3315,4 +3323,73 @@ tr.filter-hidden {
    no formulário, que é o modo "valide tudo de uma vez" do Bootstrap. */
 .invalid-feedback.zl-erro-campo {
     display: block;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ALTO CONTRASTE E CONTRASTE REFORÇADO (A-25)
+
+   `forced-colors: active` é o modo de alto contraste do Windows. Ele
+   substitui a paleta inteira por um par do sistema e, no caminho,
+   **descarta `background-image` e `box-shadow`**. Três sinais deste
+   sistema dependem exatamente disso e sumiriam sem aviso:
+
+     · o fio de status à esquerda da linha   (background em ::before)
+     · a guia pontilhada da linha de razão   (background-image)
+     · a régua dupla do item ativo do menu   (box-shadow inset)
+
+   Quem usa alto contraste costuma ser quem mais precisa desses sinais.
+   Aqui cada um deles é reconstruído com `border`, que sobrevive, e com
+   as palavras-chave de cor do sistema (`Highlight`, `CanvasText`), que
+   é como o modo espera ser atendido.
+   ══════════════════════════════════════════════════════════════ */
+@media (forced-colors: active) {
+    /* fio de status: background some, borda fica */
+    td.cert-tipo-col::before {
+        background: none;
+        border-left: 3px solid CanvasText;
+    }
+
+    /* guia da linha de razão: o gradiente some, um fio pontilhado real fica */
+    td.cert-guia::after {
+        background: none;
+        border-top: 1px dotted CanvasText;
+    }
+
+    /* item ativo do menu: a régua dupla é box-shadow e some */
+    .sidebar-link.active {
+        border-left: 3px double Highlight;
+        forced-color-adjust: none;
+    }
+
+    /* foco precisa sobreviver em qualquer elemento */
+    :focus-visible {
+        outline: 2px solid Highlight;
+        outline-offset: 2px;
+    }
+
+    /* superfícies perdem o tom e passam a se separar pelo fio */
+    .card,
+    .app-sidebar,
+    .navbar-movel {
+        border: 1px solid CanvasText;
+    }
+}
+
+/* `prefers-contrast: more` é o pedido explícito de mais contraste, sem trocar
+   a paleta. Aqui os fios finos ganham corpo: o sistema separa quase tudo por
+   um traço de 1px em --zelo-line, que é justamente o primeiro a sumir para
+   quem faz esse pedido. */
+@media (prefers-contrast: more) {
+    :root {
+        --zelo-line: #9AA1AB;
+    }
+
+    [data-bs-theme="dark"] {
+        --zelo-line: #6B7280;
+    }
+
+    td.cert-guia::after {
+        background: repeating-linear-gradient(to right,
+            var(--zelo-slate) 0 2px, transparent 2px 6px);
+    }
 }

@@ -65,7 +65,7 @@ def init_auth(app):
         if _prefere_json():
             return _envelope_erro(msg, 400, error_type='csrf'), 400
         flash(msg, 'warning')
-        return redirect(request.referrer or url_for('main.certidoes'))
+        return redirect(request.referrer or url_for('main.visao_geral_painel'))
 
 
 # --- Enforcement / respostas ---
@@ -156,7 +156,7 @@ def requer_papel(minimo):
 @bp_auth.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for('main.certidoes'))
+        return redirect(url_for('main.visao_geral_painel'))
     if request.method == 'POST':
         username = (request.form.get('username') or '').strip()
         senha = request.form.get('senha') or ''
@@ -187,7 +187,10 @@ def _destino_seguro(prox):
     `/\\evil.com` viraria o protocolo-relativo `//evil.com`."""
     if prox and prox.startswith('/') and not prox.startswith('//') and '\\' not in prox:
         return prox
-    return url_for('main.certidoes')
+    # Sem `next`, entrar leva a VISAO GERAL, nao a tabela de certidoes: ela e a
+    # pagina inicial desde 2026-08-20, e responde "por onde eu comeco hoje" em
+    # vez de "o que existe". Os redirects tinham ficado para tras da decisao.
+    return url_for('main.visao_geral_painel')
 
 
 # --- Painel de auditoria (admin) — AUDIT-02 ---
