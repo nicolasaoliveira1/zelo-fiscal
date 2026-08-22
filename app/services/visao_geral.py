@@ -25,11 +25,25 @@ def _bloco(nome, fn):
         return {'erro': True, 'nome': nome}
 
 
+# Os quatro baldes que sao TRABALHO. `validas` fica de fora porque nao pede
+# nada; `sem_data` fica DENTRO porque certidao sem validade e desconhecida, e
+# desconhecido pede conferencia (mesma leitura do chip `nao_definida` na tela de
+# Certidoes).
+_BALDES_DE_ATENCAO = ('vencidas', 'a_vencer', 'pendentes', 'sem_data')
+
+
 def _certidoes():
     contagem = snapshot_service.contagem_carteira()
+    atencao = sum(contagem[balde] for balde in _BALDES_DE_ATENCAO)
     return {
         **contagem,
-        'vazio': not any(contagem.values()),
+        'total': sum(contagem.values()),
+        'atencao': atencao,
+        # `vazio` fala de ATENCAO, nao da existencia de certidoes. Um `any()`
+        # sobre o dict inteiro ficaria verdadeiro em qualquer carteira saudavel
+        # — desde que a contagem passou a trazer `validas` — e o estado vazio do
+        # cartao sumiria em silencio, sem nenhum teste ficar vermelho.
+        'vazio': not atencao,
     }
 
 

@@ -46,13 +46,26 @@ def test_contagem_separa_vencidas_a_vencer_e_pendentes(app, ids):
         _cert(emp, TipoCertidao.FGTS, validade=hoje + timedelta(days=5))
         _cert(emp, TipoCertidao.ESTADUAL, pendente=True)
 
+        # as 5 do fixture `ids` nao tem data: com tres baldes elas eram
+        # invisiveis, e a contagem parecia falar da carteira inteira.
         assert snapshot_service.contagem_carteira() == {
-            'vencidas': 1, 'a_vencer': 1, 'pendentes': 1}
+            'vencidas': 1, 'a_vencer': 1, 'pendentes': 1,
+            'validas': 0, 'sem_data': 5}
 
 
-def test_valida_e_sem_data_ficam_fora_da_contagem(app, ids):
-    """A contagem responde "o que pede atencao", nao "quantas certidoes existem":
-    valida nao pede nada, e sem data nao e afirmacao sobre validade."""
+def test_valida_e_sem_data_entram_na_contagem(app, ids):
+    """REVERTE a intencao anterior desta funcao, de proposito.
+
+    Ela ja respondia so "o que pede atencao", e por isso classificava em cinco
+    baldes para devolver tres. O preco apareceu na tela: um numero em destaque
+    sem denominador nao diz se 89 e crise ou terca-feira comum, e quem quisesse
+    o total tinha de contar de novo por fora — que e como duas contagens da
+    mesma carteira comecam a divergir.
+
+    Agora a contagem devolve os cinco e cada consumidor soma o que lhe importa:
+    o e-mail le as tres de atencao (`montar_resumo`), a tela soma quatro e usa a
+    soma dos cinco como denominador.
+    """
     with app.app_context():
         emp = _empresa()
         _cert(emp, TipoCertidao.FEDERAL,
@@ -60,13 +73,20 @@ def test_valida_e_sem_data_ficam_fora_da_contagem(app, ids):
         _cert(emp, TipoCertidao.FGTS, validade=None)
 
         assert snapshot_service.contagem_carteira() == {
-            'vencidas': 0, 'a_vencer': 0, 'pendentes': 0}
+            'vencidas': 0, 'a_vencer': 0, 'pendentes': 0,
+            'validas': 1, 'sem_data': 6}  # 1 do teste + 5 do fixture
 
 
 def test_carteira_vazia_nao_quebra(app, ids):
+    """Carteira DE FATO vazia — o fixture semeia 5 certidoes sem data, e o nome
+    deste teste so era verdadeiro porque a contagem antiga as descartava."""
     with app.app_context():
+        Certidao.query.delete()
+        db.session.commit()
+
         assert snapshot_service.contagem_carteira() == {
-            'vencidas': 0, 'a_vencer': 0, 'pendentes': 0}
+            'vencidas': 0, 'a_vencer': 0, 'pendentes': 0,
+            'validas': 0, 'sem_data': 0}
 
 
 def test_contagem_aceita_a_data_de_referencia(app, ids):
@@ -126,7 +146,8 @@ def _configurar_fontes(monkeypatch, *, contagem=None, estados=None, itens=None,
     monkeypatch.setattr(
         visao_geral.snapshot_service,
         'contagem_carteira',
-        lambda: contagem or {'vencidas': 0, 'a_vencer': 0, 'pendentes': 0},
+        lambda: contagem or {'vencidas': 0, 'a_vencer': 0, 'pendentes': 0,
+                             'validas': 0, 'sem_data': 0},
     )
     monkeypatch.setattr(
         visao_geral.manifestador_cofre,
@@ -164,7 +185,8 @@ def test_montar_reune_blocos_preenchidos_das_fontes_existentes(monkeypatch):
     breaker = {'alvo': 'FGTS', 'motivo': 'timeout'}
     _configurar_fontes(
         monkeypatch,
-        contagem={'vencidas': 2, 'a_vencer': 1, 'pendentes': 3},
+        contagem={'vencidas': 2, 'a_vencer': 1, 'pendentes': 3,
+                  'validas': 40, 'sem_data': 4},
         estados={'pronto': 5},
         itens=certificados,
         notas=[
@@ -180,7 +202,8 @@ def test_montar_reune_blocos_preenchidos_das_fontes_existentes(monkeypatch):
     blocos = visao_geral.montar(_usuario())
 
     assert blocos['certidoes'] == {
-        'vencidas': 2, 'a_vencer': 1, 'pendentes': 3, 'vazio': False}
+        'vencidas': 2, 'a_vencer': 1, 'pendentes': 3, 'validas': 40,
+        'sem_data': 4, 'total': 50, 'atencao': 10, 'vazio': False}
     assert blocos['certificados'] == {
         'itens': certificados, 'inventariado': True, 'vazio': False}
     assert blocos['nfse'] == {
@@ -188,6 +211,48 @@ def test_montar_reune_blocos_preenchidos_das_fontes_existentes(monkeypatch):
     assert blocos['fila'] == {
         'falhas': 2, 'motivo': 'Tempo esgotado', 'grupos': falhas,
         'breakers': [breaker], 'vazio': False}
+
+
+def test_carteira_so_com_validas_deixa_o_cartao_vazio(monkeypatch):
+    """`vazio` fala de ATENCAO, nao da existencia de certidoes.
+
+    E a armadilha da mudanca: enquanto a contagem devolvia tres baldes,
+    `not any(contagem.values())` era uma forma correta de dizer "nada pede
+    atencao". Com `validas` no dict ela passa a ser falsa em toda carteira
+    saudavel — e o estado vazio do cartao sumiria sem nenhum teste ficar
+    vermelho, porque nenhuma fixture tinha certidao valida.
+    """
+    _configurar_fontes(monkeypatch, contagem={
+        'vencidas': 0, 'a_vencer': 0, 'pendentes': 0,
+        'validas': 1240, 'sem_data': 0})
+
+    bloco = visao_geral.montar(_usuario())['certidoes']
+
+    assert bloco['vazio'] is True
+    assert bloco['atencao'] == 0
+    assert bloco['total'] == 1240
+
+
+def test_sem_data_conta_como_atencao(monkeypatch):
+    """Certidao sem validade e desconhecida, e desconhecido pede conferencia —
+    a mesma leitura do chip `nao_definida` na tela de Certidoes."""
+    _configurar_fontes(monkeypatch, contagem={
+        'vencidas': 0, 'a_vencer': 0, 'pendentes': 0,
+        'validas': 3, 'sem_data': 7})
+
+    bloco = visao_geral.montar(_usuario())['certidoes']
+
+    assert bloco['atencao'] == 7
+    assert bloco['vazio'] is False
+
+
+def test_carteira_sem_nenhuma_certidao_tem_total_zero(monkeypatch):
+    _configurar_fontes(monkeypatch)
+
+    bloco = visao_geral.montar(_usuario())['certidoes']
+
+    assert bloco['total'] == 0
+    assert bloco['atencao'] == 0
 
 
 def test_blocos_vazios_sao_diferentes_de_blocos_com_erro(monkeypatch):

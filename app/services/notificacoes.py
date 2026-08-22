@@ -202,6 +202,20 @@ def _agrupar_por_secao(itens):
     return secoes
 
 
+# O resumo por e-mail pergunta "o que pede atencao?" sobre TRES baldes — a
+# contagem da carteira devolve cinco (a tela precisa do denominador e trata
+# `sem_data` como trabalho). A regra do e-mail fica escrita UMA vez, aqui, e nao
+# em cada consumidor: `not any(resumo.values())` parecia dizer isso e passou a
+# mentir no dia em que `validas` entrou no dict — silenciosamente, porque
+# nenhuma carteira de teste tinha certidao valida.
+_BALDES_DO_RESUMO = ('a_vencer', 'vencidas', 'pendentes')
+
+
+def _carteira_vazia(resumo):
+    """Nada a vencer, vencido ou pendente — pelos baldes que o e-mail conta."""
+    return not any(resumo[balde] for balde in _BALDES_DO_RESUMO)
+
+
 def montar_resumo(itens=None):
     """(assunto, corpo, resumo) do resumo do dia: carteira + pauta pendente.
 
@@ -211,7 +225,7 @@ def montar_resumo(itens=None):
     resumo = snapshot_service.contagem_carteira()
     a_vencer, vencidas, pendentes = (
         resumo['a_vencer'], resumo['vencidas'], resumo['pendentes'])
-    carteira_vazia = (a_vencer == 0 and vencidas == 0 and pendentes == 0)
+    carteira_vazia = _carteira_vazia(resumo)
 
     if itens:
         assunto = f'[Zelo] Resumo do dia — {len(itens)} aviso(s)'
@@ -285,7 +299,7 @@ def enviar_resumo_diario(app):
         return False
 
     assunto, corpo, resumo = montar_resumo(itens)
-    vazio = not itens and not any(resumo.values())
+    vazio = not itens and _carteira_vazia(resumo)
     if vazio and not app.config.get('NOTIF_DIGEST_ENVIAR_VAZIO', True):
         log_event('notif_resumo_omitido_vazio')
         return False

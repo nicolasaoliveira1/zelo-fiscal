@@ -83,13 +83,13 @@ def test_contagem_bate_com_classificacao_do_painel(ctx):
     _, _, resumo = notificacoes.montar_resumo()
 
     # referencia independente: reclassifica a carteira do zero
-    esperado = {'a_vencer': 0, 'vencidas': 0, 'pendentes': 0}
+    esperado = {'a_vencer': 0, 'vencidas': 0, 'pendentes': 0,
+                'validas': 0, 'sem_data': 0}
     for c in Certidao.query.all():
-        k = classificar_status_certidao(c, hoje)
-        if k in esperado:
-            esperado[k] += 1
+        esperado[classificar_status_certidao(c, hoje)] += 1
     assert resumo == esperado
-    assert resumo == {'a_vencer': 2, 'vencidas': 1, 'pendentes': 2}
+    assert resumo == {'a_vencer': 2, 'vencidas': 1, 'pendentes': 2,
+                      'validas': 1, 'sem_data': 0}
 
 
 # --- montagem do corpo -----------------------------------------------------
@@ -199,6 +199,29 @@ def test_vazio_omitido_quando_flag_desligada(ctx, monkeypatch):
     monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
     monkeypatch.setattr(notificacoes.email_sender, 'enviar',
                         lambda *a, **k: chamou.append(1) or True)
+    assert notificacoes.enviar_resumo_diario(ctx) is False
+    assert chamou == []
+
+
+def test_carteira_so_com_validas_continua_vazia_para_o_resumo(ctx, monkeypatch):
+    """Carteira saudavel + pauta vazia = resumo vazio, MESMO havendo certidoes.
+
+    Regressao do dia em que a contagem passou a devolver os cinco baldes: o
+    `not any(resumo.values())` daqui virava verdadeiro assim que existisse UMA
+    certidao valida, e o e-mail que devia ficar calado passaria a sair todo dia.
+    Nenhum teste pegava, porque toda carteira de fixture deste arquivo estava
+    vazia — o unico jeito de a assercao ser real e semear a certidao valida.
+    """
+    _config()
+    ctx.config.update(SMTP_HOST='smtp', SMTP_FROM='f@x.com',
+                      NOTIF_DIGEST_ENVIAR_VAZIO=False)
+    emp = _empresa()
+    _cert(emp, TipoCertidao.FGTS, validade=date.today() + timedelta(days=365))
+    chamou = []
+    monkeypatch.setattr(notificacoes.email_sender, 'smtp_configurado', lambda c: True)
+    monkeypatch.setattr(notificacoes.email_sender, 'enviar',
+                        lambda *a, **k: chamou.append(1) or True)
+
     assert notificacoes.enviar_resumo_diario(ctx) is False
     assert chamou == []
 
