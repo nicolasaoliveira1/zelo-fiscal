@@ -278,8 +278,9 @@
                     <strong class="vg-producao-n">{{ bloco.emitidas }}</strong> emitidas
                     {#- Zero não é notícia (design language): numa noite limpa,
                         "0 falharam" não pode competir com o número que importa.
-                        Sem `-#}` no fecho de propósito: o strip levava junto o
-                        espaço antes do `·` e colava "emitidas· 0". #}
+                        O fecho deste comentário NÃO leva hífen de propósito: com
+                        ele, o strip comia o espaço antes do separador e colava
+                        "emitidas· 0". #}
                     <span class="vg-producao-parte" data-zero="{{ '1' if not bloco.falhas else '0' }}">· <strong class="vg-producao-n">{{ bloco.falhas }}</strong> {{ 'falhou' if bloco.falhas == 1 else 'falharam' }}</span>
                     · {{ bloco.tipos | join(', ') }}
                     {%- if bloco.em_andamento %}

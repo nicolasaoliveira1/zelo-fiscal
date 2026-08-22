@@ -461,3 +461,19 @@ def test_dia_calmo_com_cofre_inventariado_mantem_a_frase_inteira(
     corpo = client.get('/').get_data(as_text=True)
 
     assert 'Certificados em dia, portais respondendo' in corpo
+
+
+def test_nenhum_comentario_jinja_vaza_para_a_pagina(app, ids, client, monkeypatch):
+    """Comentario com `#}` DENTRO do texto fecha o bloco cedo e despeja o resto
+    na tela — foi o que aconteceu no cartao de Passagem. O HTML renderizado nao
+    pode conter delimitador de comentario nenhum, em nenhum cenario."""
+    for cenario in ({'situacao': 'ok', 'lotes': 2, 'emitidas': 38, 'falhas': 0,
+                     'tipos': ['FGTS']},
+                    {'situacao': 'sem_registro'},
+                    {'situacao': 'desligado', 'proxima': None}):
+        _com_producao(monkeypatch, **cenario)
+
+        corpo = client.get('/').get_data(as_text=True)
+
+        assert '#}' not in corpo, cenario['situacao']
+        assert '{#' not in corpo, cenario['situacao']
