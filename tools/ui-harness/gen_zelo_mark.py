@@ -32,6 +32,24 @@ Duas regras de geometria que o codigo sozinho nao conta:
    espessura onde o pedido eram 60. O erro so apareceu quando um corte parou de
    cortar; ate ali a marca so parecia "meio desequilibrada".
 
+Sao DOIS arquivos, mesma geometria:
+
+    zelo-mark.svg            chapa em tinta, vao em papel
+    zelo-mark-invertida.svg  chapa em papel, vao em tinta
+
+A invertida nasceu para o tema escuro da barra lateral: ali a chapa (#16181C)
+encosta na cor da barra (#16191D) e a silhueta some. O fio de contorno resolve
+isso ate uns 64px, mas a barra mostra a marca a 30px, e ali ele ja e um fio de
+1px tentando separar duas cores quase iguais. Inverter resolve o problema em vez
+de compensa-lo -- e por isso a invertida nao leva fio nenhum.
+
+Depois ela virou tambem o FAVICON PADRAO, e o nome diz a arte e nao o uso por
+causa disso. Medido a 16px sobre as cores reais da faixa de abas: a normal vira
+um borrao escuro na aba clara, enquanto a invertida perde a chapa (branco sobre
+branco) mas mantem o gesto em preto, que e a parte reconhecivel -- e na aba
+escura ela ganha de longe. Uma so serve nos dois, entao o favicon nao tem
+variante por tema.
+
 Nao ha dependencia de fonte nem de rede: o SVG sai so de aritmetica.
 
 Os derivados binarios (zelo.ico, zelo-mark-512.png) NAO saem daqui -- este
@@ -99,12 +117,19 @@ def _faixa(y0, y1, x_dir, x_esq, larg):
 
 
 def marca(lado=512, com_status=True, invertida=False, mono=False, com_fio=True):
-    """invertida  chapa clara com o vao em tinta
+    """invertida  chapa clara com o vao em tinta -- a variante de tema escuro
     mono       uma cor so (a diagonal perde o verde)
     com_status desliga a diagonal, para ver o que sobra sem ela
+    com_fio    o fio de contorno; a invertida nao usa (ver FIO)
+
+    A invertida NAO e monocromatica: a diagonal segue verde, porque o verde
+    ali e o status e nao decoracao. E o mesmo #2E7D52 da versao normal por um
+    motivo exato -- aquele token e o verde calibrado para fundo de PAPEL, e na
+    invertida a chapa e papel. Trocar pelo verde do tema escuro (#4FB07E), que
+    e calibrado para fundo quase-preto, erraria o contraste.
     """
     chapa, vao = (PAPER, INK) if invertida else (INK, PAPER)
-    status = vao if (mono or invertida) else OK
+    status = vao if mono else OK
     oct_pts = _octogono()
     fio = ('<polygon points="{}" fill="none" stroke="{}" stroke-width="{}"/>'
            .format(oct_pts, LINE, FIO) if com_fio and not invertida else "")
@@ -125,7 +150,7 @@ def marca(lado=512, com_status=True, invertida=False, mono=False, com_fio=True):
 TAMANHOS = [512, 48, 32, 16]
 PROVAS = [
     ({"mono": True}, "1 cor"),
-    ({"invertida": True}, "invertida"),
+    ({"invertida": True}, "invertida (tema escuro)"),
     ({"com_status": False}, "sem status"),
     ({"com_fio": False}, "sem fio"),
 ]
@@ -179,9 +204,11 @@ def _bloco():
 
 def main():
     raiz = Path(__file__).resolve().parents[2]
-    destino = raiz / "app" / "static" / "images" / "zelo-mark.svg"
-    destino.write_text(marca(), encoding="utf-8")
-    print("marca:", destino, "({} bytes)".format(destino.stat().st_size))
+    imagens = raiz / "app" / "static" / "images"
+    for nome, kw in (("zelo-mark.svg", {}), ("zelo-mark-invertida.svg", {"invertida": True})):
+        destino = imagens / nome
+        destino.write_text(marca(**kw), encoding="utf-8")
+        print("marca:", destino, "({} bytes)".format(destino.stat().st_size))
 
     shots = Path(__file__).parent / "shots"
     shots.mkdir(exist_ok=True)
