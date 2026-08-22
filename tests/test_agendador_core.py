@@ -1,6 +1,6 @@
 """Testes do agendador core (spec 02, SCHED-02/04/07): lifecycle, reconciliação,
 reprogramação e snapshot job."""
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -109,3 +109,68 @@ def test_job_snapshot_diario_gera_snapshot(app, ids, sched_limpo):
     with app.app_context():
         assert SnapshotCertidao.query.filter_by(data=date.today()).count() > 0
     snapshot_service._ULTIMO_SNAPSHOT_DIA = None
+
+
+# --- o relogio do agendador, legivel de fora (VGC-10/17) --------------------
+
+def test_janela_usa_a_passagem_de_hoje_quando_a_hora_ja_passou(app, ids):
+    _config(app, agendador_hora=3)
+    with app.app_context():
+        inicio, _corte = agendador.janela_ultima_passagem(
+            agora=datetime(2026, 8, 22, 9, 30))
+
+        assert inicio == datetime(2026, 8, 22, 3, 0)
+
+
+def test_janela_recua_um_dia_quando_a_hora_ainda_nao_chegou(app, ids):
+    _config(app, agendador_hora=3)
+    with app.app_context():
+        inicio, _corte = agendador.janela_ultima_passagem(
+            agora=datetime(2026, 8, 22, 1, 15))
+
+        assert inicio == datetime(2026, 8, 21, 3, 0)
+
+
+def test_janela_sem_linha_de_config_usa_o_default_sem_levantar(app, ids):
+    with app.app_context():
+        inicio, _corte = agendador.janela_ultima_passagem(
+            agora=datetime(2026, 8, 22, 9, 0))
+
+        assert inicio.hour == 3  # default de `_ler_config`
+
+
+def test_corte_converte_por_duracao_e_nao_pelo_relogio_local(app, ids, monkeypatch):
+    """O achado local x UTC, em forma de teste — com o offset INJETADO.
+
+    O job e agendado por `CronTrigger(hour=hora)`, hora LOCAL (AD-004/AD-009); o
+    `ExecucaoLote.iniciado_em` tem `default=utcnow_naive`, UTC naive. Comparar a
+    hora local direto com a coluna erra pelo offset, e erra no caso NORMAL — o
+    lote comeca exatamente na hora do corte.
+
+    O offset e simulado (maquina em UTC-3: o relogio UTC esta 3h a frente do
+    local) em vez de herdado do ambiente, senao o teste nao discriminaria nada no
+    CI, que roda em UTC. Implementacao ingenua devolveria `corte == 03:00`.
+    """
+    _config(app, agendador_hora=3)
+    monkeypatch.setattr(agendador, 'utcnow_naive',
+                        lambda: datetime(2026, 8, 22, 12, 0))
+    with app.app_context():
+        inicio, corte = agendador.janela_ultima_passagem(
+            agora=datetime(2026, 8, 22, 9, 0))
+
+        assert inicio == datetime(2026, 8, 22, 3, 0)   # o que a tela exibe
+        assert corte == datetime(2026, 8, 22, 6, 0)    # 12:00 UTC - 6h decorridas
+
+
+def test_corte_separa_o_lote_de_dentro_do_de_fora_da_passagem(app, ids, monkeypatch):
+    """O que o corte significa para quem consulta: 03:01 local entra, 02:59 nao."""
+    _config(app, agendador_hora=3)
+    monkeypatch.setattr(agendador, 'utcnow_naive',
+                        lambda: datetime(2026, 8, 22, 12, 0))
+    with app.app_context():
+        _inicio, corte = agendador.janela_ultima_passagem(
+            agora=datetime(2026, 8, 22, 9, 0))
+
+        # carimbos como o modelo carimba (UTC naive), em UTC-3
+        assert datetime(2026, 8, 22, 6, 1) >= corte    # rodou 03:01 local
+        assert datetime(2026, 8, 22, 5, 59) < corte    # rodou 02:59 local
