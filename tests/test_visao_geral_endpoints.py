@@ -62,6 +62,16 @@ def test_saudacao_segue_a_hora_do_servidor(app, ids, client, monkeypatch):
     assert _saudacao(datetime(2026, 8, 20, 21, 0)) == 'Boa noite'
 
 
+def test_dia_da_semana_sai_acentuado(app, ids, client):
+    """`strftime('%A')` volta em ingles no Windows do escritorio, entao os nomes
+    sao escritos a mao — e escritos a mao e onde o acento se perde."""
+    from app.routes import _DIAS_SEMANA
+
+    assert 'terça-feira' in _DIAS_SEMANA
+    assert 'sábado' in _DIAS_SEMANA
+    assert not any(dia in ('terca-feira', 'sabado') for dia in _DIAS_SEMANA)
+
+
 def test_dia_calmo_diz_que_nada_trava(app, ids, client, monkeypatch):
     """A faixa muda de estado; ela nao some. A pagina precisa DIZER que esta
     tudo bem, e nao apenas deixar de dizer que esta mal."""
