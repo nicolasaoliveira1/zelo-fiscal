@@ -142,7 +142,8 @@ def _contagem_nfse(notas):
 
 
 def _configurar_fontes(monkeypatch, *, contagem=None, estados=None, itens=None,
-                        notas=None, grupos=None, breakers=None):
+                        notas=None, grupos=None, breakers=None,
+                        com_vencimento=0):
     monkeypatch.setattr(
         visao_geral.snapshot_service,
         'contagem_carteira',
@@ -156,8 +157,9 @@ def _configurar_fontes(monkeypatch, *, contagem=None, estados=None, itens=None,
     )
     monkeypatch.setattr(
         visao_geral.manifestador_cofre,
-        'certificados_a_vencer',
-        lambda: itens or [],
+        'resumo_de_vencimento',
+        lambda: {'itens': itens or [], 'com_vencimento': com_vencimento,
+                 'janela_dias': 30},
     )
     # A contagem da fila de NFSe agora e uma funcao do dominio da NFSe
     # (`nfse_import.contagem_fila`), como a da carteira e do snapshot_service:
@@ -197,6 +199,7 @@ def test_montar_reune_blocos_preenchidos_das_fontes_existentes(monkeypatch):
         ],
         grupos=falhas,
         breakers=[breaker],
+        com_vencimento=27,
     )
 
     blocos = visao_geral.montar(_usuario())
@@ -205,7 +208,8 @@ def test_montar_reune_blocos_preenchidos_das_fontes_existentes(monkeypatch):
         'vencidas': 2, 'a_vencer': 1, 'pendentes': 3, 'validas': 40,
         'sem_data': 4, 'total': 50, 'atencao': 10, 'vazio': False}
     assert blocos['certificados'] == {
-        'itens': certificados, 'inventariado': True, 'vazio': False}
+        'itens': certificados, 'inventariado': True, 'vazio': False,
+        'com_vencimento': 27, 'janela_dias': 30}
     assert blocos['nfse'] == {
         'prontas': 2, 'pendentes': 2, 'grupos_pendentes': 1, 'vazio': False}
     assert blocos['fila'] == {
@@ -269,7 +273,8 @@ def test_cofre_sem_inventario_nao_significa_zero_certificados(monkeypatch):
 
     bloco = visao_geral.montar(_usuario())['certificados']
 
-    assert bloco == {'itens': [], 'inventariado': False, 'vazio': False}
+    assert bloco == {'itens': [], 'inventariado': False, 'vazio': False,
+                     'com_vencimento': 0, 'janela_dias': 30}
 
 
 def test_visualizador_nao_recebe_blocos_de_operador(monkeypatch):
@@ -318,7 +323,7 @@ def test_fontes_quebradas_ficam_isoladas_no_proprio_bloco(monkeypatch):
         raise RuntimeError('indisponivel')
 
     monkeypatch.setattr(visao_geral.manifestador_cofre,
-                        'certificados_a_vencer', falhar)
+                        'resumo_de_vencimento', falhar)
     monkeypatch.setattr(visao_geral.fila_emissao, 'agrupar_falhas', falhar)
 
     blocos = visao_geral.montar(_usuario())

@@ -138,7 +138,20 @@
             O cofre ainda não foi inventariado — não sei quais certificados vencem.
         </p>
         {%- else %}
-        {{ vg_estado(bloco, 'Nenhum vencendo na janela.') }}
+        {#- "Nenhum vencendo na janela" e uma ausencia; com o denominador vira
+            afirmacao. A populacao citada e a dos certificados com vencimento
+            CONHECIDO — contar `sem_arquivo`/`sem_pasta` aqui transformaria
+            desconhecido em alivio. -#}
+        {%- if bloco.com_vencimento == 0 %}
+        {%- set texto_vazio = 'Nenhum certificado tem vencimento conhecido.' %}
+        {%- elif bloco.com_vencimento == 1 %}
+        {%- set texto_vazio = 'O único certificado com vencimento conhecido não vence
+            nos próximos ' ~ bloco.janela_dias ~ ' dias.' %}
+        {%- else %}
+        {%- set texto_vazio = 'Nenhum dos ' ~ bloco.com_vencimento ~ ' certificados vence
+            nos próximos ' ~ bloco.janela_dias ~ ' dias.' %}
+        {%- endif %}
+        {{ vg_estado(bloco, texto_vazio) }}
         {%- endif %}
         {%- else %}
         <div class="vg-lista zl-ficha">

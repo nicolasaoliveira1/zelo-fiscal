@@ -97,6 +97,42 @@ def test_exclui_empresa_nao_ativa_na_receita(app, ids):
         assert empresa.id not in {item['empresa_id'] for item in itens}
 
 
+def test_populacao_do_denominador_so_conta_vencimento_conhecido(app, ids):
+    """De quantos sai o "nenhum vencendo" — e de quantos NAO sai.
+
+    Certificado sem `not_after` (sem_arquivo/sem_pasta) e de empresa inativa
+    ficam FORA da populacao. Conta-los faria a tela dizer "nenhum dos 47 vence",
+    que e desconhecido vestido de alivio: dos 47, 20 nao se sabe nada.
+    """
+    with app.app_context():
+        com_data = _empresa('COM DATA', '22.222.222/2233-01')
+        _certificado(com_data, datetime.now() + timedelta(days=300))
+
+        sem_data = _empresa('SEM ARQUIVO', '22.222.222/2233-02')
+        _certificado(sem_data, None, EstadoCertificado.SEM_ARQUIVO)
+
+        inativa = _empresa('BAIXADA', '22.222.222/2233-03', situacao='BAIXADA')
+        _certificado(inativa, datetime.now() + timedelta(days=300))
+        db.session.commit()
+
+        resumo = manifestador_cofre.resumo_de_vencimento()
+
+        assert resumo['com_vencimento'] == 1
+        assert resumo['itens'] == []
+
+
+def test_a_lista_do_alerta_e_a_mesma_do_resumo(app, ids):
+    """`certificados_a_vencer` virou fachada de `resumo_de_vencimento`: o e-mail
+    e a tela nao podem passar a ler listas diferentes."""
+    with app.app_context():
+        empresa = _empresa('NA JANELA', '22.222.222/2233-04')
+        _certificado(empresa, datetime.now() + timedelta(days=3))
+        db.session.commit()
+
+        assert (manifestador_cofre.certificados_a_vencer()
+                == manifestador_cofre.resumo_de_vencimento()['itens'])
+
+
 def test_ordena_do_mais_critico_para_o_menos(app, ids):
     with app.app_context():
         mais_critica = _empresa('EMPRESA MAIS CRITICA', '22.222.222/2222-28')

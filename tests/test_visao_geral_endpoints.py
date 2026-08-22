@@ -17,7 +17,8 @@ def _sem_fontes(monkeypatch, **kw):
                                           'sem_data': 0, 'total': 0,
                                           'atencao': 0, 'vazio': True},
                             'certificados': {'itens': [], 'inventariado': True,
-                                             'vazio': True},
+                                             'vazio': True, 'com_vencimento': 0,
+                                             'janela_dias': 30},
                         }))
 
 
@@ -131,7 +132,8 @@ def _com_carteira(monkeypatch, **contagem):
              'vazio': not atencao}
     _sem_fontes(monkeypatch, blocos={
         'certidoes': bloco,
-        'certificados': {'itens': [], 'inventariado': True, 'vazio': True},
+        'certificados': {'itens': [], 'inventariado': True, 'vazio': True,
+                         'com_vencimento': 0, 'janela_dias': 30},
     })
     return bloco
 
@@ -185,3 +187,57 @@ def test_carteira_em_dia_nao_diz_que_esta_vazia(app, ids, client, monkeypatch):
 
     assert 'Nenhuma certidão pede atenção hoje' in corpo
     assert 'Nenhuma certidão cadastrada' not in corpo
+
+
+# --- o cartao de certificados diz DE QUANTOS nenhum vence -------------------
+
+def _cofre(monkeypatch, **kw):
+    bloco = {'itens': [], 'inventariado': True, 'vazio': True,
+             'com_vencimento': 0, 'janela_dias': 30}
+    bloco.update(kw)
+    _sem_fontes(monkeypatch, blocos={
+        'certidoes': {'vencidas': 0, 'a_vencer': 0, 'pendentes': 0,
+                      'validas': 0, 'sem_data': 0, 'total': 0, 'atencao': 0,
+                      'vazio': True},
+        'certificados': bloco,
+    })
+
+
+def test_cofre_em_dia_diz_de_quantos_nenhum_vence(app, ids, client, monkeypatch):
+    _cofre(monkeypatch, com_vencimento=24, janela_dias=30)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'Nenhum dos 24 certificados vence' in corpo
+    assert '30 dias' in corpo
+
+
+def test_um_certificado_so_nao_vira_nenhum_dos_1(app, ids, client, monkeypatch):
+    _cofre(monkeypatch, com_vencimento=1)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'Nenhum dos 1' not in corpo
+    assert 'O único certificado com vencimento conhecido' in corpo
+
+
+def test_cofre_sem_nenhum_vencimento_conhecido_nao_diz_nenhum_dos_zero(
+        app, ids, client, monkeypatch):
+    _cofre(monkeypatch, com_vencimento=0)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'Nenhum certificado tem vencimento conhecido' in corpo
+    assert 'Nenhum dos 0' not in corpo
+
+
+def test_cofre_nao_inventariado_nao_ganha_denominador(app, ids, client,
+                                                      monkeypatch):
+    """Nao inventariado vem ANTES do denominador: nao se sabe quantos existem,
+    entao nao ha de quantos nenhum vence."""
+    _cofre(monkeypatch, inventariado=False, vazio=False)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'cofre ainda não foi inventariado' in corpo
+    assert 'vence nos próximos' not in corpo

@@ -49,12 +49,16 @@ def _certidoes():
 
 def _certificados():
     estados = manifestador_cofre.estado_da_carteira()
-    itens = manifestador_cofre.certificados_a_vencer()
+    # uma consulta so devolve a lista E a populacao de onde ela sai: sem o
+    # denominador, "nenhum vencendo" e uma ausencia; com ele vira afirmacao.
+    resumo = manifestador_cofre.resumo_de_vencimento()
     inventariado = bool(estados)
     return {
-        'itens': itens,
+        'itens': resumo['itens'],
+        'com_vencimento': resumo['com_vencimento'],
+        'janela_dias': resumo['janela_dias'],
         'inventariado': inventariado,
-        'vazio': inventariado and not itens,
+        'vazio': inventariado and not resumo['itens'],
     }
 
 
