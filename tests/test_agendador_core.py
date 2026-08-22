@@ -1,6 +1,6 @@
 """Testes do agendador core (spec 02, SCHED-02/04/07): lifecycle, reconciliação,
 reprogramação e snapshot job."""
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 import pytest
 
