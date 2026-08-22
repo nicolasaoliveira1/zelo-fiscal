@@ -1249,7 +1249,9 @@ a.zl-comp-stat:focus-visible { text-decoration: underline; text-underline-offset
     padding: var(--zl-space-2) var(--zl-space-3) var(--zl-space-2) var(--zl-space-3);
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-md);
-    background: var(--bs-body-bg);
+    /* painel flutuante SOBRE a pagina: pedia o chao e ficava da cor dele, com a
+       sombra fazendo sozinha o trabalho de separar */
+    background: var(--bs-card-bg);
     box-shadow: var(--zl-elev-2);
     font-size: var(--zl-fs-2);
     transition: right .28s cubic-bezier(.4, 0, .2, 1);
@@ -1447,7 +1449,12 @@ body.topo-visivel .zl-dock {
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-md);
     overflow: hidden;
-    background: var(--bs-body-bg);
+    /* `--bs-card-bg`, nao `--bs-body-bg`: o segundo E o chao da pagina, entao a
+       faixa saia exatamente da cor do fundo e so a borda a sustentava, ao lado
+       de cartoes que levantam. Os dois tokens de tom (`--zelo-paper` e
+       `--zelo-mist`) TROCAM de papel entre os temas — quem quer "superficie
+       levantada" pede pelo PAPEL, nunca pelo tom. */
+    background: var(--bs-card-bg);
     margin-bottom: var(--zl-space-4);
 }
 
@@ -1561,7 +1568,7 @@ body.topo-visivel .zl-dock {
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-md);
     overflow: hidden;
-    background: var(--bs-body-bg);
+    background: var(--bs-card-bg);   /* superficie levantada — ver .vg-faixa */
     margin-top: var(--zl-space-4);
 }
 
@@ -3024,7 +3031,9 @@ tr.filter-hidden {
     padding: var(--zl-space-2) var(--zl-space-4);
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-sm);
-    background: var(--zelo-mist);
+    /* era `--zelo-mist`, que no tema CLARO e o proprio chao da pagina: a regua
+       sumia no claro e aparecia no escuro, pelo mesmo motivo das faixas */
+    background: var(--bs-card-bg);
     font-size: var(--zl-fs-2);
 }
 
