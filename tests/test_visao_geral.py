@@ -4,7 +4,7 @@ Comeca pela contagem da carteira (OVER-02), que virou nucleo compartilhado: o
 digest por e-mail e a tela fazem a MESMA pergunta, e um numero que diverge entre
 os dois nao tem como o operador saber em qual acreditar.
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -143,7 +143,8 @@ def _contagem_nfse(notas):
 
 def _configurar_fontes(monkeypatch, *, contagem=None, estados=None, itens=None,
                         notas=None, grupos=None, breakers=None,
-                        com_vencimento=0):
+                        com_vencimento=0, agendador_off=False, passagem=None,
+                        semana=None):
     monkeypatch.setattr(
         visao_geral.snapshot_service,
         'contagem_carteira',
@@ -178,6 +179,26 @@ def _configurar_fontes(monkeypatch, *, contagem=None, estados=None, itens=None,
         visao_geral.circuit_breaker,
         'abertos',
         lambda: breakers or [],
+    )
+    # fontes da faixa de producao: relogio do agendador + agregacao dos lotes
+    monkeypatch.setattr(
+        visao_geral.agendador, 'proxima_execucao',
+        lambda: None if agendador_off else datetime(2026, 8, 23, 3, 0),
+    )
+    monkeypatch.setattr(
+        visao_geral.agendador, 'janela_ultima_passagem',
+        lambda: (datetime(2026, 8, 22, 3, 0), datetime(2026, 8, 22, 6, 0)),
+    )
+    monkeypatch.setattr(
+        visao_geral.export_service, 'coletar_producao_agendador',
+        lambda corte: passagem or {'lotes': 0, 'emitidas': 0, 'falhas': 0,
+                                   'em_andamento': 0, 'tipos': []},
+    )
+    monkeypatch.setattr(
+        visao_geral.export_service, 'coletar_produtividade',
+        lambda dias: semana or {'total_emissoes': 0,
+                                'por_origem': {'manual': {'emissoes': 0},
+                                               'agendador': {'emissoes': 0}}},
     )
 
 
@@ -264,8 +285,13 @@ def test_blocos_vazios_sao_diferentes_de_blocos_com_erro(monkeypatch):
 
     blocos = visao_geral.montar(_usuario())
 
-    assert all(bloco['vazio'] is True for bloco in blocos.values())
+    # a faixa de producao nao tem `vazio`: ela diz `situacao`, porque
+    # "desligado", "nao rodou" e "rodou e nao produziu" nao sao o mesmo vazio.
+    do_contrato_vazio = {nome: bloco for nome, bloco in blocos.items()
+                         if nome != 'producao'}
+    assert all(bloco['vazio'] is True for bloco in do_contrato_vazio.values())
     assert all('erro' not in bloco for bloco in blocos.values())
+    assert blocos['producao']['situacao'] == 'sem_registro' 
 
 
 def test_cofre_sem_inventario_nao_significa_zero_certificados(monkeypatch):
@@ -282,7 +308,7 @@ def test_visualizador_nao_recebe_blocos_de_operador(monkeypatch):
 
     blocos = visao_geral.montar(_usuario(PapelUsuario.LEITURA))
 
-    assert set(blocos) == {'certidoes', 'certificados'}
+    assert set(blocos) == {'certidoes', 'certificados', 'producao'}
 
 
 def test_falha_de_uma_fonte_preserva_os_outros_blocos(monkeypatch):
@@ -378,6 +404,77 @@ def test_montar_nao_inventaria_nem_verifica_rede_do_cofre(monkeypatch):
                         'inventariar', chamada_de_rede)
 
     assert visao_geral.montar(_usuario())['certificados']['inventariado'] is False
+
+
+# --- a faixa de producao: o contrapeso da pagina ----------------------------
+
+def test_as_tres_situacoes_da_faixa_nao_se_confundem(monkeypatch):
+    """Os mesmos zeros saem de tres fatos diferentes, e so um e boa noticia.
+
+    Por isso `situacao` e campo explicito: inferir de `emitidas == 0` colapsaria
+    "esta desligado", "nao consta nada desde as 3h" e "rodou e nao havia o que
+    fazer" numa frase so — e duas delas nao autorizam o operador a relaxar.
+    """
+    _configurar_fontes(monkeypatch, agendador_off=True)
+    assert visao_geral.montar(_usuario())['producao']['situacao'] == 'desligado'
+
+    _configurar_fontes(monkeypatch)
+    assert visao_geral.montar(_usuario())['producao']['situacao'] == 'sem_registro'
+
+    _configurar_fontes(monkeypatch, passagem={
+        'lotes': 2, 'emitidas': 38, 'falhas': 3, 'em_andamento': 0,
+        'tipos': ['FGTS', 'Municipal']})
+    assert visao_geral.montar(_usuario())['producao']['situacao'] == 'ok'
+
+
+def test_desligado_nao_apresenta_contagem_da_passagem(monkeypatch):
+    """Desligado nao e "produziu 0": nao ha passagem sobre a qual contar."""
+    _configurar_fontes(monkeypatch, agendador_off=True)
+
+    bloco = visao_geral.montar(_usuario())['producao']
+
+    assert 'emitidas' not in bloco
+    assert bloco['proxima'] is None
+
+
+def test_acumulado_de_sete_dias_sai_mesmo_com_o_agendador_desligado(monkeypatch):
+    """Producao passada e fato — desligar hoje nao apaga a semana."""
+    _configurar_fontes(monkeypatch, agendador_off=True, semana={
+        'total_emissoes': 214,
+        'por_origem': {'manual': {'emissoes': 26},
+                       'agendador': {'emissoes': 188}}})
+
+    semana = visao_geral.montar(_usuario())['producao']['semana']
+
+    assert semana['emitidas'] == 214
+    assert semana['pct_agendador'] == 88
+
+
+def test_semana_sem_emissao_nao_diz_zero_por_cento(monkeypatch):
+    """Sem emissao nenhuma nao ha fracao que signifique algo, e "0% automatico"
+    leria como falha da automacao em vez de ausencia de trabalho."""
+    _configurar_fontes(monkeypatch)
+
+    semana = visao_geral.montar(_usuario())['producao']['semana']
+
+    assert semana['emitidas'] == 0
+    assert semana['pct_agendador'] is None
+
+
+def test_falha_da_fonte_da_producao_fica_no_bloco_producao(monkeypatch):
+    _configurar_fontes(monkeypatch)
+
+    def falhar(corte):
+        raise RuntimeError('agregacao indisponivel')
+
+    monkeypatch.setattr(visao_geral.export_service,
+                        'coletar_producao_agendador', falhar)
+
+    blocos = visao_geral.montar(_usuario())
+
+    assert blocos['producao'] == {'erro': True, 'nome': 'producao'}
+    assert blocos['certidoes']['vazio'] is True
+    assert blocos['fila']['vazio'] is True
 
 
 # --- T3: a faixa "o que trava", derivada dos blocos -------------------------

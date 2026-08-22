@@ -6,7 +6,9 @@ regra para os mesmos numeros.
 """
 from app.models import PapelUsuario
 from app.services import (
+    agendador,
     circuit_breaker,
+    export_service,
     fila_emissao,
     manifestador_cofre,
     nfse_import,
@@ -83,11 +85,69 @@ def _fila():
     }
 
 
+# Janela do acumulado da faixa. Fixa aqui, e nao em parametro de rota: o
+# `coletar_produtividade` carrega os lotes do periodo em Python, o que e
+# irrelevante em 7 dias e deixa de ser em 90.
+_DIAS_DA_SEMANA = 7
+
+
+def _semana():
+    """Emitidas nos ultimos 7 dias e quanto disso saiu sem ninguem clicar.
+
+    Reusa `coletar_produtividade`, que ja e a fonte da tela de Produtividade:
+    "emitidas" tem UMA definicao no projeto, e o recorte por origem e o mesmo
+    `por_origem` do AD-019.
+    """
+    dados = export_service.coletar_produtividade(_DIAS_DA_SEMANA)
+    total = dados['total_emissoes']
+    do_agendador = dados['por_origem']['agendador']['emissoes']
+    return {
+        'emitidas': total,
+        # `None`, e nao 0%: sem nenhuma emissao na semana nao ha fracao que
+        # signifique alguma coisa, e "0% automatico" leria como falha.
+        'pct_agendador': round(100 * do_agendador / total) if total else None,
+    }
+
+
+def _producao():
+    """O que o agendador fez na ultima passagem, e quando roda de novo.
+
+    `situacao` e campo EXPLICITO, nao inferido de zeros, porque tres fatos
+    diferentes produzem os mesmos zeros e so um deles e boa noticia:
+
+    - `desligado`: a renovacao automatica esta off. Nao ha passagem a contar.
+    - `sem_registro`: esta ligada e nenhum lote consta desde a ultima passagem.
+      Nao da para saber se o PC ficou desligado ou se nao havia o que renovar —
+      e desconhecido nao vira zero (AD-026).
+    - `ok`: rodou, e os numeros sao dela.
+
+    O acumulado de 7 dias sai nos tres casos: producao passada e fato, mesmo com
+    o agendador desligado hoje.
+    """
+    proxima = agendador.proxima_execucao()
+    semana = _semana()
+    if proxima is None:
+        return {'situacao': 'desligado', 'proxima': None, 'semana': semana}
+
+    inicio_local, corte = agendador.janela_ultima_passagem()
+    passagem = export_service.coletar_producao_agendador(corte)
+    return {
+        **passagem,
+        'situacao': 'ok' if passagem['lotes'] else 'sem_registro',
+        'inicio_local': inicio_local,
+        'proxima': proxima,
+        'semana': semana,
+    }
+
+
 def montar(usuario):
     """Monta os blocos que o papel do usuario pode acessar."""
     blocos = {
         'certidoes': _bloco('certidoes', _certidoes),
         'certificados': _bloco('certificados', _certificados),
+        # fora do gate de papel: o destino da faixa e /produtividade, que e
+        # `leitura` (AD-012) — a regra e o papel da tela de destino (OVER-09).
+        'producao': _bloco('producao', _producao),
     }
     if getattr(usuario, 'papel', None) in (
         PapelUsuario.OPERADOR,
