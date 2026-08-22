@@ -288,3 +288,82 @@ def test_registrar_pauta_nao_duplica_enquanto_o_achado_espera(ctx):
     assert notificacoes.registrar_pauta('k', 'alerta_falha', 'T', 'c') is True
     assert notificacoes.registrar_pauta('k', 'alerta_falha', 'T', 'c') is False
     assert PautaNotificacao.query.count() == 1
+
+
+# --- o que e NOVO, e por que isso importa mais que o silencio ---------------
+
+def _ja_saiu(chave):
+    """Historico de um envio anterior daquela chave."""
+    db.session.add(NotificacaoLog(chave=chave, tipo='alerta_certificado',
+                                  enviada_em=datetime.now()))
+    db.session.commit()
+
+
+def test_marca_apenas_o_que_nunca_saiu_em_resumo(ctx):
+    _config()
+    _pauta(chave='c:novo', titulo='Vence em 25/08 — ALFA')
+    _pauta(chave='c:velho', titulo='Vence em 26/08 — BETA')
+    _ja_saiu('c:velho')
+
+    _, corpo, _ = notificacoes.montar_resumo(notificacoes.pauta_pendente())
+
+    assert '[NOVO] Vence em 25/08 — ALFA' in corpo
+    assert '[NOVO] Vence em 26/08 — BETA' not in corpo
+    assert 'Vence em 26/08 — BETA' in corpo  # continua listado, so nao marcado
+
+
+def test_novos_vem_antes_dos_repetidos_na_secao(ctx):
+    """O item que entrou hoje nao pode cair no meio da lista que o leitor ja
+    percorreu ontem — e assim que a repeticao apaga o que deveria reforcar."""
+    _config()
+    _pauta(chave='c:1', titulo='Vence em 24/08 — ALFA')
+    _pauta(chave='c:2', titulo='Vence em 25/08 — BETA')
+    _pauta(chave='c:3', titulo='Vence em 26/08 — GAMA')
+    _ja_saiu('c:1')
+    _ja_saiu('c:2')
+
+    _, corpo, _ = notificacoes.montar_resumo(notificacoes.pauta_pendente())
+
+    assert corpo.index('GAMA') < corpo.index('ALFA')
+    assert corpo.index('GAMA') < corpo.index('BETA')
+
+
+def test_assunto_diz_quantos_sao_e_quantos_mudaram(ctx):
+    """Numa carteira que repete os mesmos avisos por semanas, "12 avisos" nao
+    distingue o dia em que apareceu o decimo terceiro do dia em que nada
+    aconteceu."""
+    _config()
+    _pauta(chave='c:1')
+    _pauta(chave='c:2', titulo='Vencido — Y')
+    _ja_saiu('c:1')
+
+    assunto, _, _ = notificacoes.montar_resumo(notificacoes.pauta_pendente())
+
+    assert '2 aviso(s)' in assunto
+    assert '1 novo(s)' in assunto
+
+
+def test_assunto_diz_nenhum_novo_quando_todos_repetem(ctx):
+    _config()
+    _pauta(chave='c:1')
+    _ja_saiu('c:1')
+
+    assunto, _, _ = notificacoes.montar_resumo(notificacoes.pauta_pendente())
+
+    assert 'nenhum novo' in assunto
+
+
+def test_sem_historico_nada_e_marcado_como_novo(ctx, monkeypatch):
+    """Se a consulta do historico falha, o seguro e NAO marcar: um [NOVO] errado
+    ensina o leitor a desconfiar do marcador, e ai ele para de servir."""
+    _config()
+    _pauta(chave='c:1')
+
+    def falhar(*a, **k):
+        raise RuntimeError('historico indisponivel')
+
+    monkeypatch.setattr(notificacoes.db.session, 'query', falhar)
+
+    _, corpo, _ = notificacoes.montar_resumo(notificacoes.pauta_pendente())
+
+    assert '[NOVO]' not in corpo

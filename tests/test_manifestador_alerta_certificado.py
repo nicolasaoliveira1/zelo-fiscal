@@ -333,50 +333,45 @@ def test_vencendo_hoje_no_limite_do_dia_ja_conta_como_vencido(app, ids):
         assert item['dias_restantes'] == 0      # ainda e hoje
 
 
-def test_janela_do_alerta_e_maior_que_o_intervalo_do_job_diario(ctx_alerta,
-                                                                monkeypatch):
-    """Quem alimenta este alerta e um job DIARIO. Com o resumo do dia a janela nao
-    decide mais quantos e-mails saem (sai um so), e sim quantas vezes o MESMO
-    certificado reaparece nele: com 24h ele voltaria em todo resumo ate a
-    renovacao, e a lista de repetidos afogaria o que mudou naquele dia."""
+def test_certificado_repete_todo_dia_ate_a_renovacao(ctx_alerta, monkeypatch):
+    """REVERTE a janela anti-spam deste alerta, a pedido do usuario.
+
+    A janela (7 dias vencendo, 3 dias vencido) existia para o mesmo certificado
+    nao voltar em todo resumo. Ela saiu: a condicao persiste por semanas e ver a
+    lista inteira todo dia reforca. O que impede a repeticao de virar ruido nao e
+    mais o silencio — e o [NOVO], que so o primeiro dia carrega.
+    """
     enviados = _mock_envio(monkeypatch)
     item = _item_alerta(201)
 
     assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
     assert _resumir(ctx_alerta) is True
+    assert '[NOVO]' in enviados[0][1]
 
-    # um dia depois (a janela global de 24h ja teria expirado)
-    registro = NotificacaoLog.query.filter_by(
-        chave='certificado_vencendo:201').first()
-    registro.enviada_em = datetime.now() - timedelta(hours=25)
-    db.session.commit()
-
-    assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 0
-    assert len(enviados) == 1
-
-    # uma semana depois, volta a avisar
-    registro.enviada_em = datetime.now() - timedelta(hours=24 * 7 + 1)
-    db.session.commit()
-
+    # no dia seguinte volta a anotar, e sai de novo — sem marca de novo
     assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
     assert _resumir(ctx_alerta) is True
     assert len(enviados) == 2
+    assert 'EMPRESA 201' in enviados[1][1]
+    assert '[NOVO]' not in enviados[1][1]
 
 
-def test_vencido_repete_antes_de_vencendo(ctx_alerta, monkeypatch):
-    """Vencido tem janela mais curta: ali a manifestacao esta parada."""
+def test_transicao_para_vencido_reaparece_como_novo(ctx_alerta, monkeypatch):
+    """A virada vencendo->vencido tem CHAVE propria, entao no dia em que
+    acontece ela volta marcada — mesmo depois de semanas avisando o vencendo."""
     enviados = _mock_envio(monkeypatch)
-    item = _item_alerta(202, causa='vencido', dias_restantes=-2)
+    vencendo = _item_alerta(202)
+    vencido = _item_alerta(202, causa='vencido', dias_restantes=-1)
 
-    assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
-    assert _resumir(ctx_alerta) is True
+    notificacoes.alertar_certificados_vencendo(ctx_alerta, [vencendo])
+    _resumir(ctx_alerta)
+    notificacoes.alertar_certificados_vencendo(ctx_alerta, [vencendo])
+    _resumir(ctx_alerta)
+    assert '[NOVO]' not in enviados[1][1]
 
-    registro = NotificacaoLog.query.filter_by(
-        chave='certificado_vencido:202').first()
-    registro.enviada_em = datetime.now() - timedelta(hours=24 * 3 + 1)
-    db.session.commit()
+    notificacoes.alertar_certificados_vencendo(ctx_alerta, [vencido])
+    _resumir(ctx_alerta)
 
-    # 3 dias bastam para o vencido; para o vencendo ainda nao bastariam
-    assert notificacoes.alertar_certificados_vencendo(ctx_alerta, [item]) == 1
-    assert _resumir(ctx_alerta) is True
-    assert len(enviados) == 2
+    corpo = enviados[2][1]
+    assert '[NOVO]' in corpo
+    assert 'Vencido em' in corpo
