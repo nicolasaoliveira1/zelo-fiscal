@@ -1553,6 +1553,90 @@ body.topo-visivel .zl-dock {
    A grade é desigual DE PROPÓSITO: a carteira de certidões é larga
    (figura + barra + legenda numa linha) e a lista de certificados é
    alta (uma linha por empresa). Grade uniforme desperdiça as duas. */
+/* FAIXA DE PRODUÇÃO — o contrapeso da faixa de urgência do topo.
+   Mesma anatomia (cabeçalho + linha clicável), tom NEUTRO: produção não é
+   status de certidão, e a única cor da tela é o status. Fica fora do
+   `.vg-mosaico`, abaixo dele, em largura inteira. */
+.vg-producao {
+    border: 1px solid var(--zelo-line);
+    border-radius: var(--zl-radius-md);
+    overflow: hidden;
+    background: var(--bs-body-bg);
+    margin-top: var(--zl-space-4);
+}
+
+.vg-producao-h {
+    display: flex;
+    align-items: center;
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-2) var(--zl-space-4);
+    background: var(--bs-tertiary-bg);
+    color: var(--bs-secondary-color);
+    font-weight: 600;
+    font-size: var(--zl-fs-2);
+}
+
+/* Quando roda de novo: empurrado para a direita do cabeçalho, em peso normal —
+   é contexto, não manchete. */
+.vg-producao-quando {
+    margin-left: auto;
+    font-weight: 400;
+}
+
+.vg-producao-item {
+    display: flex;
+    align-items: center;
+    gap: var(--zl-space-3);
+    padding: var(--zl-space-3) var(--zl-space-4);
+    color: inherit;
+    text-decoration: none;
+}
+
+.vg-producao-item:hover {
+    background: var(--bs-tertiary-bg);
+    color: inherit;
+}
+
+.vg-producao-txt {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--zl-space-1);
+}
+
+.vg-producao-t { font-size: var(--zl-fs-3); }
+
+.vg-producao-s {
+    font-size: var(--zl-fs-2);
+    color: var(--bs-secondary-color);
+}
+
+/* Todo número da tela é mono e tabular (design language, "Números na tela"). */
+.vg-producao-n {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--bs-emphasis-color);
+}
+
+.vg-producao-ir {
+    flex: none;
+    color: var(--bs-secondary-color);
+}
+
+/* Em tela estreita o "roda de novo" desce em vez de espremer o cabeçalho. */
+@media (max-width: 575.98px) {
+    .vg-producao-h {
+        flex-wrap: wrap;
+    }
+
+    .vg-producao-quando {
+        margin-left: 0;
+        flex-basis: 100%;
+    }
+}
+
 .vg-mosaico {
     display: grid;
     gap: var(--zl-space-4);

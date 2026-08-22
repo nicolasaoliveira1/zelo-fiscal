@@ -217,5 +217,71 @@
         {% endif %}
 
     </div>
+
+    {#- A FAIXA DE PRODUÇÃO: o contrapeso da faixa do topo.
+        Em cima, o que trava você; embaixo, o que já foi feito sem você. A página
+        só tinha a primeira metade, e por isso o dia calmo ficava mudo.
+
+        Tom neutro de propósito: produção não é status de certidão, e a única cor
+        da tela é o status. -#}
+    {% set bloco = blocos.producao %}
+    <section class="vg-producao">
+        {%- if bloco.erro %}
+        <div class="vg-producao-h">
+            <i class="bi bi-exclamation-triangle"></i>
+            <span>Não consegui ler a produção agora. O resto da página continua válido.</span>
+        </div>
+        {%- else %}
+        <div class="vg-producao-h">
+            <i class="bi bi-{{ 'pause-circle' if bloco.situacao == 'desligado' else 'graph-up-arrow' }}"></i>
+            <span>
+                {%- if bloco.situacao == 'desligado' -%}
+                Renovação automática desligada
+                {%- else -%}
+                Passagem de {{ bloco.inicio_local.strftime('%d/%m, %Hh') }}
+                {%- endif -%}
+            </span>
+            <span class="vg-producao-quando">
+                {%- if bloco.situacao == 'desligado' -%}
+                <a href="{{ url_for('main.configuracoes') }}">Ligar em Configurações</a>
+                {%- else -%}
+                Roda de novo em {{ bloco.proxima.strftime('%d/%m, %Hh') }}
+                {%- endif -%}
+            </span>
+        </div>
+        <a class="vg-producao-item" href="{{ url_for('main.produtividade') }}">
+            <span class="vg-producao-txt">
+                <span class="vg-producao-t">
+                    {%- if bloco.situacao == 'desligado' -%}
+                    Nenhum lote roda sozinho enquanto estiver assim.
+                    {%- elif bloco.situacao == 'sem_registro' -%}
+                    {#- Zero não: não se sabe se a máquina ficou desligada ou se
+                        não havia o que renovar, e desconhecido não vira zero. -#}
+                    Nenhum lote registrado desde as {{ bloco.inicio_local.strftime('%Hh') }}.
+                    {%- else -%}
+                    <strong class="vg-producao-n">{{ bloco.emitidas }}</strong> emitidas
+                    · <strong class="vg-producao-n">{{ bloco.falhas }}</strong>
+                    {{ 'falhou' if bloco.falhas == 1 else 'falharam' }}
+                    · {{ bloco.tipos | join(', ') }}
+                    {%- if bloco.em_andamento %}
+                    · {{ bloco.em_andamento }}
+                    {{ 'lote ainda em andamento' if bloco.em_andamento == 1
+                       else 'lotes ainda em andamento' }}
+                    {%- endif -%}
+                    {%- endif -%}
+                </span>
+                <span class="vg-producao-s">
+                    {%- if bloco.semana.pct_agendador is none -%}
+                    7 dias: nenhuma emissão registrada
+                    {%- else -%}
+                    7 dias: <strong class="vg-producao-n">{{ bloco.semana.emitidas }}</strong>
+                    emitidas, {{ bloco.semana.pct_agendador }}% sem ninguém clicar
+                    {%- endif -%}
+                </span>
+            </span>
+            <i class="bi bi-chevron-right vg-producao-ir"></i>
+        </a>
+        {%- endif %}
+    </section>
 </div>
 {% endblock %}

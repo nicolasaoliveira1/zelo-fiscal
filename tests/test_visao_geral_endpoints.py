@@ -5,21 +5,35 @@ tabela de certidoes, que um bloco com fonte quebrada nao derruba a pagina, e que
 o papel decide quais blocos aparecem — mostrar um numero e negar o clique seria
 pior que nao mostrar.
 """
+from datetime import datetime
+
 from app.services import visao_geral
+
+# A faixa de produção precisa existir em TODO render: o template a lê sempre.
+# Default = agendador ligado e nada registrado desde a passagem — o dia mudo, que
+# é justamente o caso que a feature existe para deixar de ser mudo.
+_PRODUCAO_PADRAO = {
+    'situacao': 'sem_registro',
+    'inicio_local': datetime(2026, 8, 22, 3, 0),
+    'proxima': datetime(2026, 8, 23, 3, 0),
+    'lotes': 0, 'emitidas': 0, 'falhas': 0, 'em_andamento': 0, 'tipos': [],
+    'semana': {'emitidas': 0, 'pct_agendador': None},
+}
 
 
 def _sem_fontes(monkeypatch, **kw):
     """Todas as fontes vazias, salvo o que o teste sobrescrever."""
-    monkeypatch.setattr(visao_geral, 'montar',
-                        lambda usuario: kw.get('blocos', {
-                            'certidoes': {'vencidas': 0, 'a_vencer': 0,
-                                          'pendentes': 0, 'validas': 0,
-                                          'sem_data': 0, 'total': 0,
-                                          'atencao': 0, 'vazio': True},
-                            'certificados': {'itens': [], 'inventariado': True,
-                                             'vazio': True, 'com_vencimento': 0,
-                                             'janela_dias': 30},
-                        }))
+    blocos = kw.get('blocos', {
+        'certidoes': {'vencidas': 0, 'a_vencer': 0,
+                      'pendentes': 0, 'validas': 0,
+                      'sem_data': 0, 'total': 0,
+                      'atencao': 0, 'vazio': True},
+        'certificados': {'itens': [], 'inventariado': True,
+                         'vazio': True, 'com_vencimento': 0,
+                         'janela_dias': 30},
+    })
+    blocos.setdefault('producao', dict(_PRODUCAO_PADRAO))
+    monkeypatch.setattr(visao_geral, 'montar', lambda usuario: blocos)
 
 
 def test_raiz_abre_a_visao_geral_e_nao_a_tabela(app, ids, client, monkeypatch):
@@ -241,3 +255,123 @@ def test_cofre_nao_inventariado_nao_ganha_denominador(app, ids, client,
 
     assert 'cofre ainda não foi inventariado' in corpo
     assert 'vence nos próximos' not in corpo
+
+
+# --- a faixa de producao: o contrapeso no rodape ----------------------------
+
+def _com_producao(monkeypatch, **kw):
+    bloco = dict(_PRODUCAO_PADRAO)
+    bloco.update(kw)
+    _sem_fontes(monkeypatch, blocos={
+        'certidoes': {'vencidas': 0, 'a_vencer': 0, 'pendentes': 0,
+                      'validas': 0, 'sem_data': 0, 'total': 0, 'atencao': 0,
+                      'vazio': True},
+        'certificados': {'itens': [], 'inventariado': True, 'vazio': True,
+                         'com_vencimento': 0, 'janela_dias': 30},
+        'producao': bloco,
+    })
+
+
+def test_faixa_mostra_o_resultado_da_passagem(app, ids, client, monkeypatch):
+    _com_producao(monkeypatch, situacao='ok', lotes=2, emitidas=38, falhas=3,
+                  tipos=['FGTS', 'Municipal'])
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'Passagem de 22/08, 03h' in corpo
+    assert '>38</strong> emitidas' in corpo
+    assert '>3</strong>' in corpo and 'falharam' in corpo
+    assert 'FGTS, Municipal' in corpo
+
+
+def test_faixa_sem_registro_nao_diz_zero_emitidas(app, ids, client, monkeypatch):
+    """Nao se sabe se o PC ficou desligado ou se nao havia o que renovar. Zero
+    afirmaria a segunda hipotese sem nenhuma evidencia dela."""
+    _com_producao(monkeypatch, situacao='sem_registro')
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'Nenhum lote registrado desde as 03h' in corpo
+    # nenhuma contagem da passagem — nem "0 emitidas", nem "0 falharam"
+    assert '</strong> emitidas\n' not in corpo
+    assert 'falharam' not in corpo
+
+
+def test_agendador_desligado_aponta_para_configuracoes(app, ids, client,
+                                                       monkeypatch):
+    """Desligado e "produziu 0" nao sao o mesmo fato — e o primeiro tem conserto
+    a um clique, entao a faixa diz onde."""
+    _com_producao(monkeypatch, situacao='desligado', proxima=None)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'Renovação automática desligada' in corpo
+    assert '/configuracoes' in corpo
+    assert 'Nenhum lote registrado desde' not in corpo
+
+
+def test_lote_ainda_rodando_nao_vira_desfecho(app, ids, client, monkeypatch):
+    _com_producao(monkeypatch, situacao='ok', lotes=2, emitidas=8, falhas=0,
+                  em_andamento=1, tipos=['FGTS'])
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'lote ainda em andamento' in corpo
+
+
+def test_faixa_leva_para_produtividade(app, ids, client, monkeypatch):
+    _com_producao(monkeypatch, situacao='ok', lotes=1, emitidas=5, falhas=0,
+                  tipos=['FGTS'])
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert '/produtividade' in corpo
+
+
+def test_linha_de_sete_dias_mostra_a_fracao_automatica(app, ids, client,
+                                                       monkeypatch):
+    _com_producao(monkeypatch, semana={'emitidas': 214, 'pct_agendador': 88})
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert '>214</strong>' in corpo
+    assert '88% sem ninguém clicar' in corpo
+
+
+def test_semana_sem_emissao_nao_mostra_porcentagem(app, ids, client, monkeypatch):
+    _com_producao(monkeypatch, semana={'emitidas': 0, 'pct_agendador': None})
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert '7 dias: nenhuma emissão registrada' in corpo
+    assert '0% sem ninguém clicar' not in corpo
+
+
+def test_visualizador_tambem_ve_a_faixa(app, ids, login_as, monkeypatch):
+    """O destino e /produtividade, que e `leitura` — a regra e o papel da tela
+    de destino (OVER-09), e negar aqui esconderia um numero que ele pode abrir."""
+    _com_producao(monkeypatch, situacao='ok', lotes=1, emitidas=9, falhas=0,
+                  tipos=['FGTS'])
+
+    resposta = login_as('leitura').get('/')
+
+    assert resposta.status_code == 200
+    assert 'Passagem de 22/08, 03h' in resposta.get_data(as_text=True)
+
+
+def test_falha_da_faixa_nao_derruba_o_mosaico(app, ids, client, monkeypatch):
+    _sem_fontes(monkeypatch, blocos={
+        'certidoes': {'vencidas': 0, 'a_vencer': 0, 'pendentes': 0,
+                      'validas': 0, 'sem_data': 0, 'total': 0, 'atencao': 0,
+                      'vazio': True},
+        'certificados': {'itens': [], 'inventariado': True, 'vazio': True,
+                         'com_vencimento': 0, 'janela_dias': 30},
+        'producao': {'erro': True, 'nome': 'producao'},
+    })
+
+    resposta = client.get('/')
+    corpo = resposta.get_data(as_text=True)
+
+    assert resposta.status_code == 200
+    assert 'Não consegui ler a produção agora' in corpo
+    assert 'Certidões' in corpo  # o mosaico continua de pé
