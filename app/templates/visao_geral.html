@@ -100,13 +100,26 @@
                         url_for('main.certidoes'), 'Abrir Certidões',
                         largo=(not bloco.erro and not bloco.vazio)) %}
         {%- if bloco.erro or bloco.vazio %}
-        {{ vg_estado(bloco, 'Nenhuma certidão pede atenção hoje.') }}
+        {#- Carteira vazia e carteira em dia NÃO são a mesma frase: a primeira é
+            um cadastro que ainda não começou, a segunda é uma boa notícia. Dizer
+            "nada pede atenção" num sistema sem nenhuma certidão é o mesmo erro
+            do "0 vencendo" num cofre nunca inventariado. -#}
+        {{ vg_estado(bloco, 'Nenhuma certidão cadastrada.' if bloco.total == 0
+                     else 'Nenhuma certidão pede atenção hoje.') }}
         {%- else %}
-        {%- set atencao = bloco.vencidas + bloco.a_vencer + bloco.pendentes %}
-        {{ zl_comp(atencao, 'pedem atenção', '', [
-            ('vencidas', bloco.vencidas, 'danger'),
-            ('a vencer', bloco.a_vencer, 'warn'),
-            ('pendentes', bloco.pendentes, 'pend')]) }}
+        {#- O denominador vive na `unidade` (`.zl-comp-d`), que no cartão largo já
+            cai na linha de baixo do número — nenhum arranjo novo, nenhum fork do
+            macro. Cada chip leva ao seu recorte na tela de Certidões, pelos
+            mesmos valores de filtro que aquela tela aceita. -#}
+        {{ zl_comp(bloco.atencao, 'de ' ~ bloco.total ~ ' pedem atenção', '', [
+            ('vencidas', bloco.vencidas, 'danger',
+             url_for('main.certidoes', status='vencidas')),
+            ('a vencer', bloco.a_vencer, 'warn',
+             url_for('main.certidoes', status='a_vencer')),
+            ('pendentes', bloco.pendentes, 'pend',
+             url_for('main.certidoes', status='pendentes')),
+            ('sem data', bloco.sem_data, 'muted',
+             url_for('main.certidoes', status='nao_definida'))]) }}
         {%- endif %}
         {% endcall %}
 

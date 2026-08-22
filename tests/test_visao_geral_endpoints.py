@@ -13,7 +13,9 @@ def _sem_fontes(monkeypatch, **kw):
     monkeypatch.setattr(visao_geral, 'montar',
                         lambda usuario: kw.get('blocos', {
                             'certidoes': {'vencidas': 0, 'a_vencer': 0,
-                                          'pendentes': 0, 'vazio': True},
+                                          'pendentes': 0, 'validas': 0,
+                                          'sem_data': 0, 'total': 0,
+                                          'atencao': 0, 'vazio': True},
                             'certificados': {'itens': [], 'inventariado': True,
                                              'vazio': True},
                         }))
@@ -116,3 +118,70 @@ def test_menu_usa_um_nome_so_para_a_pagina_inicial(app, ids, client, monkeypatch
     assert '<span class="sidebar-rotulo">Certidões</span>' in corpo
     assert 'Dashboard' not in corpo
     assert 'Início' not in corpo
+
+
+# --- o numero em destaque tem escala, e o quarto estado existe --------------
+
+def _com_carteira(monkeypatch, **contagem):
+    base = {'vencidas': 0, 'a_vencer': 0, 'pendentes': 0, 'validas': 0,
+            'sem_data': 0}
+    base.update(contagem)
+    atencao = base['vencidas'] + base['a_vencer'] + base['pendentes'] + base['sem_data']
+    bloco = {**base, 'total': sum(base.values()), 'atencao': atencao,
+             'vazio': not atencao}
+    _sem_fontes(monkeypatch, blocos={
+        'certidoes': bloco,
+        'certificados': {'itens': [], 'inventariado': True, 'vazio': True},
+    })
+    return bloco
+
+
+def test_cartao_de_certidoes_mostra_o_denominador(app, ids, client, monkeypatch):
+    """89 de 1240 e uma frase; 89 sozinho nao diz se e crise ou terca-feira."""
+    _com_carteira(monkeypatch, vencidas=12, a_vencer=45, pendentes=25,
+                  sem_data=7, validas=1151)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'de 1240 pedem atenção' in corpo
+    assert '>89<' in corpo  # a soma dos quatro baldes de atencao
+
+
+def test_o_quarto_estado_aparece_na_legenda(app, ids, client, monkeypatch):
+    _com_carteira(monkeypatch, vencidas=1, sem_data=7, validas=10)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'sem data' in corpo
+    assert 'is-muted' in corpo
+
+
+def test_cada_chip_leva_ao_seu_recorte_na_tela_de_certidoes(app, ids, client,
+                                                            monkeypatch):
+    _com_carteira(monkeypatch, vencidas=1, a_vencer=1, pendentes=1, sem_data=1)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    for filtro in ('vencidas', 'a_vencer', 'pendentes', 'nao_definida'):
+        assert f'/certidoes?status={filtro}' in corpo
+
+
+def test_carteira_sem_nenhuma_certidao_nao_diz_de_zero(app, ids, client,
+                                                       monkeypatch):
+    """Carteira vazia e carteira em dia nao sao a mesma frase — o mesmo erro do
+    "0 vencendo" num cofre que nunca foi inventariado."""
+    _com_carteira(monkeypatch)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'Nenhuma certidão cadastrada' in corpo
+    assert 'de 0 pedem atenção' not in corpo
+
+
+def test_carteira_em_dia_nao_diz_que_esta_vazia(app, ids, client, monkeypatch):
+    _com_carteira(monkeypatch, validas=1240)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'Nenhuma certidão pede atenção hoje' in corpo
+    assert 'Nenhuma certidão cadastrada' not in corpo

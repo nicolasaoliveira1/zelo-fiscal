@@ -1142,6 +1142,14 @@ footer {
     color: var(--bs-emphasis-color);
 }
 
+/* Chip que leva ao recorte correspondente na tela de destino. Herda a aparência
+   do chip inteira — a única diferença é o sublinhado no hover, porque alvo
+   clicável precisa se anunciar. Sem `is-muted` próprio: o `::before` acima já
+   nasce em --zelo-muted, que é o token de "sem data". */
+a.zl-comp-stat { text-decoration: none; color: inherit; }
+a.zl-comp-stat:hover,
+a.zl-comp-stat:focus-visible { text-decoration: underline; text-underline-offset: 2px; }
+
 /* zero não é notícia: só ganha destaque quando sai de zero */
 .zl-comp-stat[data-zero="1"] { opacity: .45; }
 .zl-comp-stat[data-zero="1"] .zl-comp-v { color: var(--bs-secondary-color); }
