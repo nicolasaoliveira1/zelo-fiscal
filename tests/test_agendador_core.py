@@ -174,3 +174,48 @@ def test_corte_separa_o_lote_de_dentro_do_de_fora_da_passagem(app, ids, monkeypa
         # carimbos como o modelo carimba (UTC naive), em UTC-3
         assert datetime(2026, 8, 22, 6, 1) >= corte    # rodou 03:01 local
         assert datetime(2026, 8, 22, 5, 59) < corte    # rodou 02:59 local
+
+
+def test_proxima_execucao_e_hoje_quando_a_hora_ainda_nao_chegou(app, ids):
+    _config(app, agendador_hora=20)
+    with app.app_context():
+        assert agendador.proxima_execucao(
+            agora=datetime(2026, 8, 22, 9, 0)) == datetime(2026, 8, 22, 20, 0)
+
+
+def test_proxima_execucao_e_amanha_quando_a_hora_ja_passou(app, ids):
+    _config(app, agendador_hora=3)
+    with app.app_context():
+        assert agendador.proxima_execucao(
+            agora=datetime(2026, 8, 22, 9, 0)) == datetime(2026, 8, 23, 3, 0)
+
+
+def test_na_hora_exata_a_proxima_e_a_de_amanha(app, ids):
+    """O disparo de agora ja aconteceu — "proxima" nao pode ser ele mesmo."""
+    _config(app, agendador_hora=3)
+    with app.app_context():
+        assert agendador.proxima_execucao(
+            agora=datetime(2026, 8, 22, 3, 0)) == datetime(2026, 8, 23, 3, 0)
+
+
+def test_agendador_desligado_nao_tem_proxima_execucao(app, ids):
+    """`None` nao e "nunca": e "nao ha proxima", que a tela mostra como
+    desligado. Devolver uma data faria a pagina prometer uma execucao que o
+    `_agendar_jobs` nem chega a registrar."""
+    _config(app, agendador_hora=3, agendador_ativo=False)
+    with app.app_context():
+        assert agendador.proxima_execucao(agora=datetime(2026, 8, 22, 9, 0)) is None
+
+
+def test_o_relogio_legivel_nao_consulta_o_scheduler(app, ids):
+    """A prova de que a leitura vem da config: nenhuma das duas funcoes referencia
+    `_scheduler`, que e None em teste e num processo recem-subido.
+
+    Olha `co_names` — os globais que o bytecode realmente usa — e nao o texto do
+    fonte: os docstrings CITAM `_scheduler` para explicar por que nao o usam, e
+    uma busca textual reprovaria a explicacao junto com o erro.
+    """
+    for funcao in (agendador.proxima_execucao, agendador.janela_ultima_passagem):
+        usados = funcao.__code__.co_names
+        assert '_scheduler' not in usados
+        assert '_ler_config' in usados

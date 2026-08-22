@@ -86,6 +86,31 @@ def _ler_config():
 # recebe em `_agendar_jobs`, entao ler dela nao pode divergir do que foi agendado.
 
 
+def proxima_execucao(agora=None):
+    """Quando a renovacao automatica roda a proxima vez (hora local, AD-004).
+
+    `None` quando o agendador esta desligado — nao ter proxima execucao e um fato
+    diferente de "roda daqui a pouco", e a tela precisa distinguir os dois.
+
+    Le a config, nao o `_scheduler.next_run_time`. Nao e preferencia:
+    `AGENDADOR_ENABLED` e falso nos testes e `_scheduler` fica None, entao a
+    introspecao seria intestavel — e mentiria num processo que ainda nao bootou.
+    A config e a mesma fonte que o `CronTrigger` recebe em `_agendar_jobs`, entao
+    ler dela nao pode divergir do que foi agendado.
+
+    Na hora exata da execucao a proxima e a de amanha: o disparo de agora ja
+    aconteceu.
+    """
+    hora, ativo = _ler_config()
+    if not ativo:
+        return None
+    agora = agora or datetime.now()
+    proxima = agora.replace(hour=hora, minute=0, second=0, microsecond=0)
+    if proxima <= agora:
+        proxima += timedelta(days=1)
+    return proxima
+
+
 def janela_ultima_passagem(agora=None):
     """A ultima passagem do agendador, nos DOIS relogios do projeto.
 
