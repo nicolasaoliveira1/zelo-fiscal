@@ -87,7 +87,8 @@ def test_certificado_vencido_aparece_na_faixa(app, ids, client, monkeypatch):
 
     _sem_fontes(monkeypatch, blocos={
         'certidoes': {'vencidas': 0, 'a_vencer': 0, 'pendentes': 0, 'vazio': True},
-        'certificados': {'inventariado': True, 'vazio': False, 'itens': [
+        'certificados': {'inventariado': True, 'vazio': False,
+                         'com_vencimento': 12, 'janela_dias': 30, 'itens': [
             {'empresa_nome': 'ACME', 'causa': 'vencido', 'dias_restantes': -3,
              'not_after': datetime(2026, 8, 17, 9, 0)}]},
     })
@@ -118,7 +119,8 @@ def test_cofre_nunca_inventariado_nao_diz_zero_vencendo(app, ids, client,
                                                         monkeypatch):
     _sem_fontes(monkeypatch, blocos={
         'certidoes': {'vencidas': 0, 'a_vencer': 0, 'pendentes': 0, 'vazio': True},
-        'certificados': {'itens': [], 'inventariado': False, 'vazio': False},
+        'certificados': {'itens': [], 'inventariado': False, 'vazio': False,
+                         'com_vencimento': 0, 'janela_dias': 30},
     })
 
     corpo = client.get('/').get_data(as_text=True)
@@ -385,3 +387,32 @@ def test_falha_da_faixa_nao_derruba_o_mosaico(app, ids, client, monkeypatch):
     assert resposta.status_code == 200
     assert 'Não consegui ler a produção agora' in corpo
     assert 'Certidões' in corpo  # o mosaico continua de pé
+
+
+def test_cartao_a1_cheio_diz_quantos_de_quantos(app, ids, client, monkeypatch):
+    """A lista rola POR DENTRO (max-height 15rem): sem a contagem no cabecalho,
+    18 dos 23 ficam atras de uma barra que pode nem aparecer. Conteudo escondido
+    sem sinal de que existe e o unico problema real de rolagem nesta pagina."""
+    from datetime import datetime
+
+    itens = [{'empresa_nome': f'EMPRESA {i}', 'causa': 'vencendo',
+              'dias_restantes': i, 'not_after': datetime(2026, 9, 1)}
+             for i in range(23)]
+    _cofre(monkeypatch, itens=itens, vazio=False, com_vencimento=47)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'vg-card-h-extra' in corpo
+    assert '23 de 47' in corpo
+
+
+def test_cartao_a1_vazio_nao_ganha_contagem_no_cabecalho(app, ids, client,
+                                                          monkeypatch):
+    """Sem item nao ha lista para rolar, e "0 de 47" no cabecalho seria ruido
+    contradizendo a frase de estado vazio logo abaixo."""
+    _cofre(monkeypatch, com_vencimento=47)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert '0 de 47' not in corpo
+    assert 'Nenhum dos 47 certificados vence' in corpo

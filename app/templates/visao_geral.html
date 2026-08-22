@@ -127,8 +127,15 @@
             dentro da caixa para uma safra grande de vencimentos não empurrar o
             cartão vizinho para fora da tela. -#}
         {% set bloco = blocos.certificados %}
+        {#- O `extra` do cabeçalho existe porque esta lista ROLA POR DENTRO: com 23
+            vencendo o cartão mostra ~5 e esconde o resto atrás de uma barra que
+            pode nem aparecer. "23 de 47" é a pista de que há mais — e é a mesma
+            gramática do cartão de Certidões, aplicada agora ao estado cheio e não
+            só ao vazio. -#}
         {% call vg_card('a1', 'patch-check', 'Certificados A1',
-                        url_for('main.manifestador_painel'), 'Abrir Manifestador') %}
+                        url_for('main.manifestador_painel'), 'Abrir Manifestador',
+                        extra=('%d de %d' % (bloco.itens | length, bloco.com_vencimento))
+                              if bloco.itens else '') %}
         {%- if bloco.erro or not bloco.itens %}
         {%- if not bloco.erro and not bloco.inventariado %}
         {#- cofre nunca inventariado NAO e "0 vencendo": sao coisas diferentes e
