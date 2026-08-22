@@ -85,8 +85,17 @@
             <i class="bi bi-check2-circle"></i>
             <span>Nada trava trabalho hoje</span>
         </div>
+        {#- A frase do dia calmo AFIRMA três coisas, e uma delas o sistema pode
+            não saber: com o cofre nunca inventariado não há como dizer que os
+            certificados estão em dia. Afirmar assim mesmo é o "0 vencendo" de
+            novo, agora em tom de boa notícia — o pior lugar para um chute. -#}
         <div class="vg-faixa-item text-secondary small">
+            {%- if blocos.certificados.inventariado or blocos.certificados.erro %}
             Certificados em dia, portais respondendo, nenhuma decisão pendurada.
+            {%- else %}
+            Portais respondendo, nenhuma decisão pendurada. Dos certificados eu
+            não sei — o cofre nunca foi inventariado.
+            {%- endif %}
         </div>
         {%- endif %}
     </section>
@@ -267,8 +276,11 @@
                     Nenhum lote registrado desde as {{ bloco.inicio_local.strftime('%Hh') }}.
                     {%- else -%}
                     <strong class="vg-producao-n">{{ bloco.emitidas }}</strong> emitidas
-                    · <strong class="vg-producao-n">{{ bloco.falhas }}</strong>
-                    {{ 'falhou' if bloco.falhas == 1 else 'falharam' }}
+                    {#- Zero não é notícia (design language): numa noite limpa,
+                        "0 falharam" não pode competir com o número que importa.
+                        Sem `-#}` no fecho de propósito: o strip levava junto o
+                        espaço antes do `·` e colava "emitidas· 0". #}
+                    <span class="vg-producao-parte" data-zero="{{ '1' if not bloco.falhas else '0' }}">· <strong class="vg-producao-n">{{ bloco.falhas }}</strong> {{ 'falhou' if bloco.falhas == 1 else 'falharam' }}</span>
                     · {{ bloco.tipos | join(', ') }}
                     {%- if bloco.em_andamento %}
                     · {{ bloco.em_andamento }}

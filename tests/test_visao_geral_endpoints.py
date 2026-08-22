@@ -416,3 +416,48 @@ def test_cartao_a1_vazio_nao_ganha_contagem_no_cabecalho(app, ids, client,
 
     assert '0 de 47' not in corpo
     assert 'Nenhum dos 47 certificados vence' in corpo
+
+
+def test_noite_sem_falha_nao_poe_o_zero_em_destaque(app, ids, client, monkeypatch):
+    """Zero não é notícia (design language): numa noite limpa, "0 falharam" não
+    pode competir com o número que importa."""
+    _com_producao(monkeypatch, situacao='ok', lotes=3, emitidas=38, falhas=0,
+                  tipos=['FGTS'])
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'vg-producao-parte" data-zero="1"' in corpo
+    # o comentario Jinja com `-#}` ja comeu este espaco uma vez, colando
+    # "emitidas· 0" — a regressao e invisivel no HTML e obvia na tela
+    assert 'emitidas<span' not in corpo
+
+
+def test_noite_com_falha_mantem_o_numero_em_destaque(app, ids, client, monkeypatch):
+    _com_producao(monkeypatch, situacao='ok', lotes=3, emitidas=38, falhas=3,
+                  tipos=['FGTS'])
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'vg-producao-parte" data-zero="0"' in corpo
+
+
+def test_dia_calmo_nao_afirma_certificados_em_dia_sem_inventario(
+        app, ids, client, monkeypatch):
+    """O pior lugar para um chute é dentro de uma boa notícia: sem inventário
+    não há como afirmar que os certificados estão em dia."""
+    _cofre(monkeypatch, inventariado=False, vazio=False)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'Nada trava trabalho hoje' in corpo
+    assert 'Certificados em dia' not in corpo
+    assert 'Dos certificados eu' in corpo
+
+
+def test_dia_calmo_com_cofre_inventariado_mantem_a_frase_inteira(
+        app, ids, client, monkeypatch):
+    _cofre(monkeypatch, inventariado=True, com_vencimento=47)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'Certificados em dia, portais respondendo' in corpo

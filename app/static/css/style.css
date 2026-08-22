@@ -1620,6 +1620,11 @@ body.topo-visivel .zl-dock {
     color: var(--bs-emphasis-color);
 }
 
+/* Zero não é notícia — mesma regra da legenda do `zl_comp`: numa noite limpa,
+   "0 falharam" não compete com as emitidas. */
+.vg-producao-parte[data-zero="1"] { opacity: .45; }
+.vg-producao-parte[data-zero="1"] .vg-producao-n { color: var(--bs-secondary-color); }
+
 .vg-producao-ir {
     flex: none;
     color: var(--bs-secondary-color);
