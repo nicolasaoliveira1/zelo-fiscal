@@ -735,7 +735,10 @@ def _mocks_alerta(pilha):
     """Espiona a ANOTACAO na pauta: o alerta nao manda mais e-mail proprio, quem
     manda e o resumo do dia (AD-029)."""
     from app.services import notificacoes as nt
-    return pilha.enter_context(patch.object(nt, '_anotar_alerta',
+    # `autospec` para a aridade do mock acompanhar a da funcao: quando o
+    # `_anotar_alerta` perdeu o parametro `janela`, um mock solto continuaria
+    # aceitando a chamada antiga e o teste passaria a provar nada.
+    return pilha.enter_context(patch.object(nt, '_anotar_alerta', autospec=True,
                                             return_value=True))
 
 
@@ -755,7 +758,7 @@ def test_alerta_so_para_quebrados(app):
         enviar = _mocks_alerta(pilha)
         enviados = nt.alertar_municipios_quebrados(app, relatorios)
     assert enviados == 1
-    (chave, tipo, titulo, corpo, _janela), _kw = enviar.call_args
+    (chave, tipo, titulo, corpo), _kw = enviar.call_args
     assert chave == 'municipio_quebrado:Imbé'   # anti-spam por municipio
     assert tipo == 'alerta_municipio'
     assert 'Imbé' in titulo
@@ -780,7 +783,7 @@ def test_alerta_de_portal_que_nao_abriu_manda_conferir_a_url(app):
         enviar = _mocks_alerta(pilha)
         enviados = nt.alertar_municipios_quebrados(app, [relatorio])
     assert enviados == 1
-    (chave, _tipo, titulo, corpo, _janela), _kw = enviar.call_args
+    (chave, _tipo, titulo, corpo), _kw = enviar.call_args
     assert chave == 'municipio_quebrado:Xangri-Lá'
     assert 'nao respondeu' in titulo
     assert 'url_certidao' in corpo

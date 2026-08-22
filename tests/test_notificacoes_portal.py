@@ -72,15 +72,19 @@ def test_dois_portais_saem_num_unico_email(ctx, monkeypatch):
     assert 'FGTS' in corpo and 'Imbe' in corpo
 
 
-def test_resumo_enviado_fecha_a_pauta_e_alimenta_o_anti_spam(ctx, monkeypatch):
+def test_resumo_enviado_fecha_a_pauta_e_registra_o_historico(ctx, monkeypatch):
+    """O `NotificacaoLog` continua sendo gravado no envio, mas mudou de papel:
+    ja nao suprime o proximo aviso — diz que ele nao e mais NOVO."""
     _mock_envio(monkeypatch)
     notificacoes.alertar_portal_fora(ctx, 'FGTS', 'Timeout.')
     notificacoes.enviar_resumo_diario(ctx)
 
     assert notificacoes.pauta_pendente() == []
     assert NotificacaoLog.query.filter_by(chave='portal_fora:FGTS').count() == 1
-    # dentro da janela de 24h nao volta para a pauta
-    assert notificacoes.alertar_portal_fora(ctx, 'FGTS', 'Timeout.') is False
+    # o portal continua fora, entao o aviso volta — sem marca de novo
+    assert notificacoes.alertar_portal_fora(ctx, 'FGTS', 'Timeout.') is True
+    assert notificacoes.chaves_ja_avisadas(['portal_fora:FGTS']) == {
+        'portal_fora:FGTS'}
 
 
 def test_alerta_nomeia_o_portal_e_o_motivo(ctx, monkeypatch):

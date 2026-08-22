@@ -231,19 +231,23 @@ def test_alerta_explica_a_consequencia(app, ids, monkeypatch):
         assert 'emissao individual' in corpo
 
 
-def test_alerta_nao_repete_na_mesma_janela(app, ids, monkeypatch):
-    """Anti-spam duravel (AD-011): sobrevive a restart."""
+def test_alerta_nao_duplica_antes_do_resumo_e_volta_depois(app, ids, monkeypatch):
+    """A pauta pendente evita duplicar no MESMO dia; a janela do NotificacaoLog
+    nao segura mais nada — ela virou o historico que decide o que e NOVO."""
     _com_smtp(app, monkeypatch)
     with app.app_context():
         notificacoes.alertar_empresas_baixadas(app, [(1, 'Alpha LTDA', 'BAIXADA')])
-        # antes do resumo: ja esta na pauta
-        assert notificacoes.alertar_empresas_baixadas(
-            app, [(1, 'Alpha LTDA', 'BAIXADA')]) == 0
-        # depois do resumo: a janela do NotificacaoLog e que segura
-        notificacoes.enviar_resumo_diario(app)
+        # antes do resumo: ja esta na pauta, nao duplica
         assert notificacoes.alertar_empresas_baixadas(
             app, [(1, 'Alpha LTDA', 'BAIXADA')]) == 0
         assert PautaNotificacao.query.count() == 1
+
+        # depois do resumo a pauta fecha, e o achado — que continua valendo —
+        # volta a ser anotado para o resumo do dia seguinte
+        notificacoes.enviar_resumo_diario(app)
+        assert notificacoes.alertar_empresas_baixadas(
+            app, [(1, 'Alpha LTDA', 'BAIXADA')]) == 1
+        assert PautaNotificacao.query.count() == 2
 
 
 def test_alerta_de_uma_empresa_nao_silencia_outra(app, ids, monkeypatch):

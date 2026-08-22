@@ -7,7 +7,7 @@ manda **um** e-mail com tudo. Antes cada certificado vencido virava um e-mail
 proprio, e a caixa do operador recebia dezenas por dia — o volume fazia o aviso
 ser ignorado, que e o oposto do que o alerta existe para fazer.
 
-O anti-spam DURAVEL continua no `NotificacaoLog` (chave + janela, sobrevive a
+O `NotificacaoLog` continua sendo o historico duravel (sobrevive a
 restart) e agora ganha um segundo guarda: enquanto um achado espera na pauta, a
 mesma chave nao e anotada de novo. O transporte fica em `email_sender`
 (best-effort). Nada aqui pode derrubar o job do agendador — falhas sao logadas,
@@ -20,7 +20,7 @@ precisava saber.
 
 Este modulo NAO importa `agendador` (evita ciclo): os jobs e que chamam este.
 """
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from app import captcha_solver, db
 from app.models import ConfiguracaoSistema, NotificacaoLog, PautaNotificacao
@@ -90,12 +90,30 @@ def _ultimo_envio(chave):
     return row.enviada_em if row else None
 
 
-def _deduplicado(chave, janela_horas):
-    """True se ja houve envio da chave dentro da janela (nao reenviar)."""
-    ultimo = _ultimo_envio(chave)
-    if ultimo is None:
-        return False
-    return (datetime.now() - ultimo) < timedelta(hours=janela_horas)
+def chaves_ja_avisadas(chaves):
+    """Das chaves dadas, quais JA sairam em algum resumo anterior.
+
+    Substitui o antigo `_deduplicado`, e a troca e de proposito: o
+    `NotificacaoLog` deixou de decidir QUEM aparece no resumo (agora aparecem
+    todos, todo dia, a pedido do usuario) e passou a decidir o que e NOVO.
+
+    Uma consulta so para o lote inteiro — uma por item seria N round-trips no
+    caminho do job diario.
+    """
+    chaves = list(chaves)
+    if not chaves:
+        return set()
+    try:
+        linhas = (db.session.query(NotificacaoLog.chave)
+                  .filter(NotificacaoLog.chave.in_(chaves))
+                  .distinct().all())
+    except Exception as exc:
+        # Sem saber o historico, o seguro e nao marcar NADA como novo: um
+        # "[NOVO]" errado ensina o leitor a desconfiar do marcador, e ai ele
+        # deixa de servir para o que existe.
+        log_event('notif_historico_falhou', level='WARNING', error=str(exc))
+        return set(chaves)
+    return {linha[0] for linha in linhas}
 
 
 def _registrar_envio(chave, tipo, detalhe=None):
@@ -124,16 +142,21 @@ def _pauta_pendente_chave(chave):
         return False
 
 
-def registrar_pauta(chave, tipo, titulo, corpo=None, janela_horas=None):
+def registrar_pauta(chave, tipo, titulo, corpo=None):
     """Anota um achado para o proximo resumo diario. True se anotou agora.
 
-    Dois guardas, e os dois precisam existir: a janela do `NotificacaoLog` evita
-    repetir um achado que JA SAIU num resumo recente, e o `_pauta_pendente_chave`
-    evita anotar duas vezes um achado que ainda NAO saiu (o produtor pode rodar
-    mais de uma vez entre dois resumos). Best-effort: falha de gravacao loga e
-    retorna False, nunca propaga (AD-011)."""
-    if janela_horas and _deduplicado(chave, janela_horas):
-        return False
+    UM guarda, e nao dois: o `_pauta_pendente_chave` evita anotar duas vezes um
+    achado que ainda NAO saiu (o produtor pode rodar varias vezes entre dois
+    resumos). O segundo guarda — a janela do `NotificacaoLog`, que suprimia o que
+    ja tinha saido num resumo recente — foi REMOVIDO por pedido do usuario: um
+    achado que persiste continua aparecendo todo dia, para reforcar.
+
+    O custo dessa escolha e real e esta pago noutro lugar: uma secao que repete a
+    mesma lista todo dia deixa de ser lida, e o item que entrou hoje some no meio
+    dos de ontem. Por isso o resumo marca [NOVO] e ordena os novos primeiro.
+
+    Best-effort: falha de gravacao loga e retorna False, nunca propaga (AD-011).
+    """
     if _pauta_pendente_chave(chave):
         return False
     try:
@@ -222,13 +245,31 @@ def montar_resumo(itens=None):
     O assunto diz o que manda a atencao: havendo aviso, o numero de avisos vem
     primeiro; sem aviso, a contagem da carteira; sem nada, "tudo em dia"."""
     itens = list(itens or [])
+    # NOVO = a chave nunca saiu em resumo nenhum. A leitura e a que o operador
+    # espera: certificado que virou "vencido" tem chave propria e por isso
+    # reaparece marcado no dia da virada, mesmo depois de semanas avisando que
+    # estava vencendo.
+    ja_avisadas = chaves_ja_avisadas({item.chave for item in itens})
+    e_novo = {item.chave: item.chave not in ja_avisadas for item in itens}
+    # Novos primeiro DENTRO de cada secao. Sem isso, o item que entrou hoje cai
+    # no meio de uma lista que o leitor ja percorreu ontem — que e exatamente o
+    # jeito de a repeticao apagar o que ela deveria reforcar. `sorted` e estavel,
+    # entao a ordem da pauta (mais antigo primeiro) sobrevive dentro de cada
+    # metade.
+    itens = sorted(itens, key=lambda item: not e_novo[item.chave])
+    quantos_novos = sum(e_novo.values())
     resumo = snapshot_service.contagem_carteira()
     a_vencer, vencidas, pendentes = (
         resumo['a_vencer'], resumo['vencidas'], resumo['pendentes'])
     carteira_vazia = _carteira_vazia(resumo)
 
     if itens:
-        assunto = f'[Zelo] Resumo do dia — {len(itens)} aviso(s)'
+        # O assunto diz quantos SAO e quantos MUDARAM: numa carteira que repete
+        # os mesmos doze avisos por semanas, "12 avisos" nao distingue o dia em
+        # que apareceu o decimo terceiro do dia em que nada aconteceu.
+        assunto = (f'[Zelo] Resumo do dia — {len(itens)} aviso(s), '
+                   + (f'{quantos_novos} novo(s)' if quantos_novos
+                      else 'nenhum novo'))
     elif not carteira_vazia:
         assunto = (f'[Zelo] Resumo do dia — {a_vencer} a vencer, '
                    f'{vencidas} vencidas, {pendentes} pendentes')
@@ -249,7 +290,8 @@ def montar_resumo(itens=None):
     for rotulo, do_tipo in _agrupar_por_secao(itens):
         linhas += ['', f'{rotulo.upper()} ({len(do_tipo)})']
         for item in do_tipo:
-            linhas.append(f'  - {item.titulo}')
+            marca = '[NOVO] ' if e_novo[item.chave] else ''
+            linhas.append(f'  - {marca}{item.titulo}')
             for linha in (item.corpo or '').splitlines():
                 linhas.append(f'    {linha}' if linha else '')
         rodape = _RODAPE_SECAO.get(do_tipo[0].tipo)
@@ -259,7 +301,9 @@ def montar_resumo(itens=None):
     if not itens:
         linhas += ['', 'Nenhum alerta novo desde o ultimo resumo.']
     linhas += ['', 'Este e o unico e-mail do dia: os avisos sao acumulados e',
-               'enviados juntos. A janela e os destinatarios ficam em Configuracoes.']
+               'enviados juntos. Enquanto o problema existir ele continua',
+               'sendo listado, e o que aparece pela primeira vez vem marcado.',
+               'Os destinatarios e a cadencia ficam em Configuracoes.']
     return assunto, '\n'.join(linhas), resumo
 
 
@@ -315,24 +359,23 @@ def enviar_resumo_diario(app):
 
 # --- alertas (falha recorrente + saldo 2captcha) ---------------------------
 
-def _anotar_alerta(chave, tipo, titulo, corpo, janela):
-    """Anota um alerta na pauta respeitando o anti-spam. True se anotou agora.
+def _anotar_alerta(chave, tipo, titulo, corpo):
+    """Anota um alerta na pauta. True se anotou agora.
 
     Ponto unico por onde TODO alerta passa: era aqui que ficava o envio imediato,
     e trocar o envio pela anotacao num lugar so e o que garante que nenhum
     caminho continue mandando e-mail avulso (AD-029)."""
-    return registrar_pauta(chave, tipo, titulo, corpo, janela_horas=janela)
+    return registrar_pauta(chave, tipo, titulo, corpo)
 
 
 def apurar_alertas(app):
     """Anota alertas de falha recorrente (via diagnostics) e de saldo baixo do
-    2captcha, com a janela anti-spam. Retorna quantos anotou agora.
+    2captcha. Retorna quantos anotou agora.
 
     - Falha recorrente: um alerta por (error_type, alvo) ativo; repeticao
-      bloqueada dentro da janela (AC P2 falha).
+      um por dia, porque o `_pauta_pendente_chave` fecha os repetidos do dia.
     - Saldo: alerta so quando abaixo do limiar; saldo None (API fora) NAO gera
       falso-baixo; mantem tambem o WARNING no painel de diagnostico (spec 02)."""
-    janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
     enviados = 0
 
     for alerta in diagnostics.alertas_ativos():
@@ -346,7 +389,7 @@ def apurar_alertas(app):
             f'Ocorrencias: {alerta.get("ocorrencias")}',
             f'Hipotese: {alerta.get("hipotese")}',
         ])
-        if _anotar_alerta(chave, 'alerta_falha', titulo, corpo, janela):
+        if _anotar_alerta(chave, 'alerta_falha', titulo, corpo):
             enviados += 1
 
     saldo = captcha_solver.consultar_saldo(app.config)
@@ -360,7 +403,7 @@ def apurar_alertas(app):
             f'Limiar minimo configurado: {minimo:.2f} USD',
             'Recarregue para nao interromper os lotes automatizados.',
         ])
-        if _anotar_alerta('saldo_baixo', 'alerta_saldo', titulo, corpo, janela):
+        if _anotar_alerta('saldo_baixo', 'alerta_saldo', titulo, corpo):
             enviados += 1
 
     return enviados
@@ -377,7 +420,6 @@ def alertar_empresas_baixadas(app, baixadas):
     municipio: resolver uma nao pode silenciar as outras dentro da janela. Todas
     saem juntas na secao "Situacao na Receita" do resumo do dia (AD-029). Retorna
     quantas foram anotadas agora."""
-    janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
     enviados = 0
 
     for empresa_id, nome, situacao in baixadas or []:
@@ -395,35 +437,25 @@ def alertar_empresas_baixadas(app, baixadas):
             'Confira a situacao na tela da empresa e decida se ela sai da carteira.',
         ])
         if _anotar_alerta(f'empresa_baixada:{empresa_id}',
-                          'alerta_empresa_baixada', titulo, corpo, janela):
+                          'alerta_empresa_baixada', titulo, corpo):
             enviados += 1
 
     return enviados
 
 
-# A JANELA anti-spam deste alerta e propria, e nao a global de 24h. Com o resumo
-# diario (AD-029) ela nao decide mais QUANTOS e-mails saem — sai um so, com tudo
-# dentro —, mas decide quantas vezes o mesmo certificado volta a aparecer nesse
-# e-mail. Sem ela, todo certificado da janela reapareceria em TODO resumo ate a
-# renovacao, e a lista de repetidos afogaria o que mudou naquele dia. O alerta de
-# empresa baixada nao precisa disso porque recebe so TRANSICOES; aqui a condicao
-# persiste por semanas.
-#
-# Vencendo repete por semana (ha tempo de agir); vencido repete a cada 3 dias,
-# porque ali a manifestacao da empresa esta parada e o silencio custa caro.
-_JANELA_VENCENDO_H = 24 * 7
-_JANELA_VENCIDO_H = 24 * 3
-
+# Este alerta TINHA janela propria (7 dias vencendo, 3 dias vencido) para nao
+# repetir o mesmo certificado em todo resumo. A janela saiu por pedido do
+# usuario: a condicao persiste por semanas, e ver a lista inteira todo dia
+# reforca. A troca de vencendo->vencido continua sendo evento proprio porque a
+# CHAVE muda, entao ela reaparece marcada [NOVO] no dia em que acontece.
 _ALERTA_CERTIFICADO_POR_CAUSA = {
     'vencido': {
-        'janela': _JANELA_VENCIDO_H,
         'chave': 'certificado_vencido:{empresa_id}',
         'titulo': 'Vencido em {data_vencimento} — {empresa_nome}',
         # So o que e proprio DESTE item; o conselho comum esta no _RODAPE_SECAO.
         'linhas': ['A manifestacao dessa empresa esta parada ate renovar.'],
     },
     'vencendo': {
-        'janela': _JANELA_VENCENDO_H,
         'chave': 'certificado_vencendo:{empresa_id}',
         'titulo': ('Vence em {data_vencimento} — {empresa_nome} '
                    '(faltam {dias_restantes} dia(s))'),
@@ -464,8 +496,7 @@ def alertar_certificados_vencendo(app, itens):
         }
         corpo = '\n'.join(linha.format(**dados) for linha in modelo['linhas'])
         if _anotar_alerta(modelo['chave'].format(**dados), 'alerta_certificado',
-                          modelo['titulo'].format(**dados), corpo,
-                          modelo['janela']):
+                          modelo['titulo'].format(**dados), corpo):
             enviados += 1
 
     return enviados
@@ -514,7 +545,6 @@ def alertar_portal_fora(app, alvo, motivo=None, causa='portal'):
     a qualquer hora. Por isso a pauta e tabela e nao buffer em memoria (AD-029):
     o achado precisa sobreviver ate o resumo da madrugada seguinte."""
     modelo = _ALERTA_POR_CAUSA.get(causa) or _ALERTA_POR_CAUSA['portal']
-    janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
     corpo = '\n'.join(
         [linha.format(alvo=alvo) for linha in modelo['linhas']]
         + [
@@ -525,7 +555,7 @@ def alertar_portal_fora(app, alvo, motivo=None, causa='portal'):
             'tenta de novo. Se o problema seguir, o aviso volta no proximo resumo.',
         ])
     return _anotar_alerta(modelo['chave'].format(alvo=alvo), modelo['tipo'],
-                          modelo['titulo'].format(alvo=alvo), corpo, janela)
+                          modelo['titulo'].format(alvo=alvo), corpo)
 
 
 def alertar_municipios_quebrados(app, relatorios):
@@ -537,8 +567,6 @@ def alertar_municipios_quebrados(app, relatorios):
     ocupado) e `parcial` e captcha — nenhum dos dois e drift. Retorna quantos
     foram anotados agora."""
     from app.services.dryrun_municipio import QUEBRADO, falhou_ao_abrir
-
-    janela = app.config.get('NOTIF_ALERTA_JANELA_HORAS', 24)
     enviados = 0
 
     for relatorio in relatorios or []:
@@ -573,7 +601,7 @@ def alertar_municipios_quebrados(app, relatorios):
             '',
         ] + fecho)
         if _anotar_alerta(f'municipio_quebrado:{nome}', 'alerta_municipio',
-                          titulo, corpo, janela):
+                          titulo, corpo):
             enviados += 1
 
     return enviados

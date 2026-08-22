@@ -51,7 +51,7 @@ def _saldo(monkeypatch, valor):
 
 # --- falha recorrente ------------------------------------------------------
 
-def test_falha_recorrente_anota_um_alerta_e_nao_repete_na_janela(ctx, monkeypatch):
+def test_falha_recorrente_anota_um_por_dia_e_repete_no_dia_seguinte(ctx, monkeypatch):
     enviados = _mock_envio(monkeypatch)
     monkeypatch.setattr(notificacoes.diagnostics, 'alertas_ativos', lambda: [_ALERTA])
     _saldo(monkeypatch, 10.0)  # saldo alto: sem alerta de saldo
@@ -64,11 +64,18 @@ def test_falha_recorrente_anota_um_alerta_e_nao_repete_na_janela(ctx, monkeypatc
     assert notificacoes.apurar_alertas(ctx) == 0
     assert PautaNotificacao.query.filter_by(tipo='alerta_falha').count() == 1
 
-    # depois do resumo, a janela anti-spam do NotificacaoLog e que segura
+    # depois do resumo a pauta esvazia, e o achado — que continua ativo — volta
+    # a ser anotado: a janela anti-spam do NotificacaoLog nao segura mais nada
+    # (ela virou o historico que decide o que e NOVO, nao o que aparece)
     notificacoes.enviar_resumo_diario(ctx)
     assert len(enviados) == 1
-    assert notificacoes.apurar_alertas(ctx) == 0
+    assert notificacoes.apurar_alertas(ctx) == 1
     assert NotificacaoLog.query.filter_by(tipo='alerta_falha').count() == 1
+
+    # e no resumo seguinte ele sai de novo, agora SEM marca de novo
+    notificacoes.enviar_resumo_diario(ctx)
+    assert len(enviados) == 2
+    assert '[NOVO]' not in enviados[1][1]
 
 
 def test_alerta_falha_contem_tipo_alvo_e_hipotese(ctx, monkeypatch):
@@ -107,14 +114,22 @@ def test_saldo_alto_nao_alerta(ctx, monkeypatch):
     assert notificacoes.apurar_alertas(ctx) == 0
 
 
-def test_saldo_baixo_nao_repete_dentro_da_janela(ctx, monkeypatch):
+def test_saldo_baixo_repete_enquanto_o_saldo_estiver_baixo(ctx, monkeypatch):
+    """Saldo baixo persiste ate a recarga; o aviso persiste junto.
+
+    Antes a janela de 24h o silenciava depois do primeiro resumo. Isso saiu: o
+    problema continua sendo listado enquanto existir, e so o primeiro dia leva
+    marca de novo."""
     _mock_envio(monkeypatch)
     _sem_alertas(monkeypatch)
     _saldo(monkeypatch, 0.3)
 
     assert notificacoes.apurar_alertas(ctx) == 1
+    # antes do resumo, a pauta pendente evita duplicar
+    assert notificacoes.apurar_alertas(ctx) == 0
     notificacoes.enviar_resumo_diario(ctx)
-    assert notificacoes.apurar_alertas(ctx) == 0  # AC saldo.3
+    # depois do resumo, volta a anotar
+    assert notificacoes.apurar_alertas(ctx) == 1
     assert NotificacaoLog.query.filter_by(tipo='alerta_saldo').count() == 1
 
 
