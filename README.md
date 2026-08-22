@@ -40,10 +40,10 @@
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.png">
-    <img src="docs/dashboard-light.png" alt="Dashboard do Zelo — status das certidões de toda a carteira" width="100%">
+    <img src="docs/dashboard-light.png" alt="Visão geral do Zelo — o que trava o trabalho hoje, o estado da carteira e o que a automação já fez sozinha" width="100%">
   </picture>
   <br />
-  <sup><i>Dashboard: o status de toda a carteira numa tela. Claro e escuro são entregas iguais</i></sup>
+  <sup><i>Visão geral: o que trava hoje, o estado da carteira e o que rodou sozinho de madrugada. Dados de demonstração. Claro e escuro são entregas iguais</i></sup>
 </div>
 
 ---

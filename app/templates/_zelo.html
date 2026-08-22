@@ -18,22 +18,33 @@
     {%- if complemento %}<span class="zl-comp-u">{{ complemento }}</span>{% endif %}
 </div>
 <div class="zl-comp-bar" aria-hidden="true">
-    {%- for rotulo, valor, cor in itens %}
-    <div class="zl-comp-seg is-{{ cor }}{{ ' is-vazio' if not valor }}"
-        style="width: {{ ((valor / total * 100) if total else 0) | round(3) }}%"></div>
+    {%- for item in itens %}
+    <div class="zl-comp-seg is-{{ item[2] }}{{ ' is-vazio' if not item[1] }}"
+        style="width: {{ ((item[1] / total * 100) if total else 0) | round(3) }}%"></div>
     {%- endfor %}
 </div>
+{#- O 4º elemento do item é OPCIONAL e leva ao recorte correspondente na tela de
+    destino (mesmo padrão de tupla de tamanho variável do `zl_ficha`). Sem ele o
+    chip continua sendo um `span`: quem chama decide se há para onde ir. -#}
 <div class="zl-comp-leg">
-    {%- for rotulo, valor, cor in itens %}
-    <span class="zl-comp-stat is-{{ cor }}" data-zero="{{ '1' if not valor else '0' }}">
-        <strong class="zl-comp-v">{{ valor }}</strong>{{ rotulo | lower }}
+    {%- for item in itens %}
+    {%- set destino = item[3] if item | length > 3 else None %}
+    {%- if destino %}
+    <a class="zl-comp-stat is-{{ item[2] }}" href="{{ destino }}"
+       data-zero="{{ '1' if not item[1] else '0' }}">
+        <strong class="zl-comp-v">{{ item[1] }}</strong>{{ item[0] | lower }}
+    </a>
+    {%- else %}
+    <span class="zl-comp-stat is-{{ item[2] }}" data-zero="{{ '1' if not item[1] else '0' }}">
+        <strong class="zl-comp-v">{{ item[1] }}</strong>{{ item[0] | lower }}
     </span>
+    {%- endif %}
     {%- endfor %}
 </div>
 {#- Os números acima são desenho (mono, cor, barra); o leitor de tela recebe a
     frase inteira por aqui, uma vez só. -#}
 <p class="visually-hidden">{{ total }} {{ unidade }}{% if complemento %} {{ complemento }}{% endif %}:
-    {% for rotulo, valor, cor in itens %}{{ valor }} {{ rotulo | lower }}{{ ', ' if not loop.last }}{% endfor %}.</p>
+    {% for item in itens %}{{ item[1] }} {{ item[0] | lower }}{{ ', ' if not loop.last }}{% endfor %}.</p>
 {%- endmacro %}
 
 {#- Componente B: lista de fatos independentes.

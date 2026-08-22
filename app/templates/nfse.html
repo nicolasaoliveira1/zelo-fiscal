@@ -5,7 +5,10 @@
 {% block content %}
 <style>
     .nfse-card {
-        background: var(--zelo-paper);
+        /* `--bs-card-bg`, nao `--zelo-paper`: no tema ESCURO paper e o chao da
+           pagina (#0F1115), e o cartao inteiro sumia no fundo. Os dois tons
+           trocam de papel entre os temas; peca o papel. */
+        background: var(--bs-card-bg);
         border: 1px solid var(--zelo-line);
         border-radius: 10px;
         padding: 1rem 1.15rem;

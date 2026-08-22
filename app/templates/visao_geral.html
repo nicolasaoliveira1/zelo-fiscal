@@ -85,8 +85,17 @@
             <i class="bi bi-check2-circle"></i>
             <span>Nada trava trabalho hoje</span>
         </div>
+        {#- A frase do dia calmo AFIRMA três coisas, e uma delas o sistema pode
+            não saber: com o cofre nunca inventariado não há como dizer que os
+            certificados estão em dia. Afirmar assim mesmo é o "0 vencendo" de
+            novo, agora em tom de boa notícia — o pior lugar para um chute. -#}
         <div class="vg-faixa-item text-secondary small">
+            {%- if blocos.certificados.inventariado or blocos.certificados.erro %}
             Certificados em dia, portais respondendo, nenhuma decisão pendurada.
+            {%- else %}
+            Portais respondendo, nenhuma decisão pendurada. Dos certificados eu
+            não sei — o cofre nunca foi inventariado.
+            {%- endif %}
         </div>
         {%- endif %}
     </section>
@@ -100,13 +109,26 @@
                         url_for('main.certidoes'), 'Abrir Certidões',
                         largo=(not bloco.erro and not bloco.vazio)) %}
         {%- if bloco.erro or bloco.vazio %}
-        {{ vg_estado(bloco, 'Nenhuma certidão pede atenção hoje.') }}
+        {#- Carteira vazia e carteira em dia NÃO são a mesma frase: a primeira é
+            um cadastro que ainda não começou, a segunda é uma boa notícia. Dizer
+            "nada pede atenção" num sistema sem nenhuma certidão é o mesmo erro
+            do "0 vencendo" num cofre nunca inventariado. -#}
+        {{ vg_estado(bloco, 'Nenhuma certidão cadastrada.' if bloco.total == 0
+                     else 'Nenhuma certidão pede atenção hoje.') }}
         {%- else %}
-        {%- set atencao = bloco.vencidas + bloco.a_vencer + bloco.pendentes %}
-        {{ zl_comp(atencao, 'pedem atenção', '', [
-            ('vencidas', bloco.vencidas, 'danger'),
-            ('a vencer', bloco.a_vencer, 'warn'),
-            ('pendentes', bloco.pendentes, 'pend')]) }}
+        {#- O denominador vive na `unidade` (`.zl-comp-d`), que no cartão largo já
+            cai na linha de baixo do número — nenhum arranjo novo, nenhum fork do
+            macro. Cada chip leva ao seu recorte na tela de Certidões, pelos
+            mesmos valores de filtro que aquela tela aceita. -#}
+        {{ zl_comp(bloco.atencao, 'de ' ~ bloco.total ~ ' pedem atenção', '', [
+            ('vencidas', bloco.vencidas, 'danger',
+             url_for('main.certidoes', status='vencidas')),
+            ('a vencer', bloco.a_vencer, 'warn',
+             url_for('main.certidoes', status='a_vencer')),
+            ('pendentes', bloco.pendentes, 'pend',
+             url_for('main.certidoes', status='pendentes')),
+            ('sem data', bloco.sem_data, 'muted',
+             url_for('main.certidoes', status='nao_definida'))]) }}
         {%- endif %}
         {% endcall %}
 
@@ -114,8 +136,15 @@
             dentro da caixa para uma safra grande de vencimentos não empurrar o
             cartão vizinho para fora da tela. -#}
         {% set bloco = blocos.certificados %}
+        {#- O `extra` do cabeçalho existe porque esta lista ROLA POR DENTRO: com 23
+            vencendo o cartão mostra ~5 e esconde o resto atrás de uma barra que
+            pode nem aparecer. "23 de 47" é a pista de que há mais — e é a mesma
+            gramática do cartão de Certidões, aplicada agora ao estado cheio e não
+            só ao vazio. -#}
         {% call vg_card('a1', 'patch-check', 'Certificados A1',
-                        url_for('main.manifestador_painel'), 'Abrir Manifestador') %}
+                        url_for('main.manifestador_painel'), 'Abrir Manifestador',
+                        extra=('%d de %d' % (bloco.itens | length, bloco.com_vencimento))
+                              if bloco.itens else '') %}
         {%- if bloco.erro or not bloco.itens %}
         {%- if not bloco.erro and not bloco.inventariado %}
         {#- cofre nunca inventariado NAO e "0 vencendo": sao coisas diferentes e
@@ -125,7 +154,20 @@
             O cofre ainda não foi inventariado — não sei quais certificados vencem.
         </p>
         {%- else %}
-        {{ vg_estado(bloco, 'Nenhum vencendo na janela.') }}
+        {#- "Nenhum vencendo na janela" e uma ausencia; com o denominador vira
+            afirmacao. A populacao citada e a dos certificados com vencimento
+            CONHECIDO — contar `sem_arquivo`/`sem_pasta` aqui transformaria
+            desconhecido em alivio. -#}
+        {%- if bloco.com_vencimento == 0 %}
+        {%- set texto_vazio = 'Nenhum certificado tem vencimento conhecido.' %}
+        {%- elif bloco.com_vencimento == 1 %}
+        {%- set texto_vazio = 'O único certificado com vencimento conhecido não vence
+            nos próximos ' ~ bloco.janela_dias ~ ' dias.' %}
+        {%- else %}
+        {%- set texto_vazio = 'Nenhum dos ' ~ bloco.com_vencimento ~ ' certificados vence
+            nos próximos ' ~ bloco.janela_dias ~ ' dias.' %}
+        {%- endif %}
+        {{ vg_estado(bloco, texto_vazio) }}
         {%- endif %}
         {%- else %}
         <div class="vg-lista zl-ficha">
@@ -191,5 +233,75 @@
         {% endif %}
 
     </div>
+
+    {#- A FAIXA DE PRODUÇÃO: o contrapeso da faixa do topo.
+        Em cima, o que trava você; embaixo, o que já foi feito sem você. A página
+        só tinha a primeira metade, e por isso o dia calmo ficava mudo.
+
+        Tom neutro de propósito: produção não é status de certidão, e a única cor
+        da tela é o status. -#}
+    {% set bloco = blocos.producao %}
+    <section class="vg-producao">
+        {%- if bloco.erro %}
+        <div class="vg-producao-h">
+            <i class="bi bi-exclamation-triangle"></i>
+            <span>Não consegui ler a produção agora. O resto da página continua válido.</span>
+        </div>
+        {%- else %}
+        <div class="vg-producao-h">
+            <i class="bi bi-{{ 'pause-circle' if bloco.situacao == 'desligado' else 'graph-up-arrow' }}"></i>
+            <span>
+                {%- if bloco.situacao == 'desligado' -%}
+                Renovação automática desligada
+                {%- else -%}
+                Passagem de {{ bloco.inicio_local.strftime('%d/%m, %Hh') }}
+                {%- endif -%}
+            </span>
+            <span class="vg-producao-quando">
+                {%- if bloco.situacao == 'desligado' -%}
+                <a href="{{ url_for('main.configuracoes') }}">Ligar em Configurações</a>
+                {%- else -%}
+                Roda de novo em {{ bloco.proxima.strftime('%d/%m, %Hh') }}
+                {%- endif -%}
+            </span>
+        </div>
+        <a class="vg-producao-item" href="{{ url_for('main.produtividade') }}">
+            <span class="vg-producao-txt">
+                <span class="vg-producao-t">
+                    {%- if bloco.situacao == 'desligado' -%}
+                    Nenhum lote roda sozinho enquanto estiver assim.
+                    {%- elif bloco.situacao == 'sem_registro' -%}
+                    {#- Zero não: não se sabe se a máquina ficou desligada ou se
+                        não havia o que renovar, e desconhecido não vira zero. -#}
+                    Nenhum lote registrado desde as {{ bloco.inicio_local.strftime('%Hh') }}.
+                    {%- else -%}
+                    <strong class="vg-producao-n">{{ bloco.emitidas }}</strong> emitidas
+                    {#- Zero não é notícia (design language): numa noite limpa,
+                        "0 falharam" não pode competir com o número que importa.
+                        O fecho deste comentário NÃO leva hífen de propósito: com
+                        ele, o strip comia o espaço antes do separador e colava
+                        "emitidas· 0". #}
+                    <span class="vg-producao-parte" data-zero="{{ '1' if not bloco.falhas else '0' }}">· <strong class="vg-producao-n">{{ bloco.falhas }}</strong> {{ 'falhou' if bloco.falhas == 1 else 'falharam' }}</span>
+                    · {{ bloco.tipos | join(', ') }}
+                    {%- if bloco.em_andamento %}
+                    · {{ bloco.em_andamento }}
+                    {{ 'lote ainda em andamento' if bloco.em_andamento == 1
+                       else 'lotes ainda em andamento' }}
+                    {%- endif -%}
+                    {%- endif -%}
+                </span>
+                <span class="vg-producao-s">
+                    {%- if bloco.semana.pct_agendador is none -%}
+                    7 dias: nenhuma emissão registrada
+                    {%- else -%}
+                    7 dias: <strong class="vg-producao-n">{{ bloco.semana.emitidas }}</strong>
+                    emitidas, {{ bloco.semana.pct_agendador }}% sem ninguém clicar
+                    {%- endif -%}
+                </span>
+            </span>
+            <i class="bi bi-chevron-right vg-producao-ir"></i>
+        </a>
+        {%- endif %}
+    </section>
 </div>
 {% endblock %}

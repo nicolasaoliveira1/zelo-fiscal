@@ -297,8 +297,8 @@ def api_pendencias():
 
 # Dias da semana em portugues, escritos aqui de proposito: `strftime('%A')`
 # depende do locale do SO, e no Windows do escritorio ele volta em ingles.
-_DIAS_SEMANA = ('segunda-feira', 'terca-feira', 'quarta-feira', 'quinta-feira',
-                'sexta-feira', 'sabado', 'domingo')
+_DIAS_SEMANA = ('segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira',
+                'sexta-feira', 'sábado', 'domingo')
 
 
 def _saudacao(agora=None):

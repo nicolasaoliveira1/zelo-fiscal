@@ -404,7 +404,7 @@ h1, h2, .h1, .h2 {
     padding: var(--zl-space-3) var(--zl-space-4);
     border: 2px solid var(--zelo-graphite);
     border-radius: var(--zl-radius-sm);
-    background: var(--zelo-paper);
+    background: var(--bs-card-bg);
     color: var(--zelo-ink);
     font-weight: 600;
     text-decoration: none;
@@ -512,6 +512,19 @@ h1, h2, .h1, .h2 {
 
 [data-bs-theme="dark"] .card {
     --bs-card-bg: var(--zelo-mist);
+}
+
+/* QUINTA ocorrência da mesma armadilha. O Bootstrap declara
+   `--bs-modal-bg: var(--bs-body-bg)` dentro da regra `.modal`: o modal saía
+   pintado com o CHÃO da página. No claro isso deixava o `.zl-modal-footer`
+   (que é --zelo-mist, o mesmo #F5F6F8) invisível dentro dele — a faixa de
+   rodapé, cuja única função é fechar a coluna de ações, sumia.
+   Modal é superfície levantada sobre um scrim, como o cartão é sobre o chão:
+   pede `--bs-card-bg`, que já resolve certo nos dois temas. O rodapé passa a
+   pedir o chão, e aí a leitura de elevação existe nos dois — antes existia só
+   no escuro, por acidente da inversão dos tons. */
+.modal {
+    --bs-modal-bg: var(--bs-card-bg);
 }
 
 /* Quarta ocorrência da armadilha (btn-outline, card, card-header e agora
@@ -1142,6 +1155,14 @@ footer {
     color: var(--bs-emphasis-color);
 }
 
+/* Chip que leva ao recorte correspondente na tela de destino. Herda a aparência
+   do chip inteira — a única diferença é o sublinhado no hover, porque alvo
+   clicável precisa se anunciar. Sem `is-muted` próprio: o `::before` acima já
+   nasce em --zelo-muted, que é o token de "sem data". */
+a.zl-comp-stat { text-decoration: none; color: inherit; }
+a.zl-comp-stat:hover,
+a.zl-comp-stat:focus-visible { text-decoration: underline; text-underline-offset: 2px; }
+
 /* zero não é notícia: só ganha destaque quando sai de zero */
 .zl-comp-stat[data-zero="1"] { opacity: .45; }
 .zl-comp-stat[data-zero="1"] .zl-comp-v { color: var(--bs-secondary-color); }
@@ -1241,7 +1262,9 @@ footer {
     padding: var(--zl-space-2) var(--zl-space-3) var(--zl-space-2) var(--zl-space-3);
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-md);
-    background: var(--bs-body-bg);
+    /* painel flutuante SOBRE a pagina: pedia o chao e ficava da cor dele, com a
+       sombra fazendo sozinha o trabalho de separar */
+    background: var(--bs-card-bg);
     box-shadow: var(--zl-elev-2);
     font-size: var(--zl-fs-2);
     transition: right .28s cubic-bezier(.4, 0, .2, 1);
@@ -1337,7 +1360,9 @@ body.topo-visivel .zl-dock {
    que definem `border-radius` direto e não pela variável do Bootstrap. */
 .zl-modal-footer {
     border-top: 1px solid var(--zelo-line);
-    background: var(--zelo-mist);
+    /* o chão contra o modal levantado. Era `--zelo-mist`, que no tema CLARO é
+       exatamente o fundo que o modal tinha — dois tons iguais, zero elevação. */
+    background: var(--bs-body-bg);
     border-bottom-left-radius: inherit;
     border-bottom-right-radius: inherit;
 }
@@ -1439,7 +1464,12 @@ body.topo-visivel .zl-dock {
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-md);
     overflow: hidden;
-    background: var(--bs-body-bg);
+    /* `--bs-card-bg`, nao `--bs-body-bg`: o segundo E o chao da pagina, entao a
+       faixa saia exatamente da cor do fundo e so a borda a sustentava, ao lado
+       de cartoes que levantam. Os dois tokens de tom (`--zelo-paper` e
+       `--zelo-mist`) TROCAM de papel entre os temas — quem quer "superficie
+       levantada" pede pelo PAPEL, nunca pelo tom. */
+    background: var(--bs-card-bg);
     margin-bottom: var(--zl-space-4);
 }
 
@@ -1545,6 +1575,95 @@ body.topo-visivel .zl-dock {
    A grade é desigual DE PROPÓSITO: a carteira de certidões é larga
    (figura + barra + legenda numa linha) e a lista de certificados é
    alta (uma linha por empresa). Grade uniforme desperdiça as duas. */
+/* FAIXA DE PRODUÇÃO — o contrapeso da faixa de urgência do topo.
+   Mesma anatomia (cabeçalho + linha clicável), tom NEUTRO: produção não é
+   status de certidão, e a única cor da tela é o status. Fica fora do
+   `.vg-mosaico`, abaixo dele, em largura inteira. */
+.vg-producao {
+    border: 1px solid var(--zelo-line);
+    border-radius: var(--zl-radius-md);
+    overflow: hidden;
+    background: var(--bs-card-bg);   /* superficie levantada — ver .vg-faixa */
+    margin-top: var(--zl-space-4);
+}
+
+.vg-producao-h {
+    display: flex;
+    align-items: center;
+    gap: var(--zl-space-2);
+    padding: var(--zl-space-2) var(--zl-space-4);
+    background: var(--bs-tertiary-bg);
+    color: var(--bs-secondary-color);
+    font-weight: 600;
+    font-size: var(--zl-fs-2);
+}
+
+/* Quando roda de novo: empurrado para a direita do cabeçalho, em peso normal —
+   é contexto, não manchete. */
+.vg-producao-quando {
+    margin-left: auto;
+    font-weight: 400;
+}
+
+.vg-producao-item {
+    display: flex;
+    align-items: center;
+    gap: var(--zl-space-3);
+    padding: var(--zl-space-3) var(--zl-space-4);
+    color: inherit;
+    text-decoration: none;
+}
+
+.vg-producao-item:hover {
+    background: var(--bs-tertiary-bg);
+    color: inherit;
+}
+
+.vg-producao-txt {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--zl-space-1);
+}
+
+.vg-producao-t { font-size: var(--zl-fs-3); }
+
+.vg-producao-s {
+    font-size: var(--zl-fs-2);
+    color: var(--bs-secondary-color);
+}
+
+/* Todo número da tela é mono e tabular (design language, "Números na tela"). */
+.vg-producao-n {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--bs-emphasis-color);
+}
+
+/* Zero não é notícia — mesma regra da legenda do `zl_comp`: numa noite limpa,
+   "0 falharam" não compete com as emitidas. */
+.vg-producao-parte[data-zero="1"] { opacity: .45; }
+.vg-producao-parte[data-zero="1"] .vg-producao-n { color: var(--bs-secondary-color); }
+
+.vg-producao-ir {
+    flex: none;
+    color: var(--bs-secondary-color);
+}
+
+/* Em tela estreita o "roda de novo" desce em vez de espremer o cabeçalho. */
+@media (max-width: 575.98px) {
+    .vg-producao-h {
+        flex-wrap: wrap;
+    }
+
+    .vg-producao-quando {
+        margin-left: 0;
+        flex-basis: 100%;
+    }
+}
+
 .vg-mosaico {
     display: grid;
     gap: var(--zl-space-4);
@@ -1778,10 +1897,11 @@ body.topo-visivel .zl-dock {
     width: min(27rem, calc(100vw - 2rem));
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-md);
-    /* Mesmo fundo dos modais (--bs-modal-bg cai em --bs-body-bg): o painel e o
-       resumo do lote aparecem em sequência e não podem ter tons diferentes.
-       Quem separa do app atrás é o scrim do .loading-overlay, não a cor. */
-    background: var(--bs-body-bg);
+    /* Mesmo fundo dos modais: o painel e o resumo do lote aparecem em
+       sequência e não podem ter tons diferentes. Agora os dois são
+       `--bs-card-bg` — quem separa do app atrás é o scrim do .loading-overlay,
+       não a cor, mas a superfície precisa LEVANTAR do que ela sobrepõe. */
+    background: var(--bs-card-bg);
     box-shadow: var(--zl-elev-2);
     overflow: hidden;
     text-align: left;
@@ -1913,7 +2033,7 @@ body.topo-visivel .zl-dock {
     gap: var(--zl-space-2);
     padding: var(--zl-space-3) var(--zl-space-5);
     border-top: 1px solid var(--zelo-line);
-    background: var(--zelo-mist);
+    background: var(--bs-body-bg);   /* o chão, como o rodapé dos modais */
 }
 
 @media (max-width: 576px) {
@@ -2927,7 +3047,9 @@ tr.filter-hidden {
     padding: var(--zl-space-2) var(--zl-space-4);
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-sm);
-    background: var(--zelo-mist);
+    /* era `--zelo-mist`, que no tema CLARO e o proprio chao da pagina: a regua
+       sumia no claro e aparecia no escuro, pelo mesmo motivo das faixas */
+    background: var(--bs-card-bg);
     font-size: var(--zl-fs-2);
 }
 
@@ -3037,7 +3159,8 @@ tr.filter-hidden {
 .manif-andamento {
     border: 1px solid var(--zelo-line);
     border-radius: var(--zl-radius-md);
-    background: var(--zelo-paper);
+    /* `--zelo-paper` some no escuro: la ele E o chao da pagina */
+    background: var(--bs-card-bg);
     padding: var(--zl-space-3) var(--zl-space-4);
     margin-bottom: var(--zl-space-3);
 }
@@ -3051,7 +3174,8 @@ tr.filter-hidden {
     position: fixed;
     inset: auto 0 0 0;
     z-index: 1040;
-    background: var(--zelo-paper);
+    /* painel ancorado SOBRE a pagina — mesma razao do .zl-dock */
+    background: var(--bs-card-bg);
     border-top: 1px solid var(--zelo-line);
     box-shadow: var(--zl-elev-2);
     padding: var(--zl-space-4) var(--zl-space-5) var(--zl-space-5);

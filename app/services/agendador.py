@@ -10,6 +10,7 @@ Este módulo NÃO importa `routes`: os fluxos automatizáveis (FGTS/RS/Municipal
 são injetados por `routes` via `registrar_fluxo` no import, evitando ciclo.
 """
 import os
+from datetime import datetime, timedelta
 from threading import Lock
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -19,6 +20,7 @@ from app.captcha_solver import consultar_saldo
 from app.services import auditoria, fila_emissao, snapshot_service
 from app.services.correlation import CorrelationContext
 from app.services.execution_logger import log_event
+from app.utils import utcnow_naive
 
 _JOB_RENOVACAO = 'agendador_renovacao_diaria'
 _JOB_SNAPSHOT = 'agendador_snapshot_diario'
@@ -73,6 +75,66 @@ def _ler_config():
     if hora is None or not (0 <= hora <= 23):
         hora = 3
     return hora, bool(cfg.agendador_ativo)
+
+
+# --- o relogio do agendador, legivel de fora --------------------------------
+#
+# As duas funcoes abaixo respondem "quando rodou" e "quando roda" SEM tocar o
+# scheduler. Nao e preferencia: `AGENDADOR_ENABLED` e falso nos testes e
+# `_scheduler` fica None, entao `next_run_time` seria intestavel — e mentiria num
+# processo que ainda nao bootou. A config e a mesma fonte que o `CronTrigger`
+# recebe em `_agendar_jobs`, entao ler dela nao pode divergir do que foi agendado.
+
+
+def proxima_execucao(agora=None):
+    """Quando a renovacao automatica roda a proxima vez (hora local, AD-004).
+
+    `None` quando o agendador esta desligado — nao ter proxima execucao e um fato
+    diferente de "roda daqui a pouco", e a tela precisa distinguir os dois.
+
+    Le a config, nao o `_scheduler.next_run_time`. Nao e preferencia:
+    `AGENDADOR_ENABLED` e falso nos testes e `_scheduler` fica None, entao a
+    introspecao seria intestavel — e mentiria num processo que ainda nao bootou.
+    A config e a mesma fonte que o `CronTrigger` recebe em `_agendar_jobs`, entao
+    ler dela nao pode divergir do que foi agendado.
+
+    Na hora exata da execucao a proxima e a de amanha: o disparo de agora ja
+    aconteceu.
+    """
+    hora, ativo = _ler_config()
+    if not ativo:
+        return None
+    agora = agora or datetime.now()
+    proxima = agora.replace(hour=hora, minute=0, second=0, microsecond=0)
+    if proxima <= agora:
+        proxima += timedelta(days=1)
+    return proxima
+
+
+def janela_ultima_passagem(agora=None):
+    """A ultima passagem do agendador, nos DOIS relogios do projeto.
+
+    Devolve `(inicio_local, corte)`: `inicio_local` e o que a tela exibe
+    ("madrugada de 22/08, 03h"); `corte` e o mesmo instante na convencao de
+    `ExecucaoLote.iniciado_em`, para a consulta comparar.
+
+    Os dois relogios existem e divergem: o job e agendado por `CronTrigger(hour=
+    hora)`, que e hora LOCAL (AD-004/AD-009), enquanto `iniciado_em` tem
+    `default=utcnow_naive` — UTC naive. Comparar a hora local direto com a coluna
+    erra pelo offset (3h no Brasil), e erra no pior caso possivel: o lote comeca
+    exatamente NA hora do corte, entao o caso normal e o que quebra.
+
+    A conversao e por DURACAO, nunca por fuso. `agora - inicio_local` e um
+    timedelta, e timedelta nao tem offset: subtraido de `utcnow_naive()` cai no
+    mesmo instante, sem precisar saber o fuso do processo nem o do banco, e sem
+    quebrar no horario de verao.
+    """
+    hora, _ativo = _ler_config()
+    agora = agora or datetime.now()
+    inicio_local = agora.replace(hour=hora, minute=0, second=0, microsecond=0)
+    if inicio_local > agora:
+        inicio_local -= timedelta(days=1)
+    return inicio_local, utcnow_naive() - (agora - inicio_local)
 
 
 # --- ciclo de vida ---------------------------------------------------------

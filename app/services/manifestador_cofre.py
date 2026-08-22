@@ -501,8 +501,15 @@ def janela_alerta_dias():
         return _JANELA_ALERTA_PADRAO
 
 
-def certificados_a_vencer(dias=None):
-    """Certificados vencidos ou dentro da janela, lidos somente do banco.
+def resumo_de_vencimento(dias=None):
+    """Os que vencem na janela E de quantos eles saem — numa consulta so.
+
+    A POPULACAO nao e "o cofre inteiro": e o conjunto sobre o qual a pergunta
+    "vence quando?" faz sentido — certificado com `not_after` conhecido, de
+    empresa ativa. Um `sem_arquivo` ou `sem_pasta` nao esta "sem vencer": nao se
+    sabe nada dele, e conta-lo no denominador transformaria desconhecido em
+    alivio ("nenhum dos 47 vence"), que e o erro que o projeto nao comete de
+    proposito em nenhum outro lugar.
 
     `dias=None` (o normal) resolve a janela por `janela_alerta_dias()`; o
     parametro so existe para quem ja tem o valor em maos e para teste.
@@ -528,9 +535,11 @@ def certificados_a_vencer(dias=None):
               .all())
 
     itens = []
+    populacao = 0
     for certificado, empresa in linhas:
         if not empresa_ativa(empresa):
             continue
+        populacao += 1
 
         dias_restantes = (certificado.not_after.date() - date.today()).days
         if dias_restantes > dias:
@@ -551,7 +560,16 @@ def certificados_a_vencer(dias=None):
             'causa': causa,
         })
 
-    return sorted(itens, key=lambda item: item['dias_restantes'])
+    return {
+        'itens': sorted(itens, key=lambda item: item['dias_restantes']),
+        'com_vencimento': populacao,
+        'janela_dias': dias,
+    }
+
+
+def certificados_a_vencer(dias=None):
+    """So a lista — a forma que o alerta por e-mail (MANIF-26) consome."""
+    return resumo_de_vencimento(dias)['itens']
 
 
 def gravar_senha(empresa, senha):

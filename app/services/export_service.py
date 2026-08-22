@@ -8,6 +8,7 @@ from io import BytesIO
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
+from sqlalchemy import case, func
 
 from app.models import ExecucaoLote
 from app.services import carteira_filtros
@@ -169,6 +170,55 @@ def coletar_produtividade(dias=30):
         'por_tipo': tipos,
         'por_origem': por_origem,
         'emissoes_por_dia': emissoes_por_dia,
+    }
+
+
+# O agendador grava `origem='agendador'` (AD-019); o valor vive no modelo como
+# String, e o rotulo e o mesmo que `coletar_produtividade` ja usa em `por_origem`
+# — nao ha uma segunda definicao de "veio do agendador" no projeto.
+_ORIGEM_AGENDADOR = 'agendador'
+
+
+def coletar_producao_agendador(corte):
+    """Desfecho dos lotes do agendador desde `corte`, agregado NO BANCO.
+
+    `corte` vem de `agendador.janela_ultima_passagem` e ja esta na convencao de
+    `iniciado_em` (UTC naive) — aqui nao se faz conta de fuso nenhuma.
+
+    Agrega em SQL em vez de carregar as linhas como o `coletar_produtividade`
+    faz: aquele precisa das duracoes por lote para a media, este so quer somas, e
+    `ExecucaoLote` cresce todo mes sem nunca ser podada. Os dois campos do filtro
+    (`origem`, `iniciado_em`) sao indexados.
+
+    `em_andamento` conta lote sem `finalizado_em` — a faixa precisa saber que os
+    numeros ainda nao sao desfecho, e nao ha como saber isso somando sucesso.
+
+    `tipos` sai na ordem da primeira execucao, nao alfabetica: e a ordem em que a
+    noite aconteceu.
+    """
+    from app import db
+
+    linhas = (
+        db.session.query(
+            ExecucaoLote.tipo,
+            func.count(ExecucaoLote.id),
+            func.coalesce(func.sum(ExecucaoLote.sucesso), 0),
+            func.coalesce(func.sum(ExecucaoLote.falhas), 0),
+            func.coalesce(func.sum(
+                case((ExecucaoLote.finalizado_em.is_(None), 1), else_=0)), 0),
+        )
+        .filter(ExecucaoLote.origem == _ORIGEM_AGENDADOR,
+                ExecucaoLote.iniciado_em >= corte)
+        .group_by(ExecucaoLote.tipo)
+        .order_by(func.min(ExecucaoLote.iniciado_em))
+        .all())
+
+    return {
+        'lotes': sum(linha[1] for linha in linhas),
+        'emitidas': sum(int(linha[2]) for linha in linhas),
+        'falhas': sum(int(linha[3]) for linha in linhas),
+        'em_andamento': sum(int(linha[4]) for linha in linhas),
+        'tipos': [linha[0] for linha in linhas],
     }
 
 
