@@ -174,3 +174,97 @@ def test_registrar_execucao_lote_carimba_origem(app):
         finally:
             db.session.remove()
             db.drop_all()
+
+
+# --- producao do agendador desde um corte (VGC-10/14/17) --------------------
+
+def _horas_atras(horas):
+    return utcnow_naive() - timedelta(hours=horas)
+
+
+@pytest.fixture()
+def corte(app):
+    """Corte de 6h atras — a "passagem da noite" nos testes abaixo."""
+    with app.app_context():
+        db.create_all()
+        yield _horas_atras(6)
+        db.session.remove()
+        db.drop_all()
+
+
+def _add(*lotes):
+    db.session.add_all(lotes)
+    db.session.commit()
+
+
+def _lote_em(tipo, horas_atras, **kw):
+    iniciado = _horas_atras(horas_atras)
+    lote = ExecucaoLote(tipo=tipo, iniciado_em=iniciado,
+                        sucesso=kw.get('sucesso', 0), falhas=kw.get('falhas', 0),
+                        origem=kw.get('origem', 'agendador'))
+    if kw.get('duracao_min') is not None:
+        lote.finalizado_em = iniciado + timedelta(minutes=kw['duracao_min'])
+    return lote
+
+
+def test_soma_emitidas_e_falhas_dos_lotes_do_agendador(app, corte):
+    with app.app_context():
+        _add(_lote_em('FGTS', 5, sucesso=20, falhas=2, duracao_min=30),
+             _lote_em('Municipal', 4, sucesso=18, falhas=1, duracao_min=25))
+
+        dados = export_service.coletar_producao_agendador(corte)
+
+        assert dados['emitidas'] == 38
+        assert dados['falhas'] == 3
+        assert dados['lotes'] == 2
+
+
+def test_lote_manual_na_janela_nao_entra(app, corte):
+    """A faixa fala do que rodou SOZINHO; lote manual e o operador clicando."""
+    with app.app_context():
+        _add(_lote_em('FGTS', 5, sucesso=10, duracao_min=5),
+             _lote_em('FGTS', 4, sucesso=99, origem='manual', duracao_min=5))
+
+        assert export_service.coletar_producao_agendador(corte)['emitidas'] == 10
+
+
+def test_lote_do_agendador_antes_do_corte_nao_entra(app, corte):
+    with app.app_context():
+        _add(_lote_em('FGTS', 7, sucesso=99, duracao_min=5))
+
+        dados = export_service.coletar_producao_agendador(corte)
+
+        assert dados['lotes'] == 0
+        assert dados['emitidas'] == 0
+
+
+def test_lote_sem_finalizado_em_conta_como_em_andamento(app, corte):
+    """Numeros de lote em curso nao sao desfecho — quem exibe precisa saber."""
+    with app.app_context():
+        _add(_lote_em('FGTS', 5, sucesso=8, duracao_min=10),
+             _lote_em('Municipal', 1, sucesso=3, duracao_min=None))
+
+        dados = export_service.coletar_producao_agendador(corte)
+
+        assert dados['em_andamento'] == 1
+        assert dados['lotes'] == 2
+
+
+def test_tipos_saem_sem_repetir_e_na_ordem_da_noite(app, corte):
+    with app.app_context():
+        _add(_lote_em('Municipal', 5, sucesso=1, duracao_min=5),
+             _lote_em('FGTS', 3, sucesso=1, duracao_min=5),
+             _lote_em('Municipal', 2, sucesso=1, duracao_min=5))
+
+        assert export_service.coletar_producao_agendador(corte)['tipos'] == [
+            'Municipal', 'FGTS']
+
+
+def test_janela_sem_lote_devolve_zeros(app, corte):
+    """Zeros aqui sao FATO da consulta. Interpretar "zero" como "nao rodou" ou
+    como "nada havia" e decisao de quem exibe, nao desta funcao."""
+    with app.app_context():
+        dados = export_service.coletar_producao_agendador(corte)
+
+        assert dados == {'lotes': 0, 'emitidas': 0, 'falhas': 0,
+                         'em_andamento': 0, 'tipos': []}
