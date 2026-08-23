@@ -302,10 +302,9 @@ def _snapshot_downloads_pdf(pasta=None):
         if not os.path.isfile(caminho):
             continue
 
-        nome_l = nome.lower()
-        if not nome_l.endswith('.pdf'):
-            continue
-        if nome_l.endswith('.crdownload') or nome_l.endswith('.tmp'):
+        # Download em andamento e '<nome>.pdf.crdownload' / '.tmp': ja cai fora
+        # aqui, no filtro de extensao. Nao existe parcial terminando em '.pdf'.
+        if not nome.lower().endswith('.pdf'):
             continue
 
         try:
