@@ -35,9 +35,9 @@ def criar_usuario(username, senha, papel=PapelUsuario.LEITURA):
     db.session.add(usuario)
     try:
         db.session.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         db.session.rollback()
-        raise ValueError(f'Username já existe: {username}')
+        raise ValueError(f'Username já existe: {username}') from exc
     return usuario
 
 
