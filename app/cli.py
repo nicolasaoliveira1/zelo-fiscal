@@ -24,7 +24,7 @@ def criar_admin(username, forcar):
         usuario_service.criar_usuario(username, senha, PapelUsuario.ADMIN)
     except ValueError as e:
         click.echo(f'Erro: {e}')
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     click.echo(f'Admin "{username}" criado.')
 
 
@@ -39,7 +39,7 @@ def criar_usuario_cmd(username, papel):
         usuario_service.criar_usuario(username, senha, papel)
     except ValueError as e:
         click.echo(f'Erro: {e}')
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     click.echo(f'Usuário "{username}" ({papel}) criado.')
 
 
