@@ -6,6 +6,7 @@
 ## Requisitos
 
 - Python 3.10+
+- Node.js 22+ e npm (somente para verificações e testes do frontend)
 - Google Chrome
 - MySQL (recomendado para produção) ou SQLite (desenvolvimento)
 
@@ -210,11 +211,13 @@ Quando uma automação Selenium quebra (tipicamente porque um portal mudou de es
 ## Testes e CI
 
 - Suíte `pytest` (`pip install -r requirements-dev.txt` + `pytest -q`).
+- Frontend: `npm ci`, `npm run js:syntax`, `npm run js:types` e `npm test`.
 - **CI com paridade de banco** (GitHub Actions, workflows separados):
   - `testes-sqlite`: lint (`ruff`) + suíte em SQLite (gate rápido) em todo PR e push na `main`.
   - `testes-mysql`: suíte inteira contra **MySQL 8.0** (service container, `utf8mb4`/`utf8mb4_0900_ai_ci`) quando há alteração de backend, banco ou testes, além de execução noturna e manual. O job também valida a **migração idempotente** (`upgrade → downgrade → upgrade`).
 - Localmente, aponte a suíte para outro banco com `TEST_DATABASE_URL` (sem a variável, usa SQLite).
 - Os fluxos Selenium não são exercitados pelos testes automatizados (o navegador é substituído por mocks); para eles existe um roteiro de verificação manual.
+- Os testes JavaScript usam dados sintéticos, `node:test` e `jsdom`; não acessam portais, certificados, Selenium nem serviços externos.
 
 ## Estrutura do projeto
 

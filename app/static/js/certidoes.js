@@ -1,5 +1,15 @@
 import { showToast } from './toasts.js';
 
+/**
+ * Envelope de erro compartilhado pelas respostas JSON das certidões.
+ *
+ * @typedef {Object} RespostaErroCertidao
+ * @property {string=} message
+ * @property {string=} acao
+ * @property {string=} request_id
+ * @property {string=} error_type
+ */
+
         document.addEventListener('DOMContentLoaded', function () {
 
 
@@ -22,6 +32,13 @@ import { showToast } from './toasts.js';
                 return `${message} (req: ${requestId})`;
             }
 
+            /**
+             * Monta uma mensagem acionável sem perder o request_id de suporte.
+             *
+             * @param {RespostaErroCertidao | null | undefined} data
+             * @param {string=} fallback
+             * @returns {string}
+             */
             function buildErrorMessage(data, fallback) {
                 let msg = (data && data.message) ? data.message : (fallback || 'Erro');
                 // mensagem ja costuma vir como "Titulo: acao"; so acrescenta a acao se vier separada

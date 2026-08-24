@@ -42,6 +42,7 @@ chrome-profile-federal-real/
 build/
 dist/
 *.egg-info/
+node_modules/
 
 # Comandos do flask que serao sempre rodados
 .flaskenv
