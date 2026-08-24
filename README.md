@@ -43,7 +43,7 @@
     <img src="docs/dashboard-light.png" alt="Visão geral do Zelo — o que trava o trabalho hoje, o estado da carteira e o que a automação já fez sozinha" width="100%">
   </picture>
   <br />
-  <sup><i>Visão geral: o que trava hoje, o estado da carteira e o que rodou sozinho de madrugada. Dados de demonstração. Claro e escuro são entregas iguais</i></sup>
+  <sup><i>Visão geral: o que trava hoje, o estado da carteira e o que rodou no agendador. Dados de demonstração.</i></sup>
 </div>
 
 ---
