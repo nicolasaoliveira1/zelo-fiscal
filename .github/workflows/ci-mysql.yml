@@ -66,7 +66,12 @@ jobs:
                     "$arquivo" =~ ^migrations/ ||
                     "$arquivo" =~ ^tests/ ||
                     "$arquivo" =~ ^requirements[^/]*\.txt$ ||
+                    "$arquivo" == 'conftest.py' ||
                     "$arquivo" == 'pyproject.toml' ||
+                    "$arquivo" == 'pytest.ini' ||
+                    "$arquivo" == 'setup.cfg' ||
+                    "$arquivo" == 'tox.ini' ||
+                    "$arquivo" == 'alembic.ini' ||
                     "$arquivo" == 'Dockerfile' ||
                     "$arquivo" == 'docker-compose.yml' ||
                     "$arquivo" =~ ^\.github/workflows/ ]]; then

@@ -111,13 +111,38 @@ from app.models import Certidao, Empresa, TipoCertidao, Usuario  # noqa: E402
 _CRIAR_SCHEMA = db.create_all
 _DESTRUIR_SCHEMA = db.drop_all
 
+# Tabela sentinela da verificacao de schema: qualquer mapeamento serve, o que
+# importa e ser uma tabela que o create_all real cria.
+_TABELA_SENTINELA = Empresa.__table__.name
+
+# A migration guarda a versao aqui. drop_all nunca derrubava esta tabela (ela nao
+# e mapeada), entao a limpeza de dados tambem nao pode esvazia-la: um teste que
+# suba o schema por migration perderia a versao sem aviso.
+_TABELAS_PRESERVADAS = {'alembic_version'}
+
+
+def _garantir_schema(*args, **kwargs):
+    """create_all barato: nao paga DDL enquanto o schema do worker existir.
+
+    Nao e um no-op cego. Se as tabelas sumirem — ou se um caminho novo chamar
+    create_all antes do fixture de sessao — o schema e criado de verdade, e a
+    chamada continua significando o que diz.
+    """
+    if inspect(db.engine).has_table(_TABELA_SENTINELA):
+        return
+    _CRIAR_SCHEMA(*args, **kwargs)
+
 
 def _limpar_dados():
     """Remove os dados sem destruir o schema compartilhado do worker."""
     db.session.remove()
     # A inspeção física também encontra tabelas criadas por migração que ainda
-    # não estão mapeadas no SQLAlchemy, como alembic_version.
-    tabelas = inspect(db.engine).get_table_names()
+    # não estão mapeadas no SQLAlchemy; alembic_version fica de fora porque o
+    # drop_all que esta função substitui também não a derrubava.
+    tabelas = [
+        nome for nome in inspect(db.engine).get_table_names()
+        if nome not in _TABELAS_PRESERVADAS
+    ]
 
     if db.engine.dialect.name == 'mysql':
         with db.engine.begin() as conexao:
@@ -176,7 +201,7 @@ def _schema_do_worker(app):
 # Mantém as chamadas existentes nos fixtures sem reconstruir tabelas. O
 # monkeypatch é restrito ao processo de pytest; o app nunca usa esses métodos em
 # runtime.
-db.create_all = lambda *args, **kwargs: None
+db.create_all = _garantir_schema
 db.drop_all = lambda *args, **kwargs: _limpar_dados()
 
 # Credenciais por papel usadas pelos fixtures de client autenticado.
