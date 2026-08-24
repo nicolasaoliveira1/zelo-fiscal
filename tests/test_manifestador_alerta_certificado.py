@@ -224,6 +224,7 @@ def test_dez_certificados_saem_num_unico_email(ctx_alerta, monkeypatch):
     assert 'CERTIFICADOS DIGITAIS (10)' in corpo
     for item in itens:
         assert item['empresa_nome'] in corpo
+    assert corpo.count('dia(s))\n\n  - [NOVO] Vence em') == 9
 
 
 def test_uma_empresa_nao_silencia_outra(ctx_alerta, monkeypatch):
@@ -248,16 +249,23 @@ def test_transicao_para_vencido_realerta_com_chave_propria(ctx_alerta, monkeypat
         'certificado_vencendo:101', 'certificado_vencido:101'}
 
 
-def test_texto_de_vencido_diz_que_manifestacao_esta_parada(ctx_alerta, monkeypatch):
-    _mock_envio(monkeypatch)
-    item = _item_alerta(101, causa='vencido', dias_restantes=-2)
-    item['not_after'] = datetime.now() - timedelta(days=2)
+def test_aviso_de_manifestacao_parada_fecha_secao_uma_vez(ctx_alerta, monkeypatch):
+    enviados = _mock_envio(monkeypatch)
+    itens = [
+        _item_alerta(101, causa='vencido', dias_restantes=-2),
+        _item_alerta(202, causa='vencido', dias_restantes=-3),
+    ]
+    itens[0]['not_after'] = datetime.now() - timedelta(days=2)
+    itens[1]['not_after'] = datetime.now() - timedelta(days=3)
 
-    notificacoes.alertar_certificados_vencendo(ctx_alerta, [item])
+    notificacoes.alertar_certificados_vencendo(ctx_alerta, itens)
 
-    anotado = PautaNotificacao.query.one()
-    assert 'vencido' in anotado.titulo.lower()
-    assert 'manifestacao dessa empresa esta parada' in anotado.corpo
+    assert all(not anotado.corpo for anotado in PautaNotificacao.query.all())
+    assert _resumir(ctx_alerta) is True
+    corpo = enviados[0][1]
+    assert corpo.count(
+        'A manifestação das empresas com certificado vencido está parada até a renovação.'
+    ) == 1
 
 
 def test_texto_de_vencendo_tem_data_e_dias_restantes_no_titulo(ctx_alerta,
