@@ -1,0 +1,111 @@
+name: CI MySQL
+
+on:
+  # A paridade completa continua obrigatória quando o backend, o schema ou o
+  # próprio harness de testes muda. Alterações apenas de UI não precisam pagar
+  # um segundo job de banco no mesmo PR.
+  push:
+    branches: [main]
+    paths:
+      - 'app/**/*.py'
+      - 'app/*.py'
+      - 'config.py'
+      - 'run.py'
+      - 'migrations/**'
+      - 'tests/**'
+      - 'requirements*.txt'
+      - 'pyproject.toml'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - '.github/workflows/ci-mysql.yml'
+  pull_request:
+    paths:
+      - 'app/**/*.py'
+      - 'app/*.py'
+      - 'config.py'
+      - 'run.py'
+      - 'migrations/**'
+      - 'tests/**'
+      - 'requirements*.txt'
+      - 'pyproject.toml'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - '.github/workflows/ci-mysql.yml'
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-mysql-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  testes-mysql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # PR em rascunho não roda: o SQLite continua sendo o feedback rápido assim
+    # que o PR estiver pronto para revisão.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: sistema_certidoes_test
+        ports:
+          - 3306:3306
+        # MySQL 8.0 já usa utf8mb4 / utf8mb4_0900_ai_ci por padrão (igual à produção).
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configurar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r requirements-dev.txt
+
+      # A imagem oficial do MySQL sobe um servidor temporário, roda o init (cria o
+      # MYSQL_DATABASE) e reinicia; espera uma query real no banco alvo para evitar
+      # a corrida de boot antes do pytest.
+      - name: Aguardar MySQL ficar realmente pronto
+        run: |
+          for i in $(seq 1 30); do
+            if mysql -h 127.0.0.1 -uroot -proot -e "SELECT 1" sistema_certidoes_test >/dev/null 2>&1; then
+              echo "MySQL pronto (query real no banco alvo OK)"; exit 0
+            fi
+            echo "aguardando MySQL... ($i)"; sleep 2
+          done
+          echo "MySQL não ficou pronto a tempo"; exit 1
+
+      - name: Testes (pytest, MySQL 8.0)
+        env:
+          # O schema é criado uma vez por worker; os fixtures limpam os dados
+          # entre testes sem mascarar falhas de compatibilidade do MySQL.
+          TEST_DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/sistema_certidoes_test?charset=utf8mb4
+          AUTO_DB_UPGRADE: '0'
+        # --timeout transforma hang em falha nomeada. Cada worker recebe seu
+        # banco próprio pelo conftest, sem compartilhar tabelas.
+        run: pytest -q -n auto --timeout=120 --timeout-method=thread
+
+      # Migração idempotente contra MySQL real, em banco dedicado. O passo falha
+      # o job se qualquer comando falhar.
+      - name: Migração idempotente (upgrade → downgrade → upgrade)
+        env:
+          FLASK_APP: run.py
+          AUTO_DB_UPGRADE: '0'
+          SECRET_KEY: ci-mig
+          DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/sistema_certidoes_mig?charset=utf8mb4
+        run: |
+          mysql -h 127.0.0.1 -uroot -proot -e "CREATE DATABASE IF NOT EXISTS sistema_certidoes_mig CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"
+          flask db upgrade head
+          flask db downgrade -- -1
+          flask db upgrade head
+          flask db current | grep -q '(head)'

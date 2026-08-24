@@ -8,8 +8,8 @@ on:
   # paths-ignore: so caminhos INERTES, que nenhum teste le e nenhum codigo abre em
   # runtime (verificado: as unicas mencoes a .specs/docs no app/ sao comentario).
   # Qualquer .py, template, JS, requirements* ou o proprio workflow continua
-  # rodando o CI inteiro — la mora tudo que pode quebrar. A main nao tem branch
-  # protection, entao pular nao deixa PR travado esperando check que nunca vem.
+  # rodando o gate rápido — lá mora tudo que pode quebrar. A paridade MySQL tem
+  # workflow próprio, condicionado a mudanças de backend/banco e agenda noturna.
   # A lista esta DUPLICADA de proposito. Reusa-la por ancora/alias YAML
   # (`&nome` / `*nome`) quebra o gatilho que usa o ALIAS: o parser do GitHub nao
   # resolve a referencia, e `pull_request` para de disparar — sem erro, sem
@@ -74,85 +74,3 @@ jobs:
       # banco compartilhado entre eles.
       - name: Testes (pytest, SQLite)
         run: pytest -q -n auto
-
-  # Paridade com producao (MySQL 8.0, utf8mb4/utf8mb4_0900_ai_ci): roda a suite
-  # inteira contra um MySQL real para pegar divergencia de enum nativo/colacao/
-  # DateTime antes de chegar a producao (spec 06). Roda em PR e push na main, em
-  # paralelo ao SQLite. Rede de seguranca: timeout-minutes (nunca mais 6h de hang) + o
-  # --timeout por teste (transforma hang em falha nomeada). A isolacao de sessao
-  # dos testes (db.session.remove antes de drop_all) evita o metadata-lock hang.
-  testes-mysql:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    # Mesma regra do job acima (ver o comentario la sobre o guard do event_name).
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: sistema_certidoes_test
-        ports:
-          - 3306:3306
-        # MySQL 8.0 ja usa utf8mb4 / utf8mb4_0900_ai_ci por padrao (igual producao).
-        # Healthcheck evita corrida de boot antes de rodar os testes.
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Configurar Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-          cache: pip
-
-      - name: Instalar dependências
-        run: pip install -r requirements-dev.txt
-
-      # A imagem oficial do MySQL sobe um servidor temporario, roda o init (cria o
-      # MYSQL_DATABASE) e REINICIA; o healthcheck ping pode reportar "saudavel" no
-      # servidor temporario, e as primeiras conexoes caem no meio do restart (flaky).
-      # Espera o servidor FINAL aceitar uma query real no banco alvo antes do pytest.
-      - name: Aguardar MySQL ficar realmente pronto
-        run: |
-          for i in $(seq 1 30); do
-            if mysql -h 127.0.0.1 -uroot -proot -e "SELECT 1" sistema_certidoes_test >/dev/null 2>&1; then
-              echo "MySQL pronto (query real no banco alvo OK)"; exit 0
-            fi
-            echo "aguardando MySQL... ($i)"; sleep 2
-          done
-          echo "MySQL nao ficou pronto a tempo"; exit 1
-
-      - name: Testes (pytest, MySQL 8.0)
-        env:
-          # conftest respeita TEST_DATABASE_URL (spec 06); schema por create_all
-          # exercita enum/colacao/DateTime no MySQL real. Sem mascaramento.
-          TEST_DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/sistema_certidoes_test?charset=utf8mb4
-          AUTO_DB_UPGRADE: '0'
-        # --timeout por teste (metodo thread) converte um hang em falha nomeada em
-        # vez de pendurar o job ate o teto.
-        # -n auto: cada worker cria e usa `sistema_certidoes_test_gw<N>` (sufixo
-        # por worker no conftest) — sem isso o drop_all de um worker derrubaria a
-        # tabela que o outro esta usando.
-        run: pytest -q -n auto --timeout=120 --timeout-method=thread
-
-      # Migracao idempotente contra MySQL real: exercita batch_alter_table/enum num
-      # banco dedicado. AUTO_DB_UPGRADE=0 para a CLI controlar o estado (o boot nao
-      # compete). downgrade "-- -1" reverte exatamente a migration head (robusto a
-      # novas migrations). O passo falha o job se qualquer comando falhar (set -e).
-      - name: Migração idempotente (upgrade → downgrade → upgrade)
-        env:
-          FLASK_APP: run.py
-          AUTO_DB_UPGRADE: '0'
-          SECRET_KEY: ci-mig
-          DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/sistema_certidoes_mig?charset=utf8mb4
-        run: |
-          mysql -h 127.0.0.1 -uroot -proot -e "CREATE DATABASE IF NOT EXISTS sistema_certidoes_mig CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"
-          flask db upgrade head
-          flask db downgrade -- -1
-          flask db upgrade head
-          flask db current | grep -q '(head)'

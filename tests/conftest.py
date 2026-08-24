@@ -2,10 +2,12 @@
 
 Configura o ambiente (SECRET_KEY de teste + SQLite temporario) antes de
 importar o app e fornece app/client/dados semeados a cada teste, com banco
-recriado e limpo por teste.
+compartilhado por worker e dados limpos por teste.
 """
 import os
 import tempfile
+
+from sqlalchemy import text
 
 # Ambiente de teste deve estar definido ANTES de importar o app (config.py le
 # SECRET_KEY/DATABASE_URL no momento do import).
@@ -28,19 +30,17 @@ os.environ.setdefault('CAPTCHA_2_API_KEY', '')
 os.environ.setdefault('WTF_CSRF_ENABLED', 'false')
 
 # Opt-in de banco de teste: se TEST_DATABASE_URL estiver setado (ex.: o job de CI
-# aponta para um MySQL de servico), a suite roda contra ele — e como o schema de
-# cada teste e construido por db.create_all()/drop_all(), isso exercita enum
-# nativo/colacao/DateTime no banco real (paridade com producao, spec 06). Sem a
-# variavel, mantem o SQLite temporario de sempre (rapido, gate local).
+# aponta para um MySQL de serviço), a suíte roda contra ele. O schema é criado uma
+# vez por worker e os fixtures limpam apenas os dados entre testes; isso preserva
+# a paridade de enum nativo/colação/DateTime sem pagar DDL a cada teste. Sem a
+# variável, mantém o SQLite temporário de sempre (rápido, gate local).
 _TEST_DB_URL = os.environ.get('TEST_DATABASE_URL')
 
-# Sob pytest-xdist cada worker e um PROCESSO separado que importa este conftest
-# do zero, e o schema e recriado por teste (create_all/drop_all). Dois workers no
-# MESMO banco derrubariam as tabelas um do outro no meio do teste do vizinho — a
-# falha apareceria como "tabela nao existe" intermitente, no worker errado. Entao
-# cada worker precisa do seu proprio banco. No SQLite isso sai de graca (o
-# mkstemp abaixo roda por processo e ja da um arquivo unico); no MySQL o nome vem
-# fixo na URL e tem que ser sufixado aqui.
+# Sob pytest-xdist cada worker é um PROCESSO separado que importa este conftest
+# do zero. O schema é criado uma vez por worker, e cada worker precisa do seu
+# próprio banco para que a limpeza de dados de um processo não afete o vizinho.
+# No SQLite isso sai de graça (o mkstemp abaixo roda por processo e já dá um
+# arquivo único); no MySQL o nome vem fixo na URL e tem que ser sufixado aqui.
 _XDIST_WORKER = os.environ.get('PYTEST_XDIST_WORKER')  # 'gw0', 'gw1', ... ou None
 
 
@@ -92,6 +92,65 @@ from werkzeug.security import generate_password_hash  # noqa: E402
 from app import create_app, db  # noqa: E402
 from app.models import Certidao, Empresa, TipoCertidao, Usuario  # noqa: E402
 
+
+# Os testes historicamente chamam create_all/drop_all dentro de fixtures locais.
+# Guardamos os métodos originais para criar e destruir o schema uma única vez por
+# worker e fazemos os chamados de drop_all virarem limpeza de dados. Assim, a
+# superfície dos testes continua igual, mas o MySQL não precisa executar DDL em
+# todo teste.
+_CRIAR_SCHEMA = db.create_all
+_DESTRUIR_SCHEMA = db.drop_all
+
+
+def _limpar_dados():
+    """Remove os dados sem destruir o schema compartilhado do worker."""
+    db.session.remove()
+    tabelas = reversed(db.metadata.sorted_tables)
+
+    if db.engine.dialect.name == 'mysql':
+        with db.engine.begin() as conexao:
+            conexao.execute(text('SET FOREIGN_KEY_CHECKS=0'))
+            try:
+                for tabela in tabelas:
+                    conexao.execute(text(f'TRUNCATE TABLE `{tabela.name}`'))
+            finally:
+                conexao.execute(text('SET FOREIGN_KEY_CHECKS=1'))
+    else:
+        with db.engine.begin() as conexao:
+            for tabela in tabelas:
+                conexao.execute(tabela.delete())
+
+        # O SQLite só cria sqlite_sequence quando há uma tabela AUTOINCREMENT.
+        # Resetar a sequência conserva o comportamento anterior de drop/create
+        # para testes que verificam ids fixos.
+        with db.engine.begin() as conexao:
+            existe_sequence = conexao.scalar(text(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name='sqlite_sequence'"
+            ))
+            if existe_sequence:
+                conexao.execute(text('DELETE FROM sqlite_sequence'))
+
+    db.session.remove()
+
+
+@pytest.fixture(scope='session', autouse=True)
+def _schema_do_worker(app):
+    """Cria o schema uma vez e o remove somente ao terminar o worker."""
+    with app.app_context():
+        _CRIAR_SCHEMA()
+    yield
+    with app.app_context():
+        db.session.remove()
+        _DESTRUIR_SCHEMA()
+
+
+# Mantém as chamadas existentes nos fixtures sem reconstruir tabelas. O
+# monkeypatch é restrito ao processo de pytest; o app nunca usa esses métodos em
+# runtime.
+db.create_all = lambda *args, **kwargs: None
+db.drop_all = lambda *args, **kwargs: _limpar_dados()
+
 # Credenciais por papel usadas pelos fixtures de client autenticado.
 USUARIOS_TESTE = {
     'admin': ('admin_test', 'senha-admin-1'),
@@ -138,8 +197,8 @@ def app():
 
 @pytest.fixture()
 def ids(app):
-    """Recria o schema, semeia uma empresa RS/Tramandai com as 5 certidoes
-    (sem data) e devolve os ids por tipo. Limpa o schema ao final do teste."""
+    """Semeia uma empresa RS/Tramandaí com as 5 certidões (sem data) e devolve
+    os ids por tipo. Os dados são limpos ao final do teste."""
     with app.app_context():
         db.create_all()
         empresa = Empresa(nome='Empresa Teste', cnpj='11.111.111/1111-11',
