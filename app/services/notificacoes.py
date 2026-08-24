@@ -54,6 +54,14 @@ _RODAPE_SECAO = {
     'alerta_certificado': ('Renove o certificado e rode o inventario do cofre '
                            'para o sistema reconhecer o arquivo novo.'),
 }
+_AVISO_MANIFESTACAO_PARADA = (
+    'A manifestação das empresas com certificado vencido está parada até a renovação.'
+)
+# Texto histórico sem acentos: precisa coincidir com pautas persistidas antes
+# de o aviso passar para o rodapé da seção.
+_AVISO_MANIFESTACAO_PARADA_LEGADO = (
+    'A manifestacao dessa empresa esta parada ate renovar.'
+)
 
 
 # --- config / destinatarios ------------------------------------------------
@@ -289,12 +297,22 @@ def montar_resumo(itens=None):
 
     for rotulo, do_tipo in _agrupar_por_secao(itens):
         linhas += ['', f'{rotulo.upper()} ({len(do_tipo)})']
-        for item in do_tipo:
+        tipo_secao = do_tipo[0].tipo
+        for indice, item in enumerate(do_tipo):
+            if tipo_secao == 'alerta_certificado' and indice:
+                linhas.append('')
             marca = '[NOVO] ' if e_novo[item.chave] else ''
             linhas.append(f'  - {marca}{item.titulo}')
             for linha in (item.corpo or '').splitlines():
+                if (item.chave.startswith('certificado_vencido:')
+                        and linha.strip() == _AVISO_MANIFESTACAO_PARADA_LEGADO):
+                    continue
                 linhas.append(f'    {linha}' if linha else '')
-        rodape = _RODAPE_SECAO.get(do_tipo[0].tipo)
+        if (tipo_secao == 'alerta_certificado'
+                and any(item.chave.startswith('certificado_vencido:')
+                        for item in do_tipo)):
+            linhas += ['', f'  {_AVISO_MANIFESTACAO_PARADA}']
+        rodape = _RODAPE_SECAO.get(tipo_secao)
         if rodape:
             linhas.append(f'  {rodape}')
 
@@ -452,8 +470,7 @@ _ALERTA_CERTIFICADO_POR_CAUSA = {
     'vencido': {
         'chave': 'certificado_vencido:{empresa_id}',
         'titulo': 'Vencido em {data_vencimento} — {empresa_nome}',
-        # So o que e proprio DESTE item; o conselho comum esta no _RODAPE_SECAO.
-        'linhas': ['A manifestacao dessa empresa esta parada ate renovar.'],
+        'linhas': [],
     },
     'vencendo': {
         'chave': 'certificado_vencendo:{empresa_id}',
