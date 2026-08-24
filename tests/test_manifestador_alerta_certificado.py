@@ -260,9 +260,19 @@ def test_aviso_de_manifestacao_parada_fecha_secao_uma_vez(ctx_alerta, monkeypatc
 
     notificacoes.alertar_certificados_vencendo(ctx_alerta, itens)
 
-    assert all(not anotado.corpo for anotado in PautaNotificacao.query.all())
+    anotados = PautaNotificacao.query.order_by(PautaNotificacao.id).all()
+    assert all(not anotado.corpo for anotado in anotados)
+    # Simula pautas duráveis criadas pela versão anterior e ainda pendentes no
+    # momento da atualização.
+    aviso_legado = 'A manifestacao dessa empresa esta parada ate renovar.'
+    anotados[0].corpo = aviso_legado
+    anotados[1].corpo = f'{aviso_legado}\nDetalhe preservado.'
+    db.session.commit()
+
     assert _resumir(ctx_alerta) is True
     corpo = enviados[0][1]
+    assert aviso_legado not in corpo
+    assert 'Detalhe preservado.' in corpo
     assert corpo.count(
         'A manifestação das empresas com certificado vencido está parada até a renovação.'
     ) == 1

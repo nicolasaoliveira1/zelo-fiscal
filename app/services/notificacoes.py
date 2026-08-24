@@ -57,6 +57,11 @@ _RODAPE_SECAO = {
 _AVISO_MANIFESTACAO_PARADA = (
     'A manifestação das empresas com certificado vencido está parada até a renovação.'
 )
+# Texto histórico sem acentos: precisa coincidir com pautas persistidas antes
+# de o aviso passar para o rodapé da seção.
+_AVISO_MANIFESTACAO_PARADA_LEGADO = (
+    'A manifestacao dessa empresa esta parada ate renovar.'
+)
 
 
 # --- config / destinatarios ------------------------------------------------
@@ -299,6 +304,9 @@ def montar_resumo(itens=None):
             marca = '[NOVO] ' if e_novo[item.chave] else ''
             linhas.append(f'  - {marca}{item.titulo}')
             for linha in (item.corpo or '').splitlines():
+                if (item.chave.startswith('certificado_vencido:')
+                        and linha.strip() == _AVISO_MANIFESTACAO_PARADA_LEGADO):
+                    continue
                 linhas.append(f'    {linha}' if linha else '')
         if (tipo_secao == 'alerta_certificado'
                 and any(item.chave.startswith('certificado_vencido:')
