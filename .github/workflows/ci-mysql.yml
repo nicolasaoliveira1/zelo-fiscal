@@ -83,10 +83,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # PR em rascunho não roda: o SQLite continua sendo o feedback rápido assim
-    # que o PR estiver pronto para revisão. O detector deixa o job ausente apenas
-    # quando a alteração não toca código, banco, testes ou a própria automação.
+    # que o PR estiver pronto para revisão. Se o detector falhar, o job também
+    # deve rodar e falhar de forma visível, em vez de ficar apenas como skipped.
     if: >-
-      needs.detectar-mudancas.outputs.precisa_mysql == 'true' &&
+      always() &&
+      (
+        needs.detectar-mudancas.result == 'failure' ||
+        needs.detectar-mudancas.outputs.precisa_mysql == 'true'
+      ) &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     services:
       mysql:
