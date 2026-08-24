@@ -7,7 +7,8 @@ compartilhado por worker e dados limpos por teste.
 import os
 import tempfile
 
-from sqlalchemy import text
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import make_url
 
 # Ambiente de teste deve estar definido ANTES de importar o app (config.py le
 # SECRET_KEY/DATABASE_URL no momento do import).
@@ -42,6 +43,8 @@ _TEST_DB_URL = os.environ.get('TEST_DATABASE_URL')
 # No SQLite isso sai de graça (o mkstemp abaixo roda por processo e já dá um
 # arquivo único); no MySQL o nome vem fixo na URL e tem que ser sufixado aqui.
 _XDIST_WORKER = os.environ.get('PYTEST_XDIST_WORKER')  # 'gw0', 'gw1', ... ou None
+_NOME_BANCO_WORKER = None
+_URL_SERVIDOR_WORKER = None
 
 
 def _banco_por_worker(url, worker):
@@ -50,10 +53,10 @@ def _banco_por_worker(url, worker):
     Sem worker (execucao serial) devolve a URL intacta — o comportamento
     historico do CI, byte a byte.
     """
+    global _NOME_BANCO_WORKER, _URL_SERVIDOR_WORKER
+
     if not worker:
         return url
-    from sqlalchemy import create_engine, text
-    from sqlalchemy.engine import make_url
 
     alvo = make_url(url)
     nome = f'{alvo.database}_{worker}'
@@ -62,11 +65,18 @@ def _banco_por_worker(url, worker):
     # que e a unica razao deste job existir.
     servidor = create_engine(alvo.set(database=None), isolation_level='AUTOCOMMIT')
     with servidor.connect() as conn:
+        # Um worker interrompido pode deixar o banco da execução anterior. O
+        # CREATE DATABASE IF NOT EXISTS reutilizaria esse schema potencialmente
+        # obsoleto e permitiria um falso verde no próximo teste local.
+        nome_sql = nome.replace('`', '``')
+        conn.execute(text(f'DROP DATABASE IF EXISTS `{nome_sql}`'))
         conn.execute(text(
-            f'CREATE DATABASE IF NOT EXISTS `{nome}` '
+            f'CREATE DATABASE `{nome_sql}` '
             'CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci'
         ))
     servidor.dispose()
+    _NOME_BANCO_WORKER = nome
+    _URL_SERVIDOR_WORKER = alvo.set(database=None).render_as_string(hide_password=False)
     # render_as_string(hide_password=False), nunca str(): str() de uma URL do
     # SQLAlchemy substitui a senha por "***" e o worker tentaria conectar com ela.
     return alvo.set(database=nome).render_as_string(hide_password=False)
@@ -105,31 +115,40 @@ _DESTRUIR_SCHEMA = db.drop_all
 def _limpar_dados():
     """Remove os dados sem destruir o schema compartilhado do worker."""
     db.session.remove()
-    tabelas = reversed(db.metadata.sorted_tables)
+    # A inspeção física também encontra tabelas criadas por migração que ainda
+    # não estão mapeadas no SQLAlchemy, como alembic_version.
+    tabelas = inspect(db.engine).get_table_names()
 
     if db.engine.dialect.name == 'mysql':
         with db.engine.begin() as conexao:
             conexao.execute(text('SET FOREIGN_KEY_CHECKS=0'))
             try:
-                for tabela in tabelas:
-                    conexao.execute(text(f'TRUNCATE TABLE `{tabela.name}`'))
+                for nome in tabelas:
+                    nome_sql = nome.replace('`', '``')
+                    conexao.execute(text(f'TRUNCATE TABLE `{nome_sql}`'))
             finally:
                 conexao.execute(text('SET FOREIGN_KEY_CHECKS=1'))
     else:
-        with db.engine.begin() as conexao:
-            for tabela in tabelas:
-                conexao.execute(tabela.delete())
+        # O SQLite exige que foreign_keys seja desativado fora da transação que
+        # contém os DELETEs. O commit explícito permite religá-lo no finally.
+        with db.engine.connect() as conexao:
+            conexao.execute(text('PRAGMA foreign_keys=OFF'))
+            try:
+                for nome in tabelas:
+                    if nome == 'sqlite_sequence':
+                        continue
+                    nome_sql = nome.replace('"', '""')
+                    conexao.execute(text(f'DELETE FROM "{nome_sql}"'))
 
-        # O SQLite só cria sqlite_sequence quando há uma tabela AUTOINCREMENT.
-        # Resetar a sequência conserva o comportamento anterior de drop/create
-        # para testes que verificam ids fixos.
-        with db.engine.begin() as conexao:
-            existe_sequence = conexao.scalar(text(
-                "SELECT 1 FROM sqlite_master "
-                "WHERE type='table' AND name='sqlite_sequence'"
-            ))
-            if existe_sequence:
-                conexao.execute(text('DELETE FROM sqlite_sequence'))
+                # O SQLite só cria sqlite_sequence quando há uma tabela
+                # AUTOINCREMENT. Resetar a sequência conserva o comportamento
+                # anterior de drop/create para testes que verificam ids fixos.
+                if 'sqlite_sequence' in tabelas:
+                    conexao.execute(text('DELETE FROM "sqlite_sequence"'))
+                conexao.commit()
+            finally:
+                conexao.execute(text('PRAGMA foreign_keys=ON'))
+                conexao.commit()
 
     db.session.remove()
 
@@ -140,9 +159,18 @@ def _schema_do_worker(app):
     with app.app_context():
         _CRIAR_SCHEMA()
     yield
-    with app.app_context():
-        db.session.remove()
-        _DESTRUIR_SCHEMA()
+    try:
+        with app.app_context():
+            db.session.remove()
+            _DESTRUIR_SCHEMA()
+            db.engine.dispose()
+    finally:
+        if _NOME_BANCO_WORKER and _URL_SERVIDOR_WORKER:
+            servidor = create_engine(_URL_SERVIDOR_WORKER, isolation_level='AUTOCOMMIT')
+            nome_sql = _NOME_BANCO_WORKER.replace('`', '``')
+            with servidor.connect() as conexao:
+                conexao.execute(text(f'DROP DATABASE IF EXISTS `{nome_sql}`'))
+            servidor.dispose()
 
 
 # Mantém as chamadas existentes nos fixtures sem reconstruir tabelas. O

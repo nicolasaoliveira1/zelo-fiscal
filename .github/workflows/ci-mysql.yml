@@ -1,36 +1,14 @@
 name: CI MySQL
 
 on:
-  # A paridade completa continua obrigatória quando o backend, o schema ou o
-  # próprio harness de testes muda. Alterações apenas de UI não precisam pagar
-  # um segundo job de banco no mesmo PR.
+  # O workflow é criado em todo PR e push para que o check nunca fique ausente
+  # por causa de um filtro de caminho. O detector abaixo decide se o job caro
+  # precisa ser executado; a agenda noturna e a execução manual sempre forçam
+  # a paridade completa.
   push:
     branches: [main]
-    paths:
-      - 'app/**/*.py'
-      - 'app/*.py'
-      - 'config.py'
-      - 'run.py'
-      - 'migrations/**'
-      - 'tests/**'
-      - 'requirements*.txt'
-      - 'pyproject.toml'
-      - 'Dockerfile'
-      - 'docker-compose.yml'
-      - '.github/workflows/ci-mysql.yml'
   pull_request:
-    paths:
-      - 'app/**/*.py'
-      - 'app/*.py'
-      - 'config.py'
-      - 'run.py'
-      - 'migrations/**'
-      - 'tests/**'
-      - 'requirements*.txt'
-      - 'pyproject.toml'
-      - 'Dockerfile'
-      - 'docker-compose.yml'
-      - '.github/workflows/ci-mysql.yml'
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: '17 6 * * *'
   workflow_dispatch:
@@ -40,12 +18,76 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  detectar-mudancas:
+    runs-on: ubuntu-latest
+    outputs:
+      precisa_mysql: ${{ steps.detectar.outputs.precisa_mysql }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verificar caminhos que exigem MySQL
+        id: detectar
+        env:
+          EVENTO: ${{ github.event_name }}
+          BASE_PR: ${{ github.event.pull_request.base.sha }}
+          HEAD_PR: ${{ github.event.pull_request.head.sha }}
+          ANTES_PUSH: ${{ github.event.before }}
+          SHA_ATUAL: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          precisa_mysql=false
+          arquivos=''
+          case "$EVENTO" in
+            schedule|workflow_dispatch)
+              precisa_mysql=true
+              ;;
+            pull_request)
+              arquivos="$(git diff --name-only "$BASE_PR" "$HEAD_PR")"
+              ;;
+            push)
+              if [[ -z "$ANTES_PUSH" || "$ANTES_PUSH" =~ ^0+$ ]]; then
+                precisa_mysql=true
+              else
+                arquivos="$(git diff --name-only "$ANTES_PUSH" "$SHA_ATUAL")"
+              fi
+              ;;
+            *)
+              precisa_mysql=true
+              ;;
+          esac
+
+          if [[ "$precisa_mysql" == false ]]; then
+            while IFS= read -r arquivo; do
+              if [[ "$arquivo" =~ ^app/.*\.py$ ||
+                    "$arquivo" =~ ^(config|run)\.py$ ||
+                    "$arquivo" =~ ^migrations/ ||
+                    "$arquivo" =~ ^tests/ ||
+                    "$arquivo" =~ ^requirements[^/]*\.txt$ ||
+                    "$arquivo" == 'pyproject.toml' ||
+                    "$arquivo" == 'Dockerfile' ||
+                    "$arquivo" == 'docker-compose.yml' ||
+                    "$arquivo" =~ ^\.github/workflows/ ]]; then
+                precisa_mysql=true
+                break
+              fi
+            done <<< "$arquivos"
+          fi
+
+          echo "precisa_mysql=$precisa_mysql" >> "$GITHUB_OUTPUT"
+
   testes-mysql:
+    needs: detectar-mudancas
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # PR em rascunho não roda: o SQLite continua sendo o feedback rápido assim
-    # que o PR estiver pronto para revisão.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # que o PR estiver pronto para revisão. O detector deixa o job ausente apenas
+    # quando a alteração não toca código, banco, testes ou a própria automação.
+    if: >-
+      needs.detectar-mudancas.outputs.precisa_mysql == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     services:
       mysql:
         image: mysql:8.0
