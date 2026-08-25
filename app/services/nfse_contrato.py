@@ -44,6 +44,10 @@ class ConfiguracaoContratoInvalidaError(ValueError):
     """Dados do operador não pertencem ao catálogo seguro do contrato."""
 
 
+class ContratoNfseNaoElegivelError(ContratoNfseError):
+    """A versão não pode conduzir o modo automático."""
+
+
 def _campo(
     chave_semantica,
     etapa,
@@ -398,6 +402,34 @@ def contrato_ativo():
         .first()
     )
     return contrato if contrato is not None else garantir_contrato_inicial()
+
+
+def validar_contrato_automatico(contrato_id=None):
+    """Valida o gate automático sem alterar o contrato selecionado."""
+
+    contrato = (
+        _contrato_com_campos(contrato_id)
+        if contrato_id is not None
+        else contrato_ativo()
+    )
+    if contrato is None:
+        raise ContratoNfseNaoElegivelError(
+            "não há contrato da NFS-e disponível para o modo automático"
+        )
+    if not contrato.elegivel_automatico:
+        raise ContratoNfseNaoElegivelError(
+            "o contrato da NFS-e ainda não é elegível para o modo automático"
+        )
+    incidente = IncidenteContratoNfse.query.filter_by(
+        contrato_base_id=contrato.id,
+        estado="aberto",
+        severidade="fiscal",
+    ).first()
+    if incidente is not None:
+        raise ContratoNfseNaoElegivelError(
+            "há incidente fiscal aberto no contrato da NFS-e"
+        )
+    return contrato
 
 
 def _contrato_com_campos(contrato_id):
@@ -977,11 +1009,63 @@ def configurar_incidente(incidente_id, dados, usuario_id=None) -> ContratoNfse:
     return candidato
 
 
+def registrar_validacao(
+    contrato_id, nota_id, resultado, usuario_id=None, *, agora=None
+) -> ContratoNfse:
+    """Registra a revisão da candidata sem persistir valores da nota."""
+
+    contrato = db.session.get(ContratoNfse, contrato_id)
+    if contrato is None:
+        raise ContratoNfseNaoEncontradoError(
+            "a versão candidata da NFS-e não existe"
+        )
+    divergencias = tuple(resultado or ())
+    elegivel = bool(getattr(resultado, "elegivel_automatico", False))
+    agora = agora or utcnow_naive()
+    contrato.nota_validacao_id = nota_id
+    contrato.elegivel_automatico = elegivel and not divergencias
+    if divergencias:
+        contrato.estado = "candidata"
+        contrato.validado_em = None
+        contrato.erro_validacao = "a revisão da validação apresentou divergências"
+    else:
+        contrato.estado = "validada"
+        contrato.validado_em = agora
+        contrato.erro_validacao = (
+            None
+            if contrato.elegivel_automatico
+            else "a revisão permite somente modos assistidos"
+        )
+    try:
+        db.session.commit()
+    except Exception as exc:
+        _persistencia_falhou("registrar_validacao_nfse", exc)
+    try:
+        auditoria.registrar(
+            "nfse.contrato.validar",
+            alvo_tipo="contrato_nfse",
+            alvo_id=contrato.id,
+            detalhe=(
+                f"contrato_id={contrato.id};nota_id={nota_id};"
+                f"usuario_id={usuario_id};divergencias={len(divergencias)}"
+            ),
+        )
+    except Exception as exc:
+        log_event(
+            "nfse_contrato_auditoria_falhou",
+            level="WARNING",
+            contrato_id=contrato.id,
+            error_type=type(exc).__name__,
+        )
+    return contrato
+
+
 __all__ = [
     "CONTRATO_INICIAL",
     "CampoContratoDesconhecidoError",
     "CampoExecucaoNfse",
     "ConfiguracaoContratoInvalidaError",
+    "ContratoNfseNaoElegivelError",
     "ContratoExecucaoNfse",
     "ContratoNfseError",
     "ContratoNfseNaoEncontradoError",
@@ -993,6 +1077,8 @@ __all__ = [
     "contrato_inicial_execucao",
     "fontes_disponiveis",
     "garantir_contrato_inicial",
+    "registrar_validacao",
     "registrar_incidentes",
     "resolver_valor",
+    "validar_contrato_automatico",
 ]

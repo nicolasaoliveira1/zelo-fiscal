@@ -30,7 +30,7 @@ from app.automation.batch_state import (
     nfse_batch_opcoes,
 )
 from app.models import NotaNfse, StatusNotaNfse
-from app.services import batch_engine, nfse_config, nfse_service
+from app.services import batch_engine, nfse_config, nfse_contrato, nfse_service
 from app.services.execution_logger import log_event
 from app.services.nfse_session import SESSAO
 
@@ -127,6 +127,29 @@ def pedir_pular():
         return True
 
 
+def validar_nota_para_validacao(nota_id):
+    """Aceita somente uma nota que a regra única de emissão aprove."""
+
+    nota = db.session.get(NotaNfse, nota_id)
+    if nota is None or not nfse_service.emitivel(nota):
+        raise ValueError("escolha uma nota emitível para validar o contrato")
+    return nota
+
+
+def validar_contrato_para_modo(
+    modo, *, contrato_id=None, validacao_contrato_id=None
+):
+    """Aplica os gates de contrato antes de iniciar uma execução."""
+
+    if validacao_contrato_id is not None and modo != MODO_INDIVIDUAL:
+        raise ValueError("a validação de contrato usa somente o modo individual assistido")
+    if modo == MODO_AUTOMATICO:
+        if validacao_contrato_id is not None:
+            raise ValueError("o modo automático não aceita validação de candidata")
+        return nfse_contrato.validar_contrato_automatico(contrato_id)
+    return None
+
+
 # --- desfecho de uma nota --------------------------------------------------
 
 def _marcar_emitida(nota):
@@ -178,7 +201,10 @@ def _emitir_nota(nota_id, driver_do_motor, execution_id):
     try:
         resultado = nfse_service.preencher_nota(
             nota_id, execution_id=execution_id,
-            ignorar_aliquota=opcoes['ignorar_aliquota'])
+            ignorar_aliquota=opcoes['ignorar_aliquota'],
+            contrato_id=opcoes.get('contrato_id'),
+            validacao_contrato_id=opcoes.get('validacao_contrato_id'),
+        )
     except nfse_service.NotaNaoEmitivelError as exc:
         # linha que nao devia estar na fila (ja emitida, sem empresa...): nao e
         # falha tecnica, e motivo para pular sem sujar a contagem de erros
@@ -195,9 +221,55 @@ def _emitir_nota(nota_id, driver_do_motor, execution_id):
 
     if resultado.get('status') == 'error':
         # `preencher_nota` ja gravou o status FALHA e a mensagem curta na nota
+        if resultado.get('pausar_lote'):
+            batch_engine.request_pause(NFSE_BATCH_LOCK, NFSE_BATCH_STATE)
+            batch_engine.marcar_resultado_pendente(NFSE_BATCH_STATE, NFSE_BATCH_LOCK)
         return False, None, resultado.get('message')
 
+    if opcoes.get('validacao_contrato_id'):
+        _registrar_validacao_candidata(
+            nota_id,
+            opcoes['validacao_contrato_id'],
+            execution_id,
+        )
+
     return _esperar_e_registrar(nota_id, opcoes, execution_id)
+
+
+def _registrar_validacao_candidata(nota_id, contrato_id, execution_id):
+    """Relê a revisão, registra a candidata e nunca dispara emissão automática."""
+
+    nota = db.session.get(NotaNfse, nota_id)
+    contrato = nfse_contrato.carregar_execucao(contrato_id)
+    config = nfse_config.get_config_nfse()
+    descricao = nfse_config.descricao_da_nota(config, nota)
+    regras = tuple(
+        campo
+        for campo in contrato.campos
+        if campo.revisao_secao
+        or campo.revisao_rotulo
+        or not campo.conferivel_automatico
+        or (campo.origem == 'padrao_portal' and campo.obrigatorio)
+    )
+    resultado = automacao.conferir_revisao(
+        SESSAO.driver,
+        nota.documento,
+        nota.valor_final,
+        descricao,
+        regras_adicionais=regras,
+    )
+    nfse_contrato.registrar_validacao(contrato_id, nota_id, resultado)
+    log_event(
+        'nfse_validacao_contrato_registrada',
+        contrato_id=contrato_id,
+        nota_id=nota_id,
+        elegivel_automatico=bool(
+            getattr(resultado, 'elegivel_automatico', False)
+        ),
+        divergencias=len(resultado),
+        execution_id=execution_id,
+    )
+    return resultado
 
 
 def _emitir_sozinho(nota, execution_id):
