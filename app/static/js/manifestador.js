@@ -600,11 +600,9 @@ function ligar() {
     const botao = e.target.closest('[data-senha]');
     if (!botao) return;
     try {
-      /* A rota devolve o DESFECHO e o JS descartava. Senha CERTA em certificado
-       * VENCIDO grava a senha e mantem a pendencia (`gravar_senha`): a linha
-       * continua ali com razao, mas o "Senha guardada." sozinho fazia isso
-       * parecer defeito da tela. Dizer qual dos dois aconteceu custa uma
-       * linha e e a diferenca entre "nao funcionou" e "falta renovar". */
+      /* Senha CERTA em certificado VENCIDO grava a senha e MANTEM a pendencia
+       * (`gravar_senha`): sem dizer qual dos dois desfechos foi, a linha que
+       * fica na lista com razao parece defeito da tela. */
       const { estado } = await pedir(`/manifestador/cofre/senha/${botao.dataset.empresa}`,
         comoJson({ senha: botao.dataset.senha }));
       if (estado === 'vencido') {

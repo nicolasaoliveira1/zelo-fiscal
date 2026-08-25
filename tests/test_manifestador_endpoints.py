@@ -169,7 +169,6 @@ def test_senha_certa_em_certificado_vencido_devolve_o_estado_vencido(
     aconteceu: sem ele, a linha que fica na lista (com razao) parece defeito.
     """
     from app.services import manifestador_cofre
-    from app import db as _db
 
     with app.app_context():
         emp = _empresa(estado_cert=EstadoCertificado.SENHA_PENDENTE)
@@ -177,7 +176,7 @@ def test_senha_certa_em_certificado_vencido_devolve_o_estado_vencido(
 
     def _grava_vencido(empresa, senha):
         empresa.certificado.estado = EstadoCertificado.VENCIDO
-        _db.session.commit()
+        db.session.commit()
         return True
 
     monkeypatch.setattr(manifestador_cofre, 'gravar_senha', _grava_vencido)
