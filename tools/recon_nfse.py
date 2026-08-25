@@ -136,7 +136,7 @@ document.querySelectorAll('input,select,textarea').forEach(function(el){
   var o = base(el);
   if (o.type === 'radio' || o.type === 'checkbox') { o.value = el.value; o.checked = el.checked; }
   else if (el.tagName.toLowerCase() === 'select') {
-    o.opcoes = Array.prototype.slice.call(el.options).slice(0,40).map(function(op){
+    o.opcoes = Array.prototype.slice.call(el.options).map(function(op){
       return { value: op.value, texto: texto(op), selecionada: op.selected }; });
   } else { o.valor_atual = (el.value||'').slice(0,60); }
   out.controles.push(o);
