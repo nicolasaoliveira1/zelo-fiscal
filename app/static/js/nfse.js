@@ -5,6 +5,9 @@
 // definido no base.html.
 
 import { showToast } from './toasts.js';
+import {
+  inicializarContratoNfse,
+} from './nfse_contrato.js';
 
 /**
  * Resposta JSON das rotas da NFSe. Os campos adicionais variam conforme a
@@ -770,13 +773,96 @@ async function acaoEmMassa(acao) {
 // Guarda o que fazer se o operador confirmar o aviso da alíquota.
 let pendenteAliquota = null;
 let timerLote = null;
+let atualizarContrato = null;
+let contratoAutomaticoElegivel = false;
+
+/**
+ * Decide somente a elegibilidade estrutural informada pelo backend.
+ * O POST de início continua protegido pelo mesmo gate no servidor.
+ *
+ * @param {object|null} estado
+ * @returns {boolean}
+ */
+export function contratoPermiteAutomatico(estado) {
+  if (estado?.ativo?.elegivel_automatico !== true) return false;
+  const incidentes = Array.isArray(estado.incidentes) ? estado.incidentes : [];
+  return !incidentes.some((item) => item?.estado === 'aberto'
+    && ['critica', 'fiscal'].includes(item.severidade));
+}
+
+/**
+ * Reflete o gate do contrato nos controles do modo, sem substituir a guarda
+ * de autoridade da rota de início.
+ *
+ * @param {object|null} estado
+ * @returns {boolean}
+ */
+export function aplicarGateContrato(estado) {
+  contratoAutomaticoElegivel = contratoPermiteAutomatico(estado);
+  const status = document.getElementById('nfseContratoStatus');
+  if (status?.dataset.estado === 'bloqueado' || status?.dataset.estado === 'desconhecido') {
+    contratoAutomaticoElegivel = false;
+  }
+  const automatico = document.getElementById('modoAutomatico');
+  const mensagem = document.getElementById('nfseContratoStatusTexto')?.textContent
+    || 'Resolva os incidentes do contrato antes do modo automático.';
+  if (automatico) {
+    automatico.disabled = !contratoAutomaticoElegivel;
+    if (automatico.disabled) {
+      automatico.setAttribute('aria-describedby', 'nfseContratoStatusTexto');
+      automatico.title = mensagem;
+    } else {
+      automatico.removeAttribute('aria-describedby');
+      automatico.removeAttribute('title');
+    }
+  }
+  pintarModo();
+  return contratoAutomaticoElegivel;
+}
 
 function modoAtual() {
   return document.querySelector('input[name="nfseModo"]:checked')?.value || 'individual';
 }
 
-async function iniciarEmissao({ notaId = null, ignorarAliquota = false } = {}) {
+const DESCRICAO_MODO = {
+  individual: 'Preenche a nota que você escolher e para na revisão. '
+    + 'Cada nota pede o certificado de novo.',
+  lote: 'Preenche a lista inteira na mesma janela, parando na revisão de cada '
+    + 'nota. Certificado uma vez só.',
+  automatico: 'Preenche e emite sozinha, conferindo CPF/CNPJ, valor e '
+    + 'descrição antes de cada emissão.',
+};
+
+function pintarModo() {
+  const modo = modoAtual();
+  const desc = document.getElementById('nfseModoDesc');
+  const bloqueado = modo === 'automatico' && !contratoAutomaticoElegivel;
+  const descricao = DESCRICAO_MODO[modo] || '';
+  if (desc) {
+    desc.textContent = bloqueado
+      ? `${descricao} Indisponível: resolva os incidentes do contrato.`
+      : descricao;
+  }
+
+  const iniciar = document.getElementById('btnIniciarLote');
+  if (iniciar) {
+    iniciar.classList.toggle('d-none', modo === 'individual');
+    iniciar.textContent = modo === 'automatico'
+      ? 'Emitir a lista inteira sozinho' : 'Emitir a lista inteira';
+    iniciar.disabled = bloqueado;
+    if (bloqueado) iniciar.title = 'Resolva os incidentes do contrato antes de iniciar.';
+    else iniciar.removeAttribute('title');
+  }
+}
+
+export async function iniciarEmissao({ notaId = null, ignorarAliquota = false } = {}) {
   const modo = notaId ? 'individual' : modoAtual();
+  if (modo === 'automatico' && !contratoAutomaticoElegivel) {
+    const mensagem = document.getElementById('nfseContratoStatusTexto')?.textContent
+      || 'O contrato da NFS-e não está elegível para o modo automático.';
+    showToast(mensagem, 'error');
+    return;
+  }
   try {
     const dados = await chamar('/nfse/lote/iniciar', {
       body: JSON.stringify({
@@ -840,6 +926,7 @@ async function consultarLote() {
   if (!ativo) {
     pararAcompanhamento();
     await recarregarNotas();
+    if (atualizarContrato && lote.status !== 'idle') await atualizarContrato();
     if (lote.status === 'completed') {
       showToast(`Fila concluída: ${lote.success} emitida(s).`, 'success');
     }
@@ -1129,28 +1216,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // --- modo de emissao ---
-  const DESCRICAO_MODO = {
-    individual: 'Preenche a nota que você escolher e para na revisão. '
-      + 'Cada nota pede o certificado de novo.',
-    lote: 'Preenche a lista inteira na mesma janela, parando na revisão de cada '
-      + 'nota. Certificado uma vez só.',
-    automatico: 'Preenche e emite sozinha, conferindo CPF/CNPJ, valor e '
-      + 'descrição antes de cada emissão.',
-  };
-
-  function pintarModo() {
-    const modo = modoAtual();
-    const desc = document.getElementById('nfseModoDesc');
-    if (desc) desc.textContent = DESCRICAO_MODO[modo] || '';
-
-    const iniciar = document.getElementById('btnIniciarLote');
-    if (iniciar) {
-      iniciar.classList.toggle('d-none', modo === 'individual');
-      iniciar.textContent = modo === 'automatico'
-        ? 'Emitir a lista inteira sozinho' : 'Emitir a lista inteira';
-    }
-  }
-
   document.querySelectorAll('input[name="nfseModo"]').forEach((radio) => {
     radio.addEventListener('change', pintarModo);
   });
@@ -1188,6 +1253,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('btnPararLote')?.addEventListener('click', () => {
     comandoLote('/nfse/lote/parar', 'Interrompendo a fila.');
+  });
+
+  // A central consulta somente o estado persistido. Nenhuma recon ou sessão
+  // fiscal é aberta pela inicialização da página.
+  void inicializarContratoNfse({
+    onEstado: aplicarGateContrato,
+  }).then((central) => {
+    atualizarContrato = central.atualizar;
   });
 
   fetch('/nfse/sessao/status')

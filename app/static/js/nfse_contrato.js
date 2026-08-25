@@ -454,7 +454,7 @@ function recomendacaoDoIncidente(incidente) {
 /**
  * Inicializa a central, carregando apenas o estado persistido no servidor.
  *
- * @param {{root?: Document|HTMLElement, fetchImpl?: Function, estadoUrl?: string}} [opcoes]
+ * @param {{root?: Document|HTMLElement, fetchImpl?: Function, estadoUrl?: string, onEstado?: Function}} [opcoes]
  * @returns {Promise<{atualizar: Function, estado: Function}>}
  */
 export async function inicializarContratoNfse(opcoes = {}) {
@@ -476,12 +476,14 @@ export async function inicializarContratoNfse(opcoes = {}) {
       const dados = await lerResposta(resposta);
       estado = dadosEstado(dados);
       renderizarEstadoContrato(estado, root);
+      if (typeof opcoes.onEstado === 'function') opcoes.onEstado(estado);
       preencherNotasValidacao(root);
       atualizarCamposOrigem(root, estado?.fontes || [], origem?.value || '');
       mostrarErro(root, 'nfseReconEstado', '');
     } catch (erro) {
       estado = null;
       renderizarEstadoContrato(null, root);
+      if (typeof opcoes.onEstado === 'function') opcoes.onEstado(null);
       const mensagem = erro instanceof Error ? erro.message : 'Não foi possível carregar o contrato.';
       mostrarErro(root, 'nfseReconEstado', mensagem);
       showToast(mensagem, 'error');

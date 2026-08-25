@@ -15,6 +15,11 @@ const {
   opcoesDaOrigem,
   renderizarEstadoContrato,
 } = await import('../app/static/js/nfse_contrato.js');
+const {
+  aplicarGateContrato,
+  contratoPermiteAutomatico,
+  iniciarEmissao,
+} = await import('../app/static/js/nfse.js');
 
 after(() => dom.window.close());
 
@@ -238,4 +243,38 @@ test('recomendação inequívoca exige confirmação explícita no payload', () 
     origem: 'fixo', valorFixo: 'OPCAO-SINTETICA', fontes,
     recomendacao: { inequivoca: true }, confirmarRecomendacao: true,
   }), { origem: 'fixo', valor_fixo: 'OPCAO-SINTETICA', confirmar_recomendacao: true });
+});
+
+test('gate fechado desabilita automático e continua recusando início se o DOM for alterado', async () => {
+  document.body.insertAdjacentHTML('beforeend', `
+    <input type="radio" name="nfseModo" id="modoAutomatico" value="automatico" checked>
+    <button id="btnIniciarLote" type="button">Emitir</button>
+    <div id="nfseModoDesc"></div>
+    <div id="nfseContratoStatus" data-estado="bloqueado"></div>
+    <div id="nfseContratoStatusTexto">Resolva o incidente sintético.</div>`);
+  let chamadas = 0;
+  const fetchOriginal = globalThis.fetch;
+  globalThis.fetch = async () => {
+    chamadas += 1;
+    return resposta({});
+  };
+  try {
+    const estado = estadoBase({
+      ativo: { id: 1, versao: 2, elegivel_automatico: false },
+    });
+    assert.equal(contratoPermiteAutomatico(estado), false);
+    assert.equal(aplicarGateContrato(estado), false);
+    const automatico = document.getElementById('modoAutomatico');
+    const iniciar = document.getElementById('btnIniciarLote');
+    assert.equal(automatico.disabled, true);
+    assert.equal(iniciar.disabled, true);
+    assert.match(document.getElementById('nfseModoDesc').textContent, /Indisponível/);
+
+    automatico.disabled = false;
+    iniciar.disabled = false;
+    await iniciarEmissao();
+    assert.equal(chamadas, 0);
+  } finally {
+    globalThis.fetch = fetchOriginal;
+  }
 });
