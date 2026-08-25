@@ -80,6 +80,50 @@ def capturar_contexto_falha(driver, contexto, certidao_id=None, execution_id=Non
     return resultado
 
 
+def salvar_artefato_sanitizado(contexto, html_seguro, execution_id=None):
+    """Salva somente o HTML seguro já reconstruído pelo chamador.
+
+    Este caminho não conhece Selenium e não tenta sanitizar ou completar o
+    conteúdo recebido: a garantia de ausência de dados fica demonstrada no
+    inventário que originou ``html_seguro``. Uma falha de diretório ou escrita
+    retorna ``None`` para não substituir o erro original do fluxo.
+    """
+    if not _habilitado() or not isinstance(html_seguro, str):
+        return None
+
+    destino = _capture_dir()
+    try:
+        os.makedirs(destino, exist_ok=True)
+    except OSError as exc:
+        log_event(
+            'selenium_sanitized_capture_dir_error',
+            level='WARNING',
+            error_type=type(exc).__name__,
+        )
+        return None
+
+    base = f"{time.strftime('%Y%m%d_%H%M%S')}_{_slug(contexto)}_sanitizado"
+    caminho = os.path.join(destino, base + '.html')
+    try:
+        with open(caminho, 'w', encoding='utf-8') as arquivo:
+            arquivo.write(html_seguro)
+    except Exception as exc:
+        log_event(
+            'selenium_sanitized_capture_write_error',
+            level='WARNING',
+            error_type=type(exc).__name__,
+        )
+        return None
+
+    log_event(
+        'selenium_sanitized_capture',
+        level='WARNING',
+        execution_id=execution_id,
+        artefato=caminho,
+    )
+    return caminho
+
+
 def prune_capturas(dias, base_dir=None):
     """Remove capturas (.png/.html) mais antigas que `dias` dias.
     Retorna a quantidade de arquivos removidos. Best-effort."""
