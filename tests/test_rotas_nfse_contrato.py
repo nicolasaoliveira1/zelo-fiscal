@@ -79,7 +79,7 @@ def _criar_nota_emitivel(app):
             lote_id=lote.id,
             empresa_id=empresa.id,
             nome_csv='TOMADOR SINTETICO',
-            documento='DOCUMENTO-SINTETICO',
+            documento='DOC-SINTETICO',
             tipo_documento='cnpj',
             competencia='08/2026',
             valor_final=Decimal('12.34'),
