@@ -102,6 +102,53 @@ def test_pre_voo_sugere_a_senha_lida_do_caminho(app, ids, client):
     assert problemas[0]['sugestao_senha'] == '042026'
 
 
+def test_pre_voo_devolve_os_vencimentos_da_mesma_fonte_do_cartao(app, ids, client):
+    """A regua e o cartao da Visao Geral leem `resumo_de_vencimento`.
+
+    Duas contagens do mesmo fato divergem: se a rota recontasse aqui, um dia o
+    cartao diria 3 e a regua 2, e nao haveria como saber qual mentiu.
+    """
+    from datetime import datetime, timedelta
+
+    with app.app_context():
+        vencida = _empresa('VENCE JA', '11.222.333/0001-81')
+        vencida.certificado = CertificadoEmpresa(
+            caminho='Z:/a.pfx', estado=EstadoCertificado.PRONTO,
+            not_after=datetime.now() - timedelta(days=2))
+        proxima = _empresa('VENCE LOGO', '22.333.444/0001-92')
+        proxima.certificado = CertificadoEmpresa(
+            caminho='Z:/b.pfx', estado=EstadoCertificado.PRONTO,
+            not_after=datetime.now() + timedelta(days=3))
+        db.session.commit()
+
+    vencimentos = client.get('/manifestador/cofre').get_json()['vencimentos']
+
+    assert vencimentos['com_vencimento'] == 2
+    assert vencimentos['janela_dias'] > 0
+    # o mais urgente primeiro, como no cartao
+    causas = [item['causa'] for item in vencimentos['itens']]
+    nomes = [item['empresa_nome'] for item in vencimentos['itens']]
+    assert causas == ['vencido', 'vencendo']
+    assert nomes == ['VENCE JA', 'VENCE LOGO']
+    # `not_after` sai serializado: a regua le a data sem parse de datetime
+    assert isinstance(vencimentos['itens'][0]['not_after'], str)
+
+
+def test_pre_voo_sem_vencimento_conhecido_nao_inventa_alivio(app, ids, client):
+    """Certificado sem `not_after` fica FORA do denominador.
+
+    Conta-lo diria "nenhum dos 2 vence", que e desconhecido disfarcado de boa
+    noticia — o erro que o cartao da Visao Geral evita de proposito.
+    """
+    with app.app_context():
+        _empresa('SEM DATA', '11.222.333/0001-81', EstadoCertificado.SEM_ARQUIVO)
+
+    vencimentos = client.get('/manifestador/cofre').get_json()['vencimentos']
+
+    assert vencimentos['com_vencimento'] == 0
+    assert vencimentos['itens'] == []
+
+
 def test_cofre_sem_inventario_diz_que_nao_foi_inventariado(app, ids, client):
     assert client.get('/manifestador/cofre').get_json()['inventariado'] is False
 
