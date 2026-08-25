@@ -9,6 +9,7 @@ import pytest
 from app import db
 from app.automation.nfse_recon import OpcaoInventariada
 from app.automation.batch_state import (
+    NFSE_BATCH_LOCK,
     NFSE_BATCH_STATE,
     definir_nfse_batch_opcoes,
 )
@@ -106,6 +107,27 @@ def _marcar_validada(app, candidato_id, nota_id):
         candidato.validado_em = datetime(2026, 8, 25, 12, 0)
         candidato.nota_validacao_id = nota_id
         db.session.commit()
+
+
+class _DriverRecon:
+    def __init__(self, url='/EmissorNacional/DPS/Pessoas'):
+        self._url = url
+        self.current_url_reads = 0
+        self.execute_script_calls = 0
+        self.get_calls = 0
+        self.click_calls = 0
+
+    @property
+    def current_url(self):
+        self.current_url_reads += 1
+        return self._url
+
+    def execute_script(self, _script):
+        self.execute_script_calls += 1
+        return {'estado': 'ok', 'controles': []}
+
+    def get(self, _url):
+        self.get_calls += 1
 
 
 def test_get_estado_e_detalhe_sao_sanitizados(login_as, app):
@@ -209,6 +231,79 @@ def test_contrato_inexistente_devolve_404_json(login_as):
     resposta = login_as('operador').get('/nfse/contrato/99999')
     assert resposta.status_code == 404
     assert resposta.get_json()['status'] == 'error'
+
+
+def test_recon_sem_sessao_orienta_preparar(login_as, monkeypatch):
+    sessao = MagicMock()
+    sessao.adquirir.return_value = True
+    sessao.driver = None
+    monkeypatch.setattr('app.routes.nfse.SESSAO', sessao)
+
+    resposta = login_as('operador').post('/nfse/contrato/recon', json={})
+
+    assert resposta.status_code == 409
+    assert resposta.get_json()['motivo'] == 'sessao_nfse_ausente'
+    assert 'Prepare a sessão' in resposta.get_json()['message']
+    sessao.liberar.assert_called_once()
+
+
+def test_recon_nao_consulta_selenium_se_lote_segura_lock(login_as, monkeypatch):
+    driver = _DriverRecon()
+    sessao = MagicMock()
+    sessao.driver = driver
+    monkeypatch.setattr('app.routes.nfse.SESSAO', sessao)
+    assert NFSE_BATCH_LOCK.acquire(blocking=False)
+    try:
+        resposta = login_as('operador').post('/nfse/contrato/recon', json={})
+    finally:
+        NFSE_BATCH_LOCK.release()
+
+    assert resposta.status_code == 409
+    assert resposta.get_json()['motivo'] == 'lote_nfse_em_curso'
+    assert not sessao.adquirir.called
+    assert driver.current_url_reads == 0
+    assert driver.execute_script_calls == 0
+
+
+def test_recon_observa_tela_atual_sem_navegar_nem_escrever(
+    login_as, app, monkeypatch
+):
+    _contrato_id, _incidente_id = _criar_incidente(app)
+    driver = _DriverRecon()
+    sessao = MagicMock()
+    sessao.adquirir.return_value = True
+    sessao.driver = driver
+    monkeypatch.setattr('app.routes.nfse.SESSAO', sessao)
+
+    resposta = login_as('operador').post('/nfse/contrato/recon', json={})
+
+    assert resposta.status_code == 200
+    observacao = resposta.get_json()['observacao']
+    assert observacao['etapa'] == 'pessoas'
+    assert observacao['compatibilidade'] == 'incompativel'
+    assert observacao['incidentes'] > 0
+    assert driver.current_url_reads == 1
+    assert driver.execute_script_calls == 1
+    assert driver.get_calls == 0
+    assert driver.click_calls == 0
+    sessao.liberar.assert_called_once()
+
+
+def test_recon_libera_sessao_se_observacao_falhar(login_as, monkeypatch):
+    driver = _DriverRecon()
+    sessao = MagicMock()
+    sessao.adquirir.return_value = True
+    sessao.driver = driver
+    monkeypatch.setattr('app.routes.nfse.SESSAO', sessao)
+    monkeypatch.setattr(
+        'app.routes.nfse.nfse_contrato.observar',
+        MagicMock(side_effect=RuntimeError('falha sintética')),
+    )
+
+    resposta = login_as('operador').post('/nfse/contrato/recon', json={})
+
+    assert resposta.status_code == 500
+    sessao.liberar.assert_called_once()
 
 
 def test_validar_exige_nota_emitivel_e_inicia_modo_individual(

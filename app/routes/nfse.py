@@ -31,6 +31,7 @@ from app.automation.batch_state import (
 )
 from app.routes import _current_app_object, bp
 from app.automation import nfse_emitidas as automacao_emitidas
+from app.automation import nfse_recon
 from app.services import (
     batch_engine,
     nfse_config,
@@ -144,6 +145,93 @@ def nfse_contrato_configurar(incidente_id):
         'incidente_id': incidente_id,
         'contrato': nfse_contrato.detalhe_contrato(candidato.id),
     }
+
+
+@bp.route('/nfse/contrato/recon', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_recon():
+    if not NFSE_BATCH_LOCK.acquire(blocking=False):
+        return json_error(
+            'Há um lote de NFS-e em andamento. Aguarde ou pare o lote antes da recon.',
+            409,
+            motivo='lote_nfse_em_curso',
+        )
+
+    sessao_adquirida = False
+    try:
+        if NFSE_BATCH_STATE.get('status') in ('running', 'paused'):
+            return json_error(
+                'Há um lote de NFS-e em andamento. Aguarde ou pare o lote antes da recon.',
+                409,
+                motivo='lote_nfse_em_curso',
+            )
+        sessao_adquirida = SESSAO.adquirir()
+    finally:
+        NFSE_BATCH_LOCK.release()
+
+    if not sessao_adquirida:
+        return json_error(
+            'A sessão da NFS-e está ocupada. Prepare a sessão e tente novamente.',
+            409,
+            motivo='sessao_nfse_ocupada',
+        )
+
+    try:
+        driver = SESSAO.driver
+        if driver is None:
+            return json_error(
+                'Não há sessão da NFS-e preparada. Prepare a sessão antes da recon.',
+                409,
+                motivo='sessao_nfse_ausente',
+            )
+        etapa = nfse_recon.etapa_da_url(driver.current_url)
+        if etapa is None:
+            return json_error(
+                'A tela atual não é uma etapa reconhecida da NFS-e.',
+                409,
+                motivo='etapa_nfse_desconhecida',
+            )
+        contrato = nfse_contrato.carregar_execucao()
+        observacao = nfse_contrato.observar(
+            driver,
+            contrato,
+            etapa,
+            'recon_assistida',
+            modo='assistido',
+        )
+        return {
+            'status': 'ok',
+            'observacao': {
+                'contrato_id': observacao.contrato_id,
+                'etapa': observacao.etapa,
+                'momento': observacao.momento,
+                'estado': observacao.estado,
+                'compatibilidade': observacao.compatibilidade,
+                'diferencas': list(observacao.diferencas),
+                'evidencias': list(observacao.evidencias),
+                'incidentes': observacao.incidentes,
+            },
+        }
+    except nfse_recon.InventarioExcedidoError:
+        return json_error(
+            'A tela excede o limite seguro de controles ou opções para a recon.',
+            409,
+            motivo='inventario_excedido',
+        )
+    except nfse_recon.InventarioInconclusivoError:
+        return json_error(
+            'Não foi possível observar a tela com segurança. Tente novamente.',
+            409,
+            motivo='inventario_inconclusivo',
+        )
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    except nfse_contrato.PersistenciaContratoError as exc:
+        return json_error(str(exc), 500)
+    except Exception as exc:
+        return json_error(exc=exc, code=500)
+    finally:
+        SESSAO.liberar()
 
 
 def _validacao_propria_na_revisao(contrato_id):

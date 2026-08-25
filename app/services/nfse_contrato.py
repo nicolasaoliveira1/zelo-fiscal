@@ -11,6 +11,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app import db
+from app.automation import nfse_recon
+from app.automation.capture import salvar_artefato_sanitizado
 from app.models import (
     CampoContratoNfse,
     ContratoNfse,
@@ -20,7 +22,7 @@ from app.models import (
 )
 from app.services import auditoria
 from app.services.execution_logger import log_event
-from app.services.nfse_drift import Diferenca, assinar_incidente
+from app.services.nfse_drift import Diferenca, assinar_incidente, comparar
 from app.utils import utcnow_naive
 
 
@@ -301,6 +303,20 @@ class ContratoExecucaoNfse:
         )
 
 
+@dataclass(frozen=True)
+class Observacao:
+    """Resultado seguro de uma leitura estrutural da tela atual."""
+
+    contrato_id: int
+    etapa: str
+    momento: str
+    estado: str
+    compatibilidade: str
+    diferencas: tuple[dict[str, Any], ...] = ()
+    evidencias: tuple[str, ...] = ()
+    incidentes: int = 0
+
+
 def _forma_inicial() -> list[dict[str, Any]]:
     resultado = []
     for campo in CONTRATO_INICIAL:
@@ -497,6 +513,98 @@ def carregar_execucao(contrato_id=None) -> ContratoExecucaoNfse:
         fingerprint=contrato.fingerprint,
         elegivel_automatico=bool(contrato.elegivel_automatico),
         campos=campos,
+    )
+
+
+def _campos_da_etapa(contrato, etapa):
+    return tuple(campo for campo in contrato.campos if campo.etapa == etapa)
+
+
+def _diferenca_segura(diferenca: Diferenca) -> dict[str, Any]:
+    return {
+        "etapa": diferenca.etapa,
+        "tipo": diferenca.tipo,
+        "severidade": diferenca.severidade,
+        "chave_esperada": diferenca.chave_esperada,
+        "chave_observada": diferenca.chave_observada,
+        "rotulo": diferenca.rotulo,
+        "mensagem": diferenca.mensagem,
+    }
+
+
+def observar(
+    driver,
+    contrato_execucao: ContratoExecucaoNfse,
+    etapa,
+    momento,
+    *,
+    modo="assistido",
+    execution_id=None,
+) -> Observacao:
+    """Observa a tela atual, compara metadados e registra drift seguro."""
+
+    if modo not in {"assistido", "automatico"}:
+        raise ValueError("modo de observação inválido")
+    inventario = nfse_recon.inventariar(driver, etapa)
+    if inventario.estado != "ok":
+        log_event(
+            "nfse_recon_desconhecida",
+            level="WARNING",
+            contrato_id=contrato_execucao.contrato_id,
+            etapa=etapa,
+            momento=momento,
+            execution_id=execution_id,
+        )
+        return Observacao(
+            contrato_id=contrato_execucao.contrato_id,
+            etapa=etapa,
+            momento=momento,
+            estado="desconhecida",
+            compatibilidade="desconhecida",
+            evidencias=("não foi possível observar a etapa com segurança",),
+        )
+
+    # A revisão é composta por pares dt/dd e precisa de uma nota para que os
+    # leitores declarativos consigam conferir valores. A recon assistida não
+    # recebe nota nem lê conteúdo preenchido; portanto, registra somente que a
+    # tela foi alcançada, sem fabricar um incidente estrutural.
+    if etapa == "revisao":
+        return Observacao(
+            contrato_id=contrato_execucao.contrato_id,
+            etapa=etapa,
+            momento=momento,
+            estado="observada",
+            compatibilidade="desconhecida",
+            evidencias=("a revisão exige conferência vinculada a uma nota",),
+        )
+
+    resultado = comparar(
+        etapa,
+        _campos_da_etapa(contrato_execucao, etapa),
+        inventario,
+    )
+    incidentes = ()
+    if resultado.diferencas and contrato_execucao.contrato_id:
+        incidentes = tuple(
+            registrar_incidentes(contrato_execucao.contrato_id, resultado)
+        )
+        html_seguro = nfse_recon.inventario_para_html(inventario)
+        salvar_artefato_sanitizado(
+            f"nfse_{etapa}_{momento}",
+            html_seguro,
+            execution_id=execution_id,
+        )
+    return Observacao(
+        contrato_id=contrato_execucao.contrato_id,
+        etapa=etapa,
+        momento=momento,
+        estado="observada",
+        compatibilidade=resultado.compatibilidade,
+        diferencas=tuple(
+            _diferenca_segura(diferenca) for diferenca in resultado.diferencas
+        ),
+        evidencias=tuple(resultado.evidencias),
+        incidentes=len(incidentes),
     )
 
 
@@ -1239,6 +1347,7 @@ __all__ = [
     "ContratoNfseError",
     "ContratoNfseNaoEncontradoError",
     "OpcaoExecucaoNfse",
+    "Observacao",
     "PersistenciaContratoError",
     "carregar_execucao",
     "contrato_ativo",
@@ -1249,6 +1358,7 @@ __all__ = [
     "estado_painel",
     "fontes_disponiveis",
     "garantir_contrato_inicial",
+    "observar",
     "registrar_validacao",
     "registrar_incidentes",
     "resolver_valor",
