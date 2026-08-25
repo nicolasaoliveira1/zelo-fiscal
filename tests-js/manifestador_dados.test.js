@@ -8,6 +8,7 @@ import {
   escapar_html,
   linha_do_cofre,
   somar_balanco,
+  vazio_de_vencimentos,
 } from '../app/static/js/manifestador_dados.js';
 
 test('escapa texto para conteúdo e atributos HTML', () => {
@@ -112,4 +113,35 @@ test('cofre nunca inventariado não vira zero tranquilizador', () => {
 
   assert.equal(linha, 'Cofre nunca inventariado');
   assert.doesNotMatch(linha, /\d/);
+});
+
+test('lista vazia sem inventário diz que não sabe, não que está em dia', () => {
+  const vazio = vazio_de_vencimentos({ inventariado: false, com_vencimento: 0, janela_dias: 30 });
+
+  assert.equal(vazio.icone, 'question-circle');
+  assert.match(vazio.texto, /não foi inventariado/);
+  assert.doesNotMatch(vazio.texto, /30/);
+});
+
+test('inventariado mas sem nenhum vencimento conhecido também é "não sei"', () => {
+  // todos os certificados em `sem_arquivo`/`sem_pasta`: a janela não se aplica
+  const vazio = vazio_de_vencimentos({ inventariado: true, com_vencimento: 0, janela_dias: 30 });
+
+  assert.equal(vazio.icone, 'question-circle');
+  assert.equal(vazio.texto, 'Nenhum certificado tem vencimento conhecido.');
+  assert.doesNotMatch(vazio.texto, /\d/);
+});
+
+test('com população conhecida, a ausência vira afirmação com denominador', () => {
+  const varios = vazio_de_vencimentos({ inventariado: true, com_vencimento: 40, janela_dias: 30 });
+
+  assert.equal(varios.icone, 'check2');
+  assert.equal(varios.texto, 'Nenhum dos 40 certificados vence nos próximos 30 dias.');
+});
+
+test('população de um fala no singular', () => {
+  const unico = vazio_de_vencimentos({ inventariado: true, com_vencimento: 1, janela_dias: 30 });
+
+  assert.equal(unico.icone, 'check2');
+  assert.match(unico.texto, /^O único certificado com vencimento conhecido não vence/);
 });

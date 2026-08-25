@@ -3073,7 +3073,8 @@ tr.filter-hidden {
     background: var(--zelo-mist);
 }
 
-.zl-ficha-row.is-foco {
+.zl-ficha-row.is-foco,
+.manif-tbl tr.is-foco > td:first-child {
     box-shadow: inset 2px 0 0 var(--bs-emphasis-color);
 }
 

@@ -12,6 +12,7 @@ import {
   escapar_html as escapar,
   linha_do_cofre as linhaDoCofre,
   somar_balanco as somarBalanco,
+  vazio_de_vencimentos as vazioDeVencimentos,
 } from './manifestador_dados.js';
 
 const $ = (id) => document.getElementById(id);
@@ -178,7 +179,12 @@ async function carregarCofre() {
     aviso.hidden = true;
   }
 
-  pintarVencimentos(vencimentos.itens || [], vencimentos.janela_dias ?? 0);
+  pintarVencimentos({
+    itens: vencimentos.itens || [],
+    com_vencimento: vencimentos.com_vencimento ?? 0,
+    janela_dias: vencimentos.janela_dias ?? 0,
+    inventariado: Boolean(dados.inventariado),
+  });
   pintarPendencias(dados.problemas || []);
   destacarEmpresaEmFoco();
 }
@@ -186,11 +192,15 @@ async function carregarCofre() {
 /* Mesma forma do cartao da Visao Geral (`.vg-lista`/`.vg-cert-*`), de proposito:
  * quem chegou de la reencontra os mesmos nomes na mesma ordem e no mesmo
  * desenho. Fork de estilo aqui obrigaria a manter duas listas do mesmo dado. */
-function pintarVencimentos(itens, janelaDias) {
+function pintarVencimentos({ itens, com_vencimento, janela_dias, inventariado }) {
   const caixa = $('manifCofreVencimentos');
   if (!itens.length) {
-    caixa.innerHTML = '<p class="vg-vazio mb-0"><i class="bi bi-check2"></i> '
-      + `Nenhum certificado vence nos próximos ${janelaDias} dias.</p>`;
+    /* Lista vazia nao e sinonimo de "nada vencendo": sem inventario, e sem
+     * nenhum `not_after` conhecido, o sistema nao sabe. Quem decide a frase e
+     * `vazio_de_vencimentos`, a mesma leitura do cartao da Visao Geral. */
+    const vazio = vazioDeVencimentos({ inventariado, com_vencimento, janela_dias });
+    caixa.innerHTML = `<p class="${vazio.classe}"><i class="bi bi-${vazio.icone}"></i> `
+      + `${escapar(vazio.texto)}</p>`;
     return;
   }
   caixa.innerHTML = itens.map((item) => {

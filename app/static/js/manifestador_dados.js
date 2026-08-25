@@ -183,3 +183,51 @@ export function linha_do_cofre({
 
   return `${num(prontas)} de ${num(total)} empresas prontas`;
 }
+
+/**
+ * O estado vazio da lista de vencimentos do cofre.
+ *
+ * Lista vazia tem TRÊS causas, e só uma delas é boa notícia. Sem inventário não
+ * se sabe nada; com inventário mas sem nenhum `not_after` conhecido também não —
+ * `sem_arquivo` e `sem_pasta` não estão "sem vencer". Dizer "nenhum vence nos
+ * próximos N dias" nesses dois casos transforma desconhecido em alívio, que é
+ * exatamente o que o cartão da Visão Geral evita de propósito (e com as mesmas
+ * palavras: as duas telas falam do mesmo dado).
+ *
+ * @param {Object} estado
+ * @param {boolean} estado.inventariado
+ * @param {number} estado.com_vencimento  certificados com vencimento CONHECIDO
+ * @param {number} estado.janela_dias
+ * @returns {{ classe: string, icone: string, texto: string }}
+ */
+export function vazio_de_vencimentos({ inventariado, com_vencimento, janela_dias }) {
+  const conhecidos = Number(com_vencimento) || 0;
+  const dias = Number(janela_dias) || 0;
+
+  if (!inventariado) {
+    return {
+      classe: 'vg-falha',
+      icone: 'question-circle',
+      texto: 'O cofre ainda não foi inventariado — não sei quais certificados vencem.',
+    };
+  }
+  if (conhecidos === 0) {
+    return {
+      classe: 'vg-falha',
+      icone: 'question-circle',
+      texto: 'Nenhum certificado tem vencimento conhecido.',
+    };
+  }
+  if (conhecidos === 1) {
+    return {
+      classe: 'vg-vazio mb-0',
+      icone: 'check2',
+      texto: `O único certificado com vencimento conhecido não vence nos próximos ${dias} dias.`,
+    };
+  }
+  return {
+    classe: 'vg-vazio mb-0',
+    icone: 'check2',
+    texto: `Nenhum dos ${conhecidos} certificados vence nos próximos ${dias} dias.`,
+  };
+}
