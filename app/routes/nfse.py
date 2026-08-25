@@ -541,6 +541,7 @@ def nfse_painel():
         config=nfse_config.get_config_nfse(),
         empresas=[{'id': e.id, 'nome': e.nome, 'cnpj': e.cnpj}
                   for e in Empresa.query.order_by(Empresa.nome).all()],
+        contrato_estado=nfse_contrato.estado_painel(),
         # Sem filtro de competencia o painel usa o MES CORRENTE — o mesmo que
         # o JS poe nos campos de data. Painel e campos sempre concordam: o que
         # esta na tela e o que uma consulta traria.

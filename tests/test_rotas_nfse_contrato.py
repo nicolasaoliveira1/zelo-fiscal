@@ -151,6 +151,49 @@ def test_get_estado_e_detalhe_sao_sanitizados(login_as, app):
     assert 'CAMINHO-CLIENTE-SINTETICO' not in corpo
 
 
+def test_pagina_exibe_central_com_aria_e_estado_vazio(login_as):
+    resposta = login_as('operador').get('/nfse')
+
+    assert resposta.status_code == 200
+    corpo = resposta.get_data(as_text=True)
+    assert 'id="nfseContratoCentral"' in corpo
+    assert 'id="nfseContratoStatus"' in corpo
+    assert 'role="status"' in corpo
+    assert 'aria-live="polite"' in corpo
+    assert 'Não há incidentes no contrato ativo.' in corpo
+    assert 'id="modalConfigContrato"' in corpo
+    assert 'id="modalValidarContrato"' in corpo
+    assert 'aria-label="Fechar"' in corpo
+    assert 'class="btn btn-ghost btn-sm"' in corpo
+    assert 'id="nfseNotaValidacao"' in corpo
+    assert '<option value="" selected disabled>Escolha uma nota…</option>' in corpo
+
+
+def test_pagina_exibe_incidente_sem_seletor_e_com_acao(login_as, app):
+    _contrato_id, incidente_id = _criar_incidente(app)
+
+    resposta = login_as('operador').get('/nfse')
+
+    assert resposta.status_code == 200
+    corpo = resposta.get_data(as_text=True)
+    assert f'data-incidente-id="{incidente_id}"' in corpo
+    assert 'Campo sintético' in corpo
+    assert 'Opção sintética' in corpo
+    assert 'Configurar alteração' in corpo
+    assert 'SENTINELA' not in corpo
+    inicio = corpo.index(f'data-incidente-id="{incidente_id}"')
+    trecho_incidente = corpo[inicio:corpo.index('</article>', inicio)]
+    assert 'seletor' not in trecho_incidente.lower()
+    assert 'xpath' not in trecho_incidente.lower()
+
+
+def test_papel_leitura_nao_recebe_central_no_template(login_as):
+    resposta = login_as('leitura').get('/nfse')
+
+    assert resposta.status_code == 403
+    assert 'nfseContratoCentral' not in resposta.get_data(as_text=True)
+
+
 def test_configurar_incidente_cria_candidata_sem_mudar_ativo(login_as, app):
     contrato_id, incidente_id = _criar_incidente(app)
     resposta = login_as('operador').post(
