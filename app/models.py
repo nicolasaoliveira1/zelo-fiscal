@@ -840,6 +840,182 @@ class NotaEmitidaNfse(db.Model):
         return f'<NotaEmitidaNfse {self.chave} {self.competencia} {self.valor}>'
 
 
+class ContratoNfse(db.Model):
+    """Versão imutável da estrutura e das decisões do formulário da NFS-e."""
+    __tablename__ = 'contrato_nfse'
+    __table_args__ = (
+        db.UniqueConstraint('versao', name='uq_contrato_nfse_versao'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    versao = db.Column(db.Integer, nullable=False)
+    estado = db.Column(db.String(20), nullable=False, index=True)
+    fingerprint = db.Column(db.String(64), nullable=False, index=True)
+    elegivel_automatico = db.Column(db.Boolean, nullable=False, default=False)
+    criado_em = db.Column(db.DateTime, nullable=False, default=utcnow_naive)
+    validado_em = db.Column(db.DateTime, nullable=True)
+    ativado_em = db.Column(db.DateTime, nullable=True)
+    criado_por_id = db.Column(
+        db.Integer, db.ForeignKey('usuario.id', ondelete='SET NULL'),
+        nullable=True, index=True)
+    ativado_por_id = db.Column(
+        db.Integer, db.ForeignKey('usuario.id', ondelete='SET NULL'),
+        nullable=True, index=True)
+    nota_validacao_id = db.Column(
+        db.Integer, db.ForeignKey('nota_nfse.id', ondelete='SET NULL'),
+        nullable=True, index=True)
+    erro_validacao = db.Column(db.String(500), nullable=True)
+
+    criado_por = db.relationship(
+        'Usuario', foreign_keys=[criado_por_id], passive_deletes=True)
+    ativado_por = db.relationship(
+        'Usuario', foreign_keys=[ativado_por_id], passive_deletes=True)
+    nota_validacao = db.relationship(
+        'NotaNfse', foreign_keys=[nota_validacao_id], passive_deletes=True)
+    campos = db.relationship(
+        'CampoContratoNfse', back_populates='contrato',
+        cascade='all, delete-orphan', passive_deletes=True)
+    incidentes = db.relationship(
+        'IncidenteContratoNfse', foreign_keys='IncidenteContratoNfse.contrato_base_id',
+        back_populates='contrato_base', cascade='all, delete-orphan',
+        passive_deletes=True)
+    incidentes_candidata = db.relationship(
+        'IncidenteContratoNfse', foreign_keys='IncidenteContratoNfse.contrato_candidato_id',
+        back_populates='contrato_candidato', passive_deletes=True)
+
+    def __repr__(self):
+        return f'<ContratoNfse v{self.versao} {self.estado}>'
+
+
+class CampoContratoNfse(db.Model):
+    """Controle declarado em uma versão do contrato da NFS-e."""
+    __tablename__ = 'campo_contrato_nfse'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'contrato_id', 'chave_semantica',
+            name='uq_campo_contrato_nfse_chave'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    contrato_id = db.Column(
+        db.Integer, db.ForeignKey('contrato_nfse.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    chave_semantica = db.Column(db.String(100), nullable=False)
+    etapa = db.Column(db.String(20), nullable=False, index=True)
+    seletor_tipo = db.Column(db.String(20), nullable=False)
+    seletor = db.Column(db.String(200), nullable=False)
+    rotulo = db.Column(db.String(500), nullable=False)
+    tipo = db.Column(db.String(30), nullable=False)
+    interacao = db.Column(db.String(30), nullable=False)
+    obrigatorio = db.Column(db.Boolean, nullable=False, default=False)
+    ordem = db.Column(db.Integer, nullable=False, default=0)
+    condicao_chave = db.Column(db.String(100), nullable=True)
+    condicao_valor = db.Column(db.String(190), nullable=True)
+    origem = db.Column(db.String(30), nullable=True)
+    fonte = db.Column(db.String(100), nullable=True)
+    valor_fixo = db.Column(db.String(500), nullable=True)
+    revisao_secao = db.Column(db.String(100), nullable=True)
+    revisao_rotulo = db.Column(db.String(500), nullable=True)
+    conferivel_automatico = db.Column(
+        db.Boolean, nullable=False, default=True)
+
+    contrato = db.relationship('ContratoNfse', back_populates='campos')
+    opcoes = db.relationship(
+        'OpcaoCampoContratoNfse', back_populates='campo',
+        cascade='all, delete-orphan', passive_deletes=True)
+
+    def __repr__(self):
+        return f'<CampoContratoNfse {self.chave_semantica}>'
+
+
+class OpcaoCampoContratoNfse(db.Model):
+    """Opção declarada no HTML e aprovada no contrato."""
+    __tablename__ = 'opcao_campo_contrato_nfse'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'campo_id', 'valor', name='uq_opcao_campo_contrato_nfse_valor'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    campo_id = db.Column(
+        db.Integer, db.ForeignKey('campo_contrato_nfse.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    valor = db.Column(db.String(190), nullable=False)
+    rotulo = db.Column(db.String(500), nullable=False)
+    ordem = db.Column(db.Integer, nullable=False, default=0)
+
+    campo = db.relationship('CampoContratoNfse', back_populates='opcoes')
+
+
+class IncidenteContratoNfse(db.Model):
+    """Diferença observada entre um contrato e uma etapa do portal."""
+    __tablename__ = 'incidente_contrato_nfse'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'contrato_base_id', 'assinatura',
+            name='uq_incidente_contrato_nfse_assinatura'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    contrato_base_id = db.Column(
+        db.Integer, db.ForeignKey('contrato_nfse.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    contrato_candidato_id = db.Column(
+        db.Integer, db.ForeignKey('contrato_nfse.id', ondelete='SET NULL'),
+        nullable=True, index=True)
+    assinatura = db.Column(db.String(64), nullable=False)
+    etapa = db.Column(db.String(20), nullable=False, index=True)
+    tipo = db.Column(db.String(30), nullable=False)
+    severidade = db.Column(db.String(20), nullable=False)
+    estado = db.Column(db.String(20), nullable=False, index=True)
+    chave_esperada = db.Column(db.String(100), nullable=True)
+    chave_observada = db.Column(db.String(100), nullable=True)
+    rotulo = db.Column(db.String(500), nullable=True)
+    tipo_controle = db.Column(db.String(30), nullable=True)
+    interacao = db.Column(db.String(30), nullable=True)
+    obrigatorio = db.Column(db.Boolean, nullable=True)
+    primeira_observacao_em = db.Column(db.DateTime, nullable=False)
+    ultima_observacao_em = db.Column(db.DateTime, nullable=False)
+    observacoes = db.Column(db.Integer, nullable=False, default=1)
+    resolvido_em = db.Column(db.DateTime, nullable=True)
+    resolvido_por_id = db.Column(
+        db.Integer, db.ForeignKey('usuario.id', ondelete='SET NULL'),
+        nullable=True, index=True)
+    mensagem = db.Column(db.String(500), nullable=False)
+    artefato_sanitizado = db.Column(db.String(500), nullable=True)
+
+    contrato_base = db.relationship(
+        'ContratoNfse', foreign_keys=[contrato_base_id],
+        back_populates='incidentes')
+    contrato_candidato = db.relationship(
+        'ContratoNfse', foreign_keys=[contrato_candidato_id],
+        back_populates='incidentes_candidata')
+    resolvido_por = db.relationship(
+        'Usuario', foreign_keys=[resolvido_por_id], passive_deletes=True)
+    opcoes = db.relationship(
+        'OpcaoIncidenteContratoNfse', back_populates='incidente',
+        cascade='all, delete-orphan', passive_deletes=True)
+
+    def __repr__(self):
+        return f'<IncidenteContratoNfse {self.assinatura} {self.estado}>'
+
+
+class OpcaoIncidenteContratoNfse(db.Model):
+    """Opção observada no controle que originou um incidente."""
+    __tablename__ = 'opcao_incidente_contrato_nfse'
+
+    id = db.Column(db.Integer, primary_key=True)
+    incidente_id = db.Column(
+        db.Integer,
+        db.ForeignKey('incidente_contrato_nfse.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    valor = db.Column(db.String(190), nullable=False)
+    rotulo = db.Column(db.String(500), nullable=False)
+    ordem = db.Column(db.Integer, nullable=False, default=0)
+
+    incidente = db.relationship('IncidenteContratoNfse', back_populates='opcoes')
+
+
 class ServicoNfse(db.Model):
     """Memoria do que um termo do extrato significa como servico.
 
