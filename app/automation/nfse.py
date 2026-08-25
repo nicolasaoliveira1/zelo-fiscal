@@ -993,6 +993,14 @@ SECAO_VALORES = 'Valores do Serviço Prestado'
 ROTULO_DOCUMENTO = "contains(.,'CNPJ') or contains(.,'CPF')"
 ROTULO_VALOR = "contains(.,'Valor do servi')"
 
+
+class ResultadoAutorrevisao(list):
+    """Lista compatível com a API antiga que também informa elegibilidade."""
+
+    def __init__(self, divergencias=(), elegivel_automatico=False):
+        super().__init__(divergencias)
+        self.elegivel_automatico = bool(elegivel_automatico)
+
 _XP_SECAO = ("//h4[contains(@class,'emissao-titulo')][normalize-space()='{secao}']"
              "/following-sibling::div[contains(@class,'emissao-conteudo')][1]")
 
@@ -1011,6 +1019,137 @@ def _dds_da_secao(driver, secao):
         return [(e.text or '').strip() for e in driver.find_elements(By.XPATH, xpath)]
     except WebDriverException:
         return []
+
+
+def _xpath_literal(texto):
+    texto = str(texto or '')
+    if "'" not in texto:
+        return f"'{texto}'"
+    if '"' not in texto:
+        return f'"{texto}"'
+    partes = texto.split("'")
+    return "concat(" + ", \"'\", ".join(f"'{parte}'" for parte in partes) + ")"
+
+
+def _dd_declarativo(driver, secao, rotulo):
+    """Lê exatamente um par dt/dd de uma seção declarada."""
+    secao_literal = _xpath_literal(secao)
+    rotulo_literal = _xpath_literal(rotulo)
+    xpath = (
+        "//h4[contains(@class,'emissao-titulo')]"
+        f"[normalize-space()={secao_literal}]"
+        "/following-sibling::div[contains(@class,'emissao-conteudo')][1]"
+        f"//dt[normalize-space()={rotulo_literal}]/following-sibling::dd[1]"
+    )
+    try:
+        elementos = driver.find_elements(By.XPATH, xpath)
+    except WebDriverException:
+        return None, 'não foi possível ler a seção ou o rótulo declarados'
+    if len(elementos) != 1:
+        return None, 'seção ou rótulo da revisão ausente ou ambíguo'
+    try:
+        texto = (elementos[0].text or '').strip()
+    except WebDriverException:
+        texto = ''
+    if not texto:
+        return None, 'o valor da revisão está ilegível'
+    return texto, None
+
+
+def _valor_regra_revisao(regra, chave, padrao=None):
+    if isinstance(regra, Mapping):
+        return regra.get(chave, padrao)
+    return getattr(regra, chave, padrao)
+
+
+def _regra_tem_leitor(regra):
+    return bool(
+        _valor_regra_revisao(regra, 'revisao_secao') and
+        _valor_regra_revisao(regra, 'revisao_rotulo')
+    )
+
+
+def _regra_fiscal(regra):
+    tipo = str(_valor_regra_revisao(regra, 'tipo', '') or '').lower()
+    severidade = str(_valor_regra_revisao(regra, 'severidade', '') or '').lower()
+    return bool(_valor_regra_revisao(regra, 'obrigatorio')) or severidade in {
+        'fiscal', 'critica'
+    } or tipo in {'select', 'radio', 'checkbox', 'revisao', 'decimal', 'valor'}
+
+
+def _esperado_regra_revisao(regra):
+    for chave in ('valor_esperado', 'esperado', 'revisao_esperada'):
+        valor = _valor_regra_revisao(regra, chave)
+        if valor is not None:
+            return valor
+    origem = _valor_regra_revisao(regra, 'origem')
+    if origem == 'fixo':
+        return _valor_regra_revisao(regra, 'valor_fixo')
+    return None
+
+
+def _comparar_revisao_declarativa(texto, esperado, tipo):
+    if esperado is None:
+        return True
+    tipo = str(tipo or 'text').lower()
+    if tipo in {'decimal', 'valor', 'number'}:
+        esperado_decimal = _decimal_do_portal(esperado)
+        observado_decimal = _decimal_do_portal(texto)
+        return (
+            esperado_decimal is not None and observado_decimal is not None and
+            esperado_decimal == observado_decimal
+        )
+    if tipo in {'documento', 'cpf', 'cnpj'}:
+        return _so_digitos(texto) == _so_digitos(esperado)
+    return _comparavel(texto) == _comparavel(esperado)
+
+
+def _regras_elegiveis_automatico(regras):
+    for regra in regras or ():
+        if not bool(_valor_regra_revisao(regra, 'conferivel_automatico', False)):
+            return False
+        origem = _valor_regra_revisao(regra, 'origem')
+        obrigatorio = bool(_valor_regra_revisao(regra, 'obrigatorio'))
+        prova = bool(_valor_regra_revisao(regra, 'prova_avanco', False))
+        if origem == 'padrao_portal' and obrigatorio and not prova:
+            return False
+        if _regra_fiscal(regra) and not _regra_tem_leitor(regra):
+            return False
+    return True
+
+
+def calcular_elegibilidade_automatica(regras=(), divergencias=()):
+    """Calcula o gate técnico sem confundir ilegibilidade com compatibilidade."""
+
+    return not list(divergencias or ()) and _regras_elegiveis_automatico(regras)
+
+
+def _conferir_regras_adicionais(driver, regras):
+    divergencias = []
+    for regra in regras or ():
+        chave = _valor_regra_revisao(regra, 'chave_semantica', 'campo sem chave')
+        if not _regra_tem_leitor(regra):
+            if _regra_fiscal(regra):
+                divergencias.append(
+                    f'Não consegui conferir o campo contratado "{chave}" na revisão.'
+                )
+            continue
+        texto, erro = _dd_declarativo(
+            driver,
+            _valor_regra_revisao(regra, 'revisao_secao'),
+            _valor_regra_revisao(regra, 'revisao_rotulo'),
+        )
+        if erro:
+            divergencias.append(f'Não consegui conferir o campo contratado "{chave}" na revisão: {erro}.')
+            continue
+        esperado = _esperado_regra_revisao(regra)
+        if esperado is not None and not _comparar_revisao_declarativa(
+            texto, esperado, _valor_regra_revisao(regra, 'tipo')
+        ):
+            divergencias.append(
+                f'O campo contratado "{chave}" diverge na revisão.'
+            )
+    return divergencias
 
 
 def _so_digitos(texto):
@@ -1033,7 +1172,9 @@ def _comparavel(texto):
     return ' '.join(_sem_acento(texto).casefold().split())
 
 
-def conferir_revisao(driver, documento, valor, descricao):
+def conferir_revisao(
+    driver, documento, valor, descricao, regras_adicionais=()
+):
     """Rele a tela de revisao e devolve as divergencias encontradas.
 
     Lista vazia significa "confere". Qualquer item na lista significa NAO
@@ -1068,7 +1209,11 @@ def conferir_revisao(driver, documento, valor, descricao):
             f'A descricao na tela nao e a esperada ("{descricao}"). '
             'Confira principalmente a competencia.')
 
-    return divergencias
+    divergencias.extend(_conferir_regras_adicionais(driver, regras_adicionais))
+    return ResultadoAutorrevisao(
+        divergencias,
+        calcular_elegibilidade_automatica(regras_adicionais, divergencias),
+    )
 
 
 def emitir(driver, timeout=None):
