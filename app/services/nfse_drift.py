@@ -162,6 +162,11 @@ def _opcoes_canonicas(campo: CampoComparavel) -> tuple[tuple[str, str], ...]:
 
 
 def _mesma_opcao(campo_a: CampoComparavel, campo_b: CampoComparavel) -> bool:
+    # Selects cuja lista é carregada pelo portal não têm catálogo inicial no
+    # contrato. Sem uma declaração esperada, não há base segura para acusar
+    # alteração; opções explicitamente contratadas continuam sendo comparadas.
+    if not campo_a.opcoes:
+        return True
     return _opcoes_canonicas(campo_a) == _opcoes_canonicas(campo_b)
 
 

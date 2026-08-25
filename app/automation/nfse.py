@@ -237,6 +237,11 @@ def _separar_pausa_contrato(pausa, contrato):
     return pausa, contrato
 
 
+def _observar_fronteira(observar, driver, etapa, momento):
+    if observar is not None:
+        observar(driver, etapa, momento)
+
+
 def _visivel(elemento):
     try:
         return bool(elemento.is_displayed() and elemento.is_enabled())
@@ -876,6 +881,7 @@ def preencher_etapa_pessoas(
     campo_inscricao = _campo_contrato(contrato, CHAVE_INSCRICAO_TOMADOR)
     campo_nome = _campo_contrato(contrato, CHAVE_NOME_TOMADOR)
 
+    _observar_fronteira(observar, driver, 'pessoas', 'entrada')
     _preencher(driver, campo_data.seletor, formatar_data(data_competencia))
 
     # O portal so carrega o emitente depois que a data sai do foco, e os campos
@@ -894,6 +900,7 @@ def preencher_etapa_pessoas(
     # Marcar "Brasil" e o que REVELA os campos do tomador; o _preencher abaixo
     # ja espera o CNPJ ficar interagivel antes de digitar.
     _marcar_radio(driver, campo_domicilio.seletor, '1')
+    _observar_fronteira(observar, driver, 'pessoas', 'dependencias')
     _preencher(driver, campo_inscricao.seletor, nota.documento)
 
     # mesma logica: o nome/endereco do tomador vem do portal apos o documento
@@ -903,7 +910,9 @@ def preencher_etapa_pessoas(
             'Confira se esta correto e ativo na Receita.')
     if pausa:
         pausa()
+    _observar_fronteira(observar, driver, 'pessoas', 'pre_avancar')
     _avancar(driver)
+    _observar_fronteira(observar, driver, 'pessoas', 'pos_avancar')
 
 
 def preencher_etapa_servico(
@@ -921,6 +930,7 @@ def preencher_etapa_servico(
     campo_descricao = _campo_contrato(contrato, CHAVE_DESCRICAO_SERVICO)
     campo_nbs = _campo_contrato(contrato, CHAVE_ITEM_NBS)
 
+    _observar_fronteira(observar, driver, 'servico', 'entrada')
     # Estes dois buscam as opções no servidor conforme se digita; o item da NBS
     # abaixo ja vem com a lista inteira carregada e usa a via direta.
     _selecionar_com_busca(driver, campo_municipio.seletor,
@@ -931,11 +941,14 @@ def preencher_etapa_servico(
     # "Nao" para imunidade/exportacao: ja e o default, mas marcar explicitamente
     # evita depender de o portal manter esse default.
     _marcar_radio(driver, campo_exportacao.seletor, '0')
+    _observar_fronteira(observar, driver, 'servico', 'dependencias')
     _preencher(driver, campo_descricao.seletor, descricao)
     _selecionar(driver, campo_nbs.seletor, config.item_nbs)
     if pausa:
         pausa()
+    _observar_fronteira(observar, driver, 'servico', 'pre_avancar')
     _avancar(driver)
+    _observar_fronteira(observar, driver, 'servico', 'pos_avancar')
 
 
 def preencher_etapa_tributacao(
@@ -953,6 +966,7 @@ def preencher_etapa_tributacao(
     campo_situacao = _campo_contrato(contrato, CHAVE_PISCOFINS_SITUACAO)
     campo_piscofins = _campo_contrato(contrato, CHAVE_PISCOFINS_RETENCAO)
 
+    _observar_fronteira(observar, driver, 'tributacao', 'entrada')
     _preencher(driver, campo_valor.seletor, formatar_valor(nota.valor_final))
     _marcar_radio(driver, campo_retencao.seletor, '0')  # Não
     _selecionar(driver, campo_situacao.seletor,
@@ -961,7 +975,9 @@ def preencher_etapa_tributacao(
                 config.piscofins_tipo_retencao)
     if pausa:
         pausa()
+    _observar_fronteira(observar, driver, 'tributacao', 'pre_avancar')
     _avancar(driver)
+    _observar_fronteira(observar, driver, 'tributacao', 'pos_avancar')
 
 
 

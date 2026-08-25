@@ -7,6 +7,7 @@ quebra antes de qualquer nota fiscal errada sair.
 """
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -85,6 +86,141 @@ def test_preenche_as_tres_etapas_e_para_na_revisao(ambiente):
     assert aut.preencher_etapa_tributacao.called
     assert resultado['status'] == 'aguardando_confirmacao'
     assert db.session.get(NotaNfse, nota.id).status == StatusNotaNfse.AGUARDANDO_CONFIRMACAO
+
+
+def test_preenchimento_carrega_contrato_fixado_uma_vez(ambiente, monkeypatch):
+    contrato = nfse_service.nfse_contrato.contrato_inicial_execucao()
+    carregar = MagicMock(return_value=contrato)
+    monkeypatch.setattr(nfse_service.nfse_contrato, 'carregar_execucao', carregar)
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(
+        nota.id,
+        hoje=date(2026, 7, 28),
+        contrato_id=71,
+    )
+
+    assert resultado['status'] == 'aguardando_confirmacao'
+    carregar.assert_called_once_with(71)
+    assert ambiente['automacao'].preencher_etapa_pessoas.call_args.kwargs['contrato'] is contrato
+    assert ambiente['automacao'].preencher_etapa_servico.call_args.kwargs['contrato'] is contrato
+    assert ambiente['automacao'].preencher_etapa_tributacao.call_args.kwargs['contrato'] is contrato
+
+
+def test_aviso_de_recon_aparece_no_resultado_assistido(ambiente, monkeypatch):
+    def observar(*args, **kwargs):
+        if args[2:] == ('pessoas', 'entrada'):
+            return {
+                'estado': 'aviso',
+                'etapa': 'pessoas',
+                'momento': 'entrada',
+                'aviso': True,
+            }
+        return {'estado': 'observada'}
+
+    monkeypatch.setattr(
+        nfse_service,
+        '_observar_fronteira_contrato',
+        observar,
+    )
+
+    def observar_entrada(*args, **kwargs):
+        kwargs['observar'](args[0], 'pessoas', 'entrada')
+
+    ambiente['automacao'].preencher_etapa_pessoas.side_effect = observar_entrada
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(nota.id, hoje=date(2026, 7, 28))
+
+    assert resultado['status'] == 'aguardando_confirmacao'
+    assert resultado['avisos_recon'] == [
+        {'etapa': 'pessoas', 'momento': 'entrada'}
+    ]
+
+
+def test_drift_incompativel_pausa_lote_e_nao_faz_captura_bruta(ambiente, monkeypatch):
+    artefato = MagicMock()
+    monkeypatch.setattr(nfse_service, 'salvar_artefato_sanitizado', artefato)
+    erro = nfse_service.NfseDriftError(
+        'Contrato sintético divergente.',
+        html_seguro='<!doctype html><p>Estrutura sintética</p>',
+    )
+
+    def falhar_na_fronteira(*args, **kwargs):
+        kwargs['observar'](args[0], 'pessoas', 'entrada')
+
+    monkeypatch.setattr(
+        nfse_service,
+        '_observar_fronteira_contrato',
+        MagicMock(side_effect=erro),
+    )
+    ambiente['automacao'].preencher_etapa_pessoas.side_effect = falhar_na_fronteira
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(nota.id, hoje=date(2026, 7, 28))
+
+    assert resultado['status'] == 'error'
+    assert resultado['pausar_lote'] is True
+    assert resultado['message'] == 'Contrato sintético divergente.'
+    artefato.assert_called_once()
+    nfse_service.capturar_contexto_falha.assert_not_called()
+
+
+def test_falha_antes_da_observacao_nao_cria_incidente(ambiente, monkeypatch):
+    inventariar = MagicMock()
+    registrar = MagicMock()
+    monkeypatch.setattr(nfse_service.nfse_recon, 'inventariar', inventariar)
+    monkeypatch.setattr(nfse_service.nfse_contrato, 'registrar_incidentes', registrar)
+    ambiente['automacao'].preencher_etapa_pessoas.side_effect = RuntimeError(
+        'sessão sintética indisponível'
+    )
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(nota.id, hoje=date(2026, 7, 28))
+
+    assert resultado['status'] == 'error'
+    inventariar.assert_not_called()
+    registrar.assert_not_called()
+    nfse_service.capturar_contexto_falha.assert_called_once()
+
+
+def test_rejeicao_de_avancar_salva_validacao_sanitizada(ambiente, monkeypatch):
+    contrato = SimpleNamespace(contrato_id=71, campos=())
+    carregar = MagicMock(return_value=contrato)
+    artefato = MagicMock()
+    registrar = MagicMock()
+    monkeypatch.setattr(nfse_service.nfse_contrato, 'carregar_execucao', carregar)
+    monkeypatch.setattr(nfse_service, 'salvar_artefato_sanitizado', artefato)
+    monkeypatch.setattr(nfse_service.nfse_contrato, 'registrar_incidentes', registrar)
+    monkeypatch.setattr(
+        nfse_service,
+        '_observar_fronteira_contrato',
+        lambda *args, **kwargs: {'estado': 'compativel'},
+    )
+    monkeypatch.setattr(
+        nfse_service.nfse_recon,
+        'mensagens_validacao',
+        lambda *_: ['Campo obrigatório', 'Mensagem sem dados preenchidos'],
+    )
+
+    def rejeitar_avanco(*args, **kwargs):
+        kwargs['observar'](args[0], 'pessoas', 'pre_avancar')
+        raise RuntimeError('validação sintética')
+
+    ambiente['automacao'].preencher_etapa_pessoas.side_effect = rejeitar_avanco
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(
+        nota.id,
+        hoje=date(2026, 7, 28),
+        contrato_id=71,
+    )
+
+    assert resultado['status'] == 'error'
+    assert artefato.call_count == 1
+    assert 'Campo obrigatório' in artefato.call_args.args[1]
+    registrar.assert_called_once()
+    carregar.assert_called_once_with(71)
 
 
 def test_NUNCA_clica_no_botao_de_emitir(ambiente):
