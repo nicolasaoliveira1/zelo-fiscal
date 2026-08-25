@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -38,6 +38,10 @@ class CampoContratoDesconhecidoError(ContratoNfseError):
 
 class PersistenciaContratoError(ContratoNfseError):
     """Falha que exige bloqueio conservador do fluxo."""
+
+
+class ConfiguracaoContratoInvalidaError(ValueError):
+    """Dados do operador não pertencem ao catálogo seguro do contrato."""
 
 
 def _campo(
@@ -564,10 +568,376 @@ def registrar_incidentes(contrato_id, resultado, *, agora=None):
     return persistidos
 
 
+def fontes_disponiveis() -> list[dict[str, str | None]]:
+    """Devolve o catálogo fechado de origens aceitas pelo contrato."""
+
+    return [
+        {"origem": "fixo", "fonte": None, "rotulo": "Valor fixo"},
+        {"origem": "nota", "fonte": "documento", "rotulo": "Documento da nota"},
+        {"origem": "nota", "fonte": "valor_final", "rotulo": "Valor final da nota"},
+        {"origem": "nota", "fonte": "descricao", "rotulo": "Descrição da nota"},
+        {"origem": "derivado", "fonte": "data_emissao", "rotulo": "Data de emissão"},
+        {
+            "origem": "derivado",
+            "fonte": "competencia_descricao",
+            "rotulo": "Competência da descrição",
+        },
+        {
+            "origem": "configuracao",
+            "fonte": "regime_apuracao_sn",
+            "rotulo": "Regime de apuração configurado",
+        },
+        {
+            "origem": "configuracao",
+            "fonte": "municipio_servico_codigo",
+            "rotulo": "Código do município configurado",
+        },
+        {
+            "origem": "configuracao",
+            "fonte": "municipio_servico_nome",
+            "rotulo": "Nome do município configurado",
+        },
+        {
+            "origem": "configuracao",
+            "fonte": "codigo_tributacao",
+            "rotulo": "Código de tributação configurado",
+        },
+        {"origem": "configuracao", "fonte": "item_nbs", "rotulo": "Item NBS configurado"},
+        {
+            "origem": "configuracao",
+            "fonte": "piscofins_situacao",
+            "rotulo": "Situação PIS/COFINS configurada",
+        },
+        {
+            "origem": "configuracao",
+            "fonte": "piscofins_tipo_retencao",
+            "rotulo": "Tipo de retenção configurado",
+        },
+        {"origem": "padrao_portal", "fonte": None, "rotulo": "Manter padrão do portal"},
+        {"origem": "intocavel", "fonte": None, "rotulo": "Não tocar no campo"},
+    ]
+
+
+def _valor_regra(regra: Any, chave: str, padrao=None):
+    if isinstance(regra, Mapping):
+        return regra.get(chave, padrao)
+    if isinstance(regra, (CampoExecucaoNfse, CampoContratoNfse)):
+        valores = {
+            "origem": regra.origem,
+            "fonte": regra.fonte,
+            "valor_fixo": regra.valor_fixo,
+        }
+        return valores.get(chave, padrao)
+    raise ConfiguracaoContratoInvalidaError("regra de contrato inválida")
+
+
+def _nota_documento(nota, _config, _hoje):
+    return nota.documento
+
+
+def _nota_valor(nota, _config, _hoje):
+    return nota.valor_final
+
+
+def _nota_descricao(nota, config, _hoje):
+    from app.services import nfse_config
+
+    return nfse_config.descricao_da_nota(config, nota)
+
+
+def _nota_competencia(nota, _config, _hoje):
+    return nota.competencia
+
+
+def _config_regime(_nota, config, _hoje):
+    return config.regime_apuracao_sn
+
+
+def _config_municipio_codigo(_nota, config, _hoje):
+    return config.municipio_servico_codigo
+
+
+def _config_municipio_nome(_nota, config, _hoje):
+    return config.municipio_servico_nome
+
+
+def _config_tributacao(_nota, config, _hoje):
+    return config.codigo_tributacao
+
+
+def _config_nbs(_nota, config, _hoje):
+    return config.item_nbs
+
+
+def _config_piscofins_situacao(_nota, config, _hoje):
+    return config.piscofins_situacao
+
+
+def _config_piscofins_retencao(_nota, config, _hoje):
+    return config.piscofins_tipo_retencao
+
+
+_RESOLVEDORES_FONTES = {
+    "nota": {
+        "documento": _nota_documento,
+        "valor_final": _nota_valor,
+        "descricao": _nota_descricao,
+    },
+    "derivado": {
+        "data_emissao": lambda _nota, _config, hoje: hoje,
+        "competencia_descricao": _nota_competencia,
+    },
+    "configuracao": {
+        "regime_apuracao_sn": _config_regime,
+        "municipio_servico_codigo": _config_municipio_codigo,
+        "municipio_servico_nome": _config_municipio_nome,
+        "codigo_tributacao": _config_tributacao,
+        "item_nbs": _config_nbs,
+        "piscofins_situacao": _config_piscofins_situacao,
+        "piscofins_tipo_retencao": _config_piscofins_retencao,
+    },
+}
+
+
+def _catalogo_tem(origem: str, fonte: str | None) -> bool:
+    return any(
+        item["origem"] == origem and item["fonte"] == fonte
+        for item in fontes_disponiveis()
+    )
+
+
+def resolver_valor(regra, nota, config, hoje):
+    """Resolve uma fonte do catálogo sem executar código configurável."""
+
+    origem = _valor_regra(regra, "origem")
+    fonte = _valor_regra(regra, "fonte")
+    if origem == "fixo":
+        valor = _valor_regra(regra, "valor_fixo")
+        if valor is None or not str(valor).strip():
+            raise ConfiguracaoContratoInvalidaError(
+                "origem fixa exige um valor"
+            )
+        if len(str(valor)) > 500:
+            raise ConfiguracaoContratoInvalidaError(
+                "valor fixo excede o limite permitido"
+            )
+        return valor
+    if origem in {"padrao_portal", "intocavel"} and fonte is None:
+        return None
+    resolveres = _RESOLVEDORES_FONTES.get(origem, {})
+    resolver = resolveres.get(fonte)
+    if resolver is None:
+        raise ConfiguracaoContratoInvalidaError(
+            "origem ou fonte não pertence ao catálogo seguro"
+        )
+    return resolver(nota, config, hoje)
+
+
+def _copiar_campo(campo):
+    copia = CampoContratoNfse(
+        chave_semantica=campo.chave_semantica,
+        etapa=campo.etapa,
+        seletor_tipo=campo.seletor_tipo,
+        seletor=campo.seletor,
+        rotulo=campo.rotulo,
+        tipo=campo.tipo,
+        interacao=campo.interacao,
+        obrigatorio=campo.obrigatorio,
+        ordem=campo.ordem,
+        condicao_chave=campo.condicao_chave,
+        condicao_valor=campo.condicao_valor,
+        origem=campo.origem,
+        fonte=campo.fonte,
+        valor_fixo=campo.valor_fixo,
+        revisao_secao=campo.revisao_secao,
+        revisao_rotulo=campo.revisao_rotulo,
+        conferivel_automatico=campo.conferivel_automatico,
+    )
+    copia.opcoes.extend(
+        OpcaoCampoContratoNfse(
+            valor=opcao.valor,
+            rotulo=opcao.rotulo,
+            ordem=opcao.ordem,
+        )
+        for opcao in campo.opcoes
+    )
+    return copia
+
+
+def _campo_do_incidente(incidente, campos):
+    chave = incidente.chave_observada or incidente.chave_esperada
+    return next((campo for campo in campos if campo.chave_semantica == chave), None)
+
+
+def _novo_campo_do_incidente(incidente, origem, fonte, valor_fixo, ordem):
+    chave = incidente.chave_observada or incidente.chave_esperada
+    if not chave:
+        raise ConfiguracaoContratoInvalidaError(
+            "o incidente não possui identidade de campo configurável"
+        )
+    campo = CampoContratoNfse(
+        chave_semantica=chave,
+        etapa=incidente.etapa,
+        seletor_tipo="name",
+        seletor=chave,
+        rotulo=incidente.rotulo or chave,
+        tipo=incidente.tipo_controle or "text",
+        interacao=incidente.interacao or "texto",
+        obrigatorio=bool(incidente.obrigatorio),
+        ordem=ordem,
+        origem=origem,
+        fonte=fonte,
+        valor_fixo=valor_fixo,
+        conferivel_automatico=False,
+    )
+    campo.opcoes.extend(
+        OpcaoCampoContratoNfse(
+            valor=opcao.valor,
+            rotulo=opcao.rotulo,
+            ordem=opcao.ordem,
+        )
+        for opcao in incidente.opcoes
+    )
+    return campo
+
+
+def _fingerprint_contrato(campos) -> str:
+    forma = []
+    for campo in sorted(campos, key=lambda item: item.chave_semantica):
+        forma.append(
+            {
+                "chave": campo.chave_semantica,
+                "etapa": campo.etapa,
+                "seletor_tipo": campo.seletor_tipo,
+                "seletor": campo.seletor,
+                "rotulo": campo.rotulo,
+                "tipo": campo.tipo,
+                "interacao": campo.interacao,
+                "obrigatorio": bool(campo.obrigatorio),
+                "origem": campo.origem,
+                "fonte": campo.fonte,
+                "valor_fixo": campo.valor_fixo,
+                "opcoes": sorted((opcao.valor, opcao.rotulo) for opcao in campo.opcoes),
+            }
+        )
+    texto = json.dumps(forma, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(texto.encode("utf-8")).hexdigest()
+
+
+def _validar_configuracao(incidente, dados):
+    if not isinstance(dados, Mapping):
+        raise ConfiguracaoContratoInvalidaError("dados de configuração inválidos")
+    permitidos = {"origem", "fonte", "valor_fixo"}
+    if set(dados) - permitidos:
+        raise ConfiguracaoContratoInvalidaError(
+            "a configuração contém campos não permitidos"
+        )
+    origem = str(dados.get("origem") or "")
+    fonte = dados.get("fonte")
+    fonte = str(fonte) if fonte is not None else None
+    valor_fixo = dados.get("valor_fixo")
+    if valor_fixo is not None:
+        valor_fixo = str(valor_fixo)
+    if not _catalogo_tem(origem, fonte):
+        raise ConfiguracaoContratoInvalidaError(
+            "origem ou fonte não pertence ao catálogo seguro"
+        )
+    if origem == "fixo":
+        if valor_fixo is None or not valor_fixo.strip():
+            raise ConfiguracaoContratoInvalidaError("origem fixa exige um valor")
+        if len(valor_fixo) > 500:
+            raise ConfiguracaoContratoInvalidaError(
+                "valor fixo excede o limite permitido"
+            )
+        valores_opcoes = {opcao.valor for opcao in incidente.opcoes}
+        if valores_opcoes and valor_fixo not in valores_opcoes:
+            raise ConfiguracaoContratoInvalidaError(
+                "o valor fixo não pertence às opções observadas"
+            )
+    elif valor_fixo is not None:
+        raise ConfiguracaoContratoInvalidaError(
+            "valor fixo só pode ser usado com a origem fixa"
+        )
+    return origem, fonte, valor_fixo
+
+
+def _auditar_configuracao(candidato, incidente, usuario_id):
+    try:
+        auditoria.registrar(
+            "nfse.contrato.configurar",
+            alvo_tipo="contrato_nfse",
+            alvo_id=candidato.id,
+            detalhe=(
+                f"incidente_id={incidente.id};usuario_id={usuario_id};"
+                f"contrato_id={candidato.id}"
+            ),
+        )
+    except Exception as exc:
+        log_event(
+            "nfse_contrato_auditoria_falhou",
+            level="WARNING",
+            contrato_id=candidato.id,
+            incidente_id=incidente.id,
+            error_type=type(exc).__name__,
+        )
+
+
+def configurar_incidente(incidente_id, dados, usuario_id=None) -> ContratoNfse:
+    """Cria uma candidata a partir de um incidente, sem alterar o ativo."""
+
+    incidente = db.session.get(IncidenteContratoNfse, incidente_id)
+    if incidente is None:
+        raise ContratoNfseNaoEncontradoError("o incidente solicitado não existe")
+    origem, fonte, valor_fixo = _validar_configuracao(incidente, dados)
+    ativo = _contrato_com_campos(contrato_ativo().id)
+    if ativo is None:
+        raise ContratoNfseNaoEncontradoError("não há contrato ativo para copiar")
+
+    agora = utcnow_naive()
+    campos = [_copiar_campo(campo) for campo in ativo.campos]
+    campo_alvo = _campo_do_incidente(incidente, campos)
+    if campo_alvo is None:
+        proxima_ordem = max((campo.ordem for campo in campos), default=-1) + 1
+        campo_alvo = _novo_campo_do_incidente(
+            incidente, origem, fonte, valor_fixo, proxima_ordem
+        )
+        campos.append(campo_alvo)
+    else:
+        campo_alvo.origem = origem
+        campo_alvo.fonte = fonte
+        campo_alvo.valor_fixo = valor_fixo
+
+    maior_versao = db.session.query(db.func.max(ContratoNfse.versao)).scalar() or 0
+    candidato = ContratoNfse(
+        versao=maior_versao + 1,
+        estado="candidata",
+        fingerprint=_fingerprint_contrato(campos),
+        elegivel_automatico=False,
+        criado_em=agora,
+        criado_por_id=usuario_id,
+        erro_validacao=(
+            "aguarda prova assistida de avanço"
+            if incidente.obrigatorio and origem in {"padrao_portal", "intocavel"}
+            else None
+        ),
+    )
+    candidato.campos.extend(campos)
+    incidente.contrato_candidato = candidato
+    incidente.estado = "configurado"
+    db.session.add(candidato)
+    try:
+        db.session.commit()
+    except Exception as exc:
+        _persistencia_falhou("configurar_incidente_nfse", exc)
+    _auditar_configuracao(candidato, incidente, usuario_id)
+    return candidato
+
+
 __all__ = [
     "CONTRATO_INICIAL",
     "CampoContratoDesconhecidoError",
     "CampoExecucaoNfse",
+    "ConfiguracaoContratoInvalidaError",
     "ContratoExecucaoNfse",
     "ContratoNfseError",
     "ContratoNfseNaoEncontradoError",
@@ -575,6 +945,9 @@ __all__ = [
     "PersistenciaContratoError",
     "carregar_execucao",
     "contrato_ativo",
+    "configurar_incidente",
+    "fontes_disponiveis",
     "garantir_contrato_inicial",
     "registrar_incidentes",
+    "resolver_valor",
 ]
