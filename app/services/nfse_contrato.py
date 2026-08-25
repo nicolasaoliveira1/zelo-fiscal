@@ -48,6 +48,10 @@ class ContratoNfseNaoElegivelError(ContratoNfseError):
     """A versão não pode conduzir o modo automático."""
 
 
+class ContratoNfseTransicaoInvalidaError(ContratoNfseError):
+    """A versão não está pronta para a transição solicitada."""
+
+
 def _campo(
     chave_semantica,
     etapa,
@@ -1060,6 +1064,68 @@ def registrar_validacao(
     return contrato
 
 
+def ativar(contrato_id, usuario_id=None, *, agora=None):
+    """Promove uma versão validada e resolve somente seus incidentes."""
+
+    candidato = (
+        ContratoNfse.query
+        .filter(ContratoNfse.id == contrato_id)
+        .with_for_update()
+        .first()
+    )
+    if candidato is None:
+        raise ContratoNfseNaoEncontradoError(
+            "a versão de contrato solicitada não existe"
+        )
+    if candidato.estado != "validada":
+        raise ContratoNfseTransicaoInvalidaError(
+            "a versão precisa ser validada antes da ativação"
+        )
+    ativo = (
+        ContratoNfse.query
+        .filter(ContratoNfse.estado == "ativa")
+        .order_by(ContratoNfse.versao.desc())
+        .with_for_update()
+        .first()
+    )
+    agora = agora or utcnow_naive()
+    if ativo is not None:
+        ativo.estado = "arquivada"
+    candidato.estado = "ativa"
+    candidato.ativado_em = agora
+    candidato.ativado_por_id = usuario_id
+    incidentes = IncidenteContratoNfse.query.filter_by(
+        contrato_candidato_id=contrato_id,
+        estado="configurado",
+    ).all()
+    for incidente in incidentes:
+        incidente.estado = "resolvido"
+        incidente.resolvido_em = agora
+        incidente.resolvido_por_id = usuario_id
+    try:
+        db.session.commit()
+    except Exception as exc:
+        _persistencia_falhou("ativar_contrato_nfse", exc)
+    try:
+        auditoria.registrar(
+            "nfse.contrato.ativar",
+            alvo_tipo="contrato_nfse",
+            alvo_id=candidato.id,
+            detalhe=(
+                f"contrato_id={candidato.id};usuario_id={usuario_id};"
+                f"incidentes_resolvidos={len(incidentes)}"
+            ),
+        )
+    except Exception as exc:
+        log_event(
+            "nfse_contrato_auditoria_falhou",
+            level="WARNING",
+            contrato_id=candidato.id,
+            error_type=type(exc).__name__,
+        )
+    return candidato
+
+
 def _data_iso(valor):
     return valor.isoformat() if valor is not None else None
 
@@ -1168,6 +1234,7 @@ __all__ = [
     "CampoExecucaoNfse",
     "ConfiguracaoContratoInvalidaError",
     "ContratoNfseNaoElegivelError",
+    "ContratoNfseTransicaoInvalidaError",
     "ContratoExecucaoNfse",
     "ContratoNfseError",
     "ContratoNfseNaoEncontradoError",
@@ -1177,6 +1244,7 @@ __all__ = [
     "contrato_ativo",
     "configurar_incidente",
     "contrato_inicial_execucao",
+    "ativar",
     "detalhe_contrato",
     "estado_painel",
     "fontes_disponiveis",

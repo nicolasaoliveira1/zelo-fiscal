@@ -25,7 +25,9 @@ from app.models import (
 from app.automation.batch_state import (
     NFSE_BATCH_LOCK,
     NFSE_BATCH_STATE,
+    automacao_em_curso,
     definir_nfse_batch_opcoes,
+    nfse_batch_opcoes,
 )
 from app.routes import _current_app_object, bp
 from app.automation import nfse_emitidas as automacao_emitidas
@@ -141,6 +143,131 @@ def nfse_contrato_configurar(incidente_id):
         'status': 'ok',
         'incidente_id': incidente_id,
         'contrato': nfse_contrato.detalhe_contrato(candidato.id),
+    }
+
+
+def _validacao_propria_na_revisao(contrato_id):
+    opcoes = nfse_batch_opcoes()
+    if opcoes.get('validacao_contrato_id') != contrato_id:
+        return False
+    with NFSE_BATCH_LOCK:
+        if NFSE_BATCH_STATE.get('status') not in ('running', 'paused'):
+            return False
+        nota_id = NFSE_BATCH_STATE.get('current_id')
+    nota = db.session.get(NotaNfse, nota_id) if nota_id else None
+    return nota is not None and nota.status == StatusNotaNfse.AGUARDANDO_CONFIRMACAO
+
+
+@bp.route('/nfse/contrato/<int:contrato_id>/validar', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_validar(contrato_id):
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return json_error('Escolha uma nota para validar o contrato.', 400, campo='nota_id')
+    extras = set(dados) - {'nota_id'}
+    if extras:
+        return json_error(
+            'A validação aceita somente nota_id.',
+            400,
+            campo=sorted(extras)[0],
+        )
+    nota_id = dados.get('nota_id')
+    if isinstance(nota_id, bool) or not isinstance(nota_id, int) or nota_id <= 0:
+        return json_error('Escolha uma nota emitível.', 400, campo='nota_id')
+
+    candidato = db.session.get(nfse_contrato.ContratoNfse, contrato_id)
+    if candidato is None:
+        return json_error('A versão candidata não existe.', 404)
+    if candidato.estado != 'candidata':
+        return json_error(
+            'A versão precisa estar no estado candidata para ser validada.',
+            409,
+        )
+    try:
+        nfse_lote.validar_nota_para_validacao(nota_id)
+    except ValueError as exc:
+        return json_error(str(exc), 400, campo='nota_id')
+
+    em_curso = automacao_em_curso()
+    if em_curso is not None:
+        return json_error(
+            'Já existe uma automação em andamento. Aguarde terminar.',
+            409,
+            motivo='automacao_em_curso',
+        )
+    if not SESSAO.adquirir():
+        return json_error(
+            'Já existe uma sessão da NFS-e em andamento. Aguarde terminar.',
+            409,
+        )
+    with NFSE_BATCH_LOCK:
+        em_andamento = NFSE_BATCH_STATE.get('status') in ('running', 'paused')
+    if em_andamento:
+        SESSAO.liberar()
+        return json_error('Já existe um lote de NFS-e em andamento.', 409)
+
+    definir_nfse_batch_opcoes(
+        nfse_lote.MODO_INDIVIDUAL,
+        False,
+        contrato_id=contrato_id,
+        validacao_contrato_id=contrato_id,
+    )
+    nfse_lote.preparar_nova_fila()
+    try:
+        dados_lote = batch_engine.init_batch_run(
+            NFSE_BATCH_LOCK,
+            NFSE_BATCH_STATE,
+            nota_id,
+            lambda inicio: nfse_lote.calcular_alvos(nota_id=inicio),
+            nfse_lote.worker,
+            app_factory=_current_app_object,
+        )
+    except Exception as exc:
+        SESSAO.liberar()
+        return json_error(exc=exc, code=500)
+    if dados_lote is None:
+        SESSAO.liberar()
+        return json_error('Já existe um lote de NFS-e em andamento.', 409)
+    if not dados_lote:
+        SESSAO.liberar()
+        return json_error('A nota escolhida não está mais emitível.', 400, campo='nota_id')
+    return {
+        'status': 'ok',
+        'modo': nfse_lote.MODO_INDIVIDUAL,
+        'contrato_id': contrato_id,
+        'nota_id': nota_id,
+        'total': dados_lote['total'],
+    }
+
+
+@bp.route('/nfse/contrato/<int:contrato_id>/ativar', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_ativar(contrato_id):
+    em_curso = automacao_em_curso()
+    propria_validacao = _validacao_propria_na_revisao(contrato_id)
+    if em_curso is not None and not propria_validacao:
+        return json_error(
+            f"A automação {em_curso['rotulo']} ainda está em andamento.",
+            409,
+            motivo='automacao_em_curso',
+        )
+    if SESSAO.ocupada and not propria_validacao:
+        return json_error(
+            'A sessão da NFS-e está ocupada por outra execução.',
+            409,
+            motivo='sessao_ocupada',
+        )
+    try:
+        contrato = nfse_contrato.ativar(contrato_id, usuario_id=current_user.id)
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+        return json_error(str(exc), 409)
+    except nfse_contrato.PersistenciaContratoError as exc:
+        return json_error(str(exc), 500)
+    return {
+        'status': 'ok',
+        'contrato': nfse_contrato.detalhe_contrato(contrato.id),
     }
 
 
@@ -1141,6 +1268,14 @@ def nfse_lote_iniciar():
         return json_error(str(exc), 409, motivo='aliquota_nao_confirmada',
                           aliquota=SESSAO.aliquota)
 
+    try:
+        contrato = nfse_lote.validar_contrato_para_modo(modo)
+        contrato = contrato or nfse_contrato.contrato_ativo()
+    except nfse_contrato.ContratoNfseNaoElegivelError as exc:
+        return json_error(str(exc), 409, motivo='contrato_nfse_nao_elegivel')
+    except ValueError as exc:
+        return json_error(str(exc), 400, campo='modo')
+
     # Toma a sessao aqui e nao no worker para que "ja tem emissao rodando" seja
     # decidido antes de qualquer thread nascer. Quem devolve o lock e o
     # `on_teardown` do worker (ou os caminhos de erro logo abaixo).
@@ -1159,7 +1294,11 @@ def nfse_lote_iniciar():
         SESSAO.liberar()
         return json_error('Ja existe um lote de NFSe em andamento.', 409)
 
-    definir_nfse_batch_opcoes(modo, ignorar_aliquota)
+    definir_nfse_batch_opcoes(
+        modo,
+        ignorar_aliquota,
+        contrato_id=contrato.id,
+    )
     nfse_lote.preparar_nova_fila()
 
     # a fila e o que a pagina mostra, nao "o ultimo lote": com um mes filtrado
