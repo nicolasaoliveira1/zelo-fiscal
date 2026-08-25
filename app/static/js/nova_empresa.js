@@ -1,10 +1,31 @@
+// @ts-check
+
 // Buscar dados da Receita na tela de nova empresa (spec 08, DATA-01.3).
 //
 // A consulta acontece ANTES de salvar, de proposito: o operador ve o que veio e
 // corrige se precisar. O POST de cadastro nunca toca a rede (DATA-01.4).
 import { showToast } from './toasts.js';
 import { marcarInvalido, validar } from './campos.js';
+import { digito_verificador_ok } from './validacao_cnpj.js';
 
+/**
+ * Campos relevantes devolvidos pela consulta da Receita.
+ *
+ * @typedef {Object} DadosReceita
+ * @property {string=} nome
+ * @property {string=} estado
+ * @property {string=} cidade
+ * @property {string=} razao_social
+ * @property {string=} nome_fantasia
+ * @property {string=} situacao
+ * @property {string=} logradouro
+ * @property {string=} bairro
+ * @property {string=} cep
+ * @property {string=} cnae_descricao
+ * @property {boolean=} ativa
+ */
+
+/** @type {Array<[string, keyof DadosReceita]>} */
 const CAMPOS_PREVIA = [
     ['Razão social', 'razao_social'],
     ['Nome fantasia', 'nome_fantasia'],
@@ -15,6 +36,11 @@ const CAMPOS_PREVIA = [
     ['Atividade', 'cnae_descricao'],
 ];
 
+/**
+ * @param {HTMLInputElement | null} elemento
+ * @param {string | undefined} valor
+ * @returns {boolean}
+ */
 function preencherSeVazio(elemento, valor) {
     // Nunca sobrescreve o que o operador ja digitou — mesma regra do backend
     // (DATA-01.9): campo preenchido e decisao dele, nao da API.
@@ -24,10 +50,15 @@ function preencherSeVazio(elemento, valor) {
     return true;
 }
 
+/**
+ * @param {HTMLSelectElement | null} select
+ * @param {string | undefined} valor
+ * @returns {boolean}
+ */
 function selecionarOpcao(select, valor) {
     if (!select || !valor) return false;
     const alvo = String(valor).trim().toUpperCase();
-    for (const opcao of select.options) {
+    for (const opcao of Array.from(select.options)) {
         const texto = (opcao.textContent || '').trim().toUpperCase();
         if (opcao.value.trim().toUpperCase() === alvo || texto === alvo) {
             select.value = opcao.value;
@@ -38,6 +69,11 @@ function selecionarOpcao(select, valor) {
     return false;
 }
 
+/**
+ * @param {HTMLElement} caixa
+ * @param {DadosReceita} dados
+ * @returns {void}
+ */
 function renderizarPrevia(caixa, dados) {
     const linhas = CAMPOS_PREVIA
         .filter(([, chave]) => dados[chave])
@@ -47,7 +83,7 @@ function renderizarPrevia(caixa, dados) {
             dt.textContent = rotulo;
             const dd = document.createElement('dd');
             dd.className = 'col-7 col-sm-8 mb-1';
-            dd.textContent = dados[chave];
+            dd.textContent = String(dados[chave]);
             return [dt, dd];
         });
 
@@ -71,8 +107,15 @@ function renderizarPrevia(caixa, dados) {
     caixa.classList.remove('d-none');
 }
 
+/**
+ * Consulta a Receita e preenche apenas campos vazios da tela.
+ *
+ * @param {HTMLButtonElement} botao
+ * @param {HTMLElement} previa
+ * @returns {Promise<void>}
+ */
 async function buscarDados(botao, previa) {
-    const campoCnpj = document.getElementById('cnpj');
+    const campoCnpj = /** @type {HTMLInputElement | null} */ (document.getElementById('cnpj'));
     const cnpj = (campoCnpj?.value || '').trim();
     if (!cnpj) {
         // A-20: o erro pertence AO CAMPO. Toast some em 6s e nao diz qual campo.
@@ -101,13 +144,16 @@ async function buscarDados(botao, previa) {
 
         const dados = corpo.dados || {};
         const preenchidos = [];
-        if (preencherSeVazio(document.getElementById('nome'), dados.nome)) {
+        const campoNome = /** @type {HTMLInputElement | null} */ (document.getElementById('nome'));
+        const campoEstado = /** @type {HTMLSelectElement | null} */ (document.getElementById('estado'));
+        const campoCidade = /** @type {HTMLSelectElement | null} */ (document.getElementById('cidade'));
+        if (preencherSeVazio(campoNome, dados.nome)) {
             preenchidos.push('nome');
         }
-        if (selecionarOpcao(document.getElementById('estado'), dados.estado)) {
+        if (selecionarOpcao(campoEstado, dados.estado)) {
             preenchidos.push('estado');
         }
-        if (selecionarOpcao(document.getElementById('cidade'), dados.cidade)) {
+        if (selecionarOpcao(campoCidade, dados.cidade)) {
             preenchidos.push('cidade');
         } else if (dados.cidade) {
             showToast(`A Receita informa a cidade "${dados.cidade}", que não está `
@@ -128,7 +174,8 @@ async function buscarDados(botao, previa) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    const botao = document.getElementById('btn-buscar-receita');
+    const botao = /** @type {HTMLButtonElement | null} */ (
+        document.getElementById('btn-buscar-receita'));
     const previa = document.getElementById('previa-receita');
     if (!botao || !previa) return;
     botao.addEventListener('click', () => buscarDados(botao, previa));
@@ -144,32 +191,16 @@ document.addEventListener('DOMContentLoaded', () => {
    14 dígitos): contar dígitos deixava passar erro de digitação, e é por isso
    que o backend passou a conferir o DV. Cliente e servidor divergirem seria
    pior que não validar — o operador veria "ok" aqui e "inválido" lá. */
-function digitoVerificadorOk(cnpj) {
-    if (cnpj.length !== 14 || /^(\d)\1{13}$/.test(cnpj)) return false;
-    const calcula = (base) => {
-        let peso = base.length - 7;
-        const soma = [...base].reduce((acc, d) => {
-            acc += Number(d) * peso--;
-            if (peso < 2) peso = 9;
-            return acc;
-        }, 0);
-        const resto = soma % 11;
-        return resto < 2 ? 0 : 11 - resto;
-    };
-    const d1 = calcula(cnpj.slice(0, 12));
-    const d2 = calcula(cnpj.slice(0, 12) + d1);
-    return cnpj === cnpj.slice(0, 12) + String(d1) + String(d2);
-}
-
 document.addEventListener('DOMContentLoaded', () => {
-    const form = document.querySelector('form[action*="adicionar"]');
+    const form = /** @type {HTMLFormElement | null} */ (
+        document.querySelector('form[action*="adicionar"]'));
     if (!form) return;
 
     form.addEventListener('submit', (evento) => {
-        const nome = form.querySelector('#nome');
-        const cnpj = form.querySelector('#cnpj');
-        const estado = form.querySelector('#estado');
-        const cidade = form.querySelector('#cidade');
+        const nome = /** @type {HTMLInputElement | null} */ (form.querySelector('#nome'));
+        const cnpj = /** @type {HTMLInputElement | null} */ (form.querySelector('#cnpj'));
+        const estado = /** @type {HTMLSelectElement | null} */ (form.querySelector('#estado'));
+        const cidade = /** @type {HTMLSelectElement | null} */ (form.querySelector('#cidade'));
         const digitos = (cnpj?.value || '').replace(/\D/g, '');
 
         const tudoCerto = validar([
@@ -178,7 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? 'Informe o CNPJ.'
                 : (digitos.length !== 14
                     ? 'O CNPJ precisa ter 14 dígitos.'
-                    : (!digitoVerificadorOk(digitos)
+                    : (!digito_verificador_ok(digitos)
                         ? 'O dígito verificador não confere. Confira a digitação.'
                         : ''))],
             [estado, estado && !estado.value ? 'Escolha o estado.' : ''],

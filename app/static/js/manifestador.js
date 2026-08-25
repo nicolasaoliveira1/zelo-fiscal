@@ -5,6 +5,13 @@
  * composição, não fatos independentes.
  */
 import { showToast as toast } from './toasts.js';
+import {
+  agrupar_arquivos_xml as daEntradaDeArquivos,
+  balanco_vazio as balancoVazio,
+  chave_segmentada as chaveSegmentada,
+  escapar_html as escapar,
+  somar_balanco as somarBalanco,
+} from './manifestador_dados.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -70,6 +77,13 @@ let fontes = [];
 
 // --- rede -------------------------------------------------------------------
 
+/**
+ * Executa uma chamada JSON e converte o envelope de erro em exceção.
+ *
+ * @param {string} url
+ * @param {RequestInit=} opcoes
+ * @returns {Promise<Record<string, unknown>>}
+ */
 async function pedir(url, opcoes) {
   const resposta = await fetch(url, opcoes);
   const dados = await resposta.json().catch(() => ({}));
@@ -89,31 +103,6 @@ const comoJson = (corpo) => ({
 });
 
 // --- a assinatura: chave segmentada pelo significado ------------------------
-
-/* Os 44 dígitos são 9 campos. A segmentação semântica mostra de onde a
- * competência foi derivada — o AAMM sublinhado É a explicação. */
-const CAMPOS_CHAVE = [
-  [0, 2, 'f-cuf'], [2, 6, 'f-aamm'], [6, 20, 'f-cnpj'], [20, 22, 'f-mod'],
-  [22, 25, 'f-serie'], [25, 34, 'f-nnf'], [34, 35, 'f-tp'], [35, 43, 'f-cnf'],
-  [43, 44, 'f-dv'],
-];
-
-function chaveSegmentada(chave) {
-  if (!chave || chave.length !== 44) return escapar(chave || '');
-  return CAMPOS_CHAVE
-    .map(([ini, fim, classe]) => `<span class="${classe}">${chave.slice(ini, fim)}</span>`)
-    .join('');
-}
-
-function escapar(texto) {
-  const no = document.createElement('span');
-  no.textContent = texto ?? '';
-  /* `innerHTML` escapa `<`, `>` e `&`, mas NAO as aspas — e desde a lista de
-   * pastas isto tambem entra dentro de atributo (`title`, `aria-label`), onde
-   * uma aspa no nome fecharia o atributo. Nome de pasta do Windows nao aceita
-   * aspa, mas um vindo de compartilhamento Linux/Mac aceita. */
-  return no.innerHTML.replace(/"/g, '&quot;');
-}
 
 // --- barra de composição (reusa .zl-comp-*) ---------------------------------
 
@@ -431,8 +420,6 @@ async function importarTexto() {
 
 // --- pastas de XML ----------------------------------------------------------
 
-const EH_XML = /\.xml$/i;
-
 /* Nome da fonte para o que nao veio dentro de pasta nenhuma. */
 const AVULSOS = 'Arquivos avulsos';
 
@@ -441,6 +428,7 @@ const AVULSOS = 'Arquivos avulsos';
  * permite mostrar progresso: com 1.200 notas, uma tela parada por dois minutos
  * parece travamento. */
 const POR_ENVIO = 200;
+const EH_XML = /\.xml$/i;
 
 const totalArquivos = () => fontes.reduce((soma, f) => soma + f.itens.length, 0);
 
@@ -491,21 +479,6 @@ function pintarFontes() {
     : 'Importar XML';
 }
 
-function daEntradaDeArquivos(lista) {
-  /* `webkitRelativePath` vem como "PastaEscolhida/sub/nota.xml". O primeiro
-   * segmento e a pasta que o operador escolheu, e e por esse nome que ele
-   * reconhece a fonte na lista — mostrar "nota.xml" nao diz de onde veio. */
-  const grupos = new Map();
-  [...lista].forEach((arquivo) => {
-    if (!EH_XML.test(arquivo.name)) return;
-    const caminho = arquivo.webkitRelativePath || arquivo.name;
-    const raiz = caminho.includes('/') ? caminho.split('/')[0] : AVULSOS;
-    if (!grupos.has(raiz)) grupos.set(raiz, []);
-    grupos.get(raiz).push({ caminho, arquivo });
-  });
-  return grupos;
-}
-
 async function lerEntrada(entrada, prefixo, saida) {
   /* Percurso recursivo do que foi ARRASTADO. Arrastar e o unico caminho que
    * aceita varias pastas de uma vez — o seletor do sistema abre uma so. */
@@ -550,18 +523,6 @@ async function receberSoltos(evento) {
   }
   pintarFontes();
   if (totalArquivos() === antes) toast('Nenhum XML dentro do que você soltou.', 'warning');
-}
-
-const balancoVazio = () => ({
-  total_lidas: 0, aceitas: [], dv_invalido: [], competencia_invalida: [],
-  duplicatas: [], sem_empresa: [], nao_e_nfe: [], fora_do_prazo: [],
-});
-
-function somarBalanco(acumulado, parcial) {
-  acumulado.total_lidas += (parcial || {}).total_lidas || 0;
-  Object.keys(acumulado).forEach((campo) => {
-    if (Array.isArray(acumulado[campo])) acumulado[campo].push(...((parcial || {})[campo] || []));
-  });
 }
 
 function progresso(texto) {

@@ -6,6 +6,17 @@
 
 import { showToast } from './toasts.js';
 
+/**
+ * Resposta JSON das rotas da NFSe. Os campos adicionais variam conforme a
+ * ação; os campos abaixo são os contratos comuns usados pela tela.
+ *
+ * @typedef {Object} RespostaNfse
+ * @property {string=} status
+ * @property {string=} message
+ * @property {string=} motivo
+ * @property {string=} request_id
+ */
+
 const ROTULO_STATUS = {
   pronta: 'Pronta',
   preenchendo: 'Preenchendo…',
@@ -61,6 +72,14 @@ const esc = (texto) => {
   return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 };
 
+/**
+ * Executa uma ação JSON da NFSe e lança erro com o envelope devolvido pelo
+ * servidor quando a resposta não é bem-sucedida.
+ *
+ * @param {string} url
+ * @param {RequestInit=} opcoes
+ * @returns {Promise<RespostaNfse>}
+ */
 async function chamar(url, opcoes = {}) {
   const resposta = await fetch(url, {
     method: 'POST',

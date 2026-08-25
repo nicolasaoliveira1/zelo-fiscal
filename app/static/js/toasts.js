@@ -1,20 +1,31 @@
+// @ts-check
+
 // Sistema de toasts empilhados de Certidões.
 // Extraído de certidoes.js (spec 05, REFA-03) como módulo ES autocontido:
 // mantem seu proprio estado/DOM e expoe apenas showToast. Carrega o elemento
 // #toastStack no import (modulo deferido: DOM ja parseado).
 
+/** @typedef {'success'|'error'|'warning'|'info'} TipoToast */
+/** @typedef {{ el: HTMLElement, timer: number | undefined, leaving: boolean, persistente: boolean }} Toast */
+
 const toastStack = document.getElementById('toastStack');
 
 // ---- Pilha de toasts acumulativos -------------------------------
+/** @type {Toast[]} */
 const toasts = [];          // index 0 = mais novo (na frente)
 let stackHovered = false;
-let leaveTimer = null;
+/** @type {number | undefined} */
+let leaveTimer;
 const PEEK = 10;            // px que cada toast de tras "espia" (recolhido)
 const GAP = 9;             // espaco entre toasts (expandido)
 const MAX_PEEK = 3;        // quantos toasts de tras ficam visiveis recolhidos
 const MAX_TOASTS = 6;      // limite na pilha
 const TOAST_DELAY = 6000;
 
+/**
+ * @param {TipoToast} type
+ * @returns {string}
+ */
 function toastClass(type) {
     const classes = {
         success: 'is-success',
@@ -42,12 +53,13 @@ function reflow() {
             opacidade = i > MAX_PEEK ? 0 : 1;
         }
         t.el.style.transform = `translateY(${y}px) scale(${escala})`;
-        t.el.style.opacity = opacidade;
+        t.el.style.opacity = String(opacidade);
         t.el.style.zIndex = String(1000 - i);
         t.el.style.pointerEvents = opacidade === 0 ? 'none' : 'auto';
     });
 }
 
+/** @param {Toast} t */
 function removeToast(t) {
     if (t.leaving) return;
     t.leaving = true;
@@ -62,6 +74,7 @@ function removeToast(t) {
     }, 350);
 }
 
+/** @param {Toast} t */
 function scheduleDismiss(t) {
     clearTimeout(t.timer);
     if (stackHovered) return;   // nao some enquanto o mouse esta na pilha
@@ -73,6 +86,13 @@ function scheduleDismiss(t) {
     t.timer = setTimeout(() => removeToast(t), TOAST_DELAY);
 }
 
+/**
+ * Exibe uma mensagem na pilha global de toasts.
+ *
+ * @param {string} message
+ * @param {TipoToast} [type='success']
+ * @returns {void}
+ */
 export function showToast(message, type = 'success') {
     if (!toastStack) return;
 
@@ -102,7 +122,7 @@ export function showToast(message, type = 'success') {
     el.style.opacity = '0';
     toastStack.appendChild(el);
 
-    const t = { el, timer: null, leaving: false, persistente: type === 'error' };
+    const t = { el, timer: undefined, leaving: false, persistente: type === 'error' };
     toasts.unshift(t);
     close.addEventListener('click', () => removeToast(t));
 

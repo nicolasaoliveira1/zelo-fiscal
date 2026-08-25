@@ -1,0 +1,18 @@
+{
+  "name": "zelo-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "js:syntax": "node tools/verificar_sintaxe_js.mjs",
+    "js:types": "tsc --project jsconfig.json",
+    "test": "node tools/executar_testes_js.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "30.0.1",
+    "typescript": "5.9.3"
+  }
+}

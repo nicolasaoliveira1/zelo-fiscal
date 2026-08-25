@@ -50,3 +50,30 @@ jobs:
       # banco compartilhado entre eles.
       - name: Testes (pytest, SQLite)
         run: pytest -q -n auto --timeout=120 --timeout-method=thread
+
+  # Gate rápido do frontend: sintaxe, contratos JSDoc e testes sem rede ou
+  # navegador real. Roda em todo PR e em push na main, em paralelo ao Python.
+  testes-javascript:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependências JavaScript
+        run: npm ci
+
+      - name: Verificar sintaxe JavaScript
+        run: npm run js:syntax
+
+      - name: Verificar tipos descritos com JSDoc
+        run: npm run js:types
+
+      - name: Testes JavaScript
+        run: npm test

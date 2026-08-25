@@ -96,7 +96,7 @@ Cada decisão abaixo existe porque o erro correspondente é caro de desfazer.
 | Backend | Python 3.10+, Flask, SQLAlchemy 2.0 / Flask-Migrate, Flask-Login, Flask-WTF, APScheduler |
 | Automação | Selenium, undetected-chromedriver, 2captcha, pdfplumber, certificado digital A1/A3 via política do Chrome |
 | Integrações | BrasilAPI e ReceitaWS (consulta de CNPJ) via `requests`; webservices da SEFAZ (NF-e) por SOAP + mTLS, com XMLDSig assinado pela biblioteca padrão + `cryptography` |
-| Frontend | Jinja2, Bootstrap 5.3 com identidade própria (design tokens, IBM Plex, dark/light), JS vanilla (ES modules, sem bundler) |
+| Frontend | Jinja2, Bootstrap 5.3 com identidade própria (design tokens, IBM Plex, dark/light), JS vanilla (ES modules, sem bundler), JSDoc com `checkJs` e testes Node |
 | Dados | MySQL 8.0 (produção), SQLite (desenvolvimento) |
 | Documentos | openpyxl (XLSX), pypdf + fpdf2 (dossiê PDF), thefuzz (casamento de nomes) |
 
