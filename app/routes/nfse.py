@@ -9,6 +9,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from flask import render_template, request
+from flask_login import current_user
 
 from app import db
 from app.auth import requer_papel
@@ -34,6 +35,7 @@ from app.services import (
     nfse_emitidas,
     nfse_grupos,
     nfse_import,
+    nfse_contrato,
     nfse_lote,
     nfse_service,
 )
@@ -61,6 +63,85 @@ ORIGEM_MANUAL = 'manual'
 CATEGORIA_HONORARIOS = 'honorarios'
 CATEGORIA_SERVICO = 'servico'
 CATEGORIA_INDEFINIDA = 'indefinida'
+
+
+# --- contrato adaptativo da NFS-e ------------------------------------------
+
+@bp.route('/nfse/contrato')
+@requer_papel('operador')
+def nfse_contrato_estado():
+    """Estado resumido do contrato, pronto para a central da interface."""
+
+    return {'status': 'ok', **nfse_contrato.estado_painel()}
+
+
+@bp.route('/nfse/contrato/<int:contrato_id>')
+@requer_papel('operador')
+def nfse_contrato_detalhe(contrato_id):
+    try:
+        detalhe = nfse_contrato.detalhe_contrato(contrato_id)
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    return {'status': 'ok', 'contrato': detalhe}
+
+
+@bp.route('/nfse/contrato/incidente/<int:incidente_id>/configurar', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_configurar(incidente_id):
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return json_error('Envie um objeto JSON de configuração.', 400, campo='corpo')
+
+    permitidos = {'origem', 'fonte', 'valor_fixo', 'confirmar_recomendacao'}
+    extras = set(dados) - permitidos
+    if extras:
+        campo = sorted(extras)[0]
+        return json_error('Campo não permitido na configuração.', 400, campo=campo)
+
+    confirmacao = dados.get('confirmar_recomendacao')
+    if confirmacao is not None and not isinstance(confirmacao, bool):
+        return json_error(
+            'A confirmação da recomendação deve ser booleana.',
+            400,
+            campo='confirmar_recomendacao',
+        )
+
+    incidente = db.session.get(nfse_contrato.IncidenteContratoNfse, incidente_id)
+    if incidente is None:
+        return json_error('O incidente solicitado não existe.', 404)
+    if incidente.estado != 'aberto':
+        return json_error(
+            'Este incidente já recebeu uma decisão e não pode ser configurado novamente.',
+            409,
+        )
+    if incidente.chave_esperada and incidente.chave_observada:
+        if confirmacao is not True:
+            return json_error(
+                'Confirme explicitamente a recomendação antes de salvar.',
+                400,
+                campo='confirmar_recomendacao',
+            )
+
+    configuracao = {
+        chave: dados[chave]
+        for chave in ('origem', 'fonte', 'valor_fixo')
+        if chave in dados
+    }
+    try:
+        candidato = nfse_contrato.configurar_incidente(
+            incidente_id,
+            configuracao,
+            usuario_id=current_user.id,
+        )
+    except nfse_contrato.ConfiguracaoContratoInvalidaError as exc:
+        return json_error(str(exc), 400, campo='origem')
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    return {
+        'status': 'ok',
+        'incidente_id': incidente_id,
+        'contrato': nfse_contrato.detalhe_contrato(candidato.id),
+    }
 
 
 def _categoria(nota):

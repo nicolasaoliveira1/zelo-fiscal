@@ -1060,6 +1060,108 @@ def registrar_validacao(
     return contrato
 
 
+def _data_iso(valor):
+    return valor.isoformat() if valor is not None else None
+
+
+def _resumo_contrato(contrato):
+    return {
+        "id": contrato.id,
+        "versao": contrato.versao,
+        "estado": contrato.estado,
+        "elegivel_automatico": bool(contrato.elegivel_automatico),
+        "criado_em": _data_iso(contrato.criado_em),
+        "validado_em": _data_iso(contrato.validado_em),
+        "ativado_em": _data_iso(contrato.ativado_em),
+        "erro_validacao": contrato.erro_validacao,
+    }
+
+
+def _resumo_incidente(incidente):
+    campo = {
+        "chave_esperada": incidente.chave_esperada,
+        "chave_observada": incidente.chave_observada,
+        "rotulo": incidente.rotulo,
+        "tipo": incidente.tipo_controle,
+        "interacao": incidente.interacao,
+        "obrigatorio": incidente.obrigatorio,
+    }
+    return {
+        "id": incidente.id,
+        "etapa": incidente.etapa,
+        "tipo": incidente.tipo,
+        "severidade": incidente.severidade,
+        "estado": incidente.estado,
+        "campo": campo,
+        "observacoes": incidente.observacoes,
+        "primeira_observacao_em": _data_iso(incidente.primeira_observacao_em),
+        "ultima_observacao_em": _data_iso(incidente.ultima_observacao_em),
+        "mensagem": incidente.mensagem,
+        "opcoes": [
+            {"valor": opcao.valor, "rotulo": opcao.rotulo}
+            for opcao in sorted(incidente.opcoes, key=lambda item: item.ordem)
+        ],
+    }
+
+
+def estado_painel():
+    """Serializa o estado persistido sem dados da nota ou do DOM."""
+
+    ativo = contrato_ativo()
+    candidatos = (
+        ContratoNfse.query
+        .filter(ContratoNfse.estado.in_(("candidata", "validada")))
+        .order_by(ContratoNfse.versao.desc())
+        .all()
+    )
+    incidentes = (
+        IncidenteContratoNfse.query
+        .filter(IncidenteContratoNfse.contrato_base_id == ativo.id)
+        .order_by(IncidenteContratoNfse.id.desc())
+        .all()
+    )
+    return {
+        "ativo": _resumo_contrato(ativo),
+        "candidatas": [_resumo_contrato(item) for item in candidatos],
+        "incidentes": [_resumo_incidente(item) for item in incidentes],
+        "fontes": fontes_disponiveis(),
+    }
+
+
+def detalhe_contrato(contrato_id):
+    """Devolve uma versão e seus campos sem expor seletores internos."""
+
+    contrato = _contrato_com_campos(contrato_id)
+    if contrato is None:
+        raise ContratoNfseNaoEncontradoError("a versão de contrato solicitada não existe")
+    dados = _resumo_contrato(contrato)
+    dados["campos"] = [
+        {
+            "chave_semantica": campo.chave_semantica,
+            "etapa": campo.etapa,
+            "rotulo": campo.rotulo,
+            "tipo": campo.tipo,
+            "interacao": campo.interacao,
+            "obrigatorio": bool(campo.obrigatorio),
+            "ordem": campo.ordem,
+            "origem": campo.origem,
+            "fonte": campo.fonte,
+            "valor_fixo": campo.valor_fixo,
+            "conferivel_automatico": bool(campo.conferivel_automatico),
+            "opcoes": [
+                {"valor": opcao.valor, "rotulo": opcao.rotulo}
+                for opcao in sorted(campo.opcoes, key=lambda item: item.ordem)
+            ],
+        }
+        for campo in sorted(contrato.campos, key=lambda item: item.ordem)
+    ]
+    dados["incidentes"] = [
+        _resumo_incidente(item)
+        for item in sorted(contrato.incidentes, key=lambda item: item.id)
+    ]
+    return dados
+
+
 __all__ = [
     "CONTRATO_INICIAL",
     "CampoContratoDesconhecidoError",
@@ -1075,6 +1177,8 @@ __all__ = [
     "contrato_ativo",
     "configurar_incidente",
     "contrato_inicial_execucao",
+    "detalhe_contrato",
+    "estado_painel",
     "fontes_disponiveis",
     "garantir_contrato_inicial",
     "registrar_validacao",
