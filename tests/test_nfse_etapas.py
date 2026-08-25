@@ -9,6 +9,7 @@ O teste mais importante do arquivo e o ultimo: prova que a automacao NAO toca
 os campos que o portal ja traz corretos nem os calculados/bloqueados. Mexer
 neles reabre secoes condicionais e muda a nota.
 """
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.automation import nfse
+from app.services import nfse_contrato
 
 CONFIG = SimpleNamespace(
     regime_apuracao_sn='1',
@@ -401,6 +403,112 @@ def test_campo_desabilitado_tambem_e_esperado(driver):
     driver.desabilitados.add('Tomador_Inscricao')
     with pytest.raises(nfse.InteracaoPortalError):
         nfse.preencher_etapa_pessoas(driver, NOTA, CONFIG, date(2026, 7, 28))
+
+
+def test_etapa_usa_seletores_do_snapshot_recebido(driver):
+    base = nfse_contrato.contrato_inicial_execucao()
+    trocas = {
+        nfse.CHAVE_DATA_COMPETENCIA: 'campo-sintetico-data',
+        nfse.CHAVE_INSCRICAO_PRESTADOR: 'campo-sintetico-prestador',
+        nfse.CHAVE_REGIME_APURACAO: 'campo-sintetico-regime',
+        nfse.CHAVE_DOMICILIO_TOMADOR: 'grupo-sintetico',
+        nfse.CHAVE_INSCRICAO_TOMADOR: 'campo-sintetico-tomador',
+        nfse.CHAVE_NOME_TOMADOR: 'campo-sintetico-nome',
+    }
+    contrato = replace(
+        base,
+        campos=tuple(
+            replace(
+                campo,
+                seletor=trocas.get(campo.chave_semantica, campo.seletor),
+            )
+            for campo in base.campos
+        ),
+    )
+    driver.autopreenchidos.update({
+        'campo-sintetico-prestador': 'prestador-sintetico',
+        'campo-sintetico-nome': 'tomador-sintetico',
+    })
+
+    nfse.preencher_etapa_pessoas(
+        driver, NOTA, CONFIG, date(2026, 7, 28), contrato=contrato
+    )
+
+    assert 'campo-sintetico-data' in driver.preenchidos
+    assert 'campo-sintetico-regime' in driver.chosen
+    assert 'grupo-sintetico' in driver.radios
+    assert 'campo-sintetico-tomador' in driver.preenchidos
+    assert 'DataCompetencia' not in driver.tocados()
+
+
+def _regra_sintetica(**valores):
+    padrao = {
+        'chave_semantica': 'campo.adicional',
+        'etapa': 'servico',
+        'seletor_tipo': 'id',
+        'seletor': 'campo-adicional',
+        'rotulo': 'Campo adicional',
+        'tipo': 'text',
+        'interacao': 'texto',
+        'obrigatorio': False,
+        'ordem': 0,
+        'condicao_chave': None,
+        'condicao_valor': None,
+        'origem': 'nota',
+        'fonte': 'descricao',
+        'valor_fixo': None,
+    }
+    padrao.update(valores)
+    return SimpleNamespace(**padrao)
+
+
+def test_campos_adicionais_respeitam_ordem_condicao_e_nao_tocam_intocavel(driver):
+    regras = [
+        _regra_sintetica(
+            chave_semantica='campo.radio', seletor_tipo='name', seletor='GrupoSintetico',
+            interacao='radio', ordem=1, origem='fixo', fonte=None, valor_fixo='1',
+        ),
+        _regra_sintetica(
+            chave_semantica='campo.texto', seletor='campo-texto', ordem=2,
+            origem='nota', fonte='descricao',
+        ),
+        _regra_sintetica(
+            chave_semantica='campo.padrao', ordem=0, origem='padrao_portal',
+            interacao='texto', fonte=None,
+        ),
+        _regra_sintetica(
+            chave_semantica='campo.condicional', seletor='campo-condicional', ordem=3,
+            condicao_chave='campo.radio',
+            condicao_valor='2', origem='nota', fonte='descricao',
+        ),
+        _regra_sintetica(
+            chave_semantica='campo.intocavel', ordem=4, origem='intocavel',
+            interacao='texto', fonte=None,
+        ),
+    ]
+    valores = {
+        'campo.radio': '1',
+        'campo.texto': 'texto-sintético',
+        'campo.condicional': 'condicional-sintético',
+    }
+
+    nfse.aplicar_campos_adicionais(driver, regras, valores)
+
+    assert driver.radios['GrupoSintetico'] == '1'
+    assert driver.preenchidos['campo-texto'] == 'texto-sintético'
+    assert 'campo-condicional' not in driver.preenchidos
+    assert 'campo.intocavel' not in driver.tocados()
+
+
+def test_campo_adicional_desconhecido_ou_dependencia_ausente_bloqueia(driver):
+    desconhecido = _regra_sintetica(interacao='clique-generico')
+    dependente = _regra_sintetica(condicao_chave='campo.inexistente')
+
+    with pytest.raises(nfse.ContratoNfseIncompativelError):
+        nfse.aplicar_campos_adicionais(driver, [desconhecido], {'campo.adicional': 'x'})
+    with pytest.raises(nfse.ContratoNfseIncompativelError):
+        nfse.aplicar_campos_adicionais(driver, [dependente], {'campo.adicional': 'x'})
+    assert driver.tocados() == set()
 
 
 def test_espera_o_portal_carregar_o_emitente_antes_de_seguir(driver):

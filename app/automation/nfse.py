@@ -17,8 +17,13 @@ Duas armadilhas do portal ditam o desenho deste modulo:
    documento fiscal. `_set_chosen` usa a API do plugin e **confere o valor
    depois de setar** (ND-008).
 """
+from collections.abc import Mapping
+from types import SimpleNamespace
+
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
+
+from app.services import nfse_contrato
 
 BASE = 'https://www.nfse.gov.br/EmissorNacional'
 URL_LOGIN = f'{BASE}/Login?ReturnUrl=%2fEmissorNacional'
@@ -185,6 +190,51 @@ def _sair_do_campo(elemento):
         elemento.parent.execute_script(_JS_SAIR, elemento)
     except WebDriverException:
         pass
+
+
+class ContratoNfseIncompativelError(InteracaoPortalError):
+    """O contrato não consegue orientar o campo com segurança."""
+
+
+# Chaves semânticas do contrato inicial. O valor do seletor continua vindo do
+# snapshot; estas constantes são apenas a identidade estável usada pelo fluxo.
+CHAVE_DATA_COMPETENCIA = 'DataCompetencia'
+CHAVE_REGIME_APURACAO = 'SimplesNacional_RegimeApuracaoTributosSN'
+CHAVE_DOMICILIO_TOMADOR = 'Tomador.LocalDomicilio'
+CHAVE_INSCRICAO_TOMADOR = 'Tomador_Inscricao'
+CHAVE_INSCRICAO_PRESTADOR = 'Prestador_Inscricao'
+CHAVE_NOME_TOMADOR = 'Tomador_Nome'
+CHAVE_MUNICIPIO_SERVICO = 'LocalPrestacao_CodigoMunicipioPrestacao'
+CHAVE_PAIS_SERVICO = 'LocalPrestacao_CodigoPaisPrestacao'
+CHAVE_TRIBUTACAO_NACIONAL = 'ServicoPrestado_CodigoTributacaoNacional'
+CHAVE_EXPORTACAO_IMUNIDADE = 'ServicoPrestado.HaExportacaoImunidadeNaoIncidencia'
+CHAVE_DESCRICAO_SERVICO = 'ServicoPrestado_Descricao'
+CHAVE_ITEM_NBS = 'ServicoPrestado_CodigoNBS'
+CHAVE_VALOR_SERVICO = 'Valores_ValorServico'
+CHAVE_RETENCAO_ISSQN = 'ISSQN.HaRetencao'
+CHAVE_PISCOFINS_SITUACAO = 'TributacaoFederal_PISCofins_SituacaoTributaria'
+CHAVE_PISCOFINS_RETENCAO = 'TributacaoFederal_PISCofins_TipoRetencao'
+
+
+def _contrato_execucao(contrato):
+    return contrato or nfse_contrato.contrato_inicial_execucao()
+
+
+def _campo_contrato(contrato, chave):
+    try:
+        return _contrato_execucao(contrato).campo(chave)
+    except (AttributeError, nfse_contrato.ContratoNfseError) as exc:
+        raise ContratoNfseIncompativelError(
+            f'O campo de contrato "{chave}" não está disponível.'
+        ) from exc
+
+
+def _separar_pausa_contrato(pausa, contrato):
+    """Aceita a ordem legada (pausa) e a nova chamada posicional (contrato)."""
+
+    if contrato is None and pausa is not None and not callable(pausa):
+        return None, pausa
+    return pausa, contrato
 
 
 def _visivel(elemento):
@@ -670,7 +720,147 @@ def _achar_avancar(driver):
     return None
 
 
-def preencher_etapa_pessoas(driver, nota, config, data_competencia, pausa=None):
+_ADAPTADORES_CONTRATO = frozenset({
+    'texto', 'textarea', 'radio', 'select_direto', 'select_busca', 'chosen',
+    'padrao_portal', 'intocavel',
+})
+
+
+def _valor_regra_contrato(regra, chave, padrao=None):
+    if isinstance(regra, Mapping):
+        return regra.get(chave, padrao)
+    return getattr(regra, chave, padrao)
+
+
+def _objeto_regra_contrato(regra):
+    return SimpleNamespace(**regra) if isinstance(regra, Mapping) else regra
+
+
+def _localizar_campo_contrato(driver, campo):
+    by = {
+        'id': By.ID,
+        'name': By.NAME,
+        'css': By.CSS_SELECTOR,
+    }.get(campo.seletor_tipo)
+    if by is None:
+        raise ContratoNfseIncompativelError(
+            f'O seletor do campo "{campo.chave_semantica}" não é aprovado.'
+        )
+    elemento = _localizar(driver, by, campo.seletor, exigir_visivel=False)
+    if elemento is None:
+        raise ContratoNfseIncompativelError(
+            f'O campo "{campo.chave_semantica}" não está disponível.'
+        )
+    return elemento
+
+
+def _preencher_campo_contrato(driver, campo, valor):
+    if campo.seletor_tipo == 'id':
+        return _preencher(driver, campo.seletor, valor)
+    elemento = _localizar_campo_contrato(driver, campo)
+    try:
+        elemento.clear()
+        elemento.send_keys(str(valor))
+        _sair_do_campo(elemento)
+    except (WebDriverException, AttributeError) as exc:
+        raise ContratoNfseIncompativelError(
+            f'O campo "{campo.chave_semantica}" não aceitou preenchimento.'
+        ) from exc
+    return elemento
+
+
+def _selecionar_direto_contrato(driver, campo, valor):
+    elemento = _localizar_campo_contrato(driver, campo)
+    try:
+        from selenium.webdriver.support.ui import Select
+
+        Select(elemento).select_by_value(str(valor))
+        atual = elemento.get_attribute('value')
+    except (WebDriverException, AttributeError, ValueError) as exc:
+        raise ContratoNfseIncompativelError(
+            f'O select "{campo.chave_semantica}" não aceitou a opção.'
+        ) from exc
+    if str(atual) != str(valor):
+        raise ContratoNfseIncompativelError(
+            f'O select "{campo.chave_semantica}" não confirmou a opção.'
+        )
+    return atual
+
+
+def _valor_busca_contrato(campo, valor):
+    if isinstance(valor, (tuple, list)) and len(valor) == 2:
+        return valor[0], valor[1]
+    return valor, campo.rotulo
+
+
+def aplicar_campos_adicionais(driver, regras, valores):
+    """Aplica somente adaptadores aprovados e em ordem declarada."""
+
+    valores = valores or {}
+    regras_ordenadas = sorted(
+        list(regras or ()),
+        key=lambda regra: int(_valor_regra_contrato(regra, 'ordem', 0) or 0),
+    )
+    preparados = []
+    for regra in regras_ordenadas:
+        interacao = _valor_regra_contrato(regra, 'interacao', '')
+        origem = _valor_regra_contrato(regra, 'origem', '')
+        adaptador = (
+            'padrao_portal' if origem == 'padrao_portal' else
+            'intocavel' if origem == 'intocavel' else interacao
+        )
+        if adaptador not in _ADAPTADORES_CONTRATO:
+            chave = _valor_regra_contrato(regra, 'chave_semantica', '')
+            raise ContratoNfseIncompativelError(
+                f'O adaptador do campo "{chave}" não é conhecido.'
+            )
+        condicao_chave = _valor_regra_contrato(regra, 'condicao_chave')
+        if condicao_chave:
+            if condicao_chave not in valores or valores[condicao_chave] is None:
+                raise ContratoNfseIncompativelError(
+                    f'A dependência "{condicao_chave}" do contrato não está disponível.'
+                )
+            condicao_valor = _valor_regra_contrato(regra, 'condicao_valor')
+            if condicao_valor is not None and str(valores[condicao_chave]) != str(condicao_valor):
+                continue
+        chave = _valor_regra_contrato(regra, 'chave_semantica')
+        if adaptador not in {'padrao_portal', 'intocavel'}:
+            if chave not in valores or valores[chave] is None:
+                raise ContratoNfseIncompativelError(
+                    f'O valor do campo "{chave}" não foi resolvido.'
+                )
+        preparados.append((_objeto_regra_contrato(regra), adaptador, chave))
+
+    for regra, adaptador, chave in preparados:
+        if adaptador in {'padrao_portal', 'intocavel'}:
+            continue
+        campo = regra
+        valor = valores[chave]
+        if adaptador in {'texto', 'textarea'}:
+            _preencher_campo_contrato(driver, campo, valor)
+        elif adaptador == 'radio':
+            _marcar_radio(driver, campo.seletor, valor)
+        elif adaptador == 'select_direto':
+            _selecionar_direto_contrato(driver, campo, valor)
+        elif adaptador == 'chosen':
+            if campo.seletor_tipo != 'id':
+                raise ContratoNfseIncompativelError(
+                    f'O campo Chosen "{chave}" precisa de seletor por id.'
+                )
+            _selecionar(driver, campo.seletor, valor)
+        elif adaptador == 'select_busca':
+            valor_busca, rotulo = _valor_busca_contrato(campo, valor)
+            if campo.seletor_tipo != 'id':
+                raise ContratoNfseIncompativelError(
+                    f'O campo de busca "{chave}" precisa de seletor por id.'
+                )
+            _selecionar_com_busca(driver, campo.seletor, valor_busca, rotulo)
+    return True
+
+
+def preencher_etapa_pessoas(
+    driver, nota, config, data_competencia, pausa=None, contrato=None, observar=None
+):
     """Etapa 1: competencia, regime de apuracao e tomador.
 
     `data_competencia` e a data da EMISSAO (hoje) — nao confundir com a
@@ -678,28 +868,36 @@ def preencher_etapa_pessoas(driver, nota, config, data_competencia, pausa=None):
     e endereco sao preenchidos pelo proprio portal apos a data e o CNPJ; a
     automacao nao os toca.
     """
-    _preencher(driver, 'DataCompetencia', formatar_data(data_competencia))
+    pausa, contrato = _separar_pausa_contrato(pausa, contrato)
+    campo_data = _campo_contrato(contrato, CHAVE_DATA_COMPETENCIA)
+    campo_prestador = _campo_contrato(contrato, CHAVE_INSCRICAO_PRESTADOR)
+    campo_regime = _campo_contrato(contrato, CHAVE_REGIME_APURACAO)
+    campo_domicilio = _campo_contrato(contrato, CHAVE_DOMICILIO_TOMADOR)
+    campo_inscricao = _campo_contrato(contrato, CHAVE_INSCRICAO_TOMADOR)
+    campo_nome = _campo_contrato(contrato, CHAVE_NOME_TOMADOR)
+
+    _preencher(driver, campo_data.seletor, formatar_data(data_competencia))
 
     # O portal so carrega o emitente depois que a data sai do foco, e os campos
     # seguintes ficam nao-interagiveis ate la. Esperar o CNPJ do emitente
     # aparecer e o sinal de que a etapa esta pronta.
-    if not _esperar_preenchido(driver, 'Prestador_Inscricao'):
+    if not _esperar_preenchido(driver, campo_prestador.seletor):
         raise InteracaoPortalError(
             'O portal nao carregou os dados do emitente apos a data de '
             'competencia. A tela pode estar lenta ou ter mudado.')
     if pausa:
         pausa()
 
-    _selecionar(driver, 'SimplesNacional_RegimeApuracaoTributosSN',
+    _selecionar(driver, campo_regime.seletor,
                 config.regime_apuracao_sn)
 
     # Marcar "Brasil" e o que REVELA os campos do tomador; o _preencher abaixo
     # ja espera o CNPJ ficar interagivel antes de digitar.
-    _marcar_radio(driver, 'Tomador.LocalDomicilio', '1')
-    _preencher(driver, 'Tomador_Inscricao', nota.documento)
+    _marcar_radio(driver, campo_domicilio.seletor, '1')
+    _preencher(driver, campo_inscricao.seletor, nota.documento)
 
     # mesma logica: o nome/endereco do tomador vem do portal apos o documento
-    if not _esperar_preenchido(driver, 'Tomador_Nome'):
+    if not _esperar_preenchido(driver, campo_nome.seletor):
         raise InteracaoPortalError(
             f'O portal nao reconheceu o documento {nota.documento} do tomador. '
             'Confira se esta correto e ativo na Receita.')
@@ -708,41 +906,58 @@ def preencher_etapa_pessoas(driver, nota, config, data_competencia, pausa=None):
     _avancar(driver)
 
 
-def preencher_etapa_servico(driver, nota, config, descricao, pausa=None):
+def preencher_etapa_servico(
+    driver, nota, config, descricao, pausa=None, contrato=None, observar=None
+):
     """Etapa 2: local, codigo de tributacao, descricao e item da NBS.
 
     Municipio e codigo de tributacao sao selects VISIVEIS (nao usam Chosen);
     o item da NBS e Chosen com 919 opcoes.
     """
-    # Estes dois buscam as opcoes no servidor conforme se digita; o item da NBS
+    pausa, contrato = _separar_pausa_contrato(pausa, contrato)
+    campo_municipio = _campo_contrato(contrato, CHAVE_MUNICIPIO_SERVICO)
+    campo_tributacao = _campo_contrato(contrato, CHAVE_TRIBUTACAO_NACIONAL)
+    campo_exportacao = _campo_contrato(contrato, CHAVE_EXPORTACAO_IMUNIDADE)
+    campo_descricao = _campo_contrato(contrato, CHAVE_DESCRICAO_SERVICO)
+    campo_nbs = _campo_contrato(contrato, CHAVE_ITEM_NBS)
+
+    # Estes dois buscam as opções no servidor conforme se digita; o item da NBS
     # abaixo ja vem com a lista inteira carregada e usa a via direta.
-    _selecionar_com_busca(driver, 'LocalPrestacao_CodigoMunicipioPrestacao',
+    _selecionar_com_busca(driver, campo_municipio.seletor,
                           config.municipio_servico_codigo,
                           config.municipio_servico_nome)
-    _selecionar_com_busca(driver, 'ServicoPrestado_CodigoTributacaoNacional',
+    _selecionar_com_busca(driver, campo_tributacao.seletor,
                           config.codigo_tributacao, config.codigo_tributacao)
     # "Nao" para imunidade/exportacao: ja e o default, mas marcar explicitamente
     # evita depender de o portal manter esse default.
-    _marcar_radio(driver, 'ServicoPrestado.HaExportacaoImunidadeNaoIncidencia', '0')
-    _preencher(driver, 'ServicoPrestado_Descricao', descricao)
-    _selecionar(driver, 'ServicoPrestado_CodigoNBS', config.item_nbs)
+    _marcar_radio(driver, campo_exportacao.seletor, '0')
+    _preencher(driver, campo_descricao.seletor, descricao)
+    _selecionar(driver, campo_nbs.seletor, config.item_nbs)
     if pausa:
         pausa()
     _avancar(driver)
 
 
-def preencher_etapa_tributacao(driver, nota, config, pausa=None):
+def preencher_etapa_tributacao(
+    driver, nota, config, pausa=None, contrato=None, observar=None
+):
     """Etapa 3: valor do servico e retencoes.
 
     A retencao do ISSQN NAO vem marcada (nem Sim nem Nao) — e obrigatoria.
     Os campos de base de calculo/valor/aliquota do ISSQN sao calculados e
     bloqueados pelo portal; a automacao nao os toca.
     """
-    _preencher(driver, 'Valores_ValorServico', formatar_valor(nota.valor_final))
-    _marcar_radio(driver, 'ISSQN.HaRetencao', '0')  # Nao
-    _selecionar(driver, 'TributacaoFederal_PISCofins_SituacaoTributaria',
+    pausa, contrato = _separar_pausa_contrato(pausa, contrato)
+    campo_valor = _campo_contrato(contrato, CHAVE_VALOR_SERVICO)
+    campo_retencao = _campo_contrato(contrato, CHAVE_RETENCAO_ISSQN)
+    campo_situacao = _campo_contrato(contrato, CHAVE_PISCOFINS_SITUACAO)
+    campo_piscofins = _campo_contrato(contrato, CHAVE_PISCOFINS_RETENCAO)
+
+    _preencher(driver, campo_valor.seletor, formatar_valor(nota.valor_final))
+    _marcar_radio(driver, campo_retencao.seletor, '0')  # Não
+    _selecionar(driver, campo_situacao.seletor,
                 config.piscofins_situacao)
-    _selecionar(driver, 'TributacaoFederal_PISCofins_TipoRetencao',
+    _selecionar(driver, campo_piscofins.seletor,
                 config.piscofins_tipo_retencao)
     if pausa:
         pausa()

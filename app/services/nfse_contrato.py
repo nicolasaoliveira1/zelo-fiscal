@@ -464,6 +464,50 @@ def carregar_execucao(contrato_id=None) -> ContratoExecucaoNfse:
     )
 
 
+def contrato_inicial_execucao() -> ContratoExecucaoNfse:
+    """Materializa a mesma constante inicial para testes sem banco."""
+
+    campos = []
+    for dados in CONTRATO_INICIAL:
+        campos.append(
+            CampoExecucaoNfse(
+                chave_semantica=dados["chave_semantica"],
+                etapa=dados["etapa"],
+                seletor_tipo=dados["seletor_tipo"],
+                seletor=dados["seletor"],
+                rotulo=dados["rotulo"],
+                tipo=dados["tipo"],
+                interacao=dados["interacao"],
+                obrigatorio=bool(dados["obrigatorio"]),
+                ordem=dados["ordem"],
+                condicao_chave=dados["condicao_chave"],
+                condicao_valor=dados["condicao_valor"],
+                origem=dados["origem"],
+                fonte=dados["fonte"],
+                valor_fixo=dados["valor_fixo"],
+                revisao_secao=dados["revisao_secao"],
+                revisao_rotulo=dados["revisao_rotulo"],
+                conferivel_automatico=bool(dados["conferivel_automatico"]),
+                opcoes=tuple(
+                    OpcaoExecucaoNfse(
+                        valor=opcao["valor"],
+                        rotulo=opcao["rotulo"],
+                        ordem=opcao["ordem"],
+                    )
+                    for opcao in dados["opcoes"]
+                ),
+            )
+        )
+    return ContratoExecucaoNfse(
+        contrato_id=0,
+        versao=1,
+        estado="ativa",
+        fingerprint=_fingerprint_inicial(),
+        elegivel_automatico=True,
+        campos=tuple(campos),
+    )
+
+
 def _campo_da_diferenca(diferenca: Diferenca):
     return diferenca.observado or diferenca.esperado
 
@@ -946,6 +990,7 @@ __all__ = [
     "carregar_execucao",
     "contrato_ativo",
     "configurar_incidente",
+    "contrato_inicial_execucao",
     "fontes_disponiveis",
     "garantir_contrato_inicial",
     "registrar_incidentes",
