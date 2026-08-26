@@ -20,7 +20,8 @@ de proposito: o dono do navegador e a `NfseSession`, e deixar o motor
 `quit()`-ar no finally fecharia a sessao compartilhada pelas costas dela.
 """
 import time
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 
 from app import db
 from app.automation import nfse as automacao
@@ -204,6 +205,7 @@ def _emitir_nota(nota_id, driver_do_motor, execution_id):
             ignorar_aliquota=opcoes['ignorar_aliquota'],
             contrato_id=opcoes.get('contrato_id'),
             validacao_contrato_id=opcoes.get('validacao_contrato_id'),
+            modo=opcoes['modo'],
         )
     except nfse_service.NotaNaoEmitivelError as exc:
         # linha que nao devia estar na fila (ja emitida, sem empresa...): nao e
@@ -242,19 +244,14 @@ def _registrar_validacao_candidata(nota_id, contrato_id, execution_id):
     nota = db.session.get(NotaNfse, nota_id)
     contrato = nfse_contrato.carregar_execucao(contrato_id)
     config = nfse_config.get_config_nfse()
-    descricao = nfse_config.descricao_da_nota(config, nota)
-    regras = tuple(
-        campo
-        for campo in contrato.campos
-        if campo.revisao_secao
-        or campo.revisao_rotulo
-        or not campo.conferivel_automatico
-        or (campo.origem == 'padrao_portal' and campo.obrigatorio)
+    documento, valor, descricao = _valores_basicos_revisao(
+        contrato, nota, config
     )
+    regras = _regras_autorrevisao_contrato(contrato, nota, config)
     resultado = automacao.conferir_revisao(
         SESSAO.driver,
-        nota.documento,
-        nota.valor_final,
+        documento,
+        valor,
         descricao,
         regras_adicionais=regras,
     )
@@ -272,7 +269,59 @@ def _registrar_validacao_candidata(nota_id, contrato_id, execution_id):
     return resultado
 
 
-def _emitir_sozinho(nota, execution_id):
+def _regras_autorrevisao_contrato(contrato, nota, config):
+    """Materializa leitores e esperados sem persistir valores da nota."""
+
+    regras = []
+    for campo in contrato.campos:
+        if campo.etapa == 'revisao':
+            # Documento, valor e descrição já são conferidos pelos leitores
+            # históricos logo antes destas regras adicionais.
+            continue
+        if not (
+            campo.revisao_secao
+            or campo.revisao_rotulo
+            or not campo.conferivel_automatico
+            or (campo.origem == 'padrao_portal' and campo.obrigatorio)
+        ):
+            continue
+        valor_esperado = nfse_contrato.resolver_valor(
+            campo, nota, config, date.today()
+        )
+        if isinstance(valor_esperado, (tuple, list)) and valor_esperado:
+            valor_esperado = valor_esperado[0]
+        regras.append({**campo.__dict__, 'valor_esperado': valor_esperado})
+    return tuple(regras)
+
+
+def _valores_basicos_revisao(contrato, nota, config):
+    def resolver(chave):
+        campo = contrato.campo(chave)
+        valor = nfse_contrato.resolver_valor(
+            campo, nota, config, date.today()
+        )
+        if isinstance(valor, (tuple, list)) and valor:
+            return valor[0]
+        return valor
+
+    documento = resolver('Tomador_Inscricao')
+    valor_cru = resolver('Valores_ValorServico')
+    descricao = resolver('ServicoPrestado_Descricao')
+    if not isinstance(valor_cru, Decimal):
+        texto = str(valor_cru or '').replace('R$', '').strip()
+        if ',' in texto:
+            texto = texto.replace('.', '').replace(',', '.')
+        try:
+            valor_cru = Decimal(texto)
+        except (InvalidOperation, ValueError):
+            # Um valor contratado ilegível jamais pode fazer a revisão voltar
+            # silenciosamente ao valor original da nota. NaN força divergência
+            # determinística sem autorizar emissão nem derrubar o worker.
+            valor_cru = Decimal('NaN')
+    return documento, valor_cru, descricao
+
+
+def _emitir_sozinho(nota, execution_id, contrato_id=None):
     """Confere a tela de revisao e, so entao, emite (NFSE-24).
 
     A conferencia e a unica coisa entre a automacao e uma nota fiscal errada,
@@ -283,10 +332,23 @@ def _emitir_sozinho(nota, execution_id):
     """
     driver = SESSAO.driver
     config = nfse_config.get_config_nfse()
-    descricao = nfse_config.descricao_da_nota(config, nota)
+    contrato = nfse_contrato.carregar_execucao(contrato_id)
+    documento, valor, descricao = _valores_basicos_revisao(
+        contrato, nota, config
+    )
+    regras = _regras_autorrevisao_contrato(contrato, nota, config)
 
     divergencias = automacao.conferir_revisao(
-        driver, nota.documento, nota.valor_final, descricao)
+        driver,
+        documento,
+        valor,
+        descricao,
+        regras_adicionais=regras,
+    )
+    if getattr(divergencias, 'elegivel_automatico', None) is False:
+        divergencias.append(
+            'O contrato ativo permite somente emissão assistida.'
+        )
     if divergencias:
         motivo = ' '.join(divergencias)
         log_event('nfse_autorrevisao_recusou', level='WARNING', nota_id=nota.id,
@@ -325,7 +387,9 @@ def _esperar_e_registrar(nota_id, opcoes, execution_id):
     nota = db.session.get(NotaNfse, nota_id)
 
     if opcoes['modo'] == MODO_AUTOMATICO:
-        return _emitir_sozinho(nota, execution_id)
+        return _emitir_sozinho(
+            nota, execution_id, contrato_id=opcoes.get('contrato_id')
+        )
 
     desfecho = aguardar_confirmacao(SESSAO.driver)
     log_event('nfse_lote_desfecho', nota_id=nota_id, desfecho=desfecho,

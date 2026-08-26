@@ -100,10 +100,15 @@ def _campos_da_etapa(contrato, etapa):
 
 
 def _observar_fronteira_contrato(
-    driver, contrato, etapa, momento, *, execution_id=None
+    driver, contrato, etapa, momento, *, modo='assistido', execution_id=None
 ):
     """Observa uma tela já alcançada, sem navegar ou interagir com ela."""
 
+    # A revisão é relida por pares dt/dd na autorrevisão. Ela não contém os
+    # controles input das etapas anteriores e não deve ser inventariada como
+    # se fosse mais um formulário.
+    if etapa == 'revisao':
+        return {'estado': 'observada', 'etapa': etapa, 'momento': momento}
     inventario = nfse_recon.inventariar(driver, etapa)
     if inventario.estado != 'ok':
         log_event(
@@ -114,12 +119,10 @@ def _observar_fronteira_contrato(
             momento=momento,
             execution_id=execution_id,
         )
-        return {'estado': 'desconhecida', 'etapa': etapa, 'momento': momento}
-    # A revisão é lida pelos pares dt/dd da autorrevisão; os campos de revisão
-    # não são controles input e não devem virar incidentes de remoção.
-    if etapa == 'revisao':
-        return {'estado': 'observada', 'etapa': etapa, 'momento': momento}
-
+        raise NfseDriftError(
+            f'Não foi possível observar com segurança a etapa {etapa}; '
+            'a nota foi pausada antes de avançar.'
+        )
     resultado = comparar(etapa, _campos_da_etapa(contrato, etapa), inventario)
     if not resultado.diferencas:
         return {'estado': resultado.compatibilidade, 'etapa': etapa, 'momento': momento}
@@ -127,7 +130,7 @@ def _observar_fronteira_contrato(
     if contrato.contrato_id:
         nfse_contrato.registrar_incidentes(contrato.contrato_id, resultado)
     html_seguro = nfse_recon.inventario_para_html(inventario)
-    if resultado.compatibilidade == 'incompativel':
+    if resultado.compatibilidade == 'incompativel' or modo == 'automatico':
         raise NfseDriftError(
             f'O formulário da etapa {etapa} divergiu do contrato aprovado; '
             'a nota foi pausada para revisão.',
@@ -144,9 +147,37 @@ def _observar_fronteira_contrato(
     }
 
 
+def _resolver_valores_contrato(contrato, nota, config, hoje):
+    """Materializa uma vez o catálogo seguro fixado para toda a nota."""
+
+    valores = {}
+    for campo in contrato.campos:
+        if campo.etapa == 'revisao':
+            continue
+        valor = nfse_contrato.resolver_valor(campo, nota, config, hoje)
+        if campo.fonte == 'municipio_servico_codigo' and valor is not None:
+            valor = (valor, config.municipio_servico_nome)
+        elif campo.fonte == 'codigo_tributacao' and valor is not None:
+            valor = (valor, valor)
+        valores[campo.chave_semantica] = valor
+    return valores
+
+
 def _registrar_validacao_portal(
-    driver, contrato, etapa, nota, descricao, execution_id=None
+    driver,
+    contrato,
+    etapa,
+    nota,
+    descricao,
+    execution_id=None,
+    valores_contrato=None,
 ):
+    valores_resolvidos = []
+    for valor in (valores_contrato or {}).values():
+        if isinstance(valor, (tuple, list)):
+            valores_resolvidos.extend(str(item or '') for item in valor)
+        else:
+            valores_resolvidos.append(str(valor or ''))
     mensagens = nfse_recon.mensagens_validacao(
         driver,
         (
@@ -154,6 +185,7 @@ def _registrar_validacao_portal(
             str(nota.valor_final or ''),
             automacao.formatar_valor(nota.valor_final),
             str(descricao or ''),
+            *valores_resolvidos,
         ),
     )
     if not mensagens:
@@ -250,6 +282,7 @@ def preencher_nota(
     ignorar_aliquota=False,
     contrato_id=None,
     validacao_contrato_id=None,
+    modo='assistido',
 ):
     """Preenche uma nota no portal ate a tela de revisao e PARA (NFSE-14).
 
@@ -273,6 +306,9 @@ def preencher_nota(
         if contrato_escolhido is not None
         else nfse_contrato.contrato_inicial_execucao()
     )
+    valores_contrato = _resolver_valores_contrato(
+        contrato, nota, config, hoje
+    )
     fronteira = {'etapa': None, 'momento': None}
     avisos_recon = []
 
@@ -284,6 +320,7 @@ def preencher_nota(
             contrato,
             etapa,
             momento,
+            modo=modo,
             execution_id=execution_id,
         )
         if resultado.get('aviso'):
@@ -309,13 +346,30 @@ def preencher_nota(
     try:
         automacao.abrir_nova_dps(driver)
         automacao.preencher_etapa_pessoas(
-            driver, nota, config, hoje, contrato=contrato, observar=observar
+            driver,
+            nota,
+            config,
+            hoje,
+            contrato=contrato,
+            observar=observar,
+            valores_contrato=valores_contrato,
         )
         automacao.preencher_etapa_servico(
-            driver, nota, config, descricao, contrato=contrato, observar=observar
+            driver,
+            nota,
+            config,
+            descricao,
+            contrato=contrato,
+            observar=observar,
+            valores_contrato=valores_contrato,
         )
         automacao.preencher_etapa_tributacao(
-            driver, nota, config, contrato=contrato, observar=observar
+            driver,
+            nota,
+            config,
+            contrato=contrato,
+            observar=observar,
+            valores_contrato=valores_contrato,
         )
 
         if not automacao.esperar_revisao(driver):
@@ -325,7 +379,10 @@ def preencher_nota(
     except Exception as exc:
         if (
             fronteira['momento'] == 'pre_avancar' and
-            not isinstance(exc, _ERRO_CONTRATO_INCOMPATIVEL)
+            not isinstance(
+                exc,
+                (_ERRO_CONTRATO_INCOMPATIVEL, nfse_contrato.ContratoNfseError),
+            )
         ):
             _registrar_validacao_portal(
                 driver,
@@ -334,6 +391,7 @@ def preencher_nota(
                 nota,
                 descricao,
                 execution_id=execution_id,
+                valores_contrato=valores_contrato,
             )
         return _registrar_falha(nota, driver, exc, execution_id)
 
@@ -341,13 +399,16 @@ def preencher_nota(
     db.session.commit()
     log_event('nfse_preenchimento_ok', nota_id=nota.id, execution_id=execution_id)
 
+    descricao_aplicada = valores_contrato.get(
+        'ServicoPrestado_Descricao', descricao
+    )
     return {
         'status': 'aguardando_confirmacao',
         'nota_id': nota.id,
         'competencia': nota.competencia,
         'documento': nota.documento,
         'valor': automacao.formatar_valor(nota.valor_final),
-        'descricao': descricao,
+        'descricao': descricao_aplicada,
         'avisos_recon': avisos_recon,
         'message': 'Nota preenchida no portal. Confira os dados e emita no navegador.',
     }
@@ -405,7 +466,9 @@ def mensagem_da_falha(exc):
 
 def _registrar_falha(nota, driver, exc, execution_id):
     """Marca SO esta nota como falha; as demais do lote ficam intactas."""
-    if isinstance(exc, _ERRO_CONTRATO_INCOMPATIVEL):
+    if isinstance(
+        exc, (_ERRO_CONTRATO_INCOMPATIVEL, nfse_contrato.ContratoNfseError)
+    ):
         html_seguro = getattr(exc, 'html_seguro', None)
         if html_seguro:
             salvar_artefato_sanitizado(
@@ -434,6 +497,8 @@ def _registrar_falha(nota, driver, exc, execution_id):
         'nota_id': nota.id,
         'message': mensagem,
     }
-    if isinstance(exc, _ERRO_CONTRATO_INCOMPATIVEL):
+    if isinstance(
+        exc, (_ERRO_CONTRATO_INCOMPATIVEL, nfse_contrato.ContratoNfseError)
+    ):
         resultado['pausar_lote'] = True
     return resultado

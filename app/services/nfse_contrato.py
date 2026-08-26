@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import selectinload
 
 from app import db
@@ -22,7 +22,16 @@ from app.models import (
 )
 from app.services import auditoria
 from app.services.execution_logger import log_event
-from app.services.nfse_drift import Diferenca, assinar_incidente, comparar
+from app.services.nfse_drift import (
+    CONTROLE_NOVO,
+    CONTROLE_REMOVIDO,
+    CampoComparavel,
+    Diferenca,
+    ResultadoComparacao,
+    assinar_incidente,
+    comparar,
+    recomendar_remapeamentos,
+)
 from app.utils import utcnow_naive
 
 
@@ -436,18 +445,25 @@ def validar_contrato_automatico(contrato_id=None):
         raise ContratoNfseNaoElegivelError(
             "não há contrato da NFS-e disponível para o modo automático"
         )
+    if contrato.estado != "ativa":
+        raise ContratoNfseNaoElegivelError(
+            "somente o contrato ativo pode conduzir o modo automático"
+        )
     if not contrato.elegivel_automatico:
         raise ContratoNfseNaoElegivelError(
             "o contrato da NFS-e ainda não é elegível para o modo automático"
         )
-    incidente = IncidenteContratoNfse.query.filter_by(
-        contrato_base_id=contrato.id,
-        estado="aberto",
-        severidade="fiscal",
-    ).first()
+    incidente = (
+        IncidenteContratoNfse.query
+        .filter(
+            IncidenteContratoNfse.contrato_base_id == contrato.id,
+            IncidenteContratoNfse.estado.in_(("aberto", "configurado")),
+        )
+        .first()
+    )
     if incidente is not None:
         raise ContratoNfseNaoElegivelError(
-            "há incidente fiscal aberto no contrato da NFS-e"
+            "há incidente fiscal pendente no contrato da NFS-e"
         )
     return contrato
 
@@ -691,11 +707,16 @@ def _incidente_novo(contrato_id, diferenca: Diferenca, assinatura: str, agora):
 
 def _registrar_uma_diferenca(contrato_id, diferenca: Diferenca, agora):
     assinatura = assinar_incidente(contrato_id, diferenca)
-    for tentativa in range(2):
-        existente = IncidenteContratoNfse.query.filter_by(
-            contrato_base_id=contrato_id,
-            assinatura=assinatura,
-        ).first()
+    for tentativa in range(3):
+        existente = (
+            IncidenteContratoNfse.query
+            .filter_by(
+                contrato_base_id=contrato_id,
+                assinatura=assinatura,
+            )
+            .with_for_update()
+            .first()
+        )
         if existente is not None:
             existente.ultima_observacao_em = agora
             existente.observacoes = (existente.observacoes or 0) + 1
@@ -713,13 +734,17 @@ def _registrar_uma_diferenca(contrato_id, diferenca: Diferenca, agora):
                 assinatura=assinatura,
             ).first()
             return incidente, assinatura
-        except IntegrityError:
+        except (IntegrityError, OperationalError) as exc:
             db.session.rollback()
-            if tentativa == 0:
+            codigo = getattr(getattr(exc, "orig", None), "args", (None,))[0]
+            concorrencia = isinstance(exc, IntegrityError) or codigo in {1205, 1213}
+            if tentativa < 2 and concorrencia:
                 continue
+            if not concorrencia:
+                _persistencia_falhou("registrar_incidente_nfse", exc)
             raise PersistenciaContratoError(
                 "não foi possível reconciliar a observação concorrente do incidente"
-            )
+            ) from exc
         except Exception as exc:
             _persistencia_falhou("registrar_incidente_nfse", exc)
     raise PersistenciaContratoError("não foi possível registrar o incidente da NFS-e")
@@ -953,8 +978,68 @@ def _copiar_campo(campo):
 
 
 def _campo_do_incidente(incidente, campos):
-    chave = incidente.chave_observada or incidente.chave_esperada
+    chave = incidente.chave_esperada or incidente.chave_observada
     return next((campo for campo in campos if campo.chave_semantica == chave), None)
+
+
+def _adaptador_observado(interacao):
+    adaptadores = {
+        "text": "texto",
+        "date": "texto",
+        "number": "texto",
+        "email": "texto",
+        "tel": "texto",
+        "textarea": "textarea",
+        "radio": "radio",
+        "select": "select_direto",
+        "select2": "select_busca",
+        "select_direto": "select_direto",
+        "select_busca": "select_busca",
+        "chosen": "chosen",
+    }
+    adaptador = adaptadores.get(str(interacao or "").lower())
+    if adaptador is None:
+        raise ConfiguracaoContratoInvalidaError(
+            "o controle observado não possui adaptador seguro"
+        )
+    return adaptador
+
+
+def _seletor_css_identidade(chave):
+    chave = str(chave or "")
+    if not chave or len(chave) > 100:
+        raise ConfiguracaoContratoInvalidaError(
+            "o controle observado não possui identidade estável"
+        )
+    escapada = chave.replace("\\", "\\\\").replace('"', '\\"')
+    return f'[name="{escapada}"], [id="{escapada}"]'
+
+
+def _substituir_opcoes(campo, incidente):
+    campo.opcoes.clear()
+    campo.opcoes.extend(
+        OpcaoCampoContratoNfse(
+            valor=opcao.valor,
+            rotulo=opcao.rotulo,
+            ordem=opcao.ordem,
+        )
+        for opcao in incidente.opcoes
+    )
+
+
+def _aplicar_estrutura_observada(campo, incidente, *, remapeamento=False):
+    if incidente.chave_observada and remapeamento:
+        campo.seletor_tipo = "css"
+        campo.seletor = _seletor_css_identidade(incidente.chave_observada)
+    if incidente.rotulo:
+        campo.rotulo = incidente.rotulo
+    if incidente.tipo_controle:
+        campo.tipo = incidente.tipo_controle
+    if incidente.interacao:
+        campo.interacao = _adaptador_observado(incidente.interacao)
+    if incidente.obrigatorio is not None:
+        campo.obrigatorio = bool(incidente.obrigatorio)
+    _substituir_opcoes(campo, incidente)
 
 
 def _novo_campo_do_incidente(incidente, origem, fonte, valor_fixo, ordem):
@@ -966,11 +1051,11 @@ def _novo_campo_do_incidente(incidente, origem, fonte, valor_fixo, ordem):
     campo = CampoContratoNfse(
         chave_semantica=chave,
         etapa=incidente.etapa,
-        seletor_tipo="name",
-        seletor=chave,
+        seletor_tipo="css",
+        seletor=_seletor_css_identidade(chave),
         rotulo=incidente.rotulo or chave,
         tipo=incidente.tipo_controle or "text",
-        interacao=incidente.interacao or "texto",
+        interacao=_adaptador_observado(incidente.interacao or "text"),
         obrigatorio=bool(incidente.obrigatorio),
         ordem=ordem,
         origem=origem,
@@ -987,6 +1072,72 @@ def _novo_campo_do_incidente(incidente, origem, fonte, valor_fixo, ordem):
         for opcao in incidente.opcoes
     )
     return campo
+
+
+def _campo_comparavel_incidente(incidente):
+    return CampoComparavel(
+        chave_semantica=(
+            incidente.chave_observada or incidente.chave_esperada or ""
+        ),
+        etapa=incidente.etapa,
+        rotulo=incidente.rotulo or "",
+        tipo=incidente.tipo_controle or "",
+        interacao=incidente.interacao or "",
+        obrigatorio=bool(incidente.obrigatorio),
+        opcoes=tuple(incidente.opcoes),
+    )
+
+
+def _recomendacoes_incidentes(incidentes):
+    por_etapa = {}
+    for incidente in incidentes:
+        if incidente.estado != "aberto" or incidente.tipo not in {
+            CONTROLE_REMOVIDO,
+            CONTROLE_NOVO,
+        }:
+            continue
+        campo = _campo_comparavel_incidente(incidente)
+        diferenca = Diferenca(
+            etapa=incidente.etapa,
+            tipo=incidente.tipo,
+            severidade=incidente.severidade,
+            chave_esperada=incidente.chave_esperada,
+            chave_observada=incidente.chave_observada,
+            esperado=campo if incidente.tipo == CONTROLE_REMOVIDO else None,
+            observado=campo if incidente.tipo == CONTROLE_NOVO else None,
+            mensagem=incidente.mensagem,
+        )
+        por_etapa.setdefault(incidente.etapa, []).append(diferenca)
+    recomendacoes = []
+    for etapa, diferencas in por_etapa.items():
+        recomendacoes.extend(
+            recomendar_remapeamentos(
+                ResultadoComparacao(
+                    etapa=etapa,
+                    compatibilidade="incompativel",
+                    diferencas=tuple(diferencas),
+                )
+            )
+        )
+    return recomendacoes
+
+
+def recomendacao_incidente(incidente, incidentes=None):
+    if incidente.tipo != CONTROLE_REMOVIDO:
+        return None
+    if incidentes is None:
+        incidentes = IncidenteContratoNfse.query.filter_by(
+            contrato_base_id=incidente.contrato_base_id
+        ).all()
+    return next(
+        (
+            recomendacao
+            for recomendacao in _recomendacoes_incidentes(incidentes)
+            if recomendacao.chave_esperada == incidente.chave_esperada
+            and recomendacao.etapa == incidente.etapa
+        ),
+        None,
+    )
 
 
 def _fingerprint_contrato(campos) -> str:
@@ -1070,21 +1221,104 @@ def _auditar_configuracao(candidato, incidente, usuario_id):
         )
 
 
-def configurar_incidente(incidente_id, dados, usuario_id=None) -> ContratoNfse:
+def configurar_incidente(
+    incidente_id,
+    dados,
+    usuario_id=None,
+    *,
+    chave_observada=None,
+    confirmar_recomendacao=False,
+) -> ContratoNfse:
     """Cria uma candidata a partir de um incidente, sem alterar o ativo."""
 
-    incidente = db.session.get(IncidenteContratoNfse, incidente_id)
+    incidente = (
+        IncidenteContratoNfse.query
+        .filter(IncidenteContratoNfse.id == incidente_id)
+        .with_for_update()
+        .first()
+    )
     if incidente is None:
         raise ContratoNfseNaoEncontradoError("o incidente solicitado não existe")
+    if incidente.estado != "aberto":
+        raise ContratoNfseTransicaoInvalidaError(
+            "o incidente já recebeu uma decisão"
+        )
     origem, fonte, valor_fixo = _validar_configuracao(incidente, dados)
-    ativo = _contrato_com_campos(contrato_ativo().id)
+    ativo_id = contrato_ativo().id
+    ativo = _contrato_com_campos(ativo_id)
     if ativo is None:
         raise ContratoNfseNaoEncontradoError("não há contrato ativo para copiar")
+    if incidente.contrato_base_id != ativo.id:
+        raise ContratoNfseTransicaoInvalidaError(
+            "o incidente pertence a uma versão que não está mais ativa"
+        )
+
+    pendentes = IncidenteContratoNfse.query.filter_by(
+        contrato_base_id=ativo.id
+    ).all()
+    recomendacao = recomendacao_incidente(incidente, pendentes)
+    incidente_observado = None
+    if recomendacao is not None:
+        escolhida = chave_observada or recomendacao.chave_observada
+        if not confirmar_recomendacao:
+            raise ConfiguracaoContratoInvalidaError(
+                "confirme explicitamente a recomendação antes de salvar"
+            )
+        if escolhida not in recomendacao.candidatos:
+            raise ConfiguracaoContratoInvalidaError(
+                "escolha um dos controles recomendados"
+            )
+        incidente_observado = next(
+            (
+                item
+                for item in pendentes
+                if item.estado == "aberto"
+                and item.tipo == CONTROLE_NOVO
+                and item.etapa == incidente.etapa
+                and item.chave_observada == escolhida
+            ),
+            None,
+        )
+        if incidente_observado is None:
+            raise ContratoNfseTransicaoInvalidaError(
+                "o controle recomendado não está mais pendente"
+            )
+    elif chave_observada is not None or confirmar_recomendacao:
+        raise ConfiguracaoContratoInvalidaError(
+            "o incidente não possui recomendação aplicável"
+        )
 
     agora = utcnow_naive()
-    campos = [_copiar_campo(campo) for campo in ativo.campos]
+    candidata_base = (
+        ContratoNfse.query
+        .join(
+            IncidenteContratoNfse,
+            IncidenteContratoNfse.contrato_candidato_id == ContratoNfse.id,
+        )
+        .filter(
+            IncidenteContratoNfse.contrato_base_id == ativo.id,
+            ContratoNfse.estado.in_(("candidata", "validada")),
+        )
+        .order_by(ContratoNfse.versao.desc())
+        .first()
+    )
+    origem_campos = (
+        _contrato_com_campos(candidata_base.id)
+        if candidata_base is not None
+        else ativo
+    )
+    campos = [_copiar_campo(campo) for campo in origem_campos.campos]
     campo_alvo = _campo_do_incidente(incidente, campos)
-    if campo_alvo is None:
+    remover_campo = (
+        incidente.tipo == CONTROLE_REMOVIDO and incidente_observado is None
+    )
+    if remover_campo:
+        if origem != "intocavel" or campo_alvo is None:
+            raise ConfiguracaoContratoInvalidaError(
+                "um controle removido sem remapeamento exige a decisão de não tocar"
+            )
+        campos.remove(campo_alvo)
+    elif campo_alvo is None:
         proxima_ordem = max((campo.ordem for campo in campos), default=-1) + 1
         campo_alvo = _novo_campo_do_incidente(
             incidente, origem, fonte, valor_fixo, proxima_ordem
@@ -1094,6 +1328,12 @@ def configurar_incidente(incidente_id, dados, usuario_id=None) -> ContratoNfse:
         campo_alvo.origem = origem
         campo_alvo.fonte = fonte
         campo_alvo.valor_fixo = valor_fixo
+        estrutura = incidente_observado or incidente
+        _aplicar_estrutura_observada(
+            campo_alvo,
+            estrutura,
+            remapeamento=incidente_observado is not None,
+        )
 
     maior_versao = db.session.query(db.func.max(ContratoNfse.versao)).scalar() or 0
     candidato = ContratoNfse(
@@ -1110,8 +1350,20 @@ def configurar_incidente(incidente_id, dados, usuario_id=None) -> ContratoNfse:
         ),
     )
     candidato.campos.extend(campos)
+    if candidata_base is not None:
+        herdados = IncidenteContratoNfse.query.filter_by(
+            contrato_candidato_id=candidata_base.id,
+            contrato_base_id=ativo.id,
+            estado="configurado",
+        ).all()
+        candidata_base.estado = "arquivada"
+        for herdado in herdados:
+            herdado.contrato_candidato = candidato
     incidente.contrato_candidato = candidato
     incidente.estado = "configurado"
+    if incidente_observado is not None:
+        incidente_observado.contrato_candidato = candidato
+        incidente_observado.estado = "configurado"
     db.session.add(candidato)
     try:
         db.session.commit()
@@ -1196,16 +1448,48 @@ def ativar(contrato_id, usuario_id=None, *, agora=None):
         .with_for_update()
         .first()
     )
-    agora = agora or utcnow_naive()
-    if ativo is not None:
-        ativo.estado = "arquivada"
-    candidato.estado = "ativa"
-    candidato.ativado_em = agora
-    candidato.ativado_por_id = usuario_id
+    if ativo is None:
+        raise ContratoNfseTransicaoInvalidaError(
+            "não há versão ativa para validar a base da candidata"
+        )
     incidentes = IncidenteContratoNfse.query.filter_by(
         contrato_candidato_id=contrato_id,
         estado="configurado",
     ).all()
+    if not incidentes or any(
+        incidente.contrato_base_id != ativo.id for incidente in incidentes
+    ):
+        raise ContratoNfseTransicaoInvalidaError(
+            "a candidata foi criada sobre uma versão que não está mais ativa"
+        )
+    pendentes = (
+        IncidenteContratoNfse.query
+        .filter(
+            IncidenteContratoNfse.contrato_base_id == ativo.id,
+            IncidenteContratoNfse.estado.in_(("aberto", "configurado")),
+        )
+        .with_for_update()
+        .all()
+    )
+    if any(
+        incidente.estado != "configurado"
+        or incidente.contrato_candidato_id != candidato.id
+        for incidente in pendentes
+    ):
+        raise ContratoNfseTransicaoInvalidaError(
+            "a candidata não cobre todos os incidentes pendentes da versão ativa"
+        )
+    agora = agora or utcnow_naive()
+    ativo.estado = "arquivada"
+    outras = ContratoNfse.query.filter(
+        ContratoNfse.id != candidato.id,
+        ContratoNfse.estado.in_(("candidata", "validada")),
+    ).all()
+    for outra in outras:
+        outra.estado = "arquivada"
+    candidato.estado = "ativa"
+    candidato.ativado_em = agora
+    candidato.ativado_por_id = usuario_id
     for incidente in incidentes:
         incidente.estado = "resolvido"
         incidente.resolvido_em = agora
@@ -1251,7 +1535,20 @@ def _resumo_contrato(contrato):
     }
 
 
-def _resumo_incidente(incidente):
+def _resumo_recomendacao(recomendacao):
+    if recomendacao is None:
+        return None
+    return {
+        "chave_observada": recomendacao.chave_observada,
+        "confianca": recomendacao.confianca,
+        "evidencias": list(recomendacao.evidencias),
+        "candidatos": list(recomendacao.candidatos),
+        "ambigua": bool(recomendacao.ambigua),
+        "inequivoca": bool(recomendacao.inequivoca),
+    }
+
+
+def _resumo_incidente(incidente, recomendacao=None):
     campo = {
         "chave_esperada": incidente.chave_esperada,
         "chave_observada": incidente.chave_observada,
@@ -1260,7 +1557,7 @@ def _resumo_incidente(incidente):
         "interacao": incidente.interacao,
         "obrigatorio": incidente.obrigatorio,
     }
-    return {
+    resumo = {
         "id": incidente.id,
         "etapa": incidente.etapa,
         "tipo": incidente.tipo,
@@ -1276,6 +1573,9 @@ def _resumo_incidente(incidente):
             for opcao in sorted(incidente.opcoes, key=lambda item: item.ordem)
         ],
     }
+    if recomendacao is not None:
+        resumo["recomendacao"] = _resumo_recomendacao(recomendacao)
+    return resumo
 
 
 def estado_painel():
@@ -1294,10 +1594,20 @@ def estado_painel():
         .order_by(IncidenteContratoNfse.id.desc())
         .all()
     )
+    recomendacoes = {
+        (item.etapa, item.chave_esperada): item
+        for item in _recomendacoes_incidentes(incidentes)
+    }
     return {
         "ativo": _resumo_contrato(ativo),
         "candidatas": [_resumo_contrato(item) for item in candidatos],
-        "incidentes": [_resumo_incidente(item) for item in incidentes],
+        "incidentes": [
+            _resumo_incidente(
+                item,
+                recomendacoes.get((item.etapa, item.chave_esperada)),
+            )
+            for item in incidentes
+        ],
         "fontes": fontes_disponiveis(),
     }
 
@@ -1361,6 +1671,7 @@ __all__ = [
     "observar",
     "registrar_validacao",
     "registrar_incidentes",
+    "recomendacao_incidente",
     "resolver_valor",
     "validar_contrato_automatico",
 ]

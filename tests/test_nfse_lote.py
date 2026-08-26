@@ -421,6 +421,35 @@ def test_gate_automatico_recusa_incidente_fiscal_aberto(banco):
         nfse_lote.validar_contrato_para_modo(nfse_lote.MODO_AUTOMATICO)
 
 
+@pytest.mark.parametrize(
+    ('severidade', 'estado'),
+    [
+        ('critica', 'aberto'),
+        ('informativa', 'aberto'),
+        ('informativa', 'configurado'),
+    ],
+)
+def test_gate_automatico_recusa_todo_incidente_pendente(
+    banco, severidade, estado
+):
+    contrato = nfse_contrato.garantir_contrato_inicial()
+    db.session.add(IncidenteContratoNfse(
+        contrato_base_id=contrato.id,
+        assinatura=(severidade + estado).ljust(64, 'x')[:64],
+        etapa='servico',
+        tipo='controle_novo',
+        severidade=severidade,
+        estado=estado,
+        primeira_observacao_em=datetime(2026, 8, 25, 12, 0),
+        ultima_observacao_em=datetime(2026, 8, 25, 12, 0),
+        mensagem='Incidente sintético pendente.',
+    ))
+    db.session.commit()
+
+    with pytest.raises(nfse_contrato.ContratoNfseNaoElegivelError):
+        nfse_lote.validar_contrato_para_modo(nfse_lote.MODO_AUTOMATICO)
+
+
 def test_validacao_aceita_apenas_nota_emitivel(banco):
     nota = _nota(status=StatusNotaNfse.PRONTA)
     assert nfse_lote.validar_nota_para_validacao(nota.id) is nota
@@ -764,6 +793,51 @@ def test_confere_contra_os_dados_da_nota(automatico):
     assert valor == nota.valor_final
     assert nota.competencia in descricao, (
         'a descricao conferida precisa ser a da competencia desta nota')
+
+
+def test_automatico_repassa_regras_do_contrato_para_autorrevisao(
+    automatico, monkeypatch
+):
+    regras = ({'chave_semantica': 'campo.sintetico'},)
+    monkeypatch.setattr(
+        nfse_lote,
+        '_regras_autorrevisao_contrato',
+        MagicMock(return_value=regras),
+    )
+
+    nfse_lote._emitir_nota(_nota().id, None, 'exec-1')
+
+    assert (
+        automatico['automacao'].conferir_revisao.call_args.kwargs[
+            'regras_adicionais'
+        ]
+        is regras
+    )
+
+
+def test_valor_contratado_ilegivel_forca_divergencia(monkeypatch):
+    contrato = MagicMock()
+    contrato.campo.side_effect = lambda chave: chave
+    valores = {
+        'Tomador_Inscricao': '11111111111',
+        'Valores_ValorServico': 'valor inválido',
+        'ServicoPrestado_Descricao': 'Descrição sintética',
+    }
+    monkeypatch.setattr(
+        nfse_lote.nfse_contrato,
+        'resolver_valor',
+        lambda campo, _nota, _config, _hoje: valores[campo],
+    )
+
+    _documento, valor, _descricao = nfse_lote._valores_basicos_revisao(
+        contrato,
+        SimpleNamespace(valor_final=Decimal('826.09')),
+        SimpleNamespace(),
+    )
+
+    assert valor.is_nan(), (
+        'valor contratado ilegível não pode liberar a revisão com o valor da nota'
+    )
 
 
 def test_conferindo_emite_e_marca(automatico):

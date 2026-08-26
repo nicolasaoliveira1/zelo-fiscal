@@ -269,3 +269,24 @@ def test_campo_fiscal_sem_leitor_e_padrao_obrigatorio_sem_prova_bloqueiam_auto()
 
     assert any('sem_leitor' in item for item in resultado)
     assert not resultado.elegivel_automatico
+
+
+def test_campo_nao_conferivel_aprova_somente_fluxo_assistido():
+    regra = _regra_revisao(
+        chave_semantica='campo.somente_assistido',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        conferivel_automatico=False,
+    )
+
+    resultado = nfse.conferir_revisao(
+        _driver_revisao(),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert resultado == []
+    assert resultado.avisos_assistidos
+    assert resultado.elegivel_automatico is False

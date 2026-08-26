@@ -464,10 +464,10 @@
     </div>
 </div>
 
-{% set contrato_abertos = contrato_estado.incidentes | selectattr('estado', 'equalto', 'aberto') | list %}
+{% set contrato_abertos = contrato_estado.incidentes | selectattr('estado', 'in', ('aberto', 'configurado')) | list %}
 {% set ns_contrato = namespace(bloqueado=false) %}
 {% for incidente in contrato_abertos %}
-    {% if incidente.severidade in ('critica', 'fiscal') %}
+    {% if incidente.estado == 'configurado' or incidente.severidade in ('critica', 'fiscal') %}
         {% set ns_contrato.bloqueado = true %}
     {% endif %}
 {% endfor %}
@@ -549,12 +549,30 @@
                     {% endfor %}
                 </ul>
                 {% endif %}
+                {% if incidente.recomendacao %}
+                <div class="nfse-contrato-recomendacao">
+                    <strong>
+                        {% if incidente.recomendacao.ambigua %}
+                        Recomendação ambígua
+                        {% else %}
+                        Remapeamento sugerido · confiança {{ incidente.recomendacao.confianca }}
+                        {% endif %}
+                    </strong>
+                    <p class="nfse-hint mb-0">
+                        {{ incidente.recomendacao.evidencias | join('; ') }}
+                    </p>
+                </div>
+                {% endif %}
                 <div class="d-flex justify-content-end">
+                    {% if incidente.estado == 'aberto' %}
                     <button class="btn btn-primary btn-sm" type="button"
                             data-configurar-incidente="{{ incidente.id }}"
                             data-bs-toggle="modal" data-bs-target="#modalConfigContrato">
                         Configurar alteração
                     </button>
+                    {% else %}
+                    <span>Incluído na versão candidata.</span>
+                    {% endif %}
                 </div>
             </article>
             {% endfor %}
@@ -644,6 +662,15 @@
                         <input class="form-control" id="nfseContratoValorFixo" name="valor_fixo"
                                maxlength="500" autocomplete="off">
                     </div>
+                    <div class="d-none mb-3" id="nfseContratoEscolhaGrupo">
+                        <label class="form-label" for="nfseContratoChaveObservada">
+                            Controle correspondente
+                        </label>
+                        <select class="form-select" id="nfseContratoChaveObservada"
+                                name="chave_observada">
+                            <option value="" selected>Escolha o controle…</option>
+                        </select>
+                    </div>
                     <div class="form-check d-none" id="nfseContratoRecomendacaoGrupo">
                         <input class="form-check-input" type="checkbox"
                                id="nfseContratoConfirmarRecomendacao"
@@ -651,6 +678,7 @@
                         <label class="form-check-label" for="nfseContratoConfirmarRecomendacao">
                             Confirmo a recomendação para este incidente.
                         </label>
+                        <div class="nfse-hint" id="nfseContratoRecomendacaoEvidencias"></div>
                     </div>
                     <div class="text-danger" id="nfseContratoErro" role="alert" aria-live="assertive"></div>
                 </div>

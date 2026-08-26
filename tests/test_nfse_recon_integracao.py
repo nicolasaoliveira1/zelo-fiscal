@@ -36,7 +36,7 @@ def _contrato(campos=(), contrato_id=0):
     return SimpleNamespace(contrato_id=contrato_id, campos=tuple(campos))
 
 
-def test_fronteira_desconhecida_nao_persiste_incidente(monkeypatch):
+def test_fronteira_desconhecida_bloqueia_sem_persistir_incidente(monkeypatch):
     inventariar = MagicMock(
         return_value=InventarioEtapa.desconhecido("servico", "DOM sintético")
     )
@@ -46,15 +46,15 @@ def test_fronteira_desconhecida_nao_persiste_incidente(monkeypatch):
     monkeypatch.setattr(nfse_service, "log_event", MagicMock())
 
     driver = MagicMock()
-    resultado = nfse_service._observar_fronteira_contrato(
-        driver,
-        _contrato(contrato_id=71),
-        "servico",
-        "entrada",
-        execution_id="execucao-sintetica",
-    )
+    with pytest.raises(nfse_service.NfseDriftError, match="observar"):
+        nfse_service._observar_fronteira_contrato(
+            driver,
+            _contrato(contrato_id=71),
+            "servico",
+            "entrada",
+            execution_id="execucao-sintetica",
+        )
 
-    assert resultado["estado"] == "desconhecida"
     inventariar.assert_called_once_with(driver, "servico")
     registrar.assert_not_called()
     assert driver.get.call_count == 0
@@ -86,6 +86,25 @@ def test_fronteira_opcional_persiste_artefato_e_retorna_aviso(monkeypatch):
     }
     salvar.assert_called_once()
     assert "Campo sintético" in salvar.call_args.args[1]
+
+
+def test_fronteira_opcional_bloqueia_no_modo_automatico(monkeypatch):
+    inventario = InventarioEtapa(
+        etapa="servico",
+        controles=(_controle(obrigatorio=False),),
+    )
+    monkeypatch.setattr(nfse_service.nfse_recon, "inventariar", lambda *_: inventario)
+
+    with pytest.raises(nfse_service.NfseDriftError) as erro:
+        nfse_service._observar_fronteira_contrato(
+            MagicMock(),
+            _contrato(),
+            "servico",
+            "entrada",
+            modo="automatico",
+        )
+
+    assert erro.value.pausar_lote is True
 
 
 def test_drift_incompatível_gera_artefato_sanitizado(monkeypatch):

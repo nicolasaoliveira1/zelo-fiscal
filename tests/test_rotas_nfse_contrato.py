@@ -52,18 +52,32 @@ def _criar_incidente(app, *, recomendado=False):
                 ),
             ),
         )
-        diferenca = Diferenca(
+        diferencas = [Diferenca(
             etapa='servico',
             tipo='controle_novo',
             severidade='critica',
-            chave_esperada='campo.esperado' if recomendado else None,
             chave_observada='campo.sintetico',
             observado=campo,
             mensagem='Diferença sintética requer decisão.',
-        )
+        )]
+        if recomendado:
+            esperado = CampoComparavel(
+                **{
+                    **campo.__dict__,
+                    'chave_semantica': 'ServicoPrestado_Descricao',
+                }
+            )
+            diferencas.insert(0, Diferenca(
+                etapa='servico',
+                tipo='controle_removido',
+                severidade='critica',
+                chave_esperada='ServicoPrestado_Descricao',
+                esperado=esperado,
+                mensagem='Controle sintético anterior não foi encontrado.',
+            ))
         incidente = nfse_contrato.registrar_incidentes(
             contrato.id,
-            [diferenca],
+            diferencas,
             agora=datetime(2026, 8, 25, 12, 0),
         )[0]
         return contrato.id, incidente.id
@@ -235,6 +249,31 @@ def test_payload_extra_e_recomendacao_sem_confirmacao_sao_recusados(login_as, ap
     )
     assert recomendacao.status_code == 400
     assert recomendacao.get_json()['campo'] == 'confirmar_recomendacao'
+
+
+def test_recomendacao_real_confirmada_cria_candidata_e_cobre_os_dois_incidentes(
+    login_as, app
+):
+    _contrato_id, removido_id = _criar_incidente(app, recomendado=True)
+
+    resposta = login_as('operador').post(
+        f'/nfse/contrato/incidente/{removido_id}/configurar',
+        json={
+            'origem': 'fixo',
+            'valor_fixo': 'OPCAO-SINTETICA',
+            'confirmar_recomendacao': True,
+            'chave_observada': 'campo.sintetico',
+        },
+    )
+
+    assert resposta.status_code == 200
+    candidato_id = resposta.get_json()['contrato']['id']
+    with app.app_context():
+        vinculados = IncidenteContratoNfse.query.filter_by(
+            contrato_candidato_id=candidato_id,
+            estado='configurado',
+        ).all()
+        assert len(vinculados) == 2
 
 
 def test_incidente_decidido_retorna_conflito(login_as, app):

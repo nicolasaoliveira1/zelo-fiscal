@@ -180,6 +180,9 @@ JS_INVENTARIO_SEGURO = r"""
     var elemento = elementos[n];
     var tag = String(elemento.tagName || '').toLowerCase();
     var tipo = (elemento.getAttribute('type') || tag).toLowerCase();
+    if (tag === 'input' && {
+      hidden: true, submit: true, button: true, reset: true, file: true, image: true
+    }[tipo]) { continue; }
     var opcoes = [];
     if (tag === 'select') {
       var declaracoes = elemento.querySelectorAll('option');
@@ -277,15 +280,17 @@ def _estado_payload(driver: Any) -> dict[str, Any] | None:
 
 def _interacao(tag: str, tipo: str, classes: tuple[str, ...]) -> str:
     if "select2-hidden-accessible" in classes:
-        return "select2"
+        return "select_busca"
     if "form-chosen" in classes:
         return "chosen"
     if tag == "select":
-        return "select"
+        return "select_direto"
     if tipo in {"radio", "checkbox"}:
         return tipo
     if tag == "textarea":
         return "textarea"
+    if tipo in {"text", "date", "number", "email", "tel"}:
+        return "texto"
     return tipo or tag
 
 

@@ -786,8 +786,7 @@ let contratoAutomaticoElegivel = false;
 export function contratoPermiteAutomatico(estado) {
   if (estado?.ativo?.elegivel_automatico !== true) return false;
   const incidentes = Array.isArray(estado.incidentes) ? estado.incidentes : [];
-  return !incidentes.some((item) => item?.estado === 'aberto'
-    && ['critica', 'fiscal'].includes(item.severidade));
+  return !incidentes.some((item) => ['aberto', 'configurado'].includes(item?.estado));
 }
 
 /**

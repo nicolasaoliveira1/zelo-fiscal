@@ -441,6 +441,32 @@ def test_etapa_usa_seletores_do_snapshot_recebido(driver):
     assert 'DataCompetencia' not in driver.tocados()
 
 
+def test_etapa_aplica_os_valores_resolvidos_do_snapshot(driver):
+    valores = {
+        nfse.CHAVE_DATA_COMPETENCIA: date(2026, 8, 25),
+        nfse.CHAVE_REGIME_APURACAO: 'REGIME-SINTETICO',
+        nfse.CHAVE_DOMICILIO_TOMADOR: '2',
+        nfse.CHAVE_INSCRICAO_TOMADOR: 'DOCUMENTO-CONTRATADO-SINTETICO',
+    }
+
+    nfse.preencher_etapa_pessoas(
+        driver,
+        NOTA,
+        CONFIG,
+        date(2026, 7, 28),
+        valores_contrato=valores,
+    )
+
+    assert driver.preenchidos['DataCompetencia'] == '25/08/2026'
+    assert driver.chosen['SimplesNacional_RegimeApuracaoTributosSN'] == (
+        'REGIME-SINTETICO'
+    )
+    assert driver.radios['Tomador.LocalDomicilio'] == '2'
+    assert driver.preenchidos['Tomador_Inscricao'] == (
+        'DOCUMENTO-CONTRATADO-SINTETICO'
+    )
+
+
 def _regra_sintetica(**valores):
     padrao = {
         'chave_semantica': 'campo.adicional',

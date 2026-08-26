@@ -82,7 +82,11 @@ function markup() {
       </select>
       <div id="nfseContratoFonteGrupo"><select id="nfseContratoFonte"></select></div>
       <div id="nfseContratoValorGrupo"><input id="nfseContratoValorFixo"></div>
-      <div id="nfseContratoRecomendacaoGrupo"><input id="nfseContratoConfirmarRecomendacao" type="checkbox"></div>
+      <div id="nfseContratoEscolhaGrupo"><select id="nfseContratoChaveObservada"></select></div>
+      <div id="nfseContratoRecomendacaoGrupo">
+        <input id="nfseContratoConfirmarRecomendacao" type="checkbox">
+        <div id="nfseContratoRecomendacaoEvidencias"></div>
+      </div>
       <div id="nfseContratoErro" role="alert"></div>
       <button id="btnSalvarConfigContrato" type="submit">Salvar configuração</button>
     </form>
@@ -235,14 +239,76 @@ test('recomendação inequívoca exige confirmação explícita no payload', () 
   assert.throws(
     () => montarDadosCandidato({
       origem: 'fixo', valorFixo: 'OPCAO-SINTETICA', fontes,
-      recomendacao: { inequivoca: true },
+      recomendacao: {
+        inequivoca: true,
+        chave_observada: 'campo.sintetico',
+        candidatos: ['campo.sintetico'],
+      },
     }),
     /Confirme explicitamente/,
   );
   assert.deepEqual(montarDadosCandidato({
     origem: 'fixo', valorFixo: 'OPCAO-SINTETICA', fontes,
-    recomendacao: { inequivoca: true }, confirmarRecomendacao: true,
-  }), { origem: 'fixo', valor_fixo: 'OPCAO-SINTETICA', confirmar_recomendacao: true });
+    recomendacao: {
+      inequivoca: true,
+      chave_observada: 'campo.sintetico',
+      candidatos: ['campo.sintetico'],
+    },
+    confirmarRecomendacao: true,
+  }), {
+    origem: 'fixo',
+    valor_fixo: 'OPCAO-SINTETICA',
+    confirmar_recomendacao: true,
+    chave_observada: 'campo.sintetico',
+  });
+});
+
+test('recomendação ambígua aceita somente escolha manual confirmada', () => {
+  const recomendacao = {
+    ambigua: true,
+    candidatos: ['campo.a', 'campo.b'],
+  };
+  assert.deepEqual(montarDadosCandidato({
+    origem: 'fixo',
+    valorFixo: 'OPCAO-SINTETICA',
+    fontes,
+    recomendacao,
+    chaveObservada: 'campo.b',
+    confirmarRecomendacao: true,
+  }), {
+    origem: 'fixo',
+    valor_fixo: 'OPCAO-SINTETICA',
+    confirmar_recomendacao: true,
+    chave_observada: 'campo.b',
+  });
+});
+
+test('botão de recon chama somente a ação explícita e mostra estado desconhecido', async () => {
+  const chamadas = [];
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => {
+      chamadas.push({ url, opcoes });
+      if (opcoes) {
+        return resposta({
+          observacao: { compatibilidade: 'desconhecida' },
+        });
+      }
+      return resposta(estadoBase());
+    },
+  });
+
+  document.getElementById('btnReconContrato').click();
+  await proximoTurno();
+  await proximoTurno();
+  await proximoTurno();
+
+  const posts = chamadas.filter((item) => item.opcoes);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].url, '/nfse/contrato/recon');
+  assert.equal(posts[0].opcoes.method, 'POST');
+  assert.equal(document.getElementById('nfseContratoStatus').dataset.estado, 'desconhecido');
+  assert.match(document.getElementById('nfseReconEstado').textContent, /desconhecida/);
 });
 
 test('gate fechado desabilita automático e continua recusando início se o DOM for alterado', async () => {
@@ -274,6 +340,12 @@ test('gate fechado desabilita automático e continua recusando início se o DOM 
     iniciar.disabled = false;
     await iniciarEmissao();
     assert.equal(chamadas, 0);
+    assert.equal(contratoPermiteAutomatico(estadoBase({
+      incidentes: [{ ...incidente, severidade: 'informativa' }],
+    })), false);
+    assert.equal(contratoPermiteAutomatico(estadoBase({
+      incidentes: [{ ...incidente, estado: 'configurado' }],
+    })), false);
   } finally {
     globalThis.fetch = fetchOriginal;
   }

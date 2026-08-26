@@ -64,17 +64,18 @@ function dadosEstado(payload) {
   return null;
 }
 
-function incidentesAbertos(estado) {
+function incidentesPendentes(estado) {
   return Array.isArray(estado?.incidentes)
-    ? estado.incidentes.filter((item) => item?.estado === 'aberto')
+    ? estado.incidentes.filter((item) => ['aberto', 'configurado'].includes(item?.estado))
     : [];
 }
 
 function estadoVisual(estado) {
   if (!estado?.ativo || !Array.isArray(estado.incidentes)) return 'desconhecido';
-  const abertos = incidentesAbertos(estado);
+  const abertos = incidentesPendentes(estado);
   if (estado.ativo.elegivel_automatico === false
-      || abertos.some((item) => ['critica', 'fiscal'].includes(item.severidade))) {
+      || abertos.some((item) => item.estado === 'configurado'
+        || ['critica', 'fiscal'].includes(item.severidade))) {
     return 'bloqueado';
   }
   return abertos.length ? 'aviso' : 'compativel';
@@ -102,7 +103,7 @@ function renderizarIncidentes(estado, root) {
   const lista = porId(root, 'nfseContratoIncidentes');
   if (!lista) return;
   limpar(lista);
-  const incidentes = incidentesAbertos(estado);
+  const incidentes = incidentesPendentes(estado);
   if (!incidentes.length) {
     const vazio = criarElemento('p', 'Não há incidentes no contrato ativo.');
     vazio.id = 'nfseContratoVazio';
@@ -157,15 +158,35 @@ function renderizarIncidentes(estado, root) {
       artigo.appendChild(opcoes);
     }
 
+    if (incidente.recomendacao) {
+      const recomendacao = criarElemento('div');
+      recomendacao.className = 'nfse-contrato-recomendacao';
+      const tituloRecomendacao = incidente.recomendacao.ambigua
+        ? 'Recomendação ambígua'
+        : `Remapeamento sugerido · confiança ${incidente.recomendacao.confianca || '—'}`;
+      recomendacao.appendChild(criarElemento('strong', tituloRecomendacao));
+      const evidencias = criarElemento(
+        'p',
+        (incidente.recomendacao.evidencias || []).join('; '),
+      );
+      evidencias.className = 'nfse-hint mb-0';
+      recomendacao.appendChild(evidencias);
+      artigo.appendChild(recomendacao);
+    }
+
     const acoes = criarElemento('div');
     acoes.className = 'd-flex justify-content-end';
-    const configurar = criarElemento('button', 'Configurar alteração');
-    configurar.type = 'button';
-    configurar.className = 'btn btn-primary btn-sm';
-    configurar.dataset.configurarIncidente = String(incidente.id ?? '');
-    configurar.setAttribute('data-bs-toggle', 'modal');
-    configurar.setAttribute('data-bs-target', '#modalConfigContrato');
-    acoes.appendChild(configurar);
+    if (incidente.estado === 'aberto') {
+      const configurar = criarElemento('button', 'Configurar alteração');
+      configurar.type = 'button';
+      configurar.className = 'btn btn-primary btn-sm';
+      configurar.dataset.configurarIncidente = String(incidente.id ?? '');
+      configurar.setAttribute('data-bs-toggle', 'modal');
+      configurar.setAttribute('data-bs-target', '#modalConfigContrato');
+      acoes.appendChild(configurar);
+    } else {
+      acoes.appendChild(criarElemento('span', 'Incluído na versão candidata.'));
+    }
     artigo.appendChild(acoes);
     lista.appendChild(artigo);
   });
@@ -283,12 +304,20 @@ export function montarDadosCandidato(dados = {}) {
   const fontes = Array.isArray(dados.fontes) ? dados.fontes : null;
   const recomendacao = dados.recomendacao || null;
   const confirmou = valorDe(dados, 'confirmarRecomendacao', 'confirmar_recomendacao');
+  const chaveCrua = valorDe(dados, 'chaveObservada', 'chave_observada');
+  let chaveObservada = chaveCrua == null ? null : String(chaveCrua).trim();
 
   if (!ORIGENS.has(origem)) throw new Error('Escolha uma origem válida.');
-  if (recomendacao?.ambigua || (recomendacao?.candidatos?.length || 0) > 1) {
-    throw new Error('A recomendação é ambígua; escolha o campo manualmente.');
+  if (recomendacao) {
+    chaveObservada ||= recomendacao.chave_observada || null;
+    if (!chaveObservada) {
+      throw new Error('A recomendação é ambígua; escolha o campo manualmente.');
+    }
+    if (!(recomendacao.candidatos || []).includes(chaveObservada)) {
+      throw new Error('Escolha um dos campos recomendados.');
+    }
   }
-  if (recomendacao?.inequivoca && confirmou !== true) {
+  if (recomendacao && confirmou !== true) {
     throw new Error('Confirme explicitamente a recomendação antes de salvar.');
   }
 
@@ -311,7 +340,10 @@ export function montarDadosCandidato(dados = {}) {
   const payload = { origem };
   if (fonte !== null) payload.fonte = fonte;
   if (origem === 'fixo') payload.valor_fixo = valorFixo;
-  if (confirmou === true) payload.confirmar_recomendacao = true;
+  if (recomendacao && confirmou === true) {
+    payload.confirmar_recomendacao = true;
+    payload.chave_observada = chaveObservada;
+  }
   return payload;
 }
 
@@ -347,6 +379,7 @@ function limparErrosConfiguracao(root) {
 function exibirGrupo(elemento, visivel) {
   if (!elemento) return;
   elemento.hidden = !visivel;
+  elemento.classList.toggle('d-none', !visivel);
   elemento.setAttribute('aria-hidden', String(!visivel));
 }
 
@@ -445,10 +478,42 @@ function incidentePorId(estado, id) {
 }
 
 function recomendacaoDoIncidente(incidente) {
-  if (incidente?.recomendacao) return incidente.recomendacao;
-  const campo = incidente?.campo || {};
-  if (campo.chave_esperada && campo.chave_observada) return { inequivoca: true };
-  return null;
+  return incidente?.recomendacao || null;
+}
+
+
+function prepararRecomendacao(root, recomendacao, estado) {
+  const grupo = porId(root, 'nfseContratoRecomendacaoGrupo');
+  const escolhaGrupo = porId(root, 'nfseContratoEscolhaGrupo');
+  const escolha = porId(root, 'nfseContratoChaveObservada');
+  const evidencia = porId(root, 'nfseContratoRecomendacaoEvidencias');
+  exibirGrupo(grupo, Boolean(recomendacao));
+  exibirGrupo(escolhaGrupo, Boolean(recomendacao?.ambigua));
+  if (evidencia) {
+    evidencia.textContent = recomendacao
+      ? (recomendacao.evidencias || []).join('; ')
+      : '';
+  }
+  if (escolha) {
+    limpar(escolha);
+    const placeholder = criarElemento('option', 'Escolha o controle…');
+    placeholder.value = '';
+    placeholder.selected = true;
+    escolha.appendChild(placeholder);
+    (recomendacao?.candidatos || []).forEach((chave, indice) => {
+      const correspondente = (estado?.incidentes || []).find(
+        (item) => item?.campo?.chave_observada === chave,
+      );
+      const rotulo = correspondente?.campo?.rotulo
+        || `Controle observado ${indice + 1}`;
+      const opcao = criarElemento('option', rotulo);
+      opcao.value = chave;
+      if (!recomendacao.ambigua && chave === recomendacao.chave_observada) {
+        opcao.selected = true;
+      }
+      escolha.appendChild(opcao);
+    });
+  }
 }
 
 /**
@@ -469,6 +534,7 @@ export async function inicializarContratoNfse(opcoes = {}) {
   const formConfig = porId(root, 'formConfigContrato');
   const formValidar = porId(root, 'formValidarContrato');
   const notaValidacao = porId(root, 'nfseNotaValidacao');
+  const botaoRecon = porId(root, 'btnReconContrato');
 
   const carregar = async () => {
     try {
@@ -494,6 +560,35 @@ export async function inicializarContratoNfse(opcoes = {}) {
     atualizarCamposOrigem(root, estado?.fontes || [], origem.value);
   });
 
+  botaoRecon?.addEventListener('click', () => {
+    void comCarregamento(botaoRecon, async () => {
+      try {
+        const dados = await chamar(fetchImpl, '/nfse/contrato/recon', {});
+        await carregar();
+        const observacao = dados.observacao || {};
+        if (observacao.compatibilidade === 'desconhecida') {
+          const faixa = porId(root, 'nfseContratoStatus');
+          if (faixa) faixa.dataset.estado = 'desconhecido';
+          const titulo = porId(root, 'nfseContratoStatusTitulo');
+          const texto = porId(root, 'nfseContratoStatusTexto');
+          if (titulo) titulo.textContent = rotulosEstado.desconhecido.titulo;
+          if (texto) texto.textContent = rotulosEstado.desconhecido.texto;
+        }
+        mostrarErro(
+          root,
+          'nfseReconEstado',
+          observacao.compatibilidade === 'compativel'
+            ? 'Recon concluída: a tela atual é compatível.'
+            : `Recon concluída: ${observacao.compatibilidade || 'estado desconhecido'}.`,
+        );
+      } catch (erro) {
+        const mensagem = erro instanceof Error ? erro.message : 'Não foi possível executar a recon.';
+        mostrarErro(root, 'nfseReconEstado', mensagem);
+        showToast(mensagem, 'error');
+      }
+    });
+  });
+
   root.addEventListener('click', (evento) => {
     const alvo = evento.target?.closest?.('[data-configurar-incidente], [data-validar-contrato], [data-ativar-contrato]');
     if (!alvo) return;
@@ -505,9 +600,8 @@ export async function inicializarContratoNfse(opcoes = {}) {
       if (campo) campo.textContent = incidenteAtual?.campo?.rotulo || 'Campo selecionado';
       if (origem) origem.value = '';
       atualizarCamposOrigem(root, estado?.fontes || [], '');
-      const confirmacao = porId(root, 'nfseContratoRecomendacaoGrupo');
       const recomendacao = recomendacaoDoIncidente(incidenteAtual);
-      exibirGrupo(confirmacao, Boolean(recomendacao));
+      prepararRecomendacao(root, recomendacao, estado);
       const checkbox = porId(root, 'nfseContratoConfirmarRecomendacao');
       if (checkbox) checkbox.checked = false;
     } else if (alvo.dataset.validarContrato) {
@@ -541,6 +635,7 @@ export async function inicializarContratoNfse(opcoes = {}) {
         valorFixo: porId(root, 'nfseContratoValorFixo')?.value,
         fontes: estado?.fontes || [],
         recomendacao,
+        chaveObservada: porId(root, 'nfseContratoChaveObservada')?.value,
         confirmarRecomendacao: porId(root, 'nfseContratoConfirmarRecomendacao')?.checked === true,
       });
     } catch (erro) {

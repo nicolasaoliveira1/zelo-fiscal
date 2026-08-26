@@ -95,7 +95,13 @@ def nfse_contrato_configurar(incidente_id):
     if not isinstance(dados, dict):
         return json_error('Envie um objeto JSON de configuração.', 400, campo='corpo')
 
-    permitidos = {'origem', 'fonte', 'valor_fixo', 'confirmar_recomendacao'}
+    permitidos = {
+        'origem',
+        'fonte',
+        'valor_fixo',
+        'confirmar_recomendacao',
+        'chave_observada',
+    }
     extras = set(dados) - permitidos
     if extras:
         campo = sorted(extras)[0]
@@ -117,13 +123,34 @@ def nfse_contrato_configurar(incidente_id):
             'Este incidente já recebeu uma decisão e não pode ser configurado novamente.',
             409,
         )
-    if incidente.chave_esperada and incidente.chave_observada:
+    recomendacao = nfse_contrato.recomendacao_incidente(incidente)
+    chave_observada = dados.get('chave_observada')
+    if chave_observada is not None and not isinstance(chave_observada, str):
+        return json_error(
+            'O controle recomendado deve ser identificado por texto.',
+            400,
+            campo='chave_observada',
+        )
+    if recomendacao is not None:
         if confirmacao is not True:
             return json_error(
                 'Confirme explicitamente a recomendação antes de salvar.',
                 400,
                 campo='confirmar_recomendacao',
             )
+        chave_observada = chave_observada or recomendacao.chave_observada
+        if chave_observada not in recomendacao.candidatos:
+            return json_error(
+                'Escolha um dos controles recomendados.',
+                400,
+                campo='chave_observada',
+            )
+    elif chave_observada is not None or confirmacao is not None:
+        return json_error(
+            'Este incidente não possui recomendação aplicável.',
+            400,
+            campo='chave_observada',
+        )
 
     configuracao = {
         chave: dados[chave]
@@ -135,11 +162,15 @@ def nfse_contrato_configurar(incidente_id):
             incidente_id,
             configuracao,
             usuario_id=current_user.id,
+            chave_observada=chave_observada,
+            confirmar_recomendacao=confirmacao is True,
         )
     except nfse_contrato.ConfiguracaoContratoInvalidaError as exc:
         return json_error(str(exc), 400, campo='origem')
     except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
         return json_error(str(exc), 404)
+    except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+        return json_error(str(exc), 409)
     return {
         'status': 'ok',
         'incidente_id': incidente_id,

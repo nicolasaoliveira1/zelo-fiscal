@@ -1,12 +1,15 @@
 """Serviço persistente do contrato adaptativo, com dados sintéticos."""
 
-from dataclasses import FrozenInstanceError
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import FrozenInstanceError, replace
 from datetime import datetime
+from threading import Barrier
 from types import SimpleNamespace
 
 import pytest
 
 from app import db
+from app.automation import nfse as automacao_nfse
 from app.automation.nfse_recon import OpcaoInventariada
 from app.models import IncidenteContratoNfse
 from app.services import nfse_contrato
@@ -30,6 +33,20 @@ def _diferenca():
         chave_observada="campo.novo",
         observado=observado,
         mensagem="Controle sintético requer decisão.",
+    )
+
+
+def _diferenca_com_chave(chave):
+    diferenca = _diferenca()
+    observado = replace(
+        diferenca.observado,
+        chave_semantica=chave,
+        rotulo=f'Campo sintético {chave}',
+    )
+    return replace(
+        diferenca,
+        chave_observada=chave,
+        observado=observado,
     )
 
 
@@ -96,6 +113,32 @@ def test_registrar_incidentes_faz_upsert_e_preserva_primeira_observacao(app, ids
         assert set(eventos[-1][1]) == {
             "contrato_id", "incidente_id", "etapa", "tipo", "assinatura"
         }
+
+
+def test_observacoes_concorrentes_nao_perdem_contagem_mysql(app, ids, monkeypatch):
+    with app.app_context():
+        if db.engine.dialect.name != 'mysql':
+            pytest.skip('a contenção real por linha é validada no gate MySQL')
+        contrato_id = nfse_contrato.garantir_contrato_inicial().id
+    monkeypatch.setattr(nfse_contrato.auditoria, 'registrar', lambda *a, **k: None)
+    barreira = Barrier(2)
+
+    def observar():
+        with app.app_context():
+            barreira.wait()
+            resultado = nfse_contrato.registrar_incidentes(
+                contrato_id, [_diferenca()]
+            )[0].id
+            db.session.remove()
+            return resultado
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        ids_incidentes = list(executor.map(lambda _indice: observar(), range(2)))
+
+    with app.app_context():
+        incidente = db.session.get(IncidenteContratoNfse, ids_incidentes[0])
+        assert len(set(ids_incidentes)) == 1
+        assert incidente.observacoes == 2
 
 
 def test_comparacao_desconhecida_nao_persiste_incidente(app, ids):
@@ -195,6 +238,156 @@ def test_configurar_incidente_copia_ativo_e_altera_somente_campo_coberto(
         } == campos_ativos
         assert incidente.estado == "configurado"
         assert incidente.contrato_candidato_id == candidato.id
+
+
+def test_configuracoes_sucessivas_formam_candidata_cumulativa(app, ids, monkeypatch):
+    monkeypatch.setattr(nfse_contrato.auditoria, 'registrar', lambda *a, **k: None)
+    with app.app_context():
+        ativo = nfse_contrato.garantir_contrato_inicial()
+        primeiro, segundo = nfse_contrato.registrar_incidentes(
+            ativo.id,
+            [_diferenca_com_chave('campo.novo.a'), _diferenca_com_chave('campo.novo.b')],
+        )
+
+        candidata_a = nfse_contrato.configurar_incidente(
+            primeiro.id, {'origem': 'fixo', 'valor_fixo': 'A'}
+        )
+        candidata_b = nfse_contrato.configurar_incidente(
+            segundo.id, {'origem': 'fixo', 'valor_fixo': 'A'}
+        )
+        db.session.refresh(candidata_a)
+        db.session.refresh(primeiro)
+
+        assert candidata_a.estado == 'arquivada'
+        assert primeiro.contrato_candidato_id == candidata_b.id
+        assert segundo.contrato_candidato_id == candidata_b.id
+        assert {'campo.novo.a', 'campo.novo.b'} <= {
+            campo.chave_semantica for campo in candidata_b.campos
+        }
+        with pytest.raises(nfse_contrato.ContratoNfseNaoElegivelError):
+            nfse_contrato.validar_contrato_automatico(ativo.id)
+
+
+def test_ativacao_recusa_candidata_que_nao_cobre_incidente_novo(
+    app, ids, monkeypatch
+):
+    monkeypatch.setattr(nfse_contrato.auditoria, 'registrar', lambda *a, **k: None)
+    with app.app_context():
+        ativo = nfse_contrato.garantir_contrato_inicial()
+        primeiro = nfse_contrato.registrar_incidentes(
+            ativo.id, [_diferenca_com_chave('campo.novo.a')]
+        )[0]
+        candidata = nfse_contrato.configurar_incidente(
+            primeiro.id, {'origem': 'fixo', 'valor_fixo': 'A'}
+        )
+        nfse_contrato.registrar_incidentes(
+            ativo.id, [_diferenca_com_chave('campo.novo.b')]
+        )
+        candidata.estado = 'validada'
+        db.session.commit()
+
+        with pytest.raises(
+            nfse_contrato.ContratoNfseTransicaoInvalidaError,
+            match='todos os incidentes',
+        ):
+            nfse_contrato.ativar(candidata.id)
+
+        assert nfse_contrato.contrato_ativo().id == ativo.id
+
+
+def test_recomendacao_persistida_no_painel_remapeia_seletor_e_cobre_o_par(
+    app, ids, monkeypatch
+):
+    monkeypatch.setattr(nfse_contrato.auditoria, 'registrar', lambda *a, **k: None)
+    with app.app_context():
+        ativo = nfse_contrato.garantir_contrato_inicial()
+        esperado = CampoComparavel(
+            chave_semantica='ServicoPrestado_Descricao',
+            etapa='servico',
+            rotulo='Descrição do serviço',
+            tipo='textarea',
+            interacao='textarea',
+            obrigatorio=True,
+        )
+        observado = replace(
+            esperado,
+            chave_semantica='ServicoPrestado_DescricaoNova',
+        )
+        removido, novo = nfse_contrato.registrar_incidentes(
+            ativo.id,
+            [
+                Diferenca(
+                    etapa='servico',
+                    tipo='controle_removido',
+                    severidade='critica',
+                    chave_esperada=esperado.chave_semantica,
+                    esperado=esperado,
+                    mensagem='Controle sintético anterior removido.',
+                ),
+                Diferenca(
+                    etapa='servico',
+                    tipo='controle_novo',
+                    severidade='critica',
+                    chave_observada=observado.chave_semantica,
+                    observado=observado,
+                    mensagem='Controle sintético substituto observado.',
+                ),
+            ],
+        )
+
+        resumo = next(
+            item
+            for item in nfse_contrato.estado_painel()['incidentes']
+            if item['id'] == removido.id
+        )
+        assert resumo['recomendacao']['inequivoca'] is True
+        assert resumo['recomendacao']['chave_observada'] == observado.chave_semantica
+
+        candidata = nfse_contrato.configurar_incidente(
+            removido.id,
+            {'origem': 'nota', 'fonte': 'descricao'},
+            chave_observada=observado.chave_semantica,
+            confirmar_recomendacao=True,
+        )
+        campo = next(
+            item
+            for item in candidata.campos
+            if item.chave_semantica == esperado.chave_semantica
+        )
+
+        assert campo.seletor_tipo == 'css'
+        assert observado.chave_semantica in campo.seletor
+        assert removido.contrato_candidato_id == candidata.id
+        assert novo.contrato_candidato_id == candidata.id
+        assert removido.estado == novo.estado == 'configurado'
+
+
+def test_validacao_sem_leitor_ativa_somente_para_modos_assistidos(
+    app, ids, monkeypatch
+):
+    monkeypatch.setattr(nfse_contrato.auditoria, 'registrar', lambda *a, **k: None)
+    with app.app_context():
+        ativo = nfse_contrato.garantir_contrato_inicial()
+        incidente = nfse_contrato.registrar_incidentes(
+            ativo.id, [_diferenca()]
+        )[0]
+        candidata = nfse_contrato.configurar_incidente(
+            incidente.id, {'origem': 'fixo', 'valor_fixo': 'A'}
+        )
+        resultado = automacao_nfse.ResultadoAutorrevisao(
+            (),
+            elegivel_automatico=False,
+            avisos_assistidos=('Campo sintético sem leitor.',),
+        )
+
+        validada = nfse_contrato.registrar_validacao(
+            candidata.id, None, resultado
+        )
+        ativada = nfse_contrato.ativar(validada.id)
+
+        assert validada.erro_validacao == 'a revisão permite somente modos assistidos'
+        assert ativada.estado == 'ativa'
+        assert ativada.elegivel_automatico is False
 
 
 def test_configurar_recusa_opcao_fixa_ausente_sem_criar_candidata(app, ids):

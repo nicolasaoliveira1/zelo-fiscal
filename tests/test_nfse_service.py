@@ -5,6 +5,7 @@ Ela para na tela de revisao e o operador clica. Ha teste dedicado provando que
 o botao de emitir nunca e acionado — se um refactor futuro o chamar, esse teste
 quebra antes de qualquer nota fiscal errada sair.
 """
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -107,6 +108,45 @@ def test_preenchimento_carrega_contrato_fixado_uma_vez(ambiente, monkeypatch):
     assert ambiente['automacao'].preencher_etapa_tributacao.call_args.kwargs['contrato'] is contrato
 
 
+def test_preenchimento_repassa_valores_resolvidos_do_contrato(ambiente, monkeypatch):
+    base = nfse_service.nfse_contrato.contrato_inicial_execucao()
+    contrato = replace(
+        base,
+        campos=tuple(
+            replace(
+                campo,
+                origem='fixo',
+                fonte=None,
+                valor_fixo='VALOR-CONTRATADO-SINTETICO',
+            )
+            if campo.chave_semantica in {
+                'SimplesNacional_RegimeApuracaoTributosSN',
+                'ServicoPrestado_Descricao',
+            }
+            else campo
+            for campo in base.campos
+        ),
+    )
+    monkeypatch.setattr(
+        nfse_service.nfse_contrato,
+        'carregar_execucao',
+        MagicMock(return_value=contrato),
+    )
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(
+        nota.id, hoje=date(2026, 7, 28), contrato_id=71
+    )
+
+    valores = ambiente['automacao'].preencher_etapa_pessoas.call_args.kwargs[
+        'valores_contrato'
+    ]
+    assert valores['SimplesNacional_RegimeApuracaoTributosSN'] == (
+        'VALOR-CONTRATADO-SINTETICO'
+    )
+    assert resultado['descricao'] == 'VALOR-CONTRATADO-SINTETICO'
+
+
 def test_aviso_de_recon_aparece_no_resultado_assistido(ambiente, monkeypatch):
     def observar(*args, **kwargs):
         if args[2:] == ('pessoas', 'entrada'):
@@ -163,6 +203,21 @@ def test_drift_incompativel_pausa_lote_e_nao_faz_captura_bruta(ambiente, monkeyp
     assert resultado['pausar_lote'] is True
     assert resultado['message'] == 'Contrato sintético divergente.'
     artefato.assert_called_once()
+    nfse_service.capturar_contexto_falha.assert_not_called()
+
+
+def test_falha_de_persistencia_do_contrato_nao_captura_dom_bruto(ambiente):
+    ambiente['automacao'].preencher_etapa_pessoas.side_effect = (
+        nfse_service.nfse_contrato.PersistenciaContratoError(
+            'Persistência sintética indisponível.'
+        )
+    )
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(nota.id, hoje=date(2026, 7, 28))
+
+    assert resultado['status'] == 'error'
+    assert resultado['pausar_lote'] is True
     nfse_service.capturar_contexto_falha.assert_not_called()
 
 

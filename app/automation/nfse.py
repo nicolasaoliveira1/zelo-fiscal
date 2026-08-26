@@ -751,12 +751,58 @@ def _localizar_campo_contrato(driver, campo):
         raise ContratoNfseIncompativelError(
             f'O seletor do campo "{campo.chave_semantica}" não é aprovado.'
         )
-    elemento = _localizar(driver, by, campo.seletor, exigir_visivel=False)
+    if campo.seletor_tipo == 'css':
+        try:
+            elementos = driver.find_elements(by, campo.seletor)
+        except WebDriverException:
+            elementos = []
+        if len(elementos) != 1:
+            raise ContratoNfseIncompativelError(
+                f'O campo "{campo.chave_semantica}" não possui alvo inequívoco.'
+            )
+        elemento = elementos[0]
+    else:
+        elemento = _localizar(driver, by, campo.seletor, exigir_visivel=False)
     if elemento is None:
         raise ContratoNfseIncompativelError(
             f'O campo "{campo.chave_semantica}" não está disponível.'
         )
     return elemento
+
+
+def _id_campo_contrato(driver, campo):
+    """Resolve o id real exigido pelos plugins sem presumir o seletor antigo."""
+
+    if campo.seletor_tipo == 'id':
+        return campo.seletor
+    elemento = _localizar_campo_contrato(driver, campo)
+    try:
+        elemento_id = (elemento.get_attribute('id') or '').strip()
+    except (WebDriverException, AttributeError):
+        elemento_id = ''
+    if not elemento_id:
+        raise ContratoNfseIncompativelError(
+            f'O campo "{campo.chave_semantica}" não possui id para o adaptador.'
+        )
+    return elemento_id
+
+
+def _esperar_preenchido_contrato(driver, campo):
+    if campo.seletor_tipo == 'id':
+        return _esperar_preenchido(driver, campo.seletor)
+
+    def tem_valor():
+        try:
+            elemento = _localizar_campo_contrato(driver, campo)
+            return bool((elemento.get_attribute('value') or '').strip())
+        except (ContratoNfseIncompativelError, WebDriverException, AttributeError):
+            return False
+
+    return esperar(
+        tem_valor,
+        timeout=TIMEOUT_AUTOPREENCHIMENTO,
+        intervalo=0.3,
+    )
 
 
 def _preencher_campo_contrato(driver, campo, valor):
@@ -795,7 +841,40 @@ def _selecionar_direto_contrato(driver, campo, valor):
 def _valor_busca_contrato(campo, valor):
     if isinstance(valor, (tuple, list)) and len(valor) == 2:
         return valor[0], valor[1]
-    return valor, campo.rotulo
+    for opcao in getattr(campo, 'opcoes', ()) or ():
+        if str(getattr(opcao, 'valor', '')) == str(valor):
+            return valor, getattr(opcao, 'rotulo', valor)
+    return valor, valor
+
+
+def _marcar_radio_contrato(driver, campo, valor):
+    if campo.seletor_tipo == 'name':
+        return _marcar_radio(driver, campo.seletor, valor)
+    try:
+        elementos = driver.find_elements(
+            {
+                'id': By.ID,
+                'css': By.CSS_SELECTOR,
+            }.get(campo.seletor_tipo, By.CSS_SELECTOR),
+            campo.seletor,
+        )
+    except WebDriverException as exc:
+        raise ContratoNfseIncompativelError(
+            f'O grupo "{campo.chave_semantica}" não pôde ser localizado.'
+        ) from exc
+    candidatos = []
+    for elemento in elementos:
+        try:
+            if str(elemento.get_attribute('value')) == str(valor):
+                candidatos.append(elemento)
+        except WebDriverException:
+            continue
+    if len(candidatos) != 1:
+        raise ContratoNfseIncompativelError(
+            f'O grupo "{campo.chave_semantica}" não possui uma opção inequívoca.'
+        )
+    driver.execute_script('arguments[0].click();', candidatos[0])
+    return candidatos[0]
 
 
 def aplicar_campos_adicionais(driver, regras, valores):
@@ -844,27 +923,42 @@ def aplicar_campos_adicionais(driver, regras, valores):
         if adaptador in {'texto', 'textarea'}:
             _preencher_campo_contrato(driver, campo, valor)
         elif adaptador == 'radio':
-            _marcar_radio(driver, campo.seletor, valor)
+            _marcar_radio_contrato(driver, campo, valor)
         elif adaptador == 'select_direto':
             _selecionar_direto_contrato(driver, campo, valor)
         elif adaptador == 'chosen':
-            if campo.seletor_tipo != 'id':
-                raise ContratoNfseIncompativelError(
-                    f'O campo Chosen "{chave}" precisa de seletor por id.'
-                )
-            _selecionar(driver, campo.seletor, valor)
+            _selecionar(driver, _id_campo_contrato(driver, campo), valor)
         elif adaptador == 'select_busca':
             valor_busca, rotulo = _valor_busca_contrato(campo, valor)
-            if campo.seletor_tipo != 'id':
-                raise ContratoNfseIncompativelError(
-                    f'O campo de busca "{chave}" precisa de seletor por id.'
-                )
-            _selecionar_com_busca(driver, campo.seletor, valor_busca, rotulo)
+            _selecionar_com_busca(
+                driver, _id_campo_contrato(driver, campo), valor_busca, rotulo
+            )
     return True
 
 
+def _valor_contrato(valores, chave, padrao):
+    if valores is not None and chave in valores:
+        return valores[chave]
+    return padrao
+
+
+def _aplicar_campo_contrato(driver, campo, valor):
+    aplicar_campos_adicionais(
+        driver, (campo,), {campo.chave_semantica: valor}
+    )
+
+
+def _campos_adicionais_etapa(contrato, etapa, chaves_principais):
+    return tuple(
+        campo
+        for campo in _contrato_execucao(contrato).campos
+        if campo.etapa == etapa and campo.chave_semantica not in chaves_principais
+    )
+
+
 def preencher_etapa_pessoas(
-    driver, nota, config, data_competencia, pausa=None, contrato=None, observar=None
+    driver, nota, config, data_competencia, pausa=None, contrato=None, observar=None,
+    valores_contrato=None,
 ):
     """Etapa 1: competencia, regime de apuracao e tomador.
 
@@ -882,41 +976,71 @@ def preencher_etapa_pessoas(
     campo_nome = _campo_contrato(contrato, CHAVE_NOME_TOMADOR)
 
     _observar_fronteira(observar, driver, 'pessoas', 'entrada')
-    _preencher(driver, campo_data.seletor, formatar_data(data_competencia))
+    valor_data = _valor_contrato(
+        valores_contrato, CHAVE_DATA_COMPETENCIA, data_competencia
+    )
+    if hasattr(valor_data, 'strftime'):
+        valor_data = formatar_data(valor_data)
+    _aplicar_campo_contrato(driver, campo_data, valor_data)
 
     # O portal so carrega o emitente depois que a data sai do foco, e os campos
     # seguintes ficam nao-interagiveis ate la. Esperar o CNPJ do emitente
     # aparecer e o sinal de que a etapa esta pronta.
-    if not _esperar_preenchido(driver, campo_prestador.seletor):
+    if not _esperar_preenchido_contrato(driver, campo_prestador):
         raise InteracaoPortalError(
             'O portal nao carregou os dados do emitente apos a data de '
             'competencia. A tela pode estar lenta ou ter mudado.')
     if pausa:
         pausa()
 
-    _selecionar(driver, campo_regime.seletor,
-                config.regime_apuracao_sn)
+    _aplicar_campo_contrato(
+        driver,
+        campo_regime,
+        _valor_contrato(
+            valores_contrato, CHAVE_REGIME_APURACAO, config.regime_apuracao_sn
+        ),
+    )
 
     # Marcar "Brasil" e o que REVELA os campos do tomador; o _preencher abaixo
     # ja espera o CNPJ ficar interagivel antes de digitar.
-    _marcar_radio(driver, campo_domicilio.seletor, '1')
+    _aplicar_campo_contrato(
+        driver,
+        campo_domicilio,
+        _valor_contrato(valores_contrato, CHAVE_DOMICILIO_TOMADOR, '1'),
+    )
     _observar_fronteira(observar, driver, 'pessoas', 'dependencias')
-    _preencher(driver, campo_inscricao.seletor, nota.documento)
+    _aplicar_campo_contrato(
+        driver,
+        campo_inscricao,
+        _valor_contrato(valores_contrato, CHAVE_INSCRICAO_TOMADOR, nota.documento),
+    )
 
     # mesma logica: o nome/endereco do tomador vem do portal apos o documento
-    if not _esperar_preenchido(driver, campo_nome.seletor):
+    if not _esperar_preenchido_contrato(driver, campo_nome):
         raise InteracaoPortalError(
             f'O portal nao reconheceu o documento {nota.documento} do tomador. '
             'Confira se esta correto e ativo na Receita.')
     if pausa:
         pausa()
+    adicionais = _campos_adicionais_etapa(
+        contrato,
+        'pessoas',
+        {
+            CHAVE_DATA_COMPETENCIA,
+            CHAVE_REGIME_APURACAO,
+            CHAVE_DOMICILIO_TOMADOR,
+            CHAVE_INSCRICAO_TOMADOR,
+        },
+    )
+    aplicar_campos_adicionais(driver, adicionais, valores_contrato)
     _observar_fronteira(observar, driver, 'pessoas', 'pre_avancar')
     _avancar(driver)
     _observar_fronteira(observar, driver, 'pessoas', 'pos_avancar')
 
 
 def preencher_etapa_servico(
-    driver, nota, config, descricao, pausa=None, contrato=None, observar=None
+    driver, nota, config, descricao, pausa=None, contrato=None, observar=None,
+    valores_contrato=None,
 ):
     """Etapa 2: local, codigo de tributacao, descricao e item da NBS.
 
@@ -933,26 +1057,64 @@ def preencher_etapa_servico(
     _observar_fronteira(observar, driver, 'servico', 'entrada')
     # Estes dois buscam as opções no servidor conforme se digita; o item da NBS
     # abaixo ja vem com a lista inteira carregada e usa a via direta.
-    _selecionar_com_busca(driver, campo_municipio.seletor,
-                          config.municipio_servico_codigo,
-                          config.municipio_servico_nome)
-    _selecionar_com_busca(driver, campo_tributacao.seletor,
-                          config.codigo_tributacao, config.codigo_tributacao)
+    _aplicar_campo_contrato(
+        driver,
+        campo_municipio,
+        _valor_contrato(
+            valores_contrato,
+            CHAVE_MUNICIPIO_SERVICO,
+            (config.municipio_servico_codigo, config.municipio_servico_nome),
+        ),
+    )
+    _aplicar_campo_contrato(
+        driver,
+        campo_tributacao,
+        _valor_contrato(
+            valores_contrato,
+            CHAVE_TRIBUTACAO_NACIONAL,
+            (config.codigo_tributacao, config.codigo_tributacao),
+        ),
+    )
     # "Nao" para imunidade/exportacao: ja e o default, mas marcar explicitamente
     # evita depender de o portal manter esse default.
-    _marcar_radio(driver, campo_exportacao.seletor, '0')
+    _aplicar_campo_contrato(
+        driver,
+        campo_exportacao,
+        _valor_contrato(valores_contrato, CHAVE_EXPORTACAO_IMUNIDADE, '0'),
+    )
     _observar_fronteira(observar, driver, 'servico', 'dependencias')
-    _preencher(driver, campo_descricao.seletor, descricao)
-    _selecionar(driver, campo_nbs.seletor, config.item_nbs)
+    _aplicar_campo_contrato(
+        driver,
+        campo_descricao,
+        _valor_contrato(valores_contrato, CHAVE_DESCRICAO_SERVICO, descricao),
+    )
+    _aplicar_campo_contrato(
+        driver,
+        campo_nbs,
+        _valor_contrato(valores_contrato, CHAVE_ITEM_NBS, config.item_nbs),
+    )
     if pausa:
         pausa()
+    adicionais = _campos_adicionais_etapa(
+        contrato,
+        'servico',
+        {
+            CHAVE_MUNICIPIO_SERVICO,
+            CHAVE_TRIBUTACAO_NACIONAL,
+            CHAVE_EXPORTACAO_IMUNIDADE,
+            CHAVE_DESCRICAO_SERVICO,
+            CHAVE_ITEM_NBS,
+        },
+    )
+    aplicar_campos_adicionais(driver, adicionais, valores_contrato)
     _observar_fronteira(observar, driver, 'servico', 'pre_avancar')
     _avancar(driver)
     _observar_fronteira(observar, driver, 'servico', 'pos_avancar')
 
 
 def preencher_etapa_tributacao(
-    driver, nota, config, pausa=None, contrato=None, observar=None
+    driver, nota, config, pausa=None, contrato=None, observar=None,
+    valores_contrato=None,
 ):
     """Etapa 3: valor do servico e retencoes.
 
@@ -967,14 +1129,46 @@ def preencher_etapa_tributacao(
     campo_piscofins = _campo_contrato(contrato, CHAVE_PISCOFINS_RETENCAO)
 
     _observar_fronteira(observar, driver, 'tributacao', 'entrada')
-    _preencher(driver, campo_valor.seletor, formatar_valor(nota.valor_final))
-    _marcar_radio(driver, campo_retencao.seletor, '0')  # Não
-    _selecionar(driver, campo_situacao.seletor,
-                config.piscofins_situacao)
-    _selecionar(driver, campo_piscofins.seletor,
-                config.piscofins_tipo_retencao)
+    valor_servico = _valor_contrato(
+        valores_contrato, CHAVE_VALOR_SERVICO, nota.valor_final
+    )
+    if not isinstance(valor_servico, str):
+        valor_servico = formatar_valor(valor_servico)
+    _aplicar_campo_contrato(driver, campo_valor, valor_servico)
+    _aplicar_campo_contrato(
+        driver,
+        campo_retencao,
+        _valor_contrato(valores_contrato, CHAVE_RETENCAO_ISSQN, '0'),
+    )
+    _aplicar_campo_contrato(
+        driver,
+        campo_situacao,
+        _valor_contrato(
+            valores_contrato, CHAVE_PISCOFINS_SITUACAO, config.piscofins_situacao
+        ),
+    )
+    _aplicar_campo_contrato(
+        driver,
+        campo_piscofins,
+        _valor_contrato(
+            valores_contrato,
+            CHAVE_PISCOFINS_RETENCAO,
+            config.piscofins_tipo_retencao,
+        ),
+    )
     if pausa:
         pausa()
+    adicionais = _campos_adicionais_etapa(
+        contrato,
+        'tributacao',
+        {
+            CHAVE_VALOR_SERVICO,
+            CHAVE_RETENCAO_ISSQN,
+            CHAVE_PISCOFINS_SITUACAO,
+            CHAVE_PISCOFINS_RETENCAO,
+        },
+    )
+    aplicar_campos_adicionais(driver, adicionais, valores_contrato)
     _observar_fronteira(observar, driver, 'tributacao', 'pre_avancar')
     _avancar(driver)
     _observar_fronteira(observar, driver, 'tributacao', 'pos_avancar')
@@ -1013,9 +1207,12 @@ ROTULO_VALOR = "contains(.,'Valor do servi')"
 class ResultadoAutorrevisao(list):
     """Lista compatível com a API antiga que também informa elegibilidade."""
 
-    def __init__(self, divergencias=(), elegivel_automatico=False):
+    def __init__(
+        self, divergencias=(), elegivel_automatico=False, avisos_assistidos=()
+    ):
         super().__init__(divergencias)
         self.elegivel_automatico = bool(elegivel_automatico)
+        self.avisos_assistidos = tuple(avisos_assistidos or ())
 
 _XP_SECAO = ("//h4[contains(@class,'emissao-titulo')][normalize-space()='{secao}']"
              "/following-sibling::div[contains(@class,'emissao-conteudo')][1]")
@@ -1142,13 +1339,22 @@ def calcular_elegibilidade_automatica(regras=(), divergencias=()):
 
 def _conferir_regras_adicionais(driver, regras):
     divergencias = []
+    avisos_assistidos = []
     for regra in regras or ():
         chave = _valor_regra_revisao(regra, 'chave_semantica', 'campo sem chave')
         if not _regra_tem_leitor(regra):
             if _regra_fiscal(regra):
-                divergencias.append(
+                mensagem = (
                     f'Não consegui conferir o campo contratado "{chave}" na revisão.'
                 )
+                if bool(
+                    _valor_regra_revisao(
+                        regra, 'conferivel_automatico', False
+                    )
+                ):
+                    divergencias.append(mensagem)
+                else:
+                    avisos_assistidos.append(mensagem)
             continue
         texto, erro = _dd_declarativo(
             driver,
@@ -1165,7 +1371,7 @@ def _conferir_regras_adicionais(driver, regras):
             divergencias.append(
                 f'O campo contratado "{chave}" diverge na revisão.'
             )
-    return divergencias
+    return divergencias, avisos_assistidos
 
 
 def _so_digitos(texto):
@@ -1225,10 +1431,14 @@ def conferir_revisao(
             f'A descricao na tela nao e a esperada ("{descricao}"). '
             'Confira principalmente a competencia.')
 
-    divergencias.extend(_conferir_regras_adicionais(driver, regras_adicionais))
+    divergencias_adicionais, avisos_assistidos = _conferir_regras_adicionais(
+        driver, regras_adicionais
+    )
+    divergencias.extend(divergencias_adicionais)
     return ResultadoAutorrevisao(
         divergencias,
         calcular_elegibilidade_automatica(regras_adicionais, divergencias),
+        avisos_assistidos,
     )
 
 

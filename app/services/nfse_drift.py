@@ -274,7 +274,12 @@ def comparar(
         for campo in inventario.controles
         if _campo_de(campo, etapa).etapa == etapa
     )
-    esperados_por_chave = {campo.chave_semantica: campo for campo in esperados}
+    def identidade_portal(campo):
+        if campo.seletor_tipo in {"id", "name"} and campo.seletor:
+            return campo.seletor
+        return campo.chave_semantica
+
+    esperados_por_chave = {identidade_portal(campo): campo for campo in esperados}
     observados_por_chave = {campo.chave_semantica: campo for campo in observados}
     diferencas = []
 
