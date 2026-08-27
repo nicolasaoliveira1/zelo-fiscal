@@ -5,8 +5,10 @@ Ela para na tela de revisao e o operador clica. Ha teste dedicado provando que
 o botao de emitir nunca e acionado — se um refactor futuro o chamar, esse teste
 quebra antes de qualquer nota fiscal errada sair.
 """
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -85,6 +87,195 @@ def test_preenche_as_tres_etapas_e_para_na_revisao(ambiente):
     assert aut.preencher_etapa_tributacao.called
     assert resultado['status'] == 'aguardando_confirmacao'
     assert db.session.get(NotaNfse, nota.id).status == StatusNotaNfse.AGUARDANDO_CONFIRMACAO
+
+
+def test_preenchimento_carrega_contrato_fixado_uma_vez(ambiente, monkeypatch):
+    contrato = nfse_service.nfse_contrato.contrato_inicial_execucao()
+    carregar = MagicMock(return_value=contrato)
+    monkeypatch.setattr(nfse_service.nfse_contrato, 'carregar_execucao', carregar)
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(
+        nota.id,
+        hoje=date(2026, 7, 28),
+        contrato_id=71,
+    )
+
+    assert resultado['status'] == 'aguardando_confirmacao'
+    carregar.assert_called_once_with(71)
+    assert ambiente['automacao'].preencher_etapa_pessoas.call_args.kwargs['contrato'] is contrato
+    assert ambiente['automacao'].preencher_etapa_servico.call_args.kwargs['contrato'] is contrato
+    assert ambiente['automacao'].preencher_etapa_tributacao.call_args.kwargs['contrato'] is contrato
+
+
+def test_preenchimento_repassa_valores_resolvidos_do_contrato(ambiente, monkeypatch):
+    base = nfse_service.nfse_contrato.contrato_inicial_execucao()
+    contrato = replace(
+        base,
+        campos=tuple(
+            replace(
+                campo,
+                origem='fixo',
+                fonte=None,
+                valor_fixo='VALOR-CONTRATADO-SINTETICO',
+            )
+            if campo.chave_semantica in {
+                'SimplesNacional_RegimeApuracaoTributosSN',
+                'ServicoPrestado_Descricao',
+            }
+            else campo
+            for campo in base.campos
+        ),
+    )
+    monkeypatch.setattr(
+        nfse_service.nfse_contrato,
+        'carregar_execucao',
+        MagicMock(return_value=contrato),
+    )
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(
+        nota.id, hoje=date(2026, 7, 28), contrato_id=71
+    )
+
+    valores = ambiente['automacao'].preencher_etapa_pessoas.call_args.kwargs[
+        'valores_contrato'
+    ]
+    assert valores['SimplesNacional_RegimeApuracaoTributosSN'] == (
+        'VALOR-CONTRATADO-SINTETICO'
+    )
+    assert resultado['descricao'] == 'VALOR-CONTRATADO-SINTETICO'
+
+
+def test_aviso_de_recon_aparece_no_resultado_assistido(ambiente, monkeypatch):
+    def observar(*args, **kwargs):
+        if args[2:] == ('pessoas', 'entrada'):
+            return {
+                'estado': 'aviso',
+                'etapa': 'pessoas',
+                'momento': 'entrada',
+                'aviso': True,
+            }
+        return {'estado': 'observada'}
+
+    monkeypatch.setattr(
+        nfse_service,
+        '_observar_fronteira_contrato',
+        observar,
+    )
+
+    def observar_entrada(*args, **kwargs):
+        kwargs['observar'](args[0], 'pessoas', 'entrada')
+
+    ambiente['automacao'].preencher_etapa_pessoas.side_effect = observar_entrada
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(nota.id, hoje=date(2026, 7, 28))
+
+    assert resultado['status'] == 'aguardando_confirmacao'
+    assert resultado['avisos_recon'] == [
+        {'etapa': 'pessoas', 'momento': 'entrada'}
+    ]
+
+
+def test_drift_incompativel_pausa_lote_e_nao_faz_captura_bruta(ambiente, monkeypatch):
+    artefato = MagicMock()
+    monkeypatch.setattr(nfse_service, 'salvar_artefato_sanitizado', artefato)
+    erro = nfse_service.NfseDriftError(
+        'Contrato sintético divergente.',
+        html_seguro='<!doctype html><p>Estrutura sintética</p>',
+    )
+
+    def falhar_na_fronteira(*args, **kwargs):
+        kwargs['observar'](args[0], 'pessoas', 'entrada')
+
+    monkeypatch.setattr(
+        nfse_service,
+        '_observar_fronteira_contrato',
+        MagicMock(side_effect=erro),
+    )
+    ambiente['automacao'].preencher_etapa_pessoas.side_effect = falhar_na_fronteira
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(nota.id, hoje=date(2026, 7, 28))
+
+    assert resultado['status'] == 'error'
+    assert resultado['pausar_lote'] is True
+    assert resultado['message'] == 'Contrato sintético divergente.'
+    artefato.assert_called_once()
+    nfse_service.capturar_contexto_falha.assert_not_called()
+
+
+def test_falha_de_persistencia_do_contrato_nao_captura_dom_bruto(ambiente):
+    ambiente['automacao'].preencher_etapa_pessoas.side_effect = (
+        nfse_service.nfse_contrato.PersistenciaContratoError(
+            'Persistência sintética indisponível.'
+        )
+    )
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(nota.id, hoje=date(2026, 7, 28))
+
+    assert resultado['status'] == 'error'
+    assert resultado['pausar_lote'] is True
+    nfse_service.capturar_contexto_falha.assert_not_called()
+
+
+def test_falha_antes_da_observacao_nao_cria_incidente(ambiente, monkeypatch):
+    inventariar = MagicMock()
+    registrar = MagicMock()
+    monkeypatch.setattr(nfse_service.nfse_recon, 'inventariar', inventariar)
+    monkeypatch.setattr(nfse_service.nfse_contrato, 'registrar_incidentes', registrar)
+    ambiente['automacao'].preencher_etapa_pessoas.side_effect = RuntimeError(
+        'sessão sintética indisponível'
+    )
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(nota.id, hoje=date(2026, 7, 28))
+
+    assert resultado['status'] == 'error'
+    inventariar.assert_not_called()
+    registrar.assert_not_called()
+    nfse_service.capturar_contexto_falha.assert_called_once()
+
+
+def test_rejeicao_de_avancar_salva_validacao_sanitizada(ambiente, monkeypatch):
+    contrato = SimpleNamespace(contrato_id=71, campos=())
+    carregar = MagicMock(return_value=contrato)
+    artefato = MagicMock()
+    registrar = MagicMock()
+    monkeypatch.setattr(nfse_service.nfse_contrato, 'carregar_execucao', carregar)
+    monkeypatch.setattr(nfse_service, 'salvar_artefato_sanitizado', artefato)
+    monkeypatch.setattr(nfse_service.nfse_contrato, 'registrar_incidentes', registrar)
+    monkeypatch.setattr(
+        nfse_service,
+        '_observar_fronteira_contrato',
+        lambda *args, **kwargs: {'estado': 'compativel'},
+    )
+    monkeypatch.setattr(
+        nfse_service.nfse_recon,
+        'mensagens_validacao',
+        lambda *_: ['Campo obrigatório', 'Mensagem sem dados preenchidos'],
+    )
+
+    def rejeitar_avanco(*args, **kwargs):
+        kwargs['observar'](args[0], 'pessoas', 'pre_avancar')
+        raise RuntimeError('validação sintética')
+
+    ambiente['automacao'].preencher_etapa_pessoas.side_effect = rejeitar_avanco
+    nota = _nota()
+
+    resultado = nfse_service.preencher_nota(
+        nota.id,
+        hoje=date(2026, 7, 28),
+        contrato_id=71,
+    )
+
+    assert resultado['status'] == 'error'
+    assert artefato.call_count == 1
+    assert 'Campo obrigatório' in artefato.call_args.args[1]
+    registrar.assert_called_once()
+    carregar.assert_called_once_with(71)
 
 
 def test_NUNCA_clica_no_botao_de_emitir(ambiente):
@@ -301,7 +492,7 @@ def test_falha_conhecida_do_selenium_vira_explicacao_correta(ambiente):
 
 def test_erro_da_propria_automacao_e_mostrado_como_escrito(ambiente):
     from app.automation.nfse import InteracaoPortalError
-    texto = 'O portal nao reconheceu o documento 33.684.001/0001-51 do tomador.'
+    texto = 'O portal nao reconheceu o documento 44.556.677/0001-86 do tomador.'
     assert nfse_service.mensagem_da_falha(InteracaoPortalError(texto)) == texto
 
 
@@ -312,3 +503,59 @@ def test_erro_generico_usa_so_a_primeira_linha(ambiente):
 
 def test_erro_sem_texto_ainda_produz_mensagem(ambiente):
     assert nfse_service.mensagem_da_falha(RuntimeError(''))
+
+
+# --- nota deixada em `preenchendo` por processo morto -----------------------
+
+def test_preenchimento_orfao_volta_para_a_fila(app, ids):
+    """`preenchendo` é status de trabalho EM CURSO, mantido por uma thread
+    viva. No boot não há thread nenhuma: a nota pertence a um processo que não
+    existe mais. Sem reconciliar, ela fica presa para sempre — nenhuma ação da
+    interface aceita `preenchendo`."""
+
+    with app.app_context():
+        empresa = Empresa.query.first()
+        lote = LoteNfse(nome_arquivo='lote-sintetico.csv', total=1)
+        db.session.add(lote)
+        db.session.flush()
+        nota = NotaNfse(
+            lote_id=lote.id, empresa_id=empresa.id,
+            nome_csv='TOMADOR SINTETICO', documento='DOC-SINTETICO',
+            tipo_documento='cnpj', competencia='08/2026',
+            valor_final=Decimal('12.34'),
+            status=StatusNotaNfse.PREENCHENDO,
+        )
+        db.session.add(nota)
+        db.session.commit()
+        nota_id = nota.id
+
+        assert nfse_service.reconciliar_preenchimentos_orfaos() == 1
+
+        devolvida = db.session.get(NotaNfse, nota_id)
+        assert devolvida.status == StatusNotaNfse.PRONTA
+        # O operador precisa saber por que a nota voltou, e que nada foi emitido.
+        assert 'interrompido' in (devolvida.erro or '')
+
+
+def test_reconciliacao_nao_toca_quem_nao_esta_preenchendo(app, ids):
+    with app.app_context():
+        empresa = Empresa.query.first()
+        lote = LoteNfse(nome_arquivo='lote-sintetico.csv', total=1)
+        db.session.add(lote)
+        db.session.flush()
+        # `aguardando_confirmacao` é o caso oposto: ali existe DPS preenchida
+        # esperando o operador no portal, e devolver abandonaria documento.
+        nota = NotaNfse(
+            lote_id=lote.id, empresa_id=empresa.id,
+            nome_csv='TOMADOR SINTETICO', documento='DOC-SINTETICO',
+            tipo_documento='cnpj', competencia='08/2026',
+            valor_final=Decimal('12.34'),
+            status=StatusNotaNfse.AGUARDANDO_CONFIRMACAO,
+        )
+        db.session.add(nota)
+        db.session.commit()
+        nota_id = nota.id
+
+        assert nfse_service.reconciliar_preenchimentos_orfaos() == 0
+        assert db.session.get(NotaNfse, nota_id).status == (
+            StatusNotaNfse.AGUARDANDO_CONFIRMACAO)

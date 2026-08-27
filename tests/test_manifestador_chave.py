@@ -10,9 +10,9 @@ As tres chaves usadas sao REAIS, lidas de NF-e assinadas no drive
 """
 from app.services import manifestador_import as imp
 
-CHAVE_A = '43170107461248000107650010000045391000045390'
-CHAVE_B = '43170107461248000107650010000045401000045404'
-CHAVE_C = '43170107461248000107650010000045751000045752'
+CHAVE_A = '43170122333444000181650010000045391000045393'
+CHAVE_B = '43170122333444000181650010000045401000045408'
+CHAVE_C = '43170122333444000181650010000045751000045756'
 
 
 # --- digito verificador (MANIF-08) ------------------------------------------
@@ -48,17 +48,17 @@ def test_decompor_separa_os_nove_campos():
     partes = imp.decompor(CHAVE_A)
     assert partes.cuf == '43'
     assert partes.aamm == '1701'
-    assert partes.cnpj_emitente == '07461248000107'
+    assert partes.cnpj_emitente == '22333444000181'
     assert partes.modelo == '65'
     assert partes.serie == '001'
     assert partes.numero == '000004539'
-    assert partes.dv == '0'
+    assert partes.dv == '3'
 
 
 def test_o_cnpj_da_chave_e_do_emitente_nao_do_destinatario():
     """Por isso a chave sozinha NAO identifica a empresa da carteira: quem
     aparece nos digitos 7-20 e quem emitiu a nota."""
-    assert imp.decompor(CHAVE_A).cnpj_emitente == '07461248000107'
+    assert imp.decompor(CHAVE_A).cnpj_emitente == '22333444000181'
 
 
 def test_competencia_sai_dos_digitos_3_a_6():

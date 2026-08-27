@@ -1,0 +1,2 @@
+# O hook roda por /bin/sh: CRLF quebra o shebang ("cannot exec").
+.githooks/* text eol=lf

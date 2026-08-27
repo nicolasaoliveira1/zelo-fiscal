@@ -5,6 +5,9 @@
 // definido no base.html.
 
 import { showToast } from './toasts.js';
+import {
+  inicializarContratoNfse,
+} from './nfse_contrato.js';
 
 /**
  * Resposta JSON das rotas da NFSe. Os campos adicionais variam conforme a
@@ -192,6 +195,12 @@ function acoesDaLinha(nota) {
     partes.push(`<button class="btn btn-primary btn-sm" data-preencher="${nota.id}">Preencher</button>`);
   }
   if (nota.status === 'aguardando_confirmacao') {
+    // Os DOIS desfechos, nao so um. Ate aqui a linha oferecia apenas "emiti", e
+    // quem fechou o navegador sem emitir ficava sem saida nenhuma: cancelar,
+    // preencher e editar recusam este status. A ND-011 proibe o SISTEMA de
+    // adivinhar o desfecho; declarar quem sabe e o operador.
+    partes.push(`<button class="btn btn-ghost btn-sm" data-naoemiti="${nota.id}"
+                  title="Fechei o navegador sem emitir; devolver para a fila">Não emiti</button>`);
     partes.push(`<button class="btn btn-primary btn-sm" data-jaemitida="${nota.id}">Emiti no portal</button>`);
   }
   if (!partes.length && nota.status === 'empresa_pendente') {
@@ -468,6 +477,33 @@ async function marcarEmitidaManual(id, marcar) {
     showToast(marcar ? 'Marcada como emitida.' : 'Marcação desfeita.', 'info');
   } catch (erro) {
     showToast(erro.message, 'error');
+  }
+}
+
+async function liberarPreenchimento(id, confirmado = false) {
+  try {
+    const dados = await chamar(`/nfse/nota/${id}/liberar-preenchimento`,
+      { body: JSON.stringify({ confirmado }) });
+    substituir(dados.nota);
+    showToast('Nota devolvida para a fila.', 'info');
+  } catch (erro) {
+    const emitidas = erro.dados?.emitidas;
+    if (!emitidas?.length) {
+      showToast(erro.message, 'error');
+      return;
+    }
+    // O portal tem nota para este tomador nesta competencia. Pode ser esta, ou
+    // outra do mesmo mes — caso real. Quem decide e quem olha valor e data:
+    // preencher de novo o que ja foi emitido gera duplicata na prefeitura, e
+    // isso nao tem rollback.
+    const linhas = emitidas
+      .map((e) => `• ${e.data_geracao || 'sem data'} — ${e.valor || 'sem valor'}`)
+      .join('\n');
+    const texto = `O portal já registra ${emitidas.length} nota(s) para este `
+      + `tomador nesta competência:\n\n${linhas}\n\n`
+      + 'Se nenhuma delas for esta, confirme para devolver a nota à fila. '
+      + 'Emitir de novo o que já foi emitido cria duplicata na prefeitura.';
+    if (globalThis.confirm(texto)) liberarPreenchimento(id, true);
   }
 }
 
@@ -770,13 +806,95 @@ async function acaoEmMassa(acao) {
 // Guarda o que fazer se o operador confirmar o aviso da alíquota.
 let pendenteAliquota = null;
 let timerLote = null;
+let atualizarContrato = null;
+let contratoAutomaticoElegivel = false;
+
+/**
+ * Decide somente a elegibilidade estrutural informada pelo backend.
+ * O POST de início continua protegido pelo mesmo gate no servidor.
+ *
+ * @param {object|null} estado
+ * @returns {boolean}
+ */
+export function contratoPermiteAutomatico(estado) {
+  if (estado?.ativo?.elegivel_automatico !== true) return false;
+  const incidentes = Array.isArray(estado.incidentes) ? estado.incidentes : [];
+  return !incidentes.some((item) => ['aberto', 'configurado'].includes(item?.estado));
+}
+
+/**
+ * Reflete o gate do contrato nos controles do modo, sem substituir a guarda
+ * de autoridade da rota de início.
+ *
+ * @param {object|null} estado
+ * @returns {boolean}
+ */
+export function aplicarGateContrato(estado) {
+  contratoAutomaticoElegivel = contratoPermiteAutomatico(estado);
+  const status = document.getElementById('nfseContratoStatus');
+  if (status?.dataset.estado === 'bloqueado' || status?.dataset.estado === 'desconhecido') {
+    contratoAutomaticoElegivel = false;
+  }
+  const automatico = document.getElementById('modoAutomatico');
+  const mensagem = document.getElementById('nfseContratoStatusTexto')?.textContent
+    || 'Resolva os incidentes do contrato antes do modo automático.';
+  if (automatico) {
+    automatico.disabled = !contratoAutomaticoElegivel;
+    if (automatico.disabled) {
+      automatico.setAttribute('aria-describedby', 'nfseContratoStatusTexto');
+      automatico.title = mensagem;
+    } else {
+      automatico.removeAttribute('aria-describedby');
+      automatico.removeAttribute('title');
+    }
+  }
+  pintarModo();
+  return contratoAutomaticoElegivel;
+}
 
 function modoAtual() {
   return document.querySelector('input[name="nfseModo"]:checked')?.value || 'individual';
 }
 
-async function iniciarEmissao({ notaId = null, ignorarAliquota = false } = {}) {
+const DESCRICAO_MODO = {
+  individual: 'Preenche a nota que você escolher e para na revisão. '
+    + 'Cada nota pede o certificado de novo.',
+  lote: 'Preenche a lista inteira na mesma janela, parando na revisão de cada '
+    + 'nota. Certificado uma vez só.',
+  automatico: 'Preenche e emite sozinha, conferindo CPF/CNPJ, valor e '
+    + 'descrição antes de cada emissão.',
+};
+
+function pintarModo() {
+  const modo = modoAtual();
+  const desc = document.getElementById('nfseModoDesc');
+  const bloqueado = modo === 'automatico' && !contratoAutomaticoElegivel;
+  const descricao = DESCRICAO_MODO[modo] || '';
+  if (desc) {
+    desc.textContent = bloqueado
+      ? `${descricao} Indisponível: resolva os incidentes do contrato.`
+      : descricao;
+  }
+
+  const iniciar = document.getElementById('btnIniciarLote');
+  if (iniciar) {
+    iniciar.classList.toggle('d-none', modo === 'individual');
+    iniciar.textContent = modo === 'automatico'
+      ? 'Emitir a lista inteira sozinho' : 'Emitir a lista inteira';
+    iniciar.disabled = bloqueado;
+    if (bloqueado) iniciar.title = 'Resolva os incidentes do contrato antes de iniciar.';
+    else iniciar.removeAttribute('title');
+  }
+}
+
+export async function iniciarEmissao({ notaId = null, ignorarAliquota = false } = {}) {
   const modo = notaId ? 'individual' : modoAtual();
+  if (modo === 'automatico' && !contratoAutomaticoElegivel) {
+    const mensagem = document.getElementById('nfseContratoStatusTexto')?.textContent
+      || 'O contrato da NFS-e não está elegível para o modo automático.';
+    showToast(mensagem, 'error');
+    return;
+  }
   try {
     const dados = await chamar('/nfse/lote/iniciar', {
       body: JSON.stringify({
@@ -840,6 +958,7 @@ async function consultarLote() {
   if (!ativo) {
     pararAcompanhamento();
     await recarregarNotas();
+    if (atualizarContrato && lote.status !== 'idle') await atualizarContrato();
     if (lote.status === 'completed') {
       showToast(`Fila concluída: ${lote.success} emitida(s).`, 'success');
     }
@@ -880,7 +999,7 @@ function pintarLote(lote) {
   if (rotulo) rotulo.textContent = ROTULO_LOTE[lote.status] || lote.status;
 
   const mensagem = document.getElementById('nfseProgressoMensagem');
-  if (mensagem) mensagem.textContent = lote.message || '';
+  if (mensagem) mensagem.textContent = textoDoProgresso(lote);
 
   destacarNotaAtual(lote.nota_id, rodando);
 
@@ -891,8 +1010,24 @@ function pintarLote(lote) {
   });
 }
 
+function textoDoProgresso(lote) {
+  // O veredito da validação aparece ENQUANTO o navegador ainda está aberto. Ele
+  // é registrado logo depois do preenchimento e nunca dependeu de emitir — mas
+  // ficava invisível até alguém recarregar a Central, e na dúvida o operador
+  // emitia uma nota de verdade só para "fechar" a validação.
+  const v = lote.validacao;
+  if (v && lote.status === 'running') {
+    return v.aprovada
+      ? 'Contrato validado: a revisão conferiu sem divergências. '
+        + 'Você pode emitir, ou fechar o navegador sem emitir.'
+      : `Contrato reprovado: ${v.divergencias.length} divergência(s). `
+        + 'Não emita — feche o navegador e veja os motivos na Central.';
+  }
+  return lote.message || '';
+}
+
 const ROTULO_LOTE = {
-  running: 'Aguardando você conferir e emitir no navegador',
+  running: 'Aguardando você conferir no navegador',
   paused: 'Pausado nesta nota',
   stopped: 'Interrompido',
   completed: 'Concluído',
@@ -1106,6 +1241,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (alvo.dataset.liberar) liberarDuplicata(Number(alvo.dataset.liberar));
     else if (alvo.dataset.jaemitida) marcarEmitidaManual(Number(alvo.dataset.jaemitida), true);
     else if (alvo.dataset.desmarcar) marcarEmitidaManual(Number(alvo.dataset.desmarcar), false);
+    else if (alvo.dataset.naoemiti) liberarPreenchimento(Number(alvo.dataset.naoemiti));
     else if (alvo.dataset.preencher) iniciarEmissao({ notaId: Number(alvo.dataset.preencher) });
     else if (alvo.dataset.editarDescricao) {
       editandoDescricao.add(Number(alvo.dataset.editarDescricao));
@@ -1129,28 +1265,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // --- modo de emissao ---
-  const DESCRICAO_MODO = {
-    individual: 'Preenche a nota que você escolher e para na revisão. '
-      + 'Cada nota pede o certificado de novo.',
-    lote: 'Preenche a lista inteira na mesma janela, parando na revisão de cada '
-      + 'nota. Certificado uma vez só.',
-    automatico: 'Preenche e emite sozinha, conferindo CPF/CNPJ, valor e '
-      + 'descrição antes de cada emissão.',
-  };
-
-  function pintarModo() {
-    const modo = modoAtual();
-    const desc = document.getElementById('nfseModoDesc');
-    if (desc) desc.textContent = DESCRICAO_MODO[modo] || '';
-
-    const iniciar = document.getElementById('btnIniciarLote');
-    if (iniciar) {
-      iniciar.classList.toggle('d-none', modo === 'individual');
-      iniciar.textContent = modo === 'automatico'
-        ? 'Emitir a lista inteira sozinho' : 'Emitir a lista inteira';
-    }
-  }
-
   document.querySelectorAll('input[name="nfseModo"]').forEach((radio) => {
     radio.addEventListener('change', pintarModo);
   });
@@ -1188,6 +1302,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('btnPararLote')?.addEventListener('click', () => {
     comandoLote('/nfse/lote/parar', 'Interrompendo a fila.');
+  });
+
+  // A central consulta somente o estado persistido. Nenhuma recon ou sessão
+  // fiscal é aberta pela inicialização da página.
+  void inicializarContratoNfse({
+    onEstado: aplicarGateContrato,
+  }).then((central) => {
+    atualizarContrato = central.atualizar;
   });
 
   fetch('/nfse/sessao/status')

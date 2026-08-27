@@ -14,7 +14,7 @@ FIXTURES = Path(__file__).parent / 'fixtures'
 XML_COM_DEST = FIXTURES / 'nfe_mod55_com_dest.xml'
 XML_SEM_DEST = FIXTURES / 'nfce_mod65_sem_dest.xml'
 
-CHAVE_55 = '43250707461248000107550010000012341000012340'
+CHAVE_55 = '43250722333444000181550010000012341000012344'
 
 
 def _empresa(nome='EMPRESA DESTINATARIA', cnpj='11.222.333/0001-81'):
@@ -59,7 +59,7 @@ def test_grava_origem_xml_e_competencia_da_chave(app, ids):
         linha = ChaveManifestacao.query.filter_by(chave=CHAVE_55).first()
         assert linha.origem == 'xml'
         assert linha.competencia == '2025-07'
-        assert linha.cnpj_emitente == '07461248000107'
+        assert linha.cnpj_emitente == '22333444000181'
 
 
 # --- recusas nomeando o ARQUIVO ---------------------------------------------
@@ -180,7 +180,7 @@ def test_destinatario_com_cpf_e_recusado(app, ids):
         xml = (f'<?xml version="1.0"?>'
                f'<NFe xmlns="http://www.portalfiscal.inf.br/nfe">'
                f'<infNFe versao="4.00" Id="NFe{CHAVE_55}">'
-               f'<dest><CPF>34560971072</CPF></dest>'
+               f'<dest><CPF>12345678909</CPF></dest>'
                f'</infNFe></NFe>').encode()
 
         balanco = imp.importar_xmls([('cpf.xml', xml)])
@@ -222,7 +222,7 @@ def test_balanco_soma_todos_os_grupos_no_xml(app, ids):
 
 XML_VIRADA = FIXTURES / 'nfe_virada_de_mes.xml'
 XML_SEM_SAIDA = FIXTURES / 'nfe_sem_saida.xml'
-CHAVE_VIRADA = '43260661186888022405550020000794101064148812'
+CHAVE_VIRADA = '43260666777888022401550020000794101064148811'
 
 
 def test_competencia_vem_da_entrada_e_nao_da_emissao(app, ids):
@@ -232,7 +232,7 @@ def test_competencia_vem_da_entrada_e_nao_da_emissao(app, ids):
     ENTRADA (`dhSaiEnt`), julho. Derivar da chave erra em TODA virada de mes, e
     erra em silencio."""
     with app.app_context():
-        _empresa('I ARAUJO FELTRIN', '46.256.812/0001-01')
+        _empresa('COMERCIO EXEMPLO', '55.666.777/0001-81')
 
         imp.importar_xmls([(XML_VIRADA.name, _bytes(XML_VIRADA))])
 
@@ -244,7 +244,7 @@ def test_competencia_vem_da_entrada_e_nao_da_emissao(app, ids):
 def test_sem_dhsaient_cai_para_dhemi(app, ids):
     """`dhSaiEnt` e opcional na NF-e; sem ela, a emissao e o que resta."""
     with app.app_context():
-        _empresa('I ARAUJO FELTRIN', '46.256.812/0001-01')
+        _empresa('COMERCIO EXEMPLO', '55.666.777/0001-81')
 
         imp.importar_xmls([(XML_SEM_SAIDA.name, _bytes(XML_SEM_SAIDA))])
 

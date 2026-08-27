@@ -20,7 +20,7 @@ from app.automation import cert_policy, driver
 CHAVE_REGISTRO = r"Software\Policies\Google\Chrome\AutoSelectCertificateForUrls"
 
 ISSUER_RS = 'AC DIGITALSIGN RFB G3'
-SUBJECT_RS = 'JURACI DA ROSA OLIVEIRA:34560971072'
+SUBJECT_RS = 'FULANO DE TAL:12345678909'
 PATTERN_RS = 'https://www.sefaz.rs.gov.br'
 
 POLITICA_RS = {
@@ -158,7 +158,7 @@ def test_ativar_com_autoselect_desligado_devolve_false_e_nao_grava(monkeypatch, 
 
 NFSE_PATTERN = 'https://certificado.nfse.gov.br'
 NFSE_ISSUER = 'AC SyngularID Multipla'
-NFSE_SUBJECT = 'JURACI DA ROSA OLIVEIRA:94645405000120'
+NFSE_SUBJECT = 'FULANO DE TAL:11222333000181'
 
 POLITICA_NFSE = {
     'pattern': NFSE_PATTERN,

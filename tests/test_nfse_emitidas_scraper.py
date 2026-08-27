@@ -16,7 +16,7 @@ import pytest
 
 from app.automation import nfse_emitidas as ne
 
-CHAVE = '43103302294645405000120000000000058026079889748735'
+CHAVE = '43103302211222333000181000000000058026079889748735'
 
 
 def _linha(**campos):

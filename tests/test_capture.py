@@ -1,5 +1,6 @@
 """Testes da captura de contexto na falha Selenium (screenshot + HTML)."""
 import os
+import inspect
 import time
 
 from app.automation import capture
@@ -64,6 +65,35 @@ def test_captura_resiliente_a_falha_de_screenshot(app, tmp_path):
         out = capture.capturar_contexto_falha(_FakeDriver(fail_screenshot=True), 'rs')
     assert 'screenshot' not in out
     assert 'html' in out and os.path.exists(out['html'])
+
+
+def test_salvar_artefato_sanitizado_grava_exatamente_html_recebido(app, tmp_path):
+    html_seguro = '<!doctype html><p>Metadado sintético</p>'
+    with app.app_context():
+        app.config['SELENIUM_CAPTURE_DIR'] = str(tmp_path)
+        app.config['SELENIUM_CAPTURE_ENABLED'] = True
+        caminho = capture.salvar_artefato_sanitizado(
+            'nfse-drift', html_seguro, execution_id='execucao-sintetica')
+
+    assert caminho is not None
+    assert caminho.endswith('.html')
+    assert open(caminho, encoding='utf-8').read() == html_seguro
+    assert 'driver' not in inspect.signature(
+        capture.salvar_artefato_sanitizado).parameters
+    assert 'screenshot' not in inspect.signature(
+        capture.salvar_artefato_sanitizado).parameters
+    assert 'page_source' not in inspect.signature(
+        capture.salvar_artefato_sanitizado).parameters
+
+
+def test_salvar_artefato_sanitizado_falha_sem_mascarar_erro(app, tmp_path):
+    destino_que_e_arquivo = tmp_path / 'não-é-diretório'
+    destino_que_e_arquivo.write_text('ocupado', encoding='utf-8')
+    with app.app_context():
+        app.config['SELENIUM_CAPTURE_DIR'] = str(destino_que_e_arquivo)
+        app.config['SELENIUM_CAPTURE_ENABLED'] = True
+
+        assert capture.salvar_artefato_sanitizado('nfse-drift', '<p>seguro</p>') is None
 
 
 def test_prune_remove_antigos_mantem_recentes(tmp_path):

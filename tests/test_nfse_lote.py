@@ -8,15 +8,28 @@ despercebido.
 A garantia mais importante do arquivo e negativa: nenhum desfecho marca uma
 nota como emitida sem o portal ter mostrado a tela de confirmacao.
 """
+from datetime import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 from app import db
-from app.automation.batch_state import NFSE_BATCH_STATE, definir_nfse_batch_opcoes
-from app.models import Empresa, LoteNfse, NotaNfse, StatusNotaNfse
-from app.services import batch_engine, nfse_lote
+from app.automation.nfse import ResultadoAutorrevisao
+from app.automation.batch_state import (
+    NFSE_BATCH_STATE,
+    definir_nfse_batch_opcoes,
+    nfse_batch_opcoes,
+)
+from app.models import (
+    Empresa,
+    IncidenteContratoNfse,
+    LoteNfse,
+    NotaNfse,
+    StatusNotaNfse,
+)
+from app.services import batch_engine, nfse_contrato, nfse_lote
 
 
 @pytest.fixture()
@@ -294,6 +307,198 @@ def test_falha_no_preenchimento_nao_espera_confirmacao(fila, monkeypatch):
     assert (sucesso, grave) == (False, None)
     assert mensagem == 'campo sumiu'
     assert not esperou.called
+
+
+def test_opcoes_fixam_as_duas_versoes_e_getter_devolve_copia():
+    definir_nfse_batch_opcoes(
+        nfse_lote.MODO_LOTE,
+        contrato_id=17,
+        validacao_contrato_id=23,
+    )
+
+    opcoes = nfse_batch_opcoes()
+    opcoes['contrato_id'] = 99
+
+    assert nfse_batch_opcoes()['contrato_id'] == 17
+    assert nfse_batch_opcoes()['validacao_contrato_id'] == 23
+
+
+def test_worker_passa_ids_fixados_a_nota_em_validacao(fila, monkeypatch):
+    definir_nfse_batch_opcoes(
+        nfse_lote.MODO_INDIVIDUAL,
+        contrato_id=17,
+        validacao_contrato_id=23,
+    )
+    registrar = MagicMock()
+    monkeypatch.setattr(nfse_lote, '_registrar_validacao_candidata', registrar)
+    monkeypatch.setattr(nfse_lote, 'aguardar_confirmacao', lambda _d: nfse_lote.TIMEOUT)
+    nota = _nota()
+
+    nfse_lote._emitir_nota(nota.id, None, 'execucao-sintetica')
+
+    argumentos = fila['preencher'].call_args.kwargs
+    assert argumentos['contrato_id'] == 17
+    assert argumentos['validacao_contrato_id'] == 23
+    registrar.assert_called_once_with(nota.id, 23, 'execucao-sintetica')
+
+
+def test_mudanca_do_ativo_nao_altera_ids_durante_o_lote(fila, monkeypatch):
+    definir_nfse_batch_opcoes(nfse_lote.MODO_LOTE, contrato_id=17)
+    monkeypatch.setattr(nfse_lote, 'aguardar_confirmacao', lambda _d: nfse_lote.EMITIDA)
+    primeira = _nota()
+    segunda = _nota()
+
+    nfse_lote._emitir_nota(primeira.id, None, 'execucao-sintetica')
+    monkeypatch.setattr(
+        nfse_lote.nfse_contrato,
+        'contrato_ativo',
+        lambda: SimpleNamespace(id=99),
+    )
+    nfse_lote._emitir_nota(segunda.id, None, 'execucao-sintetica')
+
+    assert [
+        chamada.kwargs['contrato_id']
+        for chamada in fila['preencher'].call_args_list
+    ] == [17, 17]
+
+
+def test_drift_critico_pausa_automatico_antes_de_qualquer_revisao(fila, monkeypatch):
+    definir_nfse_batch_opcoes(nfse_lote.MODO_AUTOMATICO, contrato_id=17)
+    fila['preencher'].retorno = {
+        'status': 'error',
+        'message': 'Contrato sintético divergente.',
+        'pausar_lote': True,
+    }
+    revisar = MagicMock()
+    monkeypatch.setattr(nfse_lote, '_emitir_sozinho', revisar)
+    nota = _nota()
+
+    sucesso, grave, mensagem = nfse_lote._emitir_nota(
+        nota.id, None, 'execucao-sintetica'
+    )
+
+    assert (sucesso, grave, mensagem) == (
+        False, None, 'Contrato sintético divergente.'
+    )
+    assert NFSE_BATCH_STATE['stop_action'] == 'pause'
+    assert NFSE_BATCH_STATE['pendentes_resultado'] > 0
+    revisar.assert_not_called()
+
+
+def test_inicio_automatico_recusa_contrato_fechado(monkeypatch):
+    erro = nfse_contrato.ContratoNfseNaoElegivelError(
+        'há incidente fiscal aberto no contrato sintético'
+    )
+    validar = MagicMock(side_effect=erro)
+    monkeypatch.setattr(nfse_lote.nfse_contrato, 'validar_contrato_automatico', validar)
+
+    with pytest.raises(nfse_contrato.ContratoNfseNaoElegivelError):
+        nfse_lote.validar_contrato_para_modo(
+            nfse_lote.MODO_AUTOMATICO,
+            contrato_id=17,
+        )
+
+    validar.assert_called_once_with(17)
+
+
+def test_gate_automatico_recusa_incidente_fiscal_aberto(banco):
+    contrato = nfse_contrato.garantir_contrato_inicial()
+    incidente = IncidenteContratoNfse(
+        contrato_base_id=contrato.id,
+        assinatura='a' * 64,
+        etapa='servico',
+        tipo='controle_novo',
+        severidade='fiscal',
+        estado='aberto',
+        primeira_observacao_em=datetime(2026, 8, 25, 12, 0),
+        ultima_observacao_em=datetime(2026, 8, 25, 12, 0),
+        mensagem='Incidente sintético requer revisão.',
+    )
+    db.session.add(incidente)
+    db.session.commit()
+
+    with pytest.raises(nfse_contrato.ContratoNfseNaoElegivelError, match='incidente fiscal'):
+        nfse_lote.validar_contrato_para_modo(nfse_lote.MODO_AUTOMATICO)
+
+
+@pytest.mark.parametrize(
+    ('severidade', 'estado'),
+    [
+        ('critica', 'aberto'),
+        ('informativa', 'aberto'),
+        ('informativa', 'configurado'),
+    ],
+)
+def test_gate_automatico_recusa_todo_incidente_pendente(
+    banco, severidade, estado
+):
+    contrato = nfse_contrato.garantir_contrato_inicial()
+    db.session.add(IncidenteContratoNfse(
+        contrato_base_id=contrato.id,
+        assinatura=(severidade + estado).ljust(64, 'x')[:64],
+        etapa='servico',
+        tipo='controle_novo',
+        severidade=severidade,
+        estado=estado,
+        primeira_observacao_em=datetime(2026, 8, 25, 12, 0),
+        ultima_observacao_em=datetime(2026, 8, 25, 12, 0),
+        mensagem='Incidente sintético pendente.',
+    ))
+    db.session.commit()
+
+    with pytest.raises(nfse_contrato.ContratoNfseNaoElegivelError):
+        nfse_lote.validar_contrato_para_modo(nfse_lote.MODO_AUTOMATICO)
+
+
+def test_validacao_aceita_apenas_nota_emitivel(banco):
+    nota = _nota(status=StatusNotaNfse.PRONTA)
+    assert nfse_lote.validar_nota_para_validacao(nota.id) is nota
+
+    nota.status = StatusNotaNfse.EMITIDA
+    db.session.commit()
+    with pytest.raises(ValueError, match='emitível'):
+        nfse_lote.validar_nota_para_validacao(nota.id)
+
+
+def test_registro_da_validacao_mantem_candidata_inativa_ate_ativacao(banco):
+    contrato = nfse_contrato.garantir_contrato_inicial()
+    contrato.estado = 'candidata'
+    contrato.elegivel_automatico = False
+    db.session.commit()
+    nota = _nota()
+
+    validada = nfse_contrato.registrar_validacao(
+        contrato.id,
+        nota.id,
+        ResultadoAutorrevisao([], elegivel_automatico=True),
+    )
+
+    assert validada.estado == 'validada'
+    assert validada.id == contrato.id
+    assert validada.ativado_em is None
+    assert validada.nota_validacao_id == nota.id
+    assert validada.elegivel_automatico is True
+
+
+def test_validacao_registra_revisao_e_usa_espera_assistida(fila, monkeypatch):
+    definir_nfse_batch_opcoes(
+        nfse_lote.MODO_INDIVIDUAL,
+        contrato_id=17,
+        validacao_contrato_id=23,
+    )
+    registrar = MagicMock()
+    esperar = MagicMock(return_value=nfse_lote.TIMEOUT)
+    revisar = MagicMock()
+    monkeypatch.setattr(nfse_lote, '_registrar_validacao_candidata', registrar)
+    monkeypatch.setattr(nfse_lote, 'aguardar_confirmacao', esperar)
+    monkeypatch.setattr(nfse_lote, '_emitir_sozinho', revisar)
+    nota = _nota()
+
+    nfse_lote._emitir_nota(nota.id, None, 'execucao-sintetica')
+
+    registrar.assert_called_once_with(nota.id, 23, 'execucao-sintetica')
+    esperar.assert_called_once()
+    revisar.assert_not_called()
 
 
 def test_linha_recusada_pelo_dominio_nao_vira_falha_tecnica(fila, monkeypatch):
@@ -590,6 +795,51 @@ def test_confere_contra_os_dados_da_nota(automatico):
         'a descricao conferida precisa ser a da competencia desta nota')
 
 
+def test_automatico_repassa_regras_do_contrato_para_autorrevisao(
+    automatico, monkeypatch
+):
+    regras = ({'chave_semantica': 'campo.sintetico'},)
+    monkeypatch.setattr(
+        nfse_lote,
+        '_regras_autorrevisao_contrato',
+        MagicMock(return_value=regras),
+    )
+
+    nfse_lote._emitir_nota(_nota().id, None, 'exec-1')
+
+    assert (
+        automatico['automacao'].conferir_revisao.call_args.kwargs[
+            'regras_adicionais'
+        ]
+        is regras
+    )
+
+
+def test_valor_contratado_ilegivel_forca_divergencia(monkeypatch):
+    contrato = MagicMock()
+    contrato.campo.side_effect = lambda chave: chave
+    valores = {
+        'Tomador_Inscricao': '11111111111',
+        'Valores_ValorServico': 'valor inválido',
+        'ServicoPrestado_Descricao': 'Descrição sintética',
+    }
+    monkeypatch.setattr(
+        nfse_lote.nfse_contrato,
+        'resolver_valor',
+        lambda campo, _nota, _config, _hoje: valores[campo],
+    )
+
+    _documento, valor, _descricao = nfse_lote._valores_basicos_revisao(
+        contrato,
+        SimpleNamespace(valor_final=Decimal('826.09')),
+        SimpleNamespace(),
+    )
+
+    assert valor.is_nan(), (
+        'valor contratado ilegível não pode liberar a revisão com o valor da nota'
+    )
+
+
 def test_conferindo_emite_e_marca(automatico):
     nota = _nota()
     sucesso, grave, _ = nfse_lote._emitir_nota(nota.id, None, 'exec-1')
@@ -661,3 +911,85 @@ def test_modos_assistidos_nunca_emitem_sozinhos(fila, monkeypatch, modo):
 
     assert not automacao.emitir.called
     assert not automacao.conferir_revisao.called
+
+
+# --- validar sem precisar emitir --------------------------------------------
+
+def test_validacao_e_registrada_antes_da_espera_pelo_operador(monkeypatch):
+    """A validação nunca dependeu de emitir: ela roda logo depois do
+    preenchimento e antes da espera. O teste fixa essa ordem, que é o que
+    permite ao operador fechar o navegador sem emitir."""
+
+    ordem = []
+    monkeypatch.setattr(
+        nfse_lote, '_registrar_validacao_candidata',
+        lambda *a, **k: ordem.append('validou'))
+    monkeypatch.setattr(
+        nfse_lote, '_esperar_e_registrar',
+        lambda *a, **k: (ordem.append('esperou'), (True, None, 'ok'))[1])
+    monkeypatch.setattr(
+        nfse_lote, '_ja_esta_na_revisao', lambda _id: False)
+    monkeypatch.setattr(
+        nfse_lote.nfse_service, 'preencher_nota',
+        lambda *a, **k: {'status': 'aguardando_confirmacao'})
+    monkeypatch.setattr(
+        nfse_lote, 'nfse_batch_opcoes',
+        lambda: {'modo': 'individual', 'ignorar_aliquota': True,
+                 'contrato_id': 7, 'validacao_contrato_id': 7})
+
+    nfse_lote._emitir_nota(1, None, 'execucao-sintetica')
+
+    assert ordem == ['validou', 'esperou']
+
+
+def test_fechar_a_janela_numa_validacao_nao_e_desfecho_grave(banco, monkeypatch):
+    """Fechar sem emitir é o desfecho previsto de uma validação. Marcar
+    GRAVE_FATAL pausava o lote e mandava "marcar como emitida" uma nota que o
+    operador deliberadamente não emitiu."""
+
+    monkeypatch.setattr(nfse_lote, 'aguardar_confirmacao',
+                        lambda _d: nfse_lote.JANELA_FECHADA)
+    monkeypatch.setattr(nfse_lote.batch_engine, 'marcar_resultado_pendente',
+                        lambda *a, **k: None)
+    nota = _nota(StatusNotaNfse.AGUARDANDO_CONFIRMACAO)
+    nfse_lote._publicar_validacao(7, nota.id, [])
+
+    sucesso, grave, mensagem = nfse_lote._esperar_e_registrar(
+        nota.id, {'modo': 'individual', 'validacao_contrato_id': 7},
+        'execucao-sintetica',
+    )
+
+    assert sucesso is False
+    assert grave is None
+    assert 'Validacao concluida' in mensagem
+    assert 'sem divergencias' in mensagem
+    nfse_lote.limpar_validacao_publicada()
+
+
+def test_fora_da_validacao_a_janela_fechada_continua_grave(banco, monkeypatch):
+    """Numa emissão de verdade a incerteza da ND-011 continua valendo."""
+
+    monkeypatch.setattr(nfse_lote, 'aguardar_confirmacao',
+                        lambda _d: nfse_lote.JANELA_FECHADA)
+    monkeypatch.setattr(nfse_lote.batch_engine, 'marcar_resultado_pendente',
+                        lambda *a, **k: None)
+    nfse_lote.limpar_validacao_publicada()
+    nota = _nota(StatusNotaNfse.AGUARDANDO_CONFIRMACAO)
+
+    _sucesso, grave, mensagem = nfse_lote._esperar_e_registrar(
+        nota.id, {'modo': 'individual'}, 'execucao-sintetica',
+    )
+
+    assert grave is nfse_lote.batch_engine.GRAVE_FATAL
+    assert 'marque a linha como emitida' in mensagem
+
+
+def test_status_publica_o_veredito_da_validacao():
+    nfse_lote._publicar_validacao(7, 1, ['uma divergencia sintetica'])
+    try:
+        publicado = nfse_lote.validacao_em_curso()
+        assert publicado['aprovada'] is False
+        assert publicado['contrato_id'] == 7
+    finally:
+        nfse_lote.limpar_validacao_publicada()
+    assert nfse_lote.validacao_em_curso() is None

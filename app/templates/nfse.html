@@ -317,6 +317,142 @@
     .nfse-acoes-linha .btn { white-space: nowrap; }
     .nfse-tabela-wrap { overflow-x: auto; }
     #nfseAliquota { font-family: var(--zelo-font-mono); font-weight: 600; }
+
+    .nfse-contrato-faixa {
+        border: 1px solid var(--zelo-line);
+        border-left: 0.3rem solid var(--zelo-muted);
+        background: var(--bs-card-bg);
+        border-radius: 8px;
+        padding: 0.75rem 0.9rem;
+    }
+    .nfse-contrato-faixa[data-estado="compativel"] {
+        border-left-color: var(--zelo-ok);
+        background: var(--zelo-ok-soft);
+    }
+    .nfse-contrato-faixa[data-estado="aviso"] {
+        border-left-color: var(--zelo-warn);
+        background: var(--zelo-warn-soft);
+    }
+    .nfse-contrato-faixa[data-estado="bloqueado"] {
+        border-left-color: var(--zelo-danger);
+        background: var(--zelo-danger-soft);
+    }
+    .nfse-contrato-faixa[data-estado="desconhecido"] {
+        border-left-color: var(--zelo-muted);
+        background: var(--zelo-mist);
+    }
+    .nfse-contrato-incidente [data-status="critica"],
+    .nfse-contrato-incidente [data-status="fiscal"] {
+        background: var(--zelo-danger-soft);
+        color: var(--zelo-danger);
+        border-color: var(--zelo-danger);
+    }
+    .nfse-contrato-incidente [data-status="informativa"] {
+        background: var(--zelo-warn-soft);
+        color: var(--zelo-warn);
+        border-color: var(--zelo-warn);
+    }
+    .nfse-contrato-faixa .estado {
+        font-weight: 600;
+    }
+    .nfse-contrato-meta {
+        color: var(--zelo-slate);
+        font-size: 0.82rem;
+    }
+    /* Uma linha por incidente, com a configuracao no proprio lugar: sao dezenas
+       de decisoes por recon, e um modal por decisao custa o dobro dos cliques. */
+    .nfse-contrato-incidente {
+        border-top: 1px solid var(--zelo-line);
+        padding: 0.4rem 0;
+    }
+    .nfse-contrato-incidente:first-child { border-top: 0; }
+    .nfse-contrato-linha {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.3rem 0.5rem;
+    }
+    .nfse-contrato-campo { flex: 1 1 13rem; min-width: 0; }
+    .nfse-contrato-campo strong {
+        display: block;
+        font-size: 0.9rem;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .nfse-contrato-config {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.3rem;
+    }
+    .nfse-contrato-config .form-select,
+    .nfse-contrato-config .form-control {
+        width: auto;
+        min-width: 7.5rem;
+        max-width: 13rem;
+    }
+    .nfse-contrato-confirmar {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        font-size: 0.8rem;
+        color: var(--zelo-slate);
+        white-space: nowrap;
+    }
+    .nfse-contrato-incidente .nfse-status {
+        font-size: 0.68rem;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        border: 1px solid;
+        border-radius: 999px;
+        padding: 0.05rem 0.45rem;
+        white-space: nowrap;
+    }
+    .nfse-contrato-opcoes {
+        margin: 0.2rem 0 0;
+        font-size: 0.8rem;
+        color: var(--zelo-slate);
+    }
+    .nfse-contrato-opcoes summary {
+        cursor: pointer;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .nfse-contrato-opcoes ul {
+        margin: 0.3rem 0 0;
+        padding-left: 1.2rem;
+        max-height: 11rem;
+        overflow-y: auto;
+    }
+    .nfse-contrato-opcoes code { font-family: var(--zelo-font-mono); }
+    .nfse-contrato-erro:empty { display: none; }
+    .nfse-contrato-erro { font-size: 0.8rem; margin-top: 0.2rem; }
+    /* O que os passes sugerem: proposta, nunca decisao aplicada. */
+    .nfse-contrato-sugestoes {
+        margin-top: 0.75rem;
+        border: 1px dashed var(--zelo-line);
+        border-radius: 8px;
+        padding: 0.5rem 0.7rem;
+        font-size: 0.82rem;
+    }
+    .nfse-contrato-sugestoes h4 {
+        font-size: 0.7rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--zelo-slate);
+        margin: 0 0 0.35rem;
+    }
+    .nfse-contrato-sugestoes ul { margin: 0; padding-left: 1.1rem; }
+    .nfse-contrato-sugestoes .motivo { color: var(--zelo-slate); }
+    .nfse-contrato-historico {
+        border-top: 1px solid var(--zelo-line);
+        margin-top: 1rem;
+        padding-top: 0.85rem;
+    }
+    .nfse-contrato-historico table { margin-bottom: 0; }
 </style>
 
 {% call zl_page('Emissão de NFS-e') %}
@@ -385,6 +521,145 @@
                 <button class="btn btn-primary btn-sm" type="submit">Salvar configurações</button>
             </div>
         </form>
+    </div>
+</div>
+
+{% set contrato_abertos = contrato_estado.incidentes | selectattr('estado', 'in', ('aberto', 'configurado')) | list %}
+{# O estado visual vem calculado do servidor (`nfse_contrato._estado_visual`),
+   que traduz o MESMO fato que fecha o gate do automatico. Rededuzir a regra
+   aqui ja produziu divergencia: a faixa dizia "aviso" ao lado do radio do
+   automatico desabilitado, sem explicar por que. #}
+{% set contrato_estado_visual = contrato_estado.estado_visual or 'desconhecido' %}
+
+<!-- Central de alterações do contrato adaptativo da NFS-e -->
+<section class="nfse-card mb-3" id="nfseContratoCentral"
+         data-contrato-id="{{ contrato_estado.ativo.id }}"
+         aria-labelledby="nfseContratoTitulo">
+    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+        <div>
+            <h2 class="zl-secao mb-1" id="nfseContratoTitulo">Central de alterações</h2>
+            <p class="nfse-contrato-meta mb-0">
+                Contrato ativo · versão <span class="nfse-mono">{{ contrato_estado.ativo.versao }}</span>
+            </p>
+        </div>
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+            <span class="nfse-hint nfse-mono d-none" id="nfseReconPasses"></span>
+            <button class="btn btn-soft-primary btn-sm" type="button" id="btnReconContrato">
+                Recon da tela atual
+            </button>
+            <button class="btn btn-soft-primary btn-sm d-none" type="button"
+                    id="btnReconConcluir">
+                Concluir etapa
+            </button>
+            <button class="btn btn-ghost btn-sm d-none" type="button" id="btnReconDescartar">
+                Descartar acumulado
+            </button>
+            <button class="btn btn-ghost btn-sm" type="button" id="btnDescartarIncidentes">
+                Descartar incidentes
+            </button>
+        </div>
+    </div>
+
+    <div class="nfse-contrato-faixa mt-3" id="nfseContratoStatus"
+         data-estado="{{ contrato_estado_visual }}" role="status" aria-live="polite">
+        {% if contrato_estado_visual == 'compativel' %}
+        <div class="estado" id="nfseContratoStatusTitulo">Contrato compatível</div>
+        <div id="nfseContratoStatusTexto">Não há incidentes no contrato ativo.</div>
+        {% elif contrato_estado_visual == 'aviso' %}
+        <div class="estado" id="nfseContratoStatusTitulo">Contrato com avisos</div>
+        <div id="nfseContratoStatusTexto">Há alterações que precisam de atenção do operador.</div>
+        {% elif contrato_estado_visual == 'bloqueado' %}
+        <div class="estado" id="nfseContratoStatusTitulo">Automação bloqueada</div>
+        <div id="nfseContratoStatusTexto">Resolva os incidentes críticos antes do modo automático.</div>
+        {% else %}
+        <div class="estado" id="nfseContratoStatusTitulo">Estado desconhecido</div>
+        <div id="nfseContratoStatusTexto">Não foi possível confirmar o estado do contrato.</div>
+        {% endif %}
+    </div>
+
+    {# A lista e montada por `nfse_contrato.js` a partir de /nfse/contrato: a
+       linha carrega a configuracao inline e precisa das fontes do catalogo,
+       que so a rota devolve. Aqui fica so a primeira pintura. #}
+    <div class="nfse-contrato-sugestoes d-none" id="nfseReconSugestoes"
+         aria-live="polite"></div>
+
+    <div class="mt-3" id="nfseContratoIncidentes" aria-live="polite">
+        <p class="nfse-hint mb-0" id="nfseContratoVazio">
+            {% if contrato_abertos %}Carregando alterações…{% else %}Não há incidentes no contrato ativo.{% endif %}
+        </p>
+    </div>
+
+    <div class="nfse-contrato-historico" id="nfseContratoHistorico">
+        <h3 class="h6 mb-2">Histórico de versões</h3>
+        {% if contrato_estado.candidatas %}
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th scope="col">Versão</th>
+                        <th scope="col">Estado</th>
+                        <th scope="col" class="text-end">Ação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for candidata in contrato_estado.candidatas %}
+                    <tr data-contrato-candidato="{{ candidata.id }}">
+                        <td class="nfse-mono">{{ candidata.versao }}</td>
+                        <td>{{ candidata.estado }}</td>
+                        <td class="text-end">
+                            {% if candidata.estado == 'validada' %}
+                            <button class="btn btn-primary btn-sm" type="button"
+                                    data-ativar-contrato="{{ candidata.id }}">
+                                Ativar versão
+                            </button>
+                            {% else %}
+                            <button class="btn btn-soft-primary btn-sm" type="button"
+                                    data-validar-contrato="{{ candidata.id }}"
+                                    data-bs-toggle="modal" data-bs-target="#modalValidarContrato">
+                                Validar candidata
+                            </button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="nfse-hint mb-0">Nenhuma versão candidata foi criada.</p>
+        {% endif %}
+    </div>
+    <div class="nfse-hint mt-3" id="nfseReconEstado" role="status" aria-live="polite"></div>
+</section>
+
+<div class="modal fade" id="modalValidarContrato" tabindex="-1"
+     aria-labelledby="modalValidarContratoTitulo" aria-hidden="true"
+     data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modalValidarContratoTitulo">Validar versão candidata</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+            <form id="formValidarContrato">
+                <div class="modal-body">
+                    <label class="form-label" for="nfseNotaValidacao">Nota emitível para validação</label>
+                    <select class="form-select" id="nfseNotaValidacao" name="nota_id" required>
+                        <option value="" selected disabled>Escolha uma nota…</option>
+                    </select>
+                    <div class="nfse-hint mt-2" id="nfseNotaValidacaoAjuda">
+                        A nota será preenchida até a revisão e não será emitida pela ferramenta.
+                    </div>
+                    <div class="text-danger mt-2" id="nfseValidacaoErro" role="alert" aria-live="assertive"></div>
+                </div>
+                <div class="modal-footer batch-modal-footer">
+                    <button type="button" class="btn btn-ghost btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary btn-sm" id="btnValidarContrato">
+                        Iniciar validação
+                    </button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
 

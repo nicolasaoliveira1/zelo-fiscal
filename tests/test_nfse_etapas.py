@@ -9,6 +9,7 @@ O teste mais importante do arquivo e o ultimo: prova que a automacao NAO toca
 os campos que o portal ja traz corretos nem os calculados/bloqueados. Mexer
 neles reabre secoes condicionais e muda a nota.
 """
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.automation import nfse
+from app.services import nfse_contrato
 
 CONFIG = SimpleNamespace(
     regime_apuracao_sn='1',
@@ -29,7 +31,7 @@ CONFIG = SimpleNamespace(
 )
 
 NOTA = SimpleNamespace(
-    documento='33.684.001/0001-51',
+    documento='44.556.677/0001-86',
     valor_final=Decimal('826.09'),
     competencia='06/2026',
 )
@@ -51,8 +53,8 @@ class DriverEspiao:
 
     def __init__(self):
         self.autopreenchidos = {
-            'Prestador_Inscricao': '94.645.405/0001-20',
-            'Tomador_Nome': 'L. LUIS PETRY',
+            'Prestador_Inscricao': '11.222.333/0001-81',
+            'Tomador_Nome': 'PAPELARIA CENTRAL',
         }
         # rotulo -> valor, por campo de busca (como o portal devolve)
         self.catalogo = {
@@ -210,7 +212,7 @@ def test_etapa_pessoas_preenche_data_regime_tomador_e_avanca(driver):
     assert driver.preenchidos['DataCompetencia'] == '28/07/2026'
     assert driver.chosen['SimplesNacional_RegimeApuracaoTributosSN'] == '1'
     assert driver.radios['Tomador.LocalDomicilio'] == '1'   # Brasil
-    assert driver.preenchidos['Tomador_Inscricao'] == '33.684.001/0001-51'
+    assert driver.preenchidos['Tomador_Inscricao'] == '44.556.677/0001-86'
     assert 'btnAvancar' in driver.clicados
 
 
@@ -403,6 +405,156 @@ def test_campo_desabilitado_tambem_e_esperado(driver):
         nfse.preencher_etapa_pessoas(driver, NOTA, CONFIG, date(2026, 7, 28))
 
 
+def test_etapa_usa_seletores_do_snapshot_recebido(driver):
+    base = nfse_contrato.contrato_inicial_execucao()
+    trocas = {
+        nfse.CHAVE_DATA_COMPETENCIA: 'campo-sintetico-data',
+        nfse.CHAVE_INSCRICAO_PRESTADOR: 'campo-sintetico-prestador',
+        nfse.CHAVE_REGIME_APURACAO: 'campo-sintetico-regime',
+        nfse.CHAVE_DOMICILIO_TOMADOR: 'grupo-sintetico',
+        nfse.CHAVE_INSCRICAO_TOMADOR: 'campo-sintetico-tomador',
+        nfse.CHAVE_NOME_TOMADOR: 'campo-sintetico-nome',
+    }
+    contrato = replace(
+        base,
+        campos=tuple(
+            replace(
+                campo,
+                seletor=trocas.get(campo.chave_semantica, campo.seletor),
+            )
+            for campo in base.campos
+        ),
+    )
+    driver.autopreenchidos.update({
+        'campo-sintetico-prestador': 'prestador-sintetico',
+        'campo-sintetico-nome': 'tomador-sintetico',
+    })
+
+    nfse.preencher_etapa_pessoas(
+        driver, NOTA, CONFIG, date(2026, 7, 28), contrato=contrato
+    )
+
+    assert 'campo-sintetico-data' in driver.preenchidos
+    assert 'campo-sintetico-regime' in driver.chosen
+    assert 'grupo-sintetico' in driver.radios
+    assert 'campo-sintetico-tomador' in driver.preenchidos
+    assert 'DataCompetencia' not in driver.tocados()
+
+
+def test_etapa_aplica_os_valores_resolvidos_do_snapshot(driver):
+    valores = {
+        nfse.CHAVE_DATA_COMPETENCIA: date(2026, 8, 25),
+        nfse.CHAVE_REGIME_APURACAO: 'REGIME-SINTETICO',
+        nfse.CHAVE_DOMICILIO_TOMADOR: '2',
+        nfse.CHAVE_INSCRICAO_TOMADOR: 'DOCUMENTO-CONTRATADO-SINTETICO',
+    }
+
+    nfse.preencher_etapa_pessoas(
+        driver,
+        NOTA,
+        CONFIG,
+        date(2026, 7, 28),
+        valores_contrato=valores,
+    )
+
+    assert driver.preenchidos['DataCompetencia'] == '25/08/2026'
+    assert driver.chosen['SimplesNacional_RegimeApuracaoTributosSN'] == (
+        'REGIME-SINTETICO'
+    )
+    assert driver.radios['Tomador.LocalDomicilio'] == '2'
+    assert driver.preenchidos['Tomador_Inscricao'] == (
+        'DOCUMENTO-CONTRATADO-SINTETICO'
+    )
+
+
+def _regra_sintetica(**valores):
+    padrao = {
+        'chave_semantica': 'campo.adicional',
+        'etapa': 'servico',
+        'seletor_tipo': 'id',
+        'seletor': 'campo-adicional',
+        'rotulo': 'Campo adicional',
+        'tipo': 'text',
+        'interacao': 'texto',
+        'obrigatorio': False,
+        'ordem': 0,
+        'condicao_chave': None,
+        'condicao_valor': None,
+        'origem': 'nota',
+        'fonte': 'descricao',
+        'valor_fixo': None,
+    }
+    padrao.update(valores)
+    return SimpleNamespace(**padrao)
+
+
+def test_campos_adicionais_respeitam_ordem_condicao_e_nao_tocam_intocavel(driver):
+    regras = [
+        _regra_sintetica(
+            chave_semantica='campo.radio', seletor_tipo='name', seletor='GrupoSintetico',
+            interacao='radio', ordem=1, origem='fixo', fonte=None, valor_fixo='1',
+        ),
+        _regra_sintetica(
+            chave_semantica='campo.texto', seletor='campo-texto', ordem=2,
+            origem='nota', fonte='descricao',
+        ),
+        _regra_sintetica(
+            chave_semantica='campo.padrao', ordem=0, origem='padrao_portal',
+            interacao='texto', fonte=None,
+        ),
+        _regra_sintetica(
+            chave_semantica='campo.condicional', seletor='campo-condicional', ordem=3,
+            condicao_chave='campo.radio',
+            condicao_valor='2', origem='nota', fonte='descricao',
+        ),
+        _regra_sintetica(
+            chave_semantica='campo.intocavel', ordem=4, origem='intocavel',
+            interacao='texto', fonte=None,
+        ),
+    ]
+    valores = {
+        'campo.radio': '1',
+        'campo.texto': 'texto-sintético',
+        'campo.condicional': 'condicional-sintético',
+    }
+
+    nfse.aplicar_campos_adicionais(driver, regras, valores)
+
+    assert driver.radios['GrupoSintetico'] == '1'
+    assert driver.preenchidos['campo-texto'] == 'texto-sintético'
+    assert 'campo-condicional' not in driver.preenchidos
+    assert 'campo.intocavel' not in driver.tocados()
+
+
+def test_campo_adicional_desconhecido_ou_dependencia_ausente_bloqueia(driver):
+    desconhecido = _regra_sintetica(interacao='clique-generico')
+    dependente = _regra_sintetica(condicao_chave='campo.inexistente')
+
+    with pytest.raises(nfse.ContratoNfseIncompativelError):
+        nfse.aplicar_campos_adicionais(driver, [desconhecido], {'campo.adicional': 'x'})
+    with pytest.raises(nfse.ContratoNfseIncompativelError):
+        nfse.aplicar_campos_adicionais(driver, [dependente], {'campo.adicional': 'x'})
+    assert driver.tocados() == set()
+
+
+def test_radio_com_seletor_nao_aprovado_e_recusado(driver):
+    """O grupo de radio seguia a mesma regra dos demais adaptadores só por
+    coincidência: `seletor_tipo` fora do conjunto caía em CSS por omissão, em
+    vez de recusar. Clique errado em documento fiscal não tem rollback, e a
+    coluna é `String(20)` sem `CHECK` — nada além deste guarda impede um valor
+    novo chegar aqui."""
+
+    regra = _regra_sintetica(
+        chave_semantica='campo.radio', seletor_tipo='xpath',
+        seletor='//input[@name="GrupoSintetico"]', interacao='radio',
+        origem='fixo', fonte=None, valor_fixo='1',
+    )
+
+    with pytest.raises(nfse.ContratoNfseIncompativelError):
+        nfse.aplicar_campos_adicionais(driver, [regra], {'campo.radio': '1'})
+    assert driver.tocados() == set()
+
+
 def test_espera_o_portal_carregar_o_emitente_antes_de_seguir(driver):
     """O emitente so aparece depois que a data perde o foco; seguir antes disso
     encontra os campos ainda travados."""
@@ -423,3 +575,201 @@ def test_documento_nao_reconhecido_pelo_portal_da_erro_acionavel(driver):
         nfse.preencher_etapa_pessoas(driver, NOTA, CONFIG, date(2026, 7, 28))
     assert NOTA.documento in str(exc.value)
     assert 'btnAvancar' not in driver.clicados, 'avancou com o tomador vazio'
+
+
+def test_pergunta_nova_no_topo_da_etapa_destrava_a_competencia(driver, monkeypatch):
+    """Achado de UAT: a reforma pôs "Preencher as informações IBS/CBS?" no topo
+    de Pessoas, e ela mantém os demais campos inertes até ser respondida. A
+    competência é o primeiro campo que a automação toca desde sempre — sem
+    responder a pergunta, o preenchimento morria ali."""
+
+    from app.services import nfse_contrato
+
+    execucao = nfse_contrato.contrato_inicial_execucao()
+    porteira = SimpleNamespace(
+        chave_semantica='PreencherInfoIBSCBS', etapa='pessoas',
+        seletor_tipo='name', seletor='PreencherInfoIBSCBS',
+        rotulo='Preencher as informações IBS/CBS?', tipo='radio',
+        interacao='radio', obrigatorio=True, ordem=99,
+        condicao_chave=None, condicao_valor=None, origem='fixo', fonte=None,
+        valor_fixo='0', revisao_secao=None, revisao_rotulo=None,
+        conferivel_automatico=False, opcoes=(),
+    )
+    contrato = SimpleNamespace(
+        contrato_id=execucao.contrato_id,
+        campos=tuple(execucao.campos) + (porteira,),
+        campo=execucao.campo,
+    )
+
+    driver.desabilitados.add('DataCompetencia')
+    original = nfse._marcar_radio
+
+    def marcar(drv, name, valor):
+        elemento = original(drv, name, valor)
+        if name == 'PreencherInfoIBSCBS':
+            drv.desabilitados.discard('DataCompetencia')
+        return elemento
+
+    monkeypatch.setattr(nfse, '_marcar_radio', marcar)
+
+    nfse.preencher_etapa_pessoas(
+        driver, NOTA, CONFIG, date(2026, 7, 28), contrato=contrato,
+        # No fluxo real quem resolve é `_resolver_valores_contrato`.
+        valores_contrato={'PreencherInfoIBSCBS': '0'},
+    )
+
+    assert driver.radios['PreencherInfoIBSCBS'] == '0'
+    assert driver.preenchidos['DataCompetencia'] == '28/07/2026'
+
+
+def test_sem_porteira_no_contrato_o_erro_do_portal_sobe_inalterado(driver):
+    """Sem resposta decidida no contrato, o desfecho continua sendo o do
+    portal — não um chute nosso."""
+
+    driver.desabilitados.add('DataCompetencia')
+
+    with pytest.raises(nfse.InteracaoPortalError) as erro:
+        nfse.preencher_etapa_pessoas(driver, NOTA, CONFIG, date(2026, 7, 28))
+
+    assert 'DataCompetencia' in str(erro.value)
+
+
+# --- campos novos do contrato: alvo e formato -------------------------------
+
+def _elemento_falso(visivel):
+    elemento = MagicMock()
+    elemento.is_displayed.return_value = visivel
+    elemento.size = {'width': 10 if visivel else 0, 'height': 10 if visivel else 0}
+    return elemento
+
+
+def test_alvo_repetido_resolve_pelo_visivel(monkeypatch):
+    """O portal repete `name`/`id` em partes ocultas — é por isso que
+    `_localizar` prefere o visível. Exigir um único elemento na página inteira
+    recusava campo que tem só uma cópia utilizável: foi o
+    `"Valores.ValorServico" não possui alvo inequívoco` do log."""
+
+    oculto, visivel = _elemento_falso(False), _elemento_falso(True)
+    driver = MagicMock()
+    driver.find_elements.return_value = [oculto, visivel]
+    monkeypatch.setattr(nfse, '_visivel', lambda e: e.is_displayed())
+    campo = SimpleNamespace(
+        chave_semantica='Valores.ValorServico', seletor_tipo='css',
+        seletor='[name="Valores.ValorServico"], [id="Valores.ValorServico"]',
+    )
+
+    assert nfse._localizar_campo_contrato(driver, campo) is visivel
+
+
+def test_duas_copias_visiveis_continuam_sendo_ambiguas(monkeypatch):
+    """Ambiguidade de verdade continua recusando: escolher no chute
+    preencheria a cópia errada de um documento fiscal."""
+
+    driver = MagicMock()
+    driver.find_elements.return_value = [_elemento_falso(True), _elemento_falso(True)]
+    monkeypatch.setattr(nfse, '_visivel', lambda e: e.is_displayed())
+    campo = SimpleNamespace(
+        chave_semantica='Campo.Ambiguo', seletor_tipo='css', seletor='[name="x"]',
+    )
+
+    with pytest.raises(nfse.ContratoNfseIncompativelError):
+        nfse._localizar_campo_contrato(driver, campo)
+
+
+def test_valor_e_data_vao_para_o_portal_no_formato_brasileiro():
+    """`str()` cru entrega `649.00` e `2026-08-27`; o portal usa vírgula
+    decimal e dd/mm/aaaa. Os campos históricos já formatavam — os campos NOVOS
+    do contrato caíam no `str()`, então "Valor final da nota" digitava ponto."""
+
+    from datetime import date as _date
+    from decimal import Decimal as _Decimal
+
+    assert nfse._texto_para_o_portal(_Decimal('649.00')) == '649,00'
+    assert nfse._texto_para_o_portal(_date(2026, 8, 27)) == '27/08/2026'
+    assert nfse._texto_para_o_portal('texto-sintetico') == 'texto-sintetico'
+
+
+# --- leitura da revisão -----------------------------------------------------
+
+def test_revisao_lida_mesmo_quando_a_secao_muda_de_forma(monkeypatch):
+    """A seção exige `h4` com classe e título exatos. O portal trocar a tag ou
+    acrescentar uma palavra no título não é erro fiscal — mas fazia a
+    autorrevisão parar de conferir, e "não consegui ler" virava divergência
+    num documento correto."""
+
+    achado = MagicMock()
+    achado.text = '  12,34  '
+    driver = MagicMock()
+    # A busca com seção não acha; a busca ampla acha um só.
+    monkeypatch.setattr(nfse, '_localizar', lambda *a, **k: None)
+    driver.find_elements.return_value = [achado]
+
+    lido = nfse._dd_da_secao(driver, 'Valores do Serviço Prestado',
+                             nfse.ROTULO_VALOR)
+
+    assert lido == '12,34'
+
+
+def test_rotulo_repetido_na_pagina_continua_sendo_recusa(monkeypatch):
+    """Prestador e tomador têm ambos um CNPJ: dois casamentos não podem virar
+    leitura, senão a conferência aprovaria o documento da parte errada."""
+
+    driver = MagicMock()
+    monkeypatch.setattr(nfse, '_localizar', lambda *a, **k: None)
+    driver.find_elements.return_value = [MagicMock(), MagicMock()]
+
+    assert nfse._dd_da_secao(driver, 'Tomador do Serviço',
+                             nfse.ROTULO_DOCUMENTO) is None
+
+
+def test_secao_exata_continua_tendo_prioridade(monkeypatch):
+    """O caminho preciso não pode ser trocado pelo tolerante: com as duas
+    leituras disponíveis, vale a que conhece a seção."""
+
+    da_secao = MagicMock()
+    da_secao.text = 'valor-da-secao'
+    outro = MagicMock()
+    outro.text = 'valor-da-pagina'
+    driver = MagicMock()
+    monkeypatch.setattr(nfse, '_localizar', lambda *a, **k: da_secao)
+    driver.find_elements.return_value = [outro]
+
+    assert nfse._dd_da_secao(driver, 'Tomador do Serviço',
+                             nfse.ROTULO_DOCUMENTO) == 'valor-da-secao'
+
+
+def test_secao_e_rotulo_da_revisao_batem_com_o_portal_de_hoje():
+    """Ancorado no esqueleto capturado da revisão real, não em suposição.
+
+    O portal renomeou duas coisas sob os nossos pés, e cada uma derrubou uma
+    conferência: a seção do tomador virou "Tomador/Adquirente do Serviço", e o
+    rótulo do valor virou "Valor da operação/serviço prestado:".
+    """
+    import re
+
+    from app.automation import nfse as automacao
+
+    titulos_reais = [
+        'Informações Gerais', 'Informações do Emitente',
+        'Tomador/Adquirente do Serviço', 'Serviço Prestado',
+        'Valores do Serviço Prestado', 'Tributação Municipal',
+    ]
+    rotulos_reais = [
+        'CNPJ:', 'Nome/Razão Social:', 'Descrição do serviço:',
+        'Valor da operação/serviço prestado:',
+        'Tributação do ISSQN sobre o serviço prestado:',
+    ]
+
+    # O XPath casa o título EXATO, então a constante tem de ser o texto inteiro.
+    for secao in (automacao.SECAO_TOMADOR, automacao.SECAO_VALORES,
+                  automacao.SECAO_SERVICO):
+        assert secao in titulos_reais, secao
+
+    # E o rótulo do valor precisa casar exatamente um dos rótulos reais.
+    alternativas = re.findall(r"contains\(\.,'([^']+)'\)",
+                              automacao.ROTULO_VALOR)
+    casam = [
+        rotulo for rotulo in rotulos_reais
+        if any(alvo in rotulo for alvo in alternativas)
+    ]
+    assert casam == ['Valor da operação/serviço prestado:']

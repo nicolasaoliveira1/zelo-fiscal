@@ -18,7 +18,7 @@ from app import db
 from app.models import ChaveManifestacao, Empresa
 
 # cUF(2) AAMM(4) CNPJ(14) mod(2) serie(3) nNF(9) tpEmis(1) cNF(8) DV(1)
-CHAVE_BASE = '43250707461248000107550010000012341000012340'
+CHAVE_BASE = '43250722333444000181550010000012341000012344'
 CNPJ_DEST = '11222333000181'
 
 # O que o JS manda por requisicao (`POR_ENVIO` em manifestador.js) e o teto do
@@ -51,7 +51,7 @@ def _xml(chave, cnpj_dest=CNPJ_DEST):
         f'<nfeProc xmlns="{ns}" versao="4.00"><NFe xmlns="{ns}">'
         f'<infNFe versao="4.00" Id="NFe{chave}">'
         f'<ide><dhEmi>2025-07-15T10:30:00-03:00</dhEmi></ide>'
-        f'<emit><CNPJ>07461248000107</CNPJ></emit>'
+        f'<emit><CNPJ>22333444000181</CNPJ></emit>'
         f'<dest><CNPJ>{cnpj_dest}</CNPJ></dest>'
         f'</infNFe></NFe></nfeProc>'
     ).encode('utf-8')

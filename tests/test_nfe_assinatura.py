@@ -44,15 +44,18 @@ NS_DSIG = 'http://www.w3.org/2000/09/xmldsig#'
 # canonicos = mesma assinatura, e e isso que torna o pino possivel.
 CHAVE_PINO = Path(__file__).parent / 'fixtures' / 'chave_de_teste.pem'
 
-ID_PINO = 'ID21020043170107461248000107650010000045391000045390' + '01'
-DIGEST_ESPERADO = '0zmmoEu721M52pvYPrn0wbypagQ='
+ID_PINO = 'ID21020043170122333444000181650010000045391000045390' + '01'
+# Valores congelados sobre a fixture de teste. Recalculados em 26/08/2026,
+# quando o CNPJ real da chave saiu do repositorio: o ALGORITMO nao mudou
+# (SHA-1 / RSA-SHA1 / C14N 1.0, AD-027), so o conteudo assinado.
+DIGEST_ESPERADO = 'NpsXPIwP0Not72fVXO8ApHNn3ak='
 ASSINATURA_ESPERADA = (
-    'cN2s7ooO1ErjZ59Cl9S/7lgWVmHzjEKHkr6Ge1EC0Nw+/Ea+Jdrmuljdo0IBMi/M'
-    'U/59A6PSUfvbAauZxy2Muym5iVPUF9lhb0KaqWE0ZqYmZs25JDyUXIRX4h5UB1bE'
-    '//irj/pthivbT9UjoXpZHjxekUv9RkoQvTRDNz1Dkyj+x2Do8n20RHuPf24k274e'
-    'oCGmx3OFwIgGmFRPkNSAtVm/gJrG3zDz2jq4nJWdb3N4sggVsTQFMd0D2Z9JAIuw'
-    'LexGkV0pqz67zIhZ03U7zYBNqNxkoOeEN6rsaUo+RGNVBuwr2pzuIVCvkylVRjBI'
-    '7MtyuQO08U8ZBdGPBa3a9w=='
+    'mObcxp+iUOQ3FyBojk0pGdKQWtbYU3FCSFJirZpGZtITlf4rf0ozUQ8TaIzNxpRN'
+    '28zk5T4plqL7UigAvz/xAWAVOE8yfT5x1MOX4VbS13nYf81w4r3s0KSMgb99I4a/'
+    '9e/SAEjlIC89PToz3y7I4+Rs+Kpg4TpVeIj/XlNv5lw5tuJIlfj1+klaSX8Sylpy'
+    'MFX6m3D0MOqQE60QhuDududD4bPvNpQ6TPjqrO08L8b/enKShkg5uixgRhCv8CAd'
+    'FWzNa661SE0ARGQuLrBM9F/ujAfEn+5u0Wi1XAWXOJ02oMDSEF1OM6N3LFrl3unP'
+    'xSWY9NBAQ57gGV20eIOhsA=='
 )
 
 
@@ -69,7 +72,7 @@ def _par_de_teste():
     return chave, cert
 
 
-def _evento_de_teste(id_valor='ID21020043170107461248000107650010000045391000045390' + '01'):
+def _evento_de_teste(id_valor='ID21020043170122333444000181650010000045391000045390' + '01'):
     """Um `infEvento` cru, no formato que o T9 vai montar."""
     ET.register_namespace('', NS_NFE)
     raiz = ET.Element(f'{{{NS_NFE}}}evento', {'versao': '1.00'})

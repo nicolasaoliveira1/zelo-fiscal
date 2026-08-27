@@ -139,11 +139,11 @@ def test_preencher_limpa_escreve_e_sai_do_campo():
     elemento = MagicMock()
     driver = _driver(elemento=elemento)
     elemento.parent = driver
-    nfse._preencher(driver, 'Tomador_Inscricao', '33.684.001/0001-51')
+    nfse._preencher(driver, 'Tomador_Inscricao', '44.556.677/0001-86')
 
     assert elemento.clear.called
     enviados = [chamada.args[0] for chamada in elemento.send_keys.call_args_list]
-    assert enviados == ['33.684.001/0001-51']
+    assert enviados == ['44.556.677/0001-86']
 
 
 def test_sair_do_campo_nao_usa_teclado():

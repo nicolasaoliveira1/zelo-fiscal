@@ -45,6 +45,13 @@ jobs:
       - name: Lint (ruff)
         run: ruff check .
 
+      # O repositorio e publico e o historico do git nao esquece: trocar o valor
+      # depois nao apaga o commit. Este check reprova documento real (CNPJ/CPF
+      # com DV valido, chave de NF-e) fora da lista de sinteticos declarados em
+      # `tools/verificar_dados_sensiveis.py`.
+      - name: Dados sensíveis em arquivo versionado
+        run: python tools/verificar_dados_sensiveis.py
+
       # -n auto: um processo por vCPU do runner. Cada worker recebe o seu próprio
       # SQLite temporário (o mkstemp do conftest roda por processo), então não há
       # banco compartilhado entre eles.

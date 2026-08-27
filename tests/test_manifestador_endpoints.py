@@ -18,8 +18,8 @@ from app.models import (
 from app.automation.batch_state import MANIF_BATCH_STATE
 from app.services import batch_engine, manifestador_lote
 
-CHAVE_A = '43170107461248000107650010000045391000045390'
-CHAVE_B = '43170107461248000107650010000045401000045404'
+CHAVE_A = '43170122333444000181650010000045391000045393'
+CHAVE_B = '43170122333444000181650010000045401000045408'
 DV_ERRADO = CHAVE_A[:43] + str((int(CHAVE_A[43]) + 1) % 10)
 
 
@@ -91,9 +91,9 @@ def test_pre_voo_conta_por_estado_e_nomeia_os_problemas(app, ids, client):
 def test_pre_voo_sugere_a_senha_lida_do_caminho(app, ids, client):
     """Sugestao, nunca aplicacao: o operador confirma."""
     with app.app_context():
-        emp = _empresa('EDOO', '11.222.333/0001-81')
+        emp = _empresa('SIGLA', '11.222.333/0001-81')
         emp.certificado = CertificadoEmpresa(
-            caminho=r'Z:\EDOO\CERTIFICADO SENHA 042026\edoo.pfx',
+            caminho=r'Z:\SIGLA\CERTIFICADO SENHA 042026\sigla.pfx',
             estado=EstadoCertificado.SENHA_PENDENTE)
         db.session.commit()
 

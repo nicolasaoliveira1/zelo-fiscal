@@ -100,7 +100,12 @@ def mensagem_automacao_em_curso(em_curso):
 # lock, entao qualquer chave escrita no estado antes de iniciar seria apagada, e
 # escrever depois correria com o worker ja lendo.
 NFSE_OPCOES_LOCK = Lock()
-_NFSE_BATCH_OPCOES = {'modo': 'lote', 'ignorar_aliquota': False}
+_NFSE_BATCH_OPCOES = {
+    'modo': 'lote',
+    'ignorar_aliquota': False,
+    'contrato_id': None,
+    'validacao_contrato_id': None,
+}
 
 
 def nfse_batch_opcoes():
@@ -108,10 +113,17 @@ def nfse_batch_opcoes():
         return dict(_NFSE_BATCH_OPCOES)
 
 
-def definir_nfse_batch_opcoes(modo, ignorar_aliquota=False):
+def definir_nfse_batch_opcoes(
+    modo,
+    ignorar_aliquota=False,
+    contrato_id=None,
+    validacao_contrato_id=None,
+):
     with NFSE_OPCOES_LOCK:
         _NFSE_BATCH_OPCOES['modo'] = modo
         _NFSE_BATCH_OPCOES['ignorar_aliquota'] = bool(ignorar_aliquota)
+        _NFSE_BATCH_OPCOES['contrato_id'] = contrato_id
+        _NFSE_BATCH_OPCOES['validacao_contrato_id'] = validacao_contrato_id
 
 
 def nfse_batch_stop_requested():

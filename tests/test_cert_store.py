@@ -11,7 +11,7 @@ import pytest
 
 from app.automation import cert_store
 
-SUBJECT = 'JURACI DA ROSA OLIVEIRA:34560971072'
+SUBJECT = 'FULANO DE TAL:12345678909'
 
 # O conftest dubla `encontrar_issuer` para toda a suite (nenhum teste le o store
 # da maquina). Aqui a funcao e justamente o alvo, entao guardamos a original

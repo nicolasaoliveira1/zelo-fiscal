@@ -1,0 +1,36 @@
+#!/bin/sh
+# Barreira ANTES do commit: trocar o valor depois nao apaga o historico do git.
+# Instale uma vez com:  git config core.hooksPath .githooks
+#
+# Duas armadilhas que ja quebraram este hook, e o motivo de ele ser simples:
+#
+# 1. `sh` aqui e POSIX (dash), nao bash: `read -d` nao existe. O hook errava,
+#    saia 0 e falhava ABERTO — pior do que nao existir.
+# 2. O interpretador tem de ser o do MESMO mundo do repositorio. O
+#    `venv/Scripts/python.exe` e binario Windows e nao enxerga caminho do WSL
+#    (`/tmp/...`). O verificador so usa a biblioteca padrao: qualquer python3
+#    serve, e o do proprio shell e o certo.
+set -eu
+
+raiz=$(git rev-parse --show-toplevel)
+verificador="$raiz/tools/verificar_dados_sensiveis.py"
+[ -f "$verificador" ] || exit 0
+
+if command -v python3 >/dev/null 2>&1; then
+    python_bin=python3
+elif command -v python >/dev/null 2>&1; then
+    python_bin=python
+else
+    echo "pre-commit: nenhum python encontrado; verificacao NAO executada." >&2
+    exit 1
+fi
+
+# `--staged` faz o proprio verificador ler os blobs do INDICE. O que vai no
+# commit e o indice, nao a arvore: editar depois do `git add` faria o hook
+# aprovar bytes que nao sao os que serao gravados.
+if ! "$python_bin" "$verificador" --staged; then
+    echo
+    echo "Commit recusado. Corrija acima, ou registre o documento sintetico em"
+    echo "tools/verificar_dados_sensiveis.py se ele for inventado."
+    exit 1
+fi

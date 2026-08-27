@@ -3,7 +3,7 @@
 Os estados nao foram imaginados — reproduzem o que a varredura real da carteira de
 empresas produziu (`.specs/features/manifestador-nfe/recon.md`):
 69 prontas, 10 vencidas, 9 sem arquivo, 4 com senha diferente e 1 so com e-CPF
-de socios (REPRESENTACOES LITORAL).
+de socios (REPRESENTACOES EXEMPLO).
 """
 from datetime import datetime
 
@@ -89,23 +89,23 @@ def test_senha_pendente_quando_nenhuma_senha_conhecida_abre(app, ids, tmp_path,
 
 def test_cnpj_divergente_quando_so_ha_e_cpf_de_socios(app, ids, tmp_path,
                                                       monkeypatch):
-    """O caso REPRESENTACOES LITORAL: a pasta tem 4 e-CPF de socios e nenhum
+    """O caso REPRESENTACOES EXEMPLO: a pasta tem 4 e-CPF de socios e nenhum
     e-CNPJ. Manifestar por e-CPF exigiria procuracao eletronica."""
     with app.app_context():
-        emp = _empresa('REPRESENTACOES LITORAL', '11.222.333/0001-81')
-        pasta = tmp_path / 'LITORAL'
+        emp = _empresa('REPRESENTACOES EXEMPLO', '11.222.333/0001-81')
+        pasta = tmp_path / 'EXEMPLO'
         pasta.mkdir()
-        (pasta / 'PAULO MENDES SOCIO.p12').write_bytes(
-            _fazer_pfx(cn='PAULO MENDES SOCIO:39053344705'))
-        (pasta / 'MAICO FRAGA ABEL.p12').write_bytes(
-            _fazer_pfx(cn='MAICO FRAGA ABEL:83567984004'))
-        _montar_drive(tmp_path, monkeypatch, {'REPRESENTACOES LITORAL': pasta})
+        (pasta / 'FULANO DE TAL SOCIO.p12').write_bytes(
+            _fazer_pfx(cn='FULANO DE TAL SOCIO:11144477735'))
+        (pasta / 'BELTRANO DA SILVA.p12').write_bytes(
+            _fazer_pfx(cn='BELTRANO DA SILVA:52998224725'))
+        _montar_drive(tmp_path, monkeypatch, {'REPRESENTACOES EXEMPLO': pasta})
 
         cofre.inventariar()
 
         cert = db.session.get(Empresa, emp.id).certificado
         assert cert.estado == EstadoCertificado.CNPJ_DIVERGENTE
-        assert 'PAULO MENDES SOCIO' in cert.detalhe
+        assert 'FULANO DE TAL SOCIO' in cert.detalhe
 
 
 def test_sem_arquivo_quando_a_pasta_existe_e_esta_sem_pfx(app, ids, tmp_path,
@@ -146,7 +146,7 @@ def test_acha_pfx_qualquer_que_seja_o_nome_da_pasta_e_do_arquivo(app, ids,
         emp = _empresa('EMPRESA X', '11.222.333/0001-81')
         pasta = tmp_path / 'X' / 'DOC. EMPRESA' / 'CERTIFICADO A-1 SENHA 17022013'
         pasta.mkdir(parents=True)
-        (pasta / 'EVERTON_GREGORIO_DE_FREITAS.pfx').write_bytes(
+        (pasta / 'CICRANO_DE_SOUZA.pfx').write_bytes(
             _fazer_pfx(cn='EMPRESA X LTDA:11222333000181'))
         _montar_drive(tmp_path, monkeypatch, {'EMPRESA X': tmp_path / 'X'})
 
@@ -224,16 +224,16 @@ def test_sugerir_senha_le_o_trecho_depois_da_palavra_senha():
         r'Z:\X\DOC. EMPRESA\CERTIFICADO A-1 SENHA 17022013\certificado a-1.pfx'
     ) == '17022013'
     assert cofre.sugerir_senha(
-        r'Z:\EDOO\CERTIFICADO SENHA 042026\EDOO_33132899000155.pfx') == '042026'
+        r'Z:\SIGLA\CERTIFICADO SENHA 042026\SIGLA_11222333000262.pfx') == '042026'
     assert cofre.sugerir_senha(
-        r'Z:\MISTER\CERTIFICADO A-1 SENHA Isa@2110\1010068261.pfx') == 'Isa@2110'
+        r'Z:\OUTRA\CERTIFICADO A-1 SENHA Isa@2110\9999999999.pfx') == 'Isa@2110'
 
 
 def test_sugerir_senha_nao_oferece_lixo_longo():
     """O 4o caso real tem o token ANTES da palavra SENHA, e o que vem depois e o
     nome do arquivo. Melhor nao sugerir nada que sugerir 70 caracteres."""
-    caminho = (r'Z:\IMOBISIS\DOCUMENTOS\1234 SENHA '
-               r'EVERTON_GREGORIO_DE_FREITAS_01840573023_17770259000114_'
+    caminho = (r'Z:\TERCEIRA\DOCUMENTOS\1234 SENHA '
+               r'CICRANO_DE_SOUZA_11144477735_11222333000343_'
                r'1707527913345690800.pfx')
     assert cofre.sugerir_senha(caminho) is None
 

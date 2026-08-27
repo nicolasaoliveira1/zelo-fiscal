@@ -10,11 +10,12 @@ que a pagina real usa (`R$ 826,09`, CNPJ formatado). O XPath de verdade e
 exercitado em test_nfse_automation.py.
 """
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from app.automation import nfse
 
-DOCUMENTO = '33.684.001/0001-51'
+DOCUMENTO = '44.556.677/0001-86'
 VALOR = Decimal('826.09')
 DESCRICAO = 'HONORÁRIOS PROFISSIONAIS REFERENTES AO MÊS DE 06/2026'
 
@@ -73,7 +74,7 @@ def test_tudo_conferindo_nao_acusa_divergencia():
 def test_documento_e_comparado_por_digitos():
     """A tela mostra formatado e a nota guarda formatado, mas um dos dois pode
     mudar de formato sem que nada esteja errado."""
-    assert _conferir(_driver_revisao(documento='33684001000151')) == []
+    assert _conferir(_driver_revisao(documento='44556677000186')) == []
 
 
 def test_valor_com_milhar_e_lido_corretamente():
@@ -163,3 +164,140 @@ def test_secoes_sao_ancoradas_por_titulo_exato():
     """"Serviço Prestado" e substring de "Valores do Serviço Prestado": um
     `contains` casaria as duas e leria o campo da secao errada."""
     assert "normalize-space()='{secao}'" in nfse._XP_SECAO
+
+
+def _regra_revisao(**valores):
+    padrao = {
+        'chave_semantica': 'campo.sintetico',
+        'tipo': 'text',
+        'obrigatorio': True,
+        'conferivel_automatico': True,
+        'origem': 'fixo',
+        'valor_fixo': 'Valor sintético',
+        'revisao_secao': 'Seção sintética',
+        'revisao_rotulo': 'Rótulo sintético',
+        'prova_avanco': True,
+    }
+    padrao.update(valores)
+    return SimpleNamespace(**padrao)
+
+
+def _driver_com_campo_adicional(valores):
+    driver = _driver_revisao()
+    original = driver.find_elements.side_effect
+
+    def _find_elements(by, xpath):
+        if 'Seção sintética' in xpath and 'Rótulo sintético' in xpath:
+            return [_elemento(valor) for valor in valores]
+        return original(by, xpath)
+
+    driver.find_elements.side_effect = _find_elements
+    return driver
+
+
+def test_revisao_declarativa_confere_valor_e_mantem_elegibilidade():
+    regra = _regra_revisao()
+    resultado = nfse.conferir_revisao(
+        _driver_com_campo_adicional(['Valor sintético']),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert resultado == []
+    assert resultado.elegivel_automatico is True
+
+
+def test_revisao_declarativa_acusa_valor_divergente_e_ilegivel():
+    regra = _regra_revisao()
+    divergente = nfse.conferir_revisao(
+        _driver_com_campo_adicional(['Outro valor']),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+    ilegivel = nfse.conferir_revisao(
+        _driver_com_campo_adicional([]),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert any('campo contratado' in item.lower() for item in divergente)
+    assert not divergente.elegivel_automatico
+    assert any('não consegui conferir' in item.lower() for item in ilegivel)
+    assert not ilegivel.elegivel_automatico
+
+
+def test_revisao_declarativa_acusa_secao_ambigua_e_rotulo_duplicado():
+    regra = _regra_revisao()
+    ambigua = nfse.conferir_revisao(
+        _driver_com_campo_adicional(['A', 'B']),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert len(ambigua) == 1
+    assert 'ambíguo' in ambigua[0]
+    assert not ambigua.elegivel_automatico
+
+
+def test_campo_fiscal_sem_leitor_e_padrao_obrigatorio_sem_prova_bloqueiam_auto():
+    """Campo sem leitor fecha o gate do AUTOMÁTICO, e é isso que importa.
+
+    Ele não vira divergência da nota: sem `revisao_secao`/`revisao_rotulo` não
+    há o que ler na revisão, então "não consegui conferir" é uma lacuna do
+    CONTRATO, igual em toda nota, e não um achado sobre esta. Como divergência
+    ela reprovava documento correto; some da lista da nota e aparece onde se
+    conserta — no `erro_validacao` da candidata.
+    """
+    sem_leitor = _regra_revisao(
+        chave_semantica='campo.sem_leitor',
+        revisao_secao=None,
+        revisao_rotulo=None,
+    )
+    padrao_sem_prova = _regra_revisao(
+        chave_semantica='campo.padrao',
+        origem='padrao_portal',
+        prova_avanco=False,
+    )
+
+    resultado = nfse.conferir_revisao(
+        _driver_com_campo_adicional(['Valor sintético']),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[sem_leitor, padrao_sem_prova],
+    )
+
+    # O gate do automático continua fechado — a garantia que este teste guarda.
+    assert not resultado.elegivel_automatico
+    # E a lacuna continua dita, como aviso do modo assistido.
+    assert any('sem_leitor' in aviso for aviso in resultado.avisos_assistidos)
+    assert not any('sem_leitor' in item for item in resultado)
+
+
+def test_campo_nao_conferivel_aprova_somente_fluxo_assistido():
+    regra = _regra_revisao(
+        chave_semantica='campo.somente_assistido',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        conferivel_automatico=False,
+    )
+
+    resultado = nfse.conferir_revisao(
+        _driver_revisao(),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert resultado == []
+    assert resultado.avisos_assistidos
+    assert resultado.elegivel_automatico is False

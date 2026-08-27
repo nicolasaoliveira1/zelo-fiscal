@@ -9,6 +9,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from flask import render_template, request
+from flask_login import current_user
 
 from app import db
 from app.auth import requer_papel
@@ -24,16 +25,22 @@ from app.models import (
 from app.automation.batch_state import (
     NFSE_BATCH_LOCK,
     NFSE_BATCH_STATE,
+    automacao_em_curso,
     definir_nfse_batch_opcoes,
+    mensagem_automacao_em_curso,
+    nfse_batch_opcoes,
 )
 from app.routes import _current_app_object, bp
 from app.automation import nfse_emitidas as automacao_emitidas
+from app.automation import nfse_recon
 from app.services import (
+    auditoria,
     batch_engine,
     nfse_config,
     nfse_emitidas,
     nfse_grupos,
     nfse_import,
+    nfse_contrato,
     nfse_lote,
     nfse_service,
 )
@@ -49,6 +56,10 @@ from app.utils import (
     json_error,
 )
 
+# Uniao dos passes da recon assistida. Vive so em memoria, por processo: e
+# memoria de uma sessao de observacao, nunca contrato persistido.
+ACUMULADOR_RECON = nfse_recon.AcumuladorRecon()
+
 # 5 MB cobre com folga os dois formatos: o CSV mensal tem ~7 KB e o PDF do
 # Inter ~160 KB. O limite existe para recusar cedo o arquivo que obviamente nao
 # e um extrato mensal, nao para apertar o caso normal.
@@ -61,6 +72,484 @@ ORIGEM_MANUAL = 'manual'
 CATEGORIA_HONORARIOS = 'honorarios'
 CATEGORIA_SERVICO = 'servico'
 CATEGORIA_INDEFINIDA = 'indefinida'
+
+
+# --- contrato adaptativo da NFS-e ------------------------------------------
+
+@bp.route('/nfse/contrato')
+@requer_papel('operador')
+def nfse_contrato_estado():
+    """Estado resumido do contrato, pronto para a central da interface."""
+
+    return {'status': 'ok', **nfse_contrato.estado_painel()}
+
+
+@bp.route('/nfse/contrato/<int:contrato_id>')
+@requer_papel('operador')
+def nfse_contrato_detalhe(contrato_id):
+    try:
+        detalhe = nfse_contrato.detalhe_contrato(contrato_id)
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    return {'status': 'ok', 'contrato': detalhe}
+
+
+@bp.route('/nfse/contrato/incidente/<int:incidente_id>/configurar', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_configurar(incidente_id):
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return json_error('Envie um objeto JSON de configuração.', 400, campo='corpo')
+
+    permitidos = {
+        'origem',
+        'fonte',
+        'valor_fixo',
+        'confirmar_recomendacao',
+        'chave_observada',
+    }
+    extras = set(dados) - permitidos
+    if extras:
+        campo = sorted(extras)[0]
+        return json_error('Campo não permitido na configuração.', 400, campo=campo)
+
+    confirmacao = dados.get('confirmar_recomendacao')
+    if confirmacao is not None and not isinstance(confirmacao, bool):
+        return json_error(
+            'A confirmação da recomendação deve ser booleana.',
+            400,
+            campo='confirmar_recomendacao',
+        )
+
+    incidente = db.session.get(nfse_contrato.IncidenteContratoNfse, incidente_id)
+    if incidente is None:
+        return json_error('O incidente solicitado não existe.', 404)
+    if incidente.estado != 'aberto':
+        return json_error(
+            'Este incidente já recebeu uma decisão e não pode ser configurado novamente.',
+            409,
+        )
+    # A rota valida FORMA; a regra de recomendação é de `configurar_incidente`,
+    # que a reaplica de qualquer jeito. Duplicá-la aqui custava duas consultas
+    # e o scorer inteiro por request, e as cópias já discordavam — a rota
+    # recusava `confirmar_recomendacao: false` num incidente sem recomendação,
+    # que o serviço aceita.
+    chave_observada = dados.get('chave_observada')
+    if chave_observada is not None and not isinstance(chave_observada, str):
+        return json_error(
+            'O controle recomendado deve ser identificado por texto.',
+            400,
+            campo='chave_observada',
+        )
+
+    configuracao = {
+        chave: dados[chave]
+        for chave in ('origem', 'fonte', 'valor_fixo')
+        if chave in dados
+    }
+    try:
+        candidato = nfse_contrato.configurar_incidente(
+            incidente_id,
+            configuracao,
+            usuario_id=current_user.id,
+            chave_observada=chave_observada,
+            confirmar_recomendacao=confirmacao is True,
+        )
+    except nfse_contrato.ConfiguracaoContratoInvalidaError as exc:
+        return json_error(str(exc), 400, campo=getattr(exc, 'campo', 'origem'))
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+        return json_error(str(exc), 409)
+    except nfse_contrato.PersistenciaContratoError as exc:
+        # Duas configuracoes simultaneas podem escolher a mesma proxima versao.
+        # Sem este except o Flask devolve o 500 em HTML e o `chamar()` da tela
+        # cai no `catch` sem `message`, mostrando "Falha na requisicao (500)" —
+        # e esta e a rota que o operador usa em TODO incidente. As rotas de
+        # descartar e ativar ja tratam; faltava a mais usada das tres.
+        return json_error(str(exc), 500)
+    return {
+        'status': 'ok',
+        'incidente_id': incidente_id,
+        'contrato': nfse_contrato.detalhe_contrato(candidato.id),
+    }
+
+
+@bp.route('/nfse/contrato/incidente/<int:incidente_id>/reabrir', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_reabrir_incidente(incidente_id):
+    """Desfaz a decisão de UM incidente, preservando as outras.
+
+    O "Descartar candidata" do topo continua existindo e continua sendo tudo ou
+    nada; este é o par por linha, que era o que o botão da linha aparentava ser
+    sem ser.
+    """
+
+    try:
+        candidata = nfse_contrato.reabrir_incidente(
+            incidente_id, usuario_id=current_user.id
+        )
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+        return json_error(str(exc), 409)
+    except nfse_contrato.ConfiguracaoContratoInvalidaError as exc:
+        return json_error(str(exc), 400, campo=getattr(exc, 'campo', 'origem'))
+    except nfse_contrato.PersistenciaContratoError as exc:
+        return json_error(str(exc), 500)
+    return {
+        'status': 'ok',
+        'incidente_id': incidente_id,
+        'contrato': (
+            nfse_contrato.detalhe_contrato(candidata.id)
+            if candidata is not None else None
+        ),
+        'estado': nfse_contrato.estado_painel(),
+    }
+
+
+@bp.route('/nfse/contrato/<int:contrato_id>/descartar', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_descartar(contrato_id):
+    """Arquiva a candidata e reabre seus incidentes, para reconfigurar."""
+
+    try:
+        reabertos = nfse_contrato.descartar_candidata(
+            contrato_id, usuario_id=current_user.id
+        )
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+        return json_error(str(exc), 409)
+    except nfse_contrato.PersistenciaContratoError as exc:
+        return json_error(str(exc), 500)
+    return {'status': 'ok', 'reabertos': reabertos}
+
+
+@bp.route('/nfse/contrato/incidentes/descartar', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_incidentes_descartar():
+    """Descarta os incidentes abertos da versão ativa. Não altera o contrato."""
+
+    try:
+        descartados = nfse_contrato.descartar_incidentes(usuario_id=current_user.id)
+    except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+        return json_error(str(exc), 409)
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    except nfse_contrato.PersistenciaContratoError as exc:
+        return json_error(str(exc), 500)
+    return {'status': 'ok', 'descartados': descartados}
+
+
+@bp.route('/nfse/contrato/recon/descartar', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_recon_descartar():
+    """Zera os passes acumulados. Não toca contrato, incidente nem nota."""
+
+    ACUMULADOR_RECON.descartar()
+    return {'status': 'ok', 'passe': 0, 'controles_acumulados': 0}
+
+
+@bp.route('/nfse/contrato/recon', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_recon():
+    # `final` e o operador dizendo "percorri a etapa inteira". Sem ele nenhum
+    # passe conclui ausencia — e sem conclusao de ausencia o remapeamento, que
+    # so nasce de um `controle_removido`, fica inalcancavel pela Central.
+    corpo = request.get_json(silent=True) or {}
+    if not isinstance(corpo, dict) or set(corpo) - {'final'}:
+        return json_error('A recon aceita somente o campo `final`.', 400, campo='corpo')
+    final = corpo.get('final', False)
+    if not isinstance(final, bool):
+        return json_error('O campo `final` deve ser booleano.', 400, campo='final')
+    if not NFSE_BATCH_LOCK.acquire(blocking=False):
+        return json_error(
+            'Há um lote de NFS-e em andamento. Aguarde ou pare o lote antes da recon.',
+            409,
+            motivo='lote_nfse_em_curso',
+        )
+
+    sessao_adquirida = False
+    try:
+        if NFSE_BATCH_STATE.get('status') in ('running', 'paused'):
+            return json_error(
+                'Há um lote de NFS-e em andamento. Aguarde ou pare o lote antes da recon.',
+                409,
+                motivo='lote_nfse_em_curso',
+            )
+        sessao_adquirida = SESSAO.adquirir()
+    finally:
+        NFSE_BATCH_LOCK.release()
+
+    if not sessao_adquirida:
+        return json_error(
+            'A sessão da NFS-e está ocupada. Prepare a sessão e tente novamente.',
+            409,
+            motivo='sessao_nfse_ocupada',
+        )
+
+    try:
+        driver = SESSAO.driver
+        if driver is None:
+            return json_error(
+                'Não há sessão da NFS-e preparada. Prepare a sessão antes da recon.',
+                409,
+                motivo='sessao_nfse_ausente',
+            )
+        url_atual = driver.current_url
+        etapa = nfse_recon.etapa_da_url(url_atual)
+        if etapa is None:
+            return json_error(
+                'A tela atual não é uma etapa reconhecida da NFS-e.',
+                409,
+                motivo='etapa_nfse_desconhecida',
+            )
+        # A etapa de Pessoas revela campos conforme e preenchida. Cada clique em
+        # "Recon da tela atual" e um passe: o que vale e a uniao dos passes desta
+        # mesma DPS, nao o instantaneo do ultimo.
+        inventario = nfse_recon.inventariar(driver, etapa)
+        uniao = ACUMULADOR_RECON.acumular(
+            nfse_recon.rascunho_da_url(url_atual),
+            inventario,
+            nfse_recon.preenchimento(driver),
+        )
+        # A uniao preserva o que ja foi observado, e e isso que se quer dela.
+        # Mas se ESTE passe falhou, responder pela uniao diria "compativel"
+        # sobre uma tela que nao foi lida agora — desfecho desconhecido virando
+        # chute. O passe inconclusivo responde por si.
+        if not inventario.conhecida:
+            uniao = inventario
+        contrato = nfse_contrato.carregar_execucao()
+        observacao = nfse_contrato.observar(
+            driver,
+            contrato,
+            etapa,
+            'recon_assistida',
+            modo='assistido',
+            inventario=uniao,
+            observacao_final=final,
+        )
+        return {
+            'status': 'ok',
+            'final': final,
+            'passe': ACUMULADOR_RECON.passes(etapa),
+            'controles_acumulados': len(uniao.controles),
+            'sugestoes': [
+                {
+                    'chave': item.chave,
+                    'rotulo': item.rotulo,
+                    'interacao': item.interacao,
+                    'obrigatorio': item.obrigatorio,
+                    'sugestao': item.sugestao,
+                    'motivo': item.motivo,
+                }
+                for item in ACUMULADOR_RECON.sugestoes(etapa)
+            ],
+            'observacao': {
+                'contrato_id': observacao.contrato_id,
+                'etapa': observacao.etapa,
+                'momento': observacao.momento,
+                'estado': observacao.estado,
+                'compatibilidade': observacao.compatibilidade,
+                'diferencas': list(observacao.diferencas),
+                'evidencias': list(observacao.evidencias),
+                'incidentes': observacao.incidentes,
+            },
+        }
+    except nfse_recon.InventarioExcedidoError:
+        return json_error(
+            'A tela excede o limite seguro de controles ou opções para a recon.',
+            409,
+            motivo='inventario_excedido',
+        )
+    except nfse_recon.InventarioInconclusivoError:
+        return json_error(
+            'Não foi possível observar a tela com segurança. Tente novamente.',
+            409,
+            motivo='inventario_inconclusivo',
+        )
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    except nfse_contrato.PersistenciaContratoError as exc:
+        return json_error(str(exc), 500)
+    except Exception as exc:
+        return json_error(exc=exc, code=500)
+    finally:
+        SESSAO.liberar()
+
+
+def _validacao_propria_na_revisao(contrato_id):
+    opcoes = nfse_batch_opcoes()
+    if opcoes.get('validacao_contrato_id') != contrato_id:
+        return False
+    with NFSE_BATCH_LOCK:
+        if NFSE_BATCH_STATE.get('status') not in ('running', 'paused'):
+            return False
+        nota_id = NFSE_BATCH_STATE.get('current_id')
+    nota = db.session.get(NotaNfse, nota_id) if nota_id else None
+    return nota is not None and nota.status == StatusNotaNfse.AGUARDANDO_CONFIRMACAO
+
+
+def _pausa_abandonada_de_validacao():
+    """A pausa que sobrou de uma validação já resolvida fora do navegador.
+
+    A validação pausa o lote quando o formulário diverge (é o que faz o
+    operador ir configurar os controles novos). Resolvido isso, o lote continua
+    `paused` para sempre: o worker já morreu, ninguém vai retomar, e a pausa
+    passa a barrar justamente a revalidação que ela pediu.
+
+    NÃO olha o `contrato_id`: configurar o incidente ARQUIVA a candidata e cria
+    outra, então a pausa que sobrou é sempre de uma versão diferente da que o
+    operador está tentando validar agora. Casar por id nunca acertaria.
+
+    Duas coisas protegem o que não pode ser descartado:
+
+    - `validacao_contrato_id` só existe em lote de validação; um lote de
+      emissão de verdade não tem, e não é tocado aqui;
+    - nota em `aguardando_confirmacao` é DPS preenchida esperando o operador no
+      portal. Parar ali abandonaria um documento em aberto, e documento fiscal
+      não tem rollback (ND-005/ND-011).
+    """
+    if not nfse_batch_opcoes().get('validacao_contrato_id'):
+        return False
+    with NFSE_BATCH_LOCK:
+        if NFSE_BATCH_STATE.get('status') != 'paused':
+            return False
+        nota_id = NFSE_BATCH_STATE.get('current_id')
+    nota = db.session.get(NotaNfse, nota_id) if nota_id else None
+    return nota is None or nota.status != StatusNotaNfse.AGUARDANDO_CONFIRMACAO
+
+
+@bp.route('/nfse/contrato/<int:contrato_id>/validar', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_validar(contrato_id):
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return json_error('Escolha uma nota para validar o contrato.', 400, campo='nota_id')
+    extras = set(dados) - {'nota_id'}
+    if extras:
+        return json_error(
+            'A validação aceita somente nota_id.',
+            400,
+            campo=sorted(extras)[0],
+        )
+    nota_id = dados.get('nota_id')
+    if isinstance(nota_id, bool) or not isinstance(nota_id, int) or nota_id <= 0:
+        return json_error('Escolha uma nota emitível.', 400, campo='nota_id')
+
+    candidato = db.session.get(nfse_contrato.ContratoNfse, contrato_id)
+    if candidato is None:
+        return json_error('A versão candidata não existe.', 404)
+    if candidato.estado != 'candidata':
+        return json_error(
+            'A versão precisa estar no estado candidata para ser validada.',
+            409,
+        )
+    try:
+        nfse_lote.validar_nota_para_validacao(nota_id)
+    except ValueError as exc:
+        return json_error(str(exc), 400, campo='nota_id')
+
+    em_curso = automacao_em_curso()
+    if em_curso is not None and _pausa_abandonada_de_validacao():
+        # `request_stop` grava `stopped` na hora, sem depender do worker — que
+        # neste ponto ja morreu. Sem isto a pausa fica para sempre e so um
+        # "Parar" manual libera, que e o que o operador nao tinha como saber.
+        batch_engine.request_stop(NFSE_BATCH_LOCK, NFSE_BATCH_STATE)
+        log_event('nfse_validacao_pausa_descartada', contrato_id=contrato_id)
+        em_curso = automacao_em_curso()
+    if em_curso is not None:
+        # Mensagem COMPARTILHADA (`mensagem_automacao_em_curso`), como em
+        # `routes/lotes.py`. A copia local dizia "Aguarde terminar", e para lote
+        # pausado esse e o unico conselho que nunca funciona: pausa nao termina
+        # sozinha, quem a fecha e retomar ou parar.
+        return json_error(
+            mensagem_automacao_em_curso(em_curso),
+            409,
+            motivo='automacao_em_curso',
+        )
+    if not SESSAO.adquirir():
+        return json_error(
+            'Já existe uma sessão da NFS-e em andamento. Aguarde terminar.',
+            409,
+        )
+    with NFSE_BATCH_LOCK:
+        em_andamento = NFSE_BATCH_STATE.get('status') in ('running', 'paused')
+    if em_andamento:
+        SESSAO.liberar()
+        return json_error('Já existe um lote de NFS-e em andamento.', 409)
+
+    # A validação preenche até a revisão e nunca emite (ND-005): o gate da
+    # alíquota protege a EMISSÃO, e exigi-lo aqui bloqueia justamente a prova
+    # que precede qualquer emissão. O aviso continua no log da execução.
+    definir_nfse_batch_opcoes(
+        nfse_lote.MODO_INDIVIDUAL,
+        True,
+        contrato_id=contrato_id,
+        validacao_contrato_id=contrato_id,
+    )
+    nfse_lote.preparar_nova_fila()
+    # Veredito da validação anterior não pode sobreviver à nova: o painel o
+    # mostra em tempo real, e um resultado velho ali diria "validado" sobre uma
+    # execução que ainda nem preencheu.
+    nfse_lote.limpar_validacao_publicada()
+    try:
+        dados_lote = batch_engine.init_batch_run(
+            NFSE_BATCH_LOCK,
+            NFSE_BATCH_STATE,
+            nota_id,
+            lambda inicio: nfse_lote.calcular_alvos(nota_id=inicio),
+            nfse_lote.worker,
+            app_factory=_current_app_object,
+        )
+    except Exception as exc:
+        SESSAO.liberar()
+        return json_error(exc=exc, code=500)
+    if dados_lote is None:
+        SESSAO.liberar()
+        return json_error('Já existe um lote de NFS-e em andamento.', 409)
+    if not dados_lote:
+        SESSAO.liberar()
+        return json_error('A nota escolhida não está mais emitível.', 400, campo='nota_id')
+    return {
+        'status': 'ok',
+        'modo': nfse_lote.MODO_INDIVIDUAL,
+        'contrato_id': contrato_id,
+        'nota_id': nota_id,
+        'total': dados_lote['total'],
+    }
+
+
+@bp.route('/nfse/contrato/<int:contrato_id>/ativar', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_ativar(contrato_id):
+    em_curso = automacao_em_curso()
+    propria_validacao = _validacao_propria_na_revisao(contrato_id)
+    if em_curso is not None and not propria_validacao:
+        return json_error(
+            f"A automação {em_curso['rotulo']} ainda está em andamento.",
+            409,
+            motivo='automacao_em_curso',
+        )
+    if SESSAO.ocupada and not propria_validacao:
+        return json_error(
+            'A sessão da NFS-e está ocupada por outra execução.',
+            409,
+            motivo='sessao_ocupada',
+        )
+    try:
+        contrato = nfse_contrato.ativar(contrato_id, usuario_id=current_user.id)
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+        return json_error(str(exc), 409)
+    except nfse_contrato.PersistenciaContratoError as exc:
+        return json_error(str(exc), 500)
+    return {
+        'status': 'ok',
+        'contrato': nfse_contrato.detalhe_contrato(contrato.id),
+    }
 
 
 def _categoria(nota):
@@ -103,6 +592,11 @@ def _nota_para_json(nota):
         'valor': f'{nota.valor_final:.2f}'.replace('.', ',') if nota.valor_final else None,
         'vencimento': nota.vencimento.strftime('%d/%m/%Y') if nota.vencimento else None,
         'status': nota.status,
+        # A regra de "esta nota pode ser preenchida" mora em
+        # `nfse_service.emitivel` — que barra proposta de agrupamento pendente e
+        # duplicata não liberada, coisas que uma lista de status não vê. O
+        # cliente consome o veredito; recriar a regra em JS ja tinha divergido.
+        'emitivel': nfse_service.emitivel(nota),
         'origem_vinculo': nota.origem_vinculo,
         'score_match': nota.score_match,
         'divergencia_valor': nota.divergencia_valor,
@@ -245,6 +739,7 @@ def nfse_painel():
         config=nfse_config.get_config_nfse(),
         empresas=[{'id': e.id, 'nome': e.nome, 'cnpj': e.cnpj}
                   for e in Empresa.query.order_by(Empresa.nome).all()],
+        contrato_estado=nfse_contrato.estado_painel(),
         # Sem filtro de competencia o painel usa o MES CORRENTE — o mesmo que
         # o JS poe nos campos de data. Painel e campos sempre concordam: o que
         # esta na tela e o que uma consulta traria.
@@ -772,6 +1267,46 @@ def nfse_marcar_emitida_manual(nota_id):
     return {'status': 'ok', 'nota': _nota_para_json(nota)}
 
 
+@bp.route('/nfse/nota/<int:nota_id>/liberar-preenchimento', methods=['POST'])
+@requer_papel('operador')
+def nfse_liberar_preenchimento(nota_id):
+    """O operador declara que NAO emitiu: a nota volta para a fila.
+
+    Par simetrico do "Emiti no portal". A ND-011 impede o SISTEMA de adivinhar
+    o desfecho de um preenchimento cujo navegador foi fechado, e continua
+    valendo — aqui quem declara e o humano, que sabe.
+
+    Confere no espelho do portal antes, quando ha navegador aberto. Achando
+    nota que pode ser esta, responde 409 com as candidatas em vez de liberar: o
+    operador olha valor e data e reenvia com `confirmado: true` se nao for ela.
+    """
+    nota = db.session.get(NotaNfse, nota_id)
+    if nota is None:
+        return json_error('Nota nao encontrada.', 404)
+
+    dados = request.get_json(silent=True) or {}
+    erro, evidencias = nfse_service.liberar_preenchimento(
+        nota, confirmado=bool(dados.get('confirmado')))
+    if erro:
+        db.session.rollback()
+        return json_error(erro, 409)
+    if evidencias:
+        db.session.rollback()
+        return json_error(
+            'O portal registra nota emitida para este tomador nesta '
+            'competência. Confira antes de liberar: emitir de novo cria '
+            'duplicata na prefeitura.', 409,
+            emitidas=[_emitida_para_json(e) for e in evidencias])
+
+    db.session.commit()
+    auditoria.registrar(
+        'nfse.nota.liberar_preenchimento',
+        alvo_tipo='nota_nfse', alvo_id=nota.id,
+        detalhe=f'nota_id={nota.id};status={nota.status}',
+    )
+    return {'status': 'ok', 'nota': _nota_para_json(nota)}
+
+
 # --- notas emitidas no portal (NFSE-28) ------------------------------------
 
 def _emitida_para_json(emitida):
@@ -1060,6 +1595,14 @@ def nfse_lote_iniciar():
         return json_error(str(exc), 409, motivo='aliquota_nao_confirmada',
                           aliquota=SESSAO.aliquota)
 
+    try:
+        contrato = nfse_lote.validar_contrato_para_modo(modo)
+        contrato = contrato or nfse_contrato.contrato_ativo()
+    except nfse_contrato.ContratoNfseNaoElegivelError as exc:
+        return json_error(str(exc), 409, motivo='contrato_nfse_nao_elegivel')
+    except ValueError as exc:
+        return json_error(str(exc), 400, campo='modo')
+
     # Toma a sessao aqui e nao no worker para que "ja tem emissao rodando" seja
     # decidido antes de qualquer thread nascer. Quem devolve o lock e o
     # `on_teardown` do worker (ou os caminhos de erro logo abaixo).
@@ -1078,7 +1621,11 @@ def nfse_lote_iniciar():
         SESSAO.liberar()
         return json_error('Ja existe um lote de NFSe em andamento.', 409)
 
-    definir_nfse_batch_opcoes(modo, ignorar_aliquota)
+    definir_nfse_batch_opcoes(
+        modo,
+        ignorar_aliquota,
+        contrato_id=contrato.id,
+    )
     nfse_lote.preparar_nova_fila()
 
     # a fila e o que a pagina mostra, nao "o ultimo lote": com um mes filtrado
