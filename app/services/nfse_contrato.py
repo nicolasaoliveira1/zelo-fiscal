@@ -709,9 +709,11 @@ def _incidente_novo(contrato_id, diferenca: Diferenca, assinatura: str, agora):
         estado="aberto",
         chave_esperada=diferenca.chave_esperada,
         chave_observada=diferenca.chave_observada,
-        rotulo=campo.rotulo if campo else None,
-        tipo_controle=campo.tipo if campo else None,
-        interacao=campo.interacao if campo else None,
+        rotulo=(campo.rotulo or "")[:500] if campo else None,
+        # String(30) nas duas: o inventario deriva nomes curtos, mas um tipo
+        # inesperado do portal nao pode virar DataError so no MySQL.
+        tipo_controle=(campo.tipo or "")[:30] if campo else None,
+        interacao=(campo.interacao or "")[:30] if campo else None,
         obrigatorio=campo.obrigatorio if campo else None,
         ordem_pagina=_ordem_da_diferenca(diferenca),
         primeira_observacao_em=agora,
@@ -1198,9 +1200,17 @@ def _adaptador_observado(interacao):
     return adaptador
 
 
+# `CampoContratoNfse.seletor` e String(200) e o seletor gerado tem
+# 17 + 2*len(chave) caracteres. O limite da chave sai DA COLUNA, nunca de um
+# numero redondo: o SQLite ignora largura de VARCHAR e o MySQL impoe, entao um
+# estouro passa no gate rapido e explode em producao (licao 3 do CLAUDE.md).
+_LARGURA_SELETOR = 200
+_LIMITE_CHAVE_SELETOR = (_LARGURA_SELETOR - 17) // 2
+
+
 def _seletor_css_identidade(chave):
     chave = str(chave or "")
-    if not chave or len(chave) > 100:
+    if not chave or len(chave) > _LIMITE_CHAVE_SELETOR:
         raise ConfiguracaoContratoInvalidaError(
             "o controle observado não possui identidade estável"
         )

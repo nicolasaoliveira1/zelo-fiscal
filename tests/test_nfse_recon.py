@@ -471,3 +471,40 @@ def test_mensagem_longa_e_truncada_nunca_fatal():
 
     assert len(aceitas) == 1
     assert len(aceitas[0]) <= 500
+
+
+def test_valor_curto_do_contrato_nao_censura_a_mensagem():
+    """Os fixos do contrato são '0' e '1'. Filtrar por substring com eles
+    descartava toda mensagem que citasse um número — o caminho de captura de
+    evidência ficava vazio justamente quando a nota falhava."""
+
+    aceitas = mensagens_validacao(
+        _driver_com_mensagens("O valor deve ser maior que 0."),
+        ["0", "1", "true"],
+    )
+
+    assert aceitas == ["O valor deve ser maior que 0."]
+
+
+def test_segredo_com_corpo_continua_barrado():
+    assert mensagens_validacao(
+        _driver_com_mensagens("Preencha o campo SENTINELA-VALOR corretamente."),
+        ["SENTINELA-VALOR"],
+    ) == []
+
+
+def test_identidade_longa_nao_derruba_o_passe_de_preenchimento():
+    """Um `id` gerado com 120 caracteres não pode derrubar a chamada inteira por
+    um controle que a heurística de cheio/vazio nem precisava."""
+
+    class DriverComIdLongo:
+        def execute_script(self, script):
+            return [
+                {"id": "x" * 120, "name": "y" * 130, "preenchido": True},
+                {"id": "Campo", "name": "Campo", "preenchido": False},
+            ]
+
+    estado = preenchimento(DriverComIdLongo())
+
+    assert estado["Campo"] is False
+    assert all(len(chave) <= 100 for chave in estado)

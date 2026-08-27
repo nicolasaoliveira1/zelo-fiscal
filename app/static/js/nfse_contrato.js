@@ -666,6 +666,7 @@ export async function inicializarContratoNfse(opcoes = {}) {
   const notaValidacao = porId(root, 'nfseNotaValidacao');
   const botaoRecon = porId(root, 'btnReconContrato');
   const botaoDescartar = porId(root, 'btnReconDescartar');
+  const botaoConcluir = porId(root, 'btnReconConcluir');
   const botaoIncidentes = porId(root, 'btnDescartarIncidentes');
   const rotuloPasses = porId(root, 'nfseReconPasses');
   // Os handlers delegados moram no container da central, nao no documento:
@@ -679,6 +680,7 @@ export async function inicializarContratoNfse(opcoes = {}) {
     const acumulando = Number(passe) > 0;
     rotuloPasses?.classList.toggle('d-none', !acumulando);
     botaoDescartar?.classList.toggle('d-none', !acumulando);
+    botaoConcluir?.classList.toggle('d-none', !acumulando);
     if (rotuloPasses && acumulando) {
       rotuloPasses.textContent = `passe ${passe} · ${controles} controles`;
     }
@@ -747,39 +749,48 @@ export async function inicializarContratoNfse(opcoes = {}) {
     }
   };
 
-  botaoRecon?.addEventListener('click', () => {
-    void comCarregamento(botaoRecon, async () => {
-      try {
-        const dados = await chamar(fetchImpl, '/nfse/contrato/recon', {});
-        await carregar();
-        mostrarPasses(dados.passe, dados.controles_acumulados);
-        mostrarSugestoes(dados.sugestoes);
-        const observacao = dados.observacao || {};
-        // A evidencia carrega o motivo tecnico: sem ela, 'desconhecida' nao
-        // diz ao operador o que conferir na tela.
-        const evidencia = (observacao.evidencias || [])[0] || '';
-        if (observacao.compatibilidade === 'desconhecida') {
-          const faixa = porId(root, 'nfseContratoStatus');
-          if (faixa) faixa.dataset.estado = 'desconhecido';
-          const titulo = porId(root, 'nfseContratoStatusTitulo');
-          const texto = porId(root, 'nfseContratoStatusTexto');
-          if (titulo) titulo.textContent = rotulosEstado.desconhecido.titulo;
-          if (texto) texto.textContent = evidencia || rotulosEstado.desconhecido.texto;
-        }
-        mostrarErro(
-          root,
-          'nfseReconEstado',
-          observacao.compatibilidade === 'compativel'
-            ? 'Recon concluída: a tela atual é compatível.'
-            : `Recon concluída: ${observacao.compatibilidade || 'estado desconhecido'}.`
-              + (evidencia ? ` ${evidencia}` : ''),
-        );
-      } catch (erro) {
-        const mensagem = erro instanceof Error ? erro.message : 'Não foi possível executar a recon.';
-        mostrarErro(root, 'nfseReconEstado', mensagem);
-        showToast(mensagem, 'error');
+  // `final` e o operador dizendo "percorri a etapa inteira". So nesse passe a
+  // ausencia de um campo vira incidente — e so um `controle_removido` abre o
+  // fluxo de remapeamento.
+  const executarRecon = (botao, final) => comCarregamento(botao, async () => {
+    try {
+      const dados = await chamar(fetchImpl, '/nfse/contrato/recon', { final });
+      await carregar();
+      mostrarPasses(dados.passe, dados.controles_acumulados);
+      mostrarSugestoes(dados.sugestoes);
+      const observacao = dados.observacao || {};
+      // A evidencia carrega o motivo tecnico: sem ela, 'desconhecida' nao
+      // diz ao operador o que conferir na tela.
+      const evidencia = (observacao.evidencias || [])[0] || '';
+      if (observacao.compatibilidade === 'desconhecida') {
+        const faixa = porId(root, 'nfseContratoStatus');
+        if (faixa) faixa.dataset.estado = 'desconhecido';
+        const titulo = porId(root, 'nfseContratoStatusTitulo');
+        const texto = porId(root, 'nfseContratoStatusTexto');
+        if (titulo) titulo.textContent = rotulosEstado.desconhecido.titulo;
+        if (texto) texto.textContent = evidencia || rotulosEstado.desconhecido.texto;
       }
-    });
+      mostrarErro(
+        root,
+        'nfseReconEstado',
+        observacao.compatibilidade === 'compativel'
+          ? 'Recon concluída: a tela atual é compatível.'
+          : `Recon concluída: ${observacao.compatibilidade || 'estado desconhecido'}.`
+            + (evidencia ? ` ${evidencia}` : ''),
+      );
+    } catch (erro) {
+      const mensagem = erro instanceof Error ? erro.message : 'Não foi possível executar a recon.';
+      mostrarErro(root, 'nfseReconEstado', mensagem);
+      showToast(mensagem, 'error');
+    }
+  });
+
+  botaoRecon?.addEventListener('click', () => {
+    void executarRecon(botaoRecon, false);
+  });
+
+  botaoConcluir?.addEventListener('click', () => {
+    void executarRecon(botaoConcluir, true);
   });
 
   botaoDescartar?.addEventListener('click', () => {

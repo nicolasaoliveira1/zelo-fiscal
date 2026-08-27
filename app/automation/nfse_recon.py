@@ -28,6 +28,9 @@ MAX_ROTULO = 500
 # maior passaria no SQLite e estouraria `DataError` no MySQL.
 MAX_IDENTIFICADOR = 100
 MAX_VALOR_OPCAO = 190
+# Abaixo disto um valor resolvido nao identifica ninguem: sao os fixos do
+# contrato ('0', '1', 'true') e codigos de opcao.
+MIN_VALOR_SENSIVEL = 4
 
 _ETAPAS_POR_PATH = {
     "/EmissorNacional/DPS/Pessoas": "pessoas",
@@ -618,7 +621,12 @@ def preenchimento(driver: Any) -> dict[str, bool]:
         if not isinstance(marca, bool):
             continue
         for chave in (item.get("name"), item.get("id")):
-            texto = _normalizar_identificador(chave)
+            # A chave e so um indice aqui. Um `id` gerado com mais de 100
+            # caracteres nao pode derrubar o passe inteiro por um controle que
+            # a heuristica de cheio/vazio nem precisava.
+            texto = " ".join(
+                unicodedata.normalize("NFKC", str(chave or "")).split()
+            )[:MAX_IDENTIFICADOR]
             if texto:
                 estado[texto] = marca
     return estado
@@ -886,10 +894,17 @@ def _tem_forma_de_validacao(texto: str) -> bool:
 def mensagens_validacao(driver: Any, valores_sensiveis: Iterable[str]) -> list[str]:
     """Lê mensagens de validação e mantém somente as que têm forma de validação."""
 
+    # Valor curto NAO e segredo: os fixos do contrato sao '0' e '1', e filtrar
+    # por substring com eles descartava toda mensagem que citasse um numero —
+    # "o valor deve ser maior que 0" sumia como se vazasse dado de cliente.
+    # Segredo tem corpo; abaixo de `MIN_VALOR_SENSIVEL` nao ha o que proteger.
     sensiveis = {
-        unicodedata.normalize("NFKC", str(valor)).strip().casefold()
-        for valor in valores_sensiveis
-        if str(valor).strip()
+        texto
+        for texto in (
+            unicodedata.normalize("NFKC", str(valor)).strip().casefold()
+            for valor in valores_sensiveis
+        )
+        if len(texto) >= MIN_VALOR_SENSIVEL
     }
     try:
         mensagens = driver.execute_script(JS_MENSAGENS_VALIDACAO)

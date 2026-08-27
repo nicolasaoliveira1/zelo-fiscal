@@ -32,6 +32,23 @@ def _controle(
     )
 
 
+def _driver_na_etapa(etapa="servico"):
+    """Driver falso cuja URL confirma a etapa.
+
+    A guarda de `_observar_fronteira_contrato` só compara o que a URL confirma
+    ser a etapa: um `MagicMock` cru tem `current_url` que não é etapa nenhuma,
+    e a observação (corretamente) não acontece.
+    """
+
+    caminho = {
+        "pessoas": "Pessoas", "servico": "Servico",
+        "tributacao": "Tributacao", "revisao": "EmitirNFSe",
+    }[etapa]
+    driver = MagicMock()
+    driver.current_url = f"https://www.nfse.gov.br/EmissorNacional/DPS/{caminho}"
+    return driver
+
+
 def _contrato(campos=(), contrato_id=0):
     return SimpleNamespace(contrato_id=contrato_id, campos=tuple(campos))
 
@@ -45,7 +62,7 @@ def test_fronteira_desconhecida_bloqueia_sem_persistir_incidente(monkeypatch):
     monkeypatch.setattr(nfse_service.nfse_contrato, "registrar_incidentes", registrar)
     monkeypatch.setattr(nfse_service, "log_event", MagicMock())
 
-    driver = MagicMock()
+    driver = _driver_na_etapa()
     with pytest.raises(nfse_service.NfseDriftError, match="observar"):
         nfse_service._observar_fronteira_contrato(
             driver,
@@ -71,7 +88,7 @@ def test_fronteira_opcional_persiste_artefato_e_retorna_aviso(monkeypatch):
     monkeypatch.setattr(nfse_service, "salvar_artefato_sanitizado", salvar)
 
     resultado = nfse_service._observar_fronteira_contrato(
-        MagicMock(),
+        _driver_na_etapa(),
         _contrato(),
         "servico",
         "dependencias",
@@ -97,7 +114,7 @@ def test_fronteira_opcional_bloqueia_no_modo_automatico(monkeypatch):
 
     with pytest.raises(nfse_service.NfseDriftError) as erro:
         nfse_service._observar_fronteira_contrato(
-            MagicMock(),
+            _driver_na_etapa(),
             _contrato(),
             "servico",
             "entrada",
@@ -122,7 +139,7 @@ def test_drift_incompatível_gera_artefato_sanitizado(monkeypatch):
 
     with pytest.raises(nfse_service.NfseDriftError) as erro:
         nfse_service._observar_fronteira_contrato(
-            MagicMock(),
+            _driver_na_etapa(),
             _contrato(contrato_id=71),
             "servico",
             "pre_avancar",
@@ -221,7 +238,7 @@ def test_ausencia_provisoria_nao_bloqueia_o_modo_automatico(monkeypatch):
     monkeypatch.setattr(nfse_service.nfse_contrato, "registrar_incidentes", registrar)
 
     resultado = nfse_service._observar_fronteira_contrato(
-        MagicMock(), _contrato([_campo_esperado()], contrato_id=71),
+        _driver_na_etapa(), _contrato([_campo_esperado()], contrato_id=71),
         "servico", "entrada", modo="automatico",
     )
 
@@ -244,6 +261,46 @@ def test_ausencia_na_observacao_final_continua_bloqueando_o_automatico(monkeypat
 
     with pytest.raises(nfse_service.NfseDriftError):
         nfse_service._observar_fronteira_contrato(
-            MagicMock(), _contrato([_campo_esperado()], contrato_id=71),
+            _driver_na_etapa(), _contrato([_campo_esperado()], contrato_id=71),
             "servico", "pre_avancar", modo="automatico",
         )
+
+
+def test_url_que_nao_e_etapa_conhecida_nao_vira_observacao(monkeypatch):
+    """Sessão expirada leva o driver ao login. Comparar a tela de login com o
+    contrato transforma todo campo contratado em remoção crítica e enche a
+    Central de incidentes falsos contra a versão ativa."""
+
+    inventariar = MagicMock()
+    registrar = MagicMock()
+    monkeypatch.setattr(nfse_service.nfse_recon, "inventariar", inventariar)
+    monkeypatch.setattr(nfse_service.nfse_contrato, "registrar_incidentes", registrar)
+    driver = MagicMock()
+    driver.current_url = "https://www.nfse.gov.br/EmissorNacional/Login"
+
+    resultado = nfse_service._observar_fronteira_contrato(
+        driver, _contrato([_campo_esperado()], contrato_id=71),
+        "servico", "pre_avancar", modo="automatico",
+    )
+
+    assert resultado["estado"] == "ignorada"
+    inventariar.assert_not_called()
+    registrar.assert_not_called()
+
+
+def test_current_url_indisponivel_tambem_nao_observa(monkeypatch):
+    inventariar = MagicMock()
+    monkeypatch.setattr(nfse_service.nfse_recon, "inventariar", inventariar)
+
+    class DriverMudo:
+        @property
+        def current_url(self):
+            raise RuntimeError("sessão encerrada")
+
+    resultado = nfse_service._observar_fronteira_contrato(
+        DriverMudo(), _contrato([_campo_esperado()], contrato_id=71),
+        "servico", "entrada",
+    )
+
+    assert resultado["estado"] == "ignorada"
+    inventariar.assert_not_called()

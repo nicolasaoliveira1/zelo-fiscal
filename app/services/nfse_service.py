@@ -112,14 +112,19 @@ def _tela_ainda_e_da_etapa(driver, etapa):
     PRÓXIMA tela carregada. Observar ali inventaria o formulário seguinte e o
     compara com o contrato da etapa anterior: todo controle obrigatório da tela
     nova vira `controle_novo` crítico, a nota é bloqueada e a Central recebe
-    incidentes na etapa errada. Só se compara o que a URL confirma ser a etapa.
+    incidentes na etapa errada.
+
+    URL que NAO e etapa conhecida tambem nao serve — e este era o furo: sessao
+    expirada leva o driver para o login, e a tela de login comparada com o
+    contrato transforma todo campo contratado em remocao critica. So se compara
+    o que a URL confirma ser ESTA etapa; qualquer outra coisa nao e observacao.
     """
 
     try:
         atual = nfse_recon.etapa_da_url(getattr(driver, 'current_url', '') or '')
     except Exception:
-        return True
-    return atual is None or atual == etapa
+        return False
+    return atual == etapa
 
 
 def _observar_fronteira_contrato(

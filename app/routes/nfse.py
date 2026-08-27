@@ -228,6 +228,15 @@ def nfse_contrato_recon_descartar():
 @bp.route('/nfse/contrato/recon', methods=['POST'])
 @requer_papel('operador')
 def nfse_contrato_recon():
+    # `final` e o operador dizendo "percorri a etapa inteira". Sem ele nenhum
+    # passe conclui ausencia — e sem conclusao de ausencia o remapeamento, que
+    # so nasce de um `controle_removido`, fica inalcancavel pela Central.
+    corpo = request.get_json(silent=True) or {}
+    if not isinstance(corpo, dict) or set(corpo) - {'final'}:
+        return json_error('A recon aceita somente o campo `final`.', 400, campo='corpo')
+    final = corpo.get('final', False)
+    if not isinstance(final, bool):
+        return json_error('O campo `final` deve ser booleano.', 400, campo='final')
     if not NFSE_BATCH_LOCK.acquire(blocking=False):
         return json_error(
             'Há um lote de NFS-e em andamento. Aguarde ou pare o lote antes da recon.',
@@ -293,9 +302,11 @@ def nfse_contrato_recon():
             'recon_assistida',
             modo='assistido',
             inventario=uniao,
+            observacao_final=final,
         )
         return {
             'status': 'ok',
+            'final': final,
             'passe': ACUMULADOR_RECON.passes(etapa),
             'controles_acumulados': len(uniao.controles),
             'sugestoes': [

@@ -569,3 +569,36 @@ def test_descartar_incidentes_tira_do_gate_sem_alterar_contrato(app, ids):
         assert nfse_contrato.estado_painel()['incidentes'] == []
         assert nfse_contrato.contrato_ativo().id == contrato_id
         assert incidente_id is not None
+
+
+def test_limite_da_chave_sai_da_largura_da_coluna(app, ids):
+    """O seletor gerado tem 17 + 2×len(chave) e a coluna é String(200). O
+    SQLite ignora largura de VARCHAR e o MySQL impõe: um estouro passa no gate
+    rápido e explode em produção (lição 3 do CLAUDE.md)."""
+
+    limite = nfse_contrato._LIMITE_CHAVE_SELETOR
+    assert 17 + 2 * limite <= nfse_contrato._LARGURA_SELETOR
+
+    no_limite = nfse_contrato._seletor_css_identidade("c" * limite)
+    assert len(no_limite) <= nfse_contrato._LARGURA_SELETOR
+
+    with pytest.raises(nfse_contrato.ConfiguracaoContratoInvalidaError):
+        nfse_contrato._seletor_css_identidade("c" * (limite + 1))
+
+
+def test_tipo_e_interacao_do_incidente_cabem_na_coluna(app, ids):
+    """`tipo_controle` e `interacao` são String(30)."""
+
+    with app.app_context():
+        contrato = nfse_contrato.garantir_contrato_inicial()
+        diferenca = _diferenca_de_controle("texto", "Campo.Largo")
+        observado = replace(
+            diferenca.observado, tipo="t" * 80, interacao="i" * 80,
+        )
+        incidente, _ = nfse_contrato._registrar_uma_diferenca(
+            contrato.id, replace(diferenca, observado=observado),
+            datetime(2026, 8, 26, 12, 0, 0),
+        )
+
+        assert len(incidente.tipo_controle) <= 30
+        assert len(incidente.interacao) <= 30
