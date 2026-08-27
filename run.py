@@ -22,4 +22,14 @@ if __name__ == '__main__':
     # debug desligado por padrao (esta ferramenta escreve em disco de rede e no
     # registro do Windows); habilite localmente com FLASK_DEBUG=1 quando precisar.
     debug = os.environ.get('FLASK_DEBUG', '').strip().lower() in {'1', 'true', 'yes', 'on'}
-    app.run(debug=debug)
+
+    if debug:
+        # O reloader vigia so o arquivo-gatilho: editar codigo nao derruba a
+        # sessao no meio de um teste. Para recarregar, toque reload.trigger
+        # (botao "Reload" do painel.pyw).
+        gatilho = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reload.trigger')
+        open(gatilho, 'a').close()
+        app.run(debug=True, use_reloader=True,
+                extra_files=[gatilho], exclude_patterns=['*.py'])
+    else:
+        app.run(debug=False)

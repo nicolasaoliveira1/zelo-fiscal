@@ -1,22 +1,12 @@
 @echo off
-REM Inicia o sistema de certidoes: garante o venv e as dependencias e sobe o app.
-REM Idempotente: quando tudo ja esta instalado, o pip install e rapido.
-setlocal
+REM Abre o painel do Zelo (painel.pyw): sobe o app, mostra o log e da acesso
+REM as utilidades. Sem console: quem mostra a saida e o proprio painel.
 cd /d "%~dp0"
 
-if not exist "venv\Scripts\activate.bat" (
+if not exist "venv\Scripts\pythonw.exe" (
     echo ERRO: venv nao encontrado. Crie com: python -m venv venv
     pause
     exit /b 1
 )
 
-call "venv\Scripts\activate.bat"
-
-echo Verificando dependencias...
-python -m pip install -r requirements.txt
-
-echo Iniciando o app...
-python run.py
-
-pause
-endlocal
+start "" "venv\Scripts\pythonw.exe" "painel.pyw"
