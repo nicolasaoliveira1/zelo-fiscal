@@ -386,3 +386,105 @@ def test_marcar_como_emitida_limpa_o_erro_da_tentativa_anterior(client, app):
     assert resposta.get_json()['nota']['erro'] is None
     with app.app_context():
         assert db.session.get(NotaNfse, nota_id).erro is None
+
+
+# --- destravar a nota que ficou esperando confirmacao (ND-011) --------------
+
+def _travar_em_aguardando(app, nota_id):
+    with app.app_context():
+        nota = db.session.get(NotaNfse, nota_id)
+        nota.status = StatusNotaNfse.AGUARDANDO_CONFIRMACAO
+        nota.erro = 'falha antiga que nao vale mais'
+        db.session.commit()
+
+
+def test_nao_emiti_devolve_a_nota_para_a_fila(client, app, monkeypatch):
+    """Sem isto a nota fica sem saída nenhuma: cancelar, preencher e editar
+    recusam `aguardando_confirmacao`, e o único botão declara o desfecho
+    oposto ao que aconteceu."""
+
+    from app.services import nfse_service
+
+    _importar(client, 'EMPRESA TESTE LTDA')
+    nota_id = _ultima_nota(app)
+    _travar_em_aguardando(app, nota_id)
+    # Sem navegador aberto não há o que conferir: o caminho é a declaração.
+    monkeypatch.setattr(nfse_service, 'evidencia_de_emissao', lambda *a, **k: None)
+
+    resposta = client.post(f'/nfse/nota/{nota_id}/liberar-preenchimento', json={})
+
+    assert resposta.status_code == 200
+    nota = resposta.get_json()['nota']
+    assert nota['status'] == StatusNotaNfse.PRONTA
+    # A falha anterior não sobrevive: mostraria a linha Pronta com um erro
+    # embaixo que não quer dizer mais nada.
+    assert not nota.get('erro')
+
+
+def test_nota_emitida_no_portal_barra_a_liberacao_ate_o_operador_confirmar(
+        client, app, monkeypatch):
+    """Emitir de novo o que já foi emitido gera duplicata na prefeitura, e isso
+    não tem rollback. O portal tem a palavra antes da declaração."""
+
+    from types import SimpleNamespace
+
+    from app.services import nfse_service
+
+    _importar(client, 'EMPRESA TESTE LTDA')
+    nota_id = _ultima_nota(app)
+    _travar_em_aguardando(app, nota_id)
+
+    achada = SimpleNamespace(
+        id=1, chave='9' * 50, data_geracao=None, documento=CNPJ_OK,
+        nome_tomador='Empresa Teste', competencia_dps='08/2026',
+        municipio='Tramandaí', valor=None, situacao='P100_GERADA', nota_id=None,
+    )
+    monkeypatch.setattr(
+        nfse_service, 'evidencia_de_emissao', lambda *a, **k: [achada])
+
+    resposta = client.post(f'/nfse/nota/{nota_id}/liberar-preenchimento', json={})
+
+    assert resposta.status_code == 409
+    assert resposta.get_json()['emitidas'][0]['chave'] == '9' * 50
+    with app.app_context():
+        nota = db.session.get(NotaNfse, nota_id)
+        assert nota.status == StatusNotaNfse.AGUARDANDO_CONFIRMACAO
+
+    # Olhou, não é esta, confirma: aí sim libera — e sem reconsultar o portal.
+    def _nao_deve_consultar(*_a, **_k):
+        raise AssertionError('confirmado=True não pode reconsultar o portal')
+
+    monkeypatch.setattr(nfse_service, 'evidencia_de_emissao', _nao_deve_consultar)
+    resposta = client.post(f'/nfse/nota/{nota_id}/liberar-preenchimento',
+                           json={'confirmado': True})
+
+    assert resposta.status_code == 200
+    assert resposta.get_json()['nota']['status'] == StatusNotaNfse.PRONTA
+
+
+def test_liberar_so_vale_para_quem_esta_esperando_confirmacao(client, app):
+    _importar(client, 'EMPRESA TESTE LTDA')
+    nota_id = _ultima_nota(app)
+
+    resposta = client.post(f'/nfse/nota/{nota_id}/liberar-preenchimento', json={})
+
+    assert resposta.status_code == 409
+    with app.app_context():
+        assert db.session.get(NotaNfse, nota_id).status == StatusNotaNfse.PRONTA
+
+
+def test_conferencia_nao_abre_navegador_quando_nao_ha_sessao(app, monkeypatch):
+    """A conferência NUNCA abre janela. Abrir aqui pediria certificado de novo
+    e deixaria a sessão do modo assistido apontando para uma janela que o
+    operador não pediu — e é nessa janela que ele emite."""
+
+    from app.services import nfse_service
+
+    garantir = lambda *_a, **_k: (_ for _ in ()).throw(
+        AssertionError('não pode abrir navegador'))
+    monkeypatch.setattr(nfse_service.SESSAO, 'garantir', garantir)
+    monkeypatch.setattr(nfse_service.SESSAO, 'driver_vivo', lambda: False)
+
+    with app.app_context():
+        nota = NotaNfse(documento=CNPJ_OK, status=StatusNotaNfse.PRONTA)
+        assert nfse_service.evidencia_de_emissao(nota) is None

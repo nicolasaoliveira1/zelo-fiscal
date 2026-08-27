@@ -33,6 +33,7 @@ from app.routes import _current_app_object, bp
 from app.automation import nfse_emitidas as automacao_emitidas
 from app.automation import nfse_recon
 from app.services import (
+    auditoria,
     batch_engine,
     nfse_config,
     nfse_emitidas,
@@ -1177,6 +1178,46 @@ def nfse_marcar_emitida_manual(nota_id):
         return json_error(erro, 409)
 
     db.session.commit()
+    return {'status': 'ok', 'nota': _nota_para_json(nota)}
+
+
+@bp.route('/nfse/nota/<int:nota_id>/liberar-preenchimento', methods=['POST'])
+@requer_papel('operador')
+def nfse_liberar_preenchimento(nota_id):
+    """O operador declara que NAO emitiu: a nota volta para a fila.
+
+    Par simetrico do "Emiti no portal". A ND-011 impede o SISTEMA de adivinhar
+    o desfecho de um preenchimento cujo navegador foi fechado, e continua
+    valendo — aqui quem declara e o humano, que sabe.
+
+    Confere no espelho do portal antes, quando ha navegador aberto. Achando
+    nota que pode ser esta, responde 409 com as candidatas em vez de liberar: o
+    operador olha valor e data e reenvia com `confirmado: true` se nao for ela.
+    """
+    nota = db.session.get(NotaNfse, nota_id)
+    if nota is None:
+        return json_error('Nota nao encontrada.', 404)
+
+    dados = request.get_json(silent=True) or {}
+    erro, evidencias = nfse_service.liberar_preenchimento(
+        nota, confirmado=bool(dados.get('confirmado')))
+    if erro:
+        db.session.rollback()
+        return json_error(erro, 409)
+    if evidencias:
+        db.session.rollback()
+        return json_error(
+            'O portal registra nota emitida para este tomador nesta '
+            'competência. Confira antes de liberar: emitir de novo cria '
+            'duplicata na prefeitura.', 409,
+            emitidas=[_emitida_para_json(e) for e in evidencias])
+
+    db.session.commit()
+    auditoria.registrar(
+        'nfse.nota.liberar_preenchimento',
+        alvo_tipo='nota_nfse', alvo_id=nota.id,
+        detalhe=f'nota_id={nota.id};status={nota.status}',
+    )
     return {'status': 'ok', 'nota': _nota_para_json(nota)}
 
 

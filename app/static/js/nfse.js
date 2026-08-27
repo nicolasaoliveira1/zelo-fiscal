@@ -195,6 +195,12 @@ function acoesDaLinha(nota) {
     partes.push(`<button class="btn btn-primary btn-sm" data-preencher="${nota.id}">Preencher</button>`);
   }
   if (nota.status === 'aguardando_confirmacao') {
+    // Os DOIS desfechos, nao so um. Ate aqui a linha oferecia apenas "emiti", e
+    // quem fechou o navegador sem emitir ficava sem saida nenhuma: cancelar,
+    // preencher e editar recusam este status. A ND-011 proibe o SISTEMA de
+    // adivinhar o desfecho; declarar quem sabe e o operador.
+    partes.push(`<button class="btn btn-ghost btn-sm" data-naoemiti="${nota.id}"
+                  title="Fechei o navegador sem emitir; devolver para a fila">Não emiti</button>`);
     partes.push(`<button class="btn btn-primary btn-sm" data-jaemitida="${nota.id}">Emiti no portal</button>`);
   }
   if (!partes.length && nota.status === 'empresa_pendente') {
@@ -471,6 +477,33 @@ async function marcarEmitidaManual(id, marcar) {
     showToast(marcar ? 'Marcada como emitida.' : 'Marcação desfeita.', 'info');
   } catch (erro) {
     showToast(erro.message, 'error');
+  }
+}
+
+async function liberarPreenchimento(id, confirmado = false) {
+  try {
+    const dados = await chamar(`/nfse/nota/${id}/liberar-preenchimento`,
+      { body: JSON.stringify({ confirmado }) });
+    substituir(dados.nota);
+    showToast('Nota devolvida para a fila.', 'info');
+  } catch (erro) {
+    const emitidas = erro.dados?.emitidas;
+    if (!emitidas?.length) {
+      showToast(erro.message, 'error');
+      return;
+    }
+    // O portal tem nota para este tomador nesta competencia. Pode ser esta, ou
+    // outra do mesmo mes — caso real. Quem decide e quem olha valor e data:
+    // preencher de novo o que ja foi emitido gera duplicata na prefeitura, e
+    // isso nao tem rollback.
+    const linhas = emitidas
+      .map((e) => `• ${e.data_geracao || 'sem data'} — ${e.valor || 'sem valor'}`)
+      .join('\n');
+    const texto = `O portal já registra ${emitidas.length} nota(s) para este `
+      + `tomador nesta competência:\n\n${linhas}\n\n`
+      + 'Se nenhuma delas for esta, confirme para devolver a nota à fila. '
+      + 'Emitir de novo o que já foi emitido cria duplicata na prefeitura.';
+    if (globalThis.confirm(texto)) liberarPreenchimento(id, true);
   }
 }
 
@@ -1192,6 +1225,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (alvo.dataset.liberar) liberarDuplicata(Number(alvo.dataset.liberar));
     else if (alvo.dataset.jaemitida) marcarEmitidaManual(Number(alvo.dataset.jaemitida), true);
     else if (alvo.dataset.desmarcar) marcarEmitidaManual(Number(alvo.dataset.desmarcar), false);
+    else if (alvo.dataset.naoemiti) liberarPreenchimento(Number(alvo.dataset.naoemiti));
     else if (alvo.dataset.preencher) iniciarEmissao({ notaId: Number(alvo.dataset.preencher) });
     else if (alvo.dataset.editarDescricao) {
       editandoDescricao.add(Number(alvo.dataset.editarDescricao));

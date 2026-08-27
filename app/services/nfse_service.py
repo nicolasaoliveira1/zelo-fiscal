@@ -496,6 +496,96 @@ _FALHAS_SELENIUM = {
 }
 
 
+# --- destravar a nota que ficou esperando confirmacao (ND-011) --------------
+
+def evidencia_de_emissao(nota, hoje=None):
+    """Notas do portal que PODEM ser esta, lidas do espelho.
+
+    Devolve `None` quando nao deu para conferir — sem navegador aberto ou o
+    portal recusou —, e uma lista (possivelmente vazia) quando a conferencia
+    aconteceu. `None` e lista vazia sao coisas diferentes de proposito: a
+    primeira e "nao sei", a segunda e "olhei e nao ha".
+
+    NAO abre navegador. Abrir aqui pediria certificado de novo e, pior,
+    deixaria a sessao do modo assistido apontando para uma janela que o
+    operador nao pediu — e e nessa janela que ele emite.
+
+    O casamento e por documento + `competencia_dps`, que e o mes da EMISSAO e
+    nao o mes de referencia do honorario (ND-027). Ele acha demais de
+    proposito: duas notas para o mesmo tomador no mesmo mes sao um caso real, e
+    quem decide se e esta ou outra e o operador, olhando valor e data.
+    """
+    from app.models import NotaEmitidaNfse
+    from app.services import nfse_emitidas
+
+    if not nota.documento:
+        return None
+    if not SESSAO.driver_vivo():
+        return None
+    if not SESSAO.adquirir():
+        return None
+
+    hoje = hoje or date.today()
+    try:
+        nfse_emitidas.consultar(hoje.replace(day=1), hoje)
+    except Exception as exc:
+        log_event('nfse_conferencia_portal_falhou', nota_id=nota.id,
+                  level='WARNING', error_type=type(exc).__name__)
+        return None
+    finally:
+        # A janela FICA ABERTA, como na consulta do painel: e a mesma sessao
+        # autenticada do preenchimento, e fecha-la pediria certificado na
+        # proxima nota. Quem fecha e o "Encerrar sessao".
+        SESSAO.liberar()
+
+    competencia = f'{hoje.month:02d}/{hoje.year}'
+    achadas = (
+        NotaEmitidaNfse.query
+        .filter(NotaEmitidaNfse.documento == nota.documento)
+        .filter(NotaEmitidaNfse.competencia_dps == competencia)
+        .order_by(NotaEmitidaNfse.data_geracao.desc())
+        .all()
+    )
+    log_event('nfse_conferencia_portal', nota_id=nota.id,
+              encontradas=len(achadas))
+    return achadas
+
+
+def liberar_preenchimento(nota, confirmado=False, hoje=None):
+    """Devolve a fila a nota que ficou `aguardando_confirmacao`.
+
+    A ND-011 manda o sistema NAO chutar o desfecho de um preenchimento cujo
+    navegador foi fechado — e continua valendo. O que esta funcao acrescenta e
+    o outro lado: o operador, que sabe o desfecho, pode declara-lo. Antes so
+    dava para declarar "emiti", e quem nao emitiu ficava sem saida nenhuma.
+
+    Confere no portal antes, quando ha navegador aberto. Se o espelho mostrar
+    nota que pode ser esta, a liberacao para e devolve as candidatas: emitir de
+    novo o que ja foi emitido gera duplicata na prefeitura, e isso nao tem
+    rollback. O operador confirma com `confirmado=True` depois de olhar.
+
+    Devolve `(erro, evidencias)`.
+    """
+    from app.services import nfse_import
+
+    if nota.status != StatusNotaNfse.AGUARDANDO_CONFIRMACAO:
+        return ('Esta nota não está esperando confirmação.', None)
+
+    evidencias = None
+    if not confirmado:
+        evidencias = evidencia_de_emissao(nota, hoje=hoje)
+        if evidencias:
+            return (None, evidencias)
+
+    nota.status = nfse_import.recalcular_status(nota)
+    # A falha de antes nao vale mais: deixa-la mostraria a nota como Pronta com
+    # um erro embaixo que nao quer dizer nada (mesmo motivo do `_cancelar`).
+    nota.erro = None
+    log_event('nfse_preenchimento_liberado', nota_id=nota.id,
+              status=nota.status, conferido=evidencias is not None)
+    return (None, evidencias)
+
+
 def mensagem_da_falha(exc):
     """Frase curta e correta para mostrar na linha da nota.
 
