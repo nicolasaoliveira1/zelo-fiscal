@@ -852,3 +852,43 @@ def test_editar_recusa_incidente_que_nao_esta_configurado(app, ids):
 
         with pytest.raises(nfse_contrato.ContratoNfseTransicaoInvalidaError):
             nfse_contrato.reabrir_incidente(incidente.id)
+
+
+def test_edicao_de_linha_nao_loga_como_descarte_do_operador(app, ids, monkeypatch):
+    """`descartar_candidata` tem dois chamadores com significados opostos. Sem
+    distinguir, editar uma linha logava "candidata descartada" em WARNING e
+    parecia ter apagado a configuração inteira — foi o que gerou a dúvida."""
+
+    eventos = []
+    monkeypatch.setattr(
+        nfse_contrato, 'log_event',
+        lambda nome, **campos: eventos.append((nome, campos)),
+    )
+
+    with app.app_context():
+        contrato = nfse_contrato.garantir_contrato_inicial()
+        agora = datetime(2026, 8, 27, 12, 0, 0)
+        um, _ = nfse_contrato._registrar_uma_diferenca(
+            contrato.id, _diferenca_de_controle('texto', 'Campo.A'), agora)
+        dois, _ = nfse_contrato._registrar_uma_diferenca(
+            contrato.id, _diferenca_de_controle('texto', 'Campo.B'), agora)
+        db.session.commit()
+        id_um, id_dois = um.id, dois.id
+        nfse_contrato.configurar_incidente(id_um, {'origem': 'intocavel'})
+        nfse_contrato.configurar_incidente(id_dois, {'origem': 'intocavel'})
+
+        eventos.clear()
+        # A candidata anterior foi arquivada: a viva é a que `reabrir` devolve.
+        candidata = nfse_contrato.reabrir_incidente(id_um)
+
+        descartes = [c for nome, c in eventos if nome == 'nfse_candidata_descartada']
+        assert descartes, 'o passo interno continua registrado'
+        assert all(c['motivo'] == 'edicao_de_linha' for c in descartes)
+        assert all(c.get('level') != 'WARNING' for c in descartes)
+
+        # E o descarte pedido pelo operador continua sendo WARNING.
+        eventos.clear()
+        nfse_contrato.descartar_candidata(candidata.id)
+        descartes = [c for nome, c in eventos if nome == 'nfse_candidata_descartada']
+        assert descartes[0]['motivo'] == 'descarte'
+        assert descartes[0]['level'] == 'WARNING'

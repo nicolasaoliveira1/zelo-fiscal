@@ -1001,7 +1001,15 @@ def reabrir_incidente(incidente_id, usuario_id=None) -> ContratoNfse | None:
             dados["valor_fixo"] = campo.valor_fixo
         retrato.append((irma.id, dados, campo.chave_semantica))
 
-    descartar_candidata(candidata_id, usuario_id=usuario_id)
+    log_event(
+        "nfse_incidente_reabrindo",
+        incidente_id=incidente_id,
+        candidata=candidata_id,
+        preservados=len(retrato),
+    )
+    descartar_candidata(
+        candidata_id, usuario_id=usuario_id, motivo="edicao_de_linha",
+    )
 
     reconstruida = None
     for irma_id, dados, chave in retrato:
@@ -1026,7 +1034,9 @@ def reabrir_incidente(incidente_id, usuario_id=None) -> ContratoNfse | None:
     return reconstruida
 
 
-def descartar_candidata(contrato_id, usuario_id=None, *, agora=None) -> int:
+def descartar_candidata(
+    contrato_id, usuario_id=None, *, agora=None, motivo="descarte",
+) -> int:
     """Arquiva uma candidata e devolve seus incidentes ao estado aberto.
 
     É o inverso exato da sequência de configurações que a construiu: cada
@@ -1065,8 +1075,15 @@ def descartar_candidata(contrato_id, usuario_id=None, *, agora=None) -> int:
         db.session.commit()
     except Exception as exc:
         _persistencia_falhou("descartar_candidata_nfse", exc)
-    log_event("nfse_candidata_descartada", level="WARNING",
-              contrato_id=candidata.id, quantidade=len(presos))
+    # O `motivo` existe porque esta funcao tem DOIS chamadores com significados
+    # opostos: o descarte pedido pelo operador (perde tudo, merece WARNING) e o
+    # passo interno de `reabrir_incidente` (a candidata e reconstruida logo em
+    # seguida, e um WARNING ali ensina a ignorar warning). Sem ele o log dizia
+    # "candidata descartada" nos dois casos, e editar uma linha parecia ter
+    # apagado a configuracao inteira.
+    log_event("nfse_candidata_descartada",
+              level="INFO" if motivo != "descarte" else "WARNING",
+              contrato_id=candidata.id, quantidade=len(presos), motivo=motivo)
     auditoria.registrar(
         "nfse.contrato.descartar", alvo_tipo="contrato_nfse", alvo_id=candidata.id,
         detalhe=(f"contrato_id={candidata.id};usuario_id={usuario_id};"
