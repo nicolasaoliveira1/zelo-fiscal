@@ -21,7 +21,7 @@ from app.automation.capture import (
 from app.models import NotaNfse, StatusNotaNfse
 from app.services import nfse_config
 from app.services import nfse_contrato
-from app.services.nfse_drift import Diferenca, comparar
+from app.services.nfse_drift import Diferenca
 from app.services.execution_logger import log_event
 from app.services.nfse_session import SESSAO
 
@@ -95,9 +95,6 @@ class NfseDriftError(_ERRO_CONTRATO_INCOMPATIVEL):
         self.pausar_lote = True
 
 
-def _campos_da_etapa(contrato, etapa):
-    return tuple(campo for campo in contrato.campos if campo.etapa == etapa)
-
 
 # `pre_avancar` é a única observação feita com a etapa já preenchida por
 # inteiro. Antes dela o formulário ainda está revelando campos, e ausência não
@@ -162,11 +159,16 @@ def _observar_fronteira_contrato(
         inventario = acumulador.acumular(
             nfse_recon.rascunho_da_url(driver.current_url), inventario
         )
-    resultado = comparar(
+    # Núcleo compartilhado com a recon assistida: qual diferença vira incidente,
+    # contra qual versão, e que evidência fica. O que muda aqui é só a POLÍTICA
+    # — esta fronteira levanta para pausar a nota; a recon devolve.
+    resultado, _incidentes, html_seguro = nfse_contrato.comparar_e_registrar(
+        contrato,
         etapa,
-        _campos_da_etapa(contrato, etapa),
+        momento,
         inventario,
         observacao_final=(momento == MOMENTO_FINAL_DA_ETAPA),
+        execution_id=execution_id,
     )
     # O modo automático é conservador de propósito, mas conservadorismo que
     # nunca deixa concluir não protege nada: a etapa é um formulário progressivo
@@ -174,18 +176,12 @@ def _observar_fronteira_contrato(
     if not resultado.diferencas_acionaveis:
         return {'estado': resultado.compatibilidade, 'etapa': etapa, 'momento': momento}
 
-    if contrato.contrato_id:
-        nfse_contrato.registrar_incidentes(contrato.contrato_id, resultado)
-    html_seguro = nfse_recon.inventario_para_html(inventario)
     if resultado.compatibilidade == 'incompativel' or modo == 'automatico':
         raise NfseDriftError(
             f'O formulário da etapa {etapa} divergiu do contrato aprovado; '
             'a nota foi pausada para revisão.',
             html_seguro=html_seguro,
         )
-    salvar_artefato_sanitizado(
-        f'nfse_{etapa}_{momento}', html_seguro, execution_id=execution_id
-    )
     return {
         'estado': resultado.compatibilidade,
         'etapa': etapa,
@@ -451,9 +447,11 @@ def preencher_nota(
     db.session.commit()
     log_event('nfse_preenchimento_ok', nota_id=nota.id, execution_id=execution_id)
 
-    descricao_aplicada = valores_contrato.get(
-        'ServicoPrestado_Descricao', descricao
-    )
+    # `.get(chave, padrao)` nunca cai no padrao aqui: a chave SEMPRE existe, e
+    # vale `None` quando o contrato marca a descricao como intocavel. O JSON
+    # entregue ao operador dizia `"descricao": null` para uma nota que tem
+    # descricao.
+    descricao_aplicada = valores_contrato.get('ServicoPrestado_Descricao') or descricao
     return {
         'status': 'aguardando_confirmacao',
         'nota_id': nota.id,

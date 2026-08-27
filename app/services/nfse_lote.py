@@ -229,11 +229,27 @@ def _emitir_nota(nota_id, driver_do_motor, execution_id):
         return False, None, resultado.get('message')
 
     if opcoes.get('validacao_contrato_id'):
-        _registrar_validacao_candidata(
-            nota_id,
-            opcoes['validacao_contrato_id'],
-            execution_id,
-        )
+        # Fora do `try` que existe para impedir uma excecao de matar a thread
+        # do worker, qualquer falha aqui (contrato sumido, campo desconhecido,
+        # WebDriver caido, persistencia) atravessa o `run_batch_loop`: o lote
+        # fica `running` para sempre — toda emissao seguinte responde 409 — e a
+        # nota trava em `preenchendo`, que nao tem acao nenhuma na interface.
+        try:
+            _registrar_validacao_candidata(
+                nota_id,
+                opcoes['validacao_contrato_id'],
+                execution_id,
+            )
+        except Exception as exc:
+            log_event(
+                'nfse_validacao_contrato_falhou',
+                level='ERROR',
+                contrato_id=opcoes['validacao_contrato_id'],
+                nota_id=nota_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+                execution_id=execution_id,
+            )
 
     return _esperar_e_registrar(nota_id, opcoes, execution_id)
 

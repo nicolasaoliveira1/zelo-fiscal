@@ -1301,10 +1301,9 @@ def _dd_declarativo(driver, secao, rotulo):
     return texto, None
 
 
-def _valor_regra_revisao(regra, chave, padrao=None):
-    if isinstance(regra, Mapping):
-        return regra.get(chave, padrao)
-    return getattr(regra, chave, padrao)
+# Era copia byte a byte de `_valor_regra_contrato`, no mesmo arquivo. Duas
+# copias divergem; o nome fica por legibilidade no bloco da revisao.
+_valor_regra_revisao = _valor_regra_contrato
 
 
 def _regra_tem_leitor(regra):

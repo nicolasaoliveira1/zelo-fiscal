@@ -85,7 +85,9 @@ def test_fronteira_opcional_persiste_artefato_e_retorna_aviso(monkeypatch):
     )
     salvar = MagicMock()
     monkeypatch.setattr(nfse_service.nfse_recon, "inventariar", lambda *_: inventario)
-    monkeypatch.setattr(nfse_service, "salvar_artefato_sanitizado", salvar)
+    monkeypatch.setattr(
+        nfse_service.nfse_contrato, "salvar_artefato_sanitizado", salvar
+    )
 
     resultado = nfse_service._observar_fronteira_contrato(
         _driver_na_etapa(),
@@ -133,7 +135,9 @@ def test_drift_incompatível_gera_artefato_sanitizado(monkeypatch):
     capturar = MagicMock()
     registrar = MagicMock()
     monkeypatch.setattr(nfse_service.nfse_recon, "inventariar", lambda *_: inventario)
-    monkeypatch.setattr(nfse_service, "salvar_artefato_sanitizado", salvar)
+    monkeypatch.setattr(
+        nfse_service.nfse_contrato, "salvar_artefato_sanitizado", salvar
+    )
     monkeypatch.setattr(nfse_service, "capturar_contexto_falha", capturar)
     monkeypatch.setattr(nfse_service.nfse_contrato, "registrar_incidentes", registrar)
 
@@ -154,6 +158,8 @@ def test_drift_incompatível_gera_artefato_sanitizado(monkeypatch):
 def test_mensagem_de_validacao_remove_sentinelas_antes_do_artefato(monkeypatch):
     salvar = MagicMock()
     registrar = MagicMock()
+    # Este artefato e do proprio `_registrar_validacao_portal`, nao do nucleo
+    # compartilhado: e a captura da mensagem do portal quando a nota falha.
     monkeypatch.setattr(nfse_service, "salvar_artefato_sanitizado", salvar)
     monkeypatch.setattr(
         nfse_service.nfse_recon,

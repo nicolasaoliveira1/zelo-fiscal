@@ -127,31 +127,15 @@ def nfse_contrato_configurar(incidente_id):
             'Este incidente já recebeu uma decisão e não pode ser configurado novamente.',
             409,
         )
-    recomendacao = nfse_contrato.recomendacao_incidente(incidente)
+    # A rota valida FORMA; a regra de recomendação é de `configurar_incidente`,
+    # que a reaplica de qualquer jeito. Duplicá-la aqui custava duas consultas
+    # e o scorer inteiro por request, e as cópias já discordavam — a rota
+    # recusava `confirmar_recomendacao: false` num incidente sem recomendação,
+    # que o serviço aceita.
     chave_observada = dados.get('chave_observada')
     if chave_observada is not None and not isinstance(chave_observada, str):
         return json_error(
             'O controle recomendado deve ser identificado por texto.',
-            400,
-            campo='chave_observada',
-        )
-    if recomendacao is not None:
-        if confirmacao is not True:
-            return json_error(
-                'Confirme explicitamente a recomendação antes de salvar.',
-                400,
-                campo='confirmar_recomendacao',
-            )
-        chave_observada = chave_observada or recomendacao.chave_observada
-        if chave_observada not in recomendacao.candidatos:
-            return json_error(
-                'Escolha um dos controles recomendados.',
-                400,
-                campo='chave_observada',
-            )
-    elif chave_observada is not None or confirmacao is not None:
-        return json_error(
-            'Este incidente não possui recomendação aplicável.',
             400,
             campo='chave_observada',
         )
@@ -170,7 +154,7 @@ def nfse_contrato_configurar(incidente_id):
             confirmar_recomendacao=confirmacao is True,
         )
     except nfse_contrato.ConfiguracaoContratoInvalidaError as exc:
-        return json_error(str(exc), 400, campo='origem')
+        return json_error(str(exc), 400, campo=getattr(exc, 'campo', 'origem'))
     except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
         return json_error(str(exc), 404)
     except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:

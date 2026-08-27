@@ -52,7 +52,16 @@ class PersistenciaContratoError(ContratoNfseError):
 
 
 class ConfiguracaoContratoInvalidaError(ValueError):
-    """Dados do operador não pertencem ao catálogo seguro do contrato."""
+    """Dados do operador não pertencem ao catálogo seguro do contrato.
+
+    Carrega `campo` para a rota marcar o controle certo na tela: sem isso a
+    interface só sabe dizer "revise a configuração", e o operador procura o
+    erro no lugar errado.
+    """
+
+    def __init__(self, mensagem, campo="origem"):
+        super().__init__(mensagem)
+        self.campo = campo
 
 
 class ContratoNfseNaoElegivelError(ContratoNfseError):
@@ -532,7 +541,9 @@ def carregar_execucao(contrato_id=None) -> ContratoExecucaoNfse:
     )
 
 
-def _campos_da_etapa(contrato, etapa):
+def campos_da_etapa(contrato, etapa):
+    """Campos que o contrato declara para uma etapa. Fonte única."""
+
     return tuple(campo for campo in contrato.campos if campo.etapa == etapa)
 
 
@@ -546,6 +557,48 @@ def _diferenca_segura(diferenca: Diferenca) -> dict[str, Any]:
         "rotulo": diferenca.rotulo,
         "mensagem": diferenca.mensagem,
     }
+
+
+def comparar_e_registrar(
+    contrato_execucao,
+    etapa,
+    momento,
+    inventario,
+    *,
+    observacao_final=False,
+    execution_id=None,
+):
+    """Compara a etapa, persiste o que pede decisão e guarda a evidência.
+
+    Núcleo compartilhado pela recon assistida (`observar`) e pela fronteira do
+    preenchimento (`nfse_service._observar_fronteira_contrato`). O que difere
+    entre as duas é POLÍTICA — uma devolve, a outra levanta —, e política é do
+    chamador. O que não pode divergir é isto: qual diferença vira incidente,
+    contra qual versão, e que evidência fica.
+
+    Devolve `(resultado, incidentes, html_seguro)`; `html_seguro` é `None`
+    quando não houve nada a registrar.
+    """
+
+    resultado = comparar(
+        etapa,
+        campos_da_etapa(contrato_execucao, etapa),
+        inventario,
+        observacao_final=observacao_final,
+    )
+    if not resultado.diferencas_acionaveis:
+        return resultado, (), None
+
+    incidentes = ()
+    if contrato_execucao.contrato_id:
+        incidentes = tuple(
+            registrar_incidentes(contrato_execucao.contrato_id, resultado)
+        )
+    html_seguro = nfse_recon.inventario_para_html(inventario)
+    salvar_artefato_sanitizado(
+        f"nfse_{etapa}_{momento}", html_seguro, execution_id=execution_id,
+    )
+    return resultado, incidentes, html_seguro
 
 
 def observar(
@@ -606,23 +659,14 @@ def observar(
             evidencias=("a revisão exige conferência vinculada a uma nota",),
         )
 
-    resultado = comparar(
+    resultado, incidentes, _html = comparar_e_registrar(
+        contrato_execucao,
         etapa,
-        _campos_da_etapa(contrato_execucao, etapa),
+        momento,
         inventario,
         observacao_final=observacao_final,
+        execution_id=execution_id,
     )
-    incidentes = ()
-    if resultado.diferencas_acionaveis and contrato_execucao.contrato_id:
-        incidentes = tuple(
-            registrar_incidentes(contrato_execucao.contrato_id, resultado)
-        )
-        html_seguro = nfse_recon.inventario_para_html(inventario)
-        salvar_artefato_sanitizado(
-            f"nfse_{etapa}_{momento}",
-            html_seguro,
-            execution_id=execution_id,
-        )
     return Observacao(
         contrato_id=contrato_execucao.contrato_id,
         etapa=etapa,
@@ -1124,7 +1168,7 @@ def resolver_valor(regra, nota, config, hoje):
             )
         if len(str(valor)) > 500:
             raise ConfiguracaoContratoInvalidaError(
-                "valor fixo excede o limite permitido"
+                "valor fixo excede o limite permitido", campo="valor_fixo",
             )
         return valor
     if origem in {"padrao_portal", "intocavel"} and fonte is None:
@@ -1403,7 +1447,9 @@ def _validar_configuracao(incidente, dados):
         )
     if origem == "fixo":
         if valor_fixo is None or not valor_fixo.strip():
-            raise ConfiguracaoContratoInvalidaError("origem fixa exige um valor")
+            raise ConfiguracaoContratoInvalidaError(
+            "origem fixa exige um valor", campo="valor_fixo",
+        )
         if len(valor_fixo) > 500:
             raise ConfiguracaoContratoInvalidaError(
                 "valor fixo excede o limite permitido"
@@ -1411,7 +1457,8 @@ def _validar_configuracao(incidente, dados):
         valores_opcoes = {opcao.valor for opcao in incidente.opcoes}
         if valores_opcoes and valor_fixo not in valores_opcoes:
             raise ConfiguracaoContratoInvalidaError(
-                "o valor fixo não pertence às opções observadas"
+                "o valor fixo não pertence às opções observadas",
+                campo="valor_fixo",
             )
     elif valor_fixo is not None:
         raise ConfiguracaoContratoInvalidaError(
@@ -1482,11 +1529,12 @@ def configurar_incidente(
         escolhida = chave_observada or recomendacao.chave_observada
         if not confirmar_recomendacao:
             raise ConfiguracaoContratoInvalidaError(
-                "confirme explicitamente a recomendação antes de salvar"
+                "confirme explicitamente a recomendação antes de salvar",
+                campo="confirmar_recomendacao",
             )
         if escolhida not in recomendacao.candidatos:
             raise ConfiguracaoContratoInvalidaError(
-                "escolha um dos controles recomendados"
+                "escolha um dos controles recomendados", campo="chave_observada",
             )
         incidente_observado = next(
             (
@@ -1504,8 +1552,12 @@ def configurar_incidente(
                 "o controle recomendado não está mais pendente"
             )
     elif chave_observada is not None or confirmar_recomendacao:
+        # Chega aqui quando o cliente manda escolha/confirmação para um
+        # incidente que não tem recomendação — estado que muda entre o desenho
+        # da tela e o envio, e por isso é erro do cliente, não do servidor.
         raise ConfiguracaoContratoInvalidaError(
-            "o incidente não possui recomendação aplicável"
+            "o incidente não possui recomendação aplicável",
+            campo="chave_observada",
         )
 
     agora = utcnow_naive()
