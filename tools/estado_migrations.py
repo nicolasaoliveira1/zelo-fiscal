@@ -21,6 +21,18 @@ VERSOES = os.path.join(RAIZ, 'migrations', 'versions')
 sys.path.insert(0, RAIZ)
 
 
+LOCAIS = ('localhost', '127.0.0.1', '::1', '')
+
+
+def _e_local(url):
+    """Banco na propria maquina? Host remoto aqui e producao do escritorio."""
+    from sqlalchemy.engine import make_url
+    try:
+        return (make_url(url).host or '') in LOCAIS
+    except Exception:
+        return False
+
+
 def _git(*args):
     r = subprocess.run(['git', *args], cwd=RAIZ, capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else ''
@@ -108,7 +120,8 @@ def diagnosticar():
                 'mensagem': 'banco inacessivel'}
 
     base = {'branch': branch_atual(), 'banco': url.split('@')[-1],
-            'revisao_banco': rev_banco, 'cabeca_codigo': cabeca}
+            'revisao_banco': rev_banco, 'cabeca_codigo': cabeca,
+            'local': _e_local(url)}
 
     if rev_banco is None:
         return {**base, 'estado': 'vazio', 'mensagem': 'banco novo — falta upgrade'}
@@ -141,9 +154,20 @@ def sincronizar():
     if estado == 'em_dia':
         return 0
     if estado in ('vazio', 'atrasado'):
+        if not d.get('local'):
+            print('ATENCAO: upgrade em banco remoto (%s).' % d.get('banco'))
         return _flask('upgrade')
     if estado == 'sem_banco':
         print('banco inacessivel:', d.get('erro'))
+        return 1
+
+    if not d.get('local'):
+        print('RECUSADO: descer o schema so e permitido em banco local.')
+        print(f"  banco: {d.get('banco')}")
+        print('  Este e o banco de producao do escritorio. Reverter migration')
+        print('  aqui derruba tabela e coluna com o conteudo — nao tem volta.')
+        print('  Para sair do desencontro, volte para a branch que tem a')
+        print('  revisao %s.' % d.get('revisao_banco'))
         return 1
 
     locais = _revisoes_locais()

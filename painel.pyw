@@ -265,7 +265,11 @@ class Painel:
         self.lbl_branch.configure(text='branch ' + d.get('branch', '?'), fg=TEXTO)
         cor = {'em_dia': OK, 'vazio': ATENCAO, 'atrasado': ATENCAO}.get(
             d.get('estado'), ERRO)
-        self.lbl_banco.configure(text=d.get('mensagem', ''), fg=cor)
+        alvo = d.get('banco', '?')
+        if d.get('local') is False:
+            alvo = 'PRODUCAO · ' + alvo
+            cor = ERRO if d.get('estado') != 'em_dia' else ATENCAO
+        self.lbl_banco.configure(text=f"{alvo}\n{d.get('mensagem', '')}", fg=cor)
         if d.get('estado') not in ('em_dia', None):
             self.escrever('[banco] ' + d.get('mensagem', ''),
                           'ok' if cor is OK else 'atencao')
@@ -278,6 +282,16 @@ class Painel:
             return
         if d.get('estado') == 'em_dia':
             self.escrever('[banco] ja esta em dia com a branch', 'ok')
+            return
+        if d.get('estado') == 'a_frente' and d.get('local') is False:
+            messagebox.showerror(
+                'Banco de producao',
+                'O banco apontado pelo .env e remoto (%s).\n\n'
+                'Reverter migration ali derruba tabela e coluna com o conteudo, '
+                'e nao tem volta. O painel nao faz isso em producao.\n\n'
+                'Para sair do desencontro, volte para a branch que tem a revisao '
+                '%s.' % (d.get('banco'), d.get('revisao_banco')))
+            self.escrever('[banco] sincronizacao recusada: banco de producao', 'erro')
             return
         if d.get('estado') == 'a_frente':
             reverter = d.get('reverter') or []
