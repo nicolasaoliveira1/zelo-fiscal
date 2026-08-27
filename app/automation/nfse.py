@@ -1259,14 +1259,24 @@ def preencher_etapa_tributacao(
 # substring de "Valores do Servico Prestado" — um `contains` casaria as duas e
 # leria o campo da secao errada. Com acento porque e o texto real do DOM; o
 # XPath vai como unicode e casa direto.
-SECAO_TOMADOR = 'Tomador do Serviço'
+# Titulos como o portal os escreve HOJE, conferidos no esqueleto capturado da
+# revisao — nao supostos. Dois deles ja mudaram sob os nossos pes:
+# "Tomador do Serviço" virou "Tomador/Adquirente do Serviço".
+SECAO_TOMADOR = 'Tomador/Adquirente do Serviço'
 SECAO_SERVICO = 'Serviço Prestado'
 SECAO_VALORES = 'Valores do Serviço Prestado'
 
 # Dentro da secao do tomador so existe um destes; qual depende de o tomador ser
-# pessoa juridica ou fisica.
+# pessoa juridica ou fisica. Na PAGINA inteira existem dois "CNPJ:" (emitente e
+# tomador) — por isso a busca por secao e a que vale, e o fallback global
+# recusa quando acha mais de um.
 ROTULO_DOCUMENTO = "contains(.,'CNPJ') or contains(.,'CPF')"
-ROTULO_VALOR = "contains(.,'Valor do servi')"
+# O rotulo do valor tambem mudou: hoje e "Valor da operação/serviço prestado:".
+# As duas formas ficam aceitas — a nova e a antiga —, porque quem determina o
+# desfecho e a igualdade do VALOR, nao a forma do rotulo.
+ROTULO_VALOR = (
+    "contains(.,'Valor da opera') or contains(.,'Valor do servi')"
+)
 
 
 class ResultadoAutorrevisao(list):
@@ -1279,6 +1289,11 @@ class ResultadoAutorrevisao(list):
         self.elegivel_automatico = bool(elegivel_automatico)
         self.avisos_assistidos = tuple(avisos_assistidos or ())
 
+# Titulo EXATO, nunca `contains`: "Serviço Prestado" e substring de "Valores do
+# Serviço Prestado", e um `contains` casaria as duas secoes — a descricao seria
+# lida da secao errada. A tolerancia a renomeacao mora no fallback de
+# `_dd_da_secao`, que procura o rotulo na pagina inteira e so aceita com um
+# unico casamento; aqui, precisao.
 _XP_SECAO = ("//h4[contains(@class,'emissao-titulo')][normalize-space()='{secao}']"
              "/following-sibling::div[contains(@class,'emissao-conteudo')][1]")
 

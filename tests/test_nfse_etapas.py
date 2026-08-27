@@ -736,3 +736,40 @@ def test_secao_exata_continua_tendo_prioridade(monkeypatch):
 
     assert nfse._dd_da_secao(driver, 'Tomador do Serviço',
                              nfse.ROTULO_DOCUMENTO) == 'valor-da-secao'
+
+
+def test_secao_e_rotulo_da_revisao_batem_com_o_portal_de_hoje():
+    """Ancorado no esqueleto capturado da revisão real, não em suposição.
+
+    O portal renomeou duas coisas sob os nossos pés, e cada uma derrubou uma
+    conferência: a seção do tomador virou "Tomador/Adquirente do Serviço", e o
+    rótulo do valor virou "Valor da operação/serviço prestado:".
+    """
+    import re
+
+    from app.automation import nfse as automacao
+
+    titulos_reais = [
+        'Informações Gerais', 'Informações do Emitente',
+        'Tomador/Adquirente do Serviço', 'Serviço Prestado',
+        'Valores do Serviço Prestado', 'Tributação Municipal',
+    ]
+    rotulos_reais = [
+        'CNPJ:', 'Nome/Razão Social:', 'Descrição do serviço:',
+        'Valor da operação/serviço prestado:',
+        'Tributação do ISSQN sobre o serviço prestado:',
+    ]
+
+    # O XPath casa o título EXATO, então a constante tem de ser o texto inteiro.
+    for secao in (automacao.SECAO_TOMADOR, automacao.SECAO_VALORES,
+                  automacao.SECAO_SERVICO):
+        assert secao in titulos_reais, secao
+
+    # E o rótulo do valor precisa casar exatamente um dos rótulos reais.
+    alternativas = re.findall(r"contains\(\.,'([^']+)'\)",
+                              automacao.ROTULO_VALOR)
+    casam = [
+        rotulo for rotulo in rotulos_reais
+        if any(alvo in rotulo for alvo in alternativas)
+    ]
+    assert casam == ['Valor da operação/serviço prestado:']
