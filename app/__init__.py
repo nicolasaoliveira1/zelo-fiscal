@@ -49,6 +49,7 @@ def create_app(config_class=Config):
             _aplicar_migrations_pendentes()
         checks = run_health_checks(app.config)
         log_event('startup_health_checks', checks=checks)
+        _reconciliar_nfse_orfas()
     
     # models importado para registrar as tabelas no SQLAlchemy/Migrate (efeito colateral)
     from app import routes, models  # noqa: F401
@@ -124,6 +125,24 @@ def _aplicar_migrations_pendentes():
         _db_upgrade()
     except Exception as e:
         log_event('startup_db_upgrade_failed', level='ERROR', error=str(e))
+
+
+def _reconciliar_nfse_orfas():
+    """Solta a nota que um processo morto deixou em `preenchendo`.
+
+    Mesmo espírito do `stop_federal_monitor.txt` logo acima: resquício de
+    execução anterior não pode continuar bloqueando a execução nova. Aqui o
+    resquício é um status de trabalho em curso sem ninguém trabalhando, e ele
+    trava a nota para sempre — nenhuma ação da interface aceita `preenchendo`.
+    """
+    from app.services.nfse_service import reconciliar_preenchimentos_orfaos
+
+    try:
+        reconciliar_preenchimentos_orfaos()
+    except Exception as e:
+        # Boot nao pode morrer por causa da limpeza: sem o app no ar o operador
+        # nao tem nem como ver a nota travada, que e o problema que isto resolve.
+        log_event('startup_nfse_reconciliacao_falhou', level='ERROR', error=str(e))
 
 
 def _limpar_chave_interrupcao_federal():

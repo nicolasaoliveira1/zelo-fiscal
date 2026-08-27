@@ -503,3 +503,59 @@ def test_erro_generico_usa_so_a_primeira_linha(ambiente):
 
 def test_erro_sem_texto_ainda_produz_mensagem(ambiente):
     assert nfse_service.mensagem_da_falha(RuntimeError(''))
+
+
+# --- nota deixada em `preenchendo` por processo morto -----------------------
+
+def test_preenchimento_orfao_volta_para_a_fila(app, ids):
+    """`preenchendo` é status de trabalho EM CURSO, mantido por uma thread
+    viva. No boot não há thread nenhuma: a nota pertence a um processo que não
+    existe mais. Sem reconciliar, ela fica presa para sempre — nenhuma ação da
+    interface aceita `preenchendo`."""
+
+    with app.app_context():
+        empresa = Empresa.query.first()
+        lote = LoteNfse(nome_arquivo='lote-sintetico.csv', total=1)
+        db.session.add(lote)
+        db.session.flush()
+        nota = NotaNfse(
+            lote_id=lote.id, empresa_id=empresa.id,
+            nome_csv='TOMADOR SINTETICO', documento='DOC-SINTETICO',
+            tipo_documento='cnpj', competencia='08/2026',
+            valor_final=Decimal('12.34'),
+            status=StatusNotaNfse.PREENCHENDO,
+        )
+        db.session.add(nota)
+        db.session.commit()
+        nota_id = nota.id
+
+        assert nfse_service.reconciliar_preenchimentos_orfaos() == 1
+
+        devolvida = db.session.get(NotaNfse, nota_id)
+        assert devolvida.status == StatusNotaNfse.PRONTA
+        # O operador precisa saber por que a nota voltou, e que nada foi emitido.
+        assert 'interrompido' in (devolvida.erro or '')
+
+
+def test_reconciliacao_nao_toca_quem_nao_esta_preenchendo(app, ids):
+    with app.app_context():
+        empresa = Empresa.query.first()
+        lote = LoteNfse(nome_arquivo='lote-sintetico.csv', total=1)
+        db.session.add(lote)
+        db.session.flush()
+        # `aguardando_confirmacao` é o caso oposto: ali existe DPS preenchida
+        # esperando o operador no portal, e devolver abandonaria documento.
+        nota = NotaNfse(
+            lote_id=lote.id, empresa_id=empresa.id,
+            nome_csv='TOMADOR SINTETICO', documento='DOC-SINTETICO',
+            tipo_documento='cnpj', competencia='08/2026',
+            valor_final=Decimal('12.34'),
+            status=StatusNotaNfse.AGUARDANDO_CONFIRMACAO,
+        )
+        db.session.add(nota)
+        db.session.commit()
+        nota_id = nota.id
+
+        assert nfse_service.reconciliar_preenchimentos_orfaos() == 0
+        assert db.session.get(NotaNfse, nota_id).status == (
+            StatusNotaNfse.AGUARDANDO_CONFIRMACAO)

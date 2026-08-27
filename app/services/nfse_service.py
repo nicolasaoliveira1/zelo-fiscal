@@ -496,6 +496,45 @@ _FALHAS_SELENIUM = {
 }
 
 
+def reconciliar_preenchimentos_orfaos():
+    """Devolve à fila a nota deixada em `preenchendo` por um processo morto.
+
+    `preenchendo` é status de trabalho EM CURSO, e quem o mantém é uma thread
+    viva. No boot não existe thread nenhuma: toda nota nesse estado pertence a
+    um processo que não existe mais — reinício, crash, `Ctrl+C` no meio. Isso é
+    fato observado, não palpite, e por isso não esbarra na ND-011.
+
+    O desfecho também é sabido, e é o que torna a devolução segura: o
+    preenchimento só chega a `aguardando_confirmacao` DEPOIS da tela de revisão,
+    e o portal só cria a DPS quando o operador clica em emitir. Uma nota que
+    morreu em `preenchendo` não deixou documento nenhum para trás.
+
+    Sem isto a nota ficava presa para sempre: nenhuma ação da interface aceita
+    `preenchendo`, nem preencher, nem cancelar, nem editar.
+    """
+    from app.services import nfse_import
+
+    orfas = NotaNfse.query.filter(
+        NotaNfse.status == StatusNotaNfse.PREENCHENDO
+    ).all()
+    if not orfas:
+        return 0
+    for nota in orfas:
+        nota.status = nfse_import.recalcular_status(nota)
+        nota.erro = (
+            'O preenchimento foi interrompido antes da revisão '
+            '(o sistema reiniciou). Nada foi emitido; pode tentar de novo.'
+        )
+    db.session.commit()
+    log_event(
+        'nfse_preenchimentos_orfaos_reconciliados',
+        level='WARNING',
+        quantidade=len(orfas),
+        notas=[nota.id for nota in orfas],
+    )
+    return len(orfas)
+
+
 # --- destravar a nota que ficou esperando confirmacao (ND-011) --------------
 
 def evidencia_de_emissao(nota, hoje=None):
