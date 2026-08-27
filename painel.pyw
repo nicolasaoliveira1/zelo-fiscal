@@ -4,6 +4,7 @@ Tkinter puro (stdlib) para nao adicionar dependencia. Substitui o iniciar.bat:
 o .bat agora so garante o venv e chama este painel.
 """
 
+import json
 import os
 import queue
 import subprocess
@@ -11,11 +12,14 @@ import threading
 import tkinter as tk
 import webbrowser
 from tkinter import font as tkfont
+from tkinter import messagebox
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
 PYTHON = os.path.join(RAIZ, 'venv', 'Scripts', 'python.exe')
 GATILHO = os.path.join(RAIZ, 'reload.trigger')
 URL = 'http://127.0.0.1:5000'
+PORTA = 5000
+ESTADO = os.path.join(RAIZ, 'tools', 'estado_migrations.py')
 
 FUNDO = '#14161a'
 FUNDO_LATERAL = '#1c1f26'
@@ -43,14 +47,25 @@ class Painel:
         lateral.pack_propagate(False)
 
         self.status = tk.Label(lateral, text='parado', bg=FUNDO_LATERAL, fg=SUAVE,
-                               font=('Segoe UI', 10, 'bold'), anchor='w', padx=14, pady=14)
-        self.status.pack(fill='x')
+                               font=('Segoe UI', 10, 'bold'), anchor='w', padx=14)
+        self.status.pack(fill='x', pady=(14, 2))
+
+        self.lbl_branch = tk.Label(lateral, text='branch ...', bg=FUNDO_LATERAL,
+                                   fg=TEXTO, font=('Segoe UI', 9), anchor='w',
+                                   padx=14, wraplength=185, justify='left')
+        self.lbl_branch.pack(fill='x')
+
+        self.lbl_banco = tk.Label(lateral, text='banco ...', bg=FUNDO_LATERAL,
+                                  fg=SUAVE, font=('Segoe UI', 8), anchor='w',
+                                  padx=14, wraplength=185, justify='left')
+        self.lbl_banco.pack(fill='x', pady=(0, 8))
 
         self._secao(lateral, 'servidor')
         self.btn_ligar = self._botao(lateral, 'Iniciar', self.iniciar)
         self.btn_parar = self._botao(lateral, 'Parar', self.parar)
         self._botao(lateral, 'Reload (gatilho)', self.reload_gatilho)
         self._botao(lateral, 'Reload total', self.reload_total)
+        self._botao(lateral, f'Derrubar porta {PORTA}', self.derrubar_porta)
 
         self._secao(lateral, 'banco')
         self._botao(lateral, 'flask db upgrade', lambda: self.tarefa(
@@ -59,6 +74,7 @@ class Painel:
         self._botao(lateral, 'flask db current', lambda: self.tarefa(
             [PYTHON, '-m', 'flask', 'db', 'current'], 'db current',
             {'FLASK_APP': 'run.py', 'AUTO_DB_UPGRADE': '0'}))
+        self._botao(lateral, 'Sincronizar com a branch', self.sincronizar)
 
         self._secao(lateral, 'utilidades')
         self._botao(lateral, 'Abrir no navegador', lambda: webbrowser.open(URL))
@@ -68,6 +84,7 @@ class Painel:
             [PYTHON, '-m', 'pytest', '-q'], 'pytest'))
         self._botao(lateral, 'Abrir pasta de logs',
                     lambda: os.startfile(os.path.join(RAIZ, 'logs')))
+        self._botao(lateral, 'Rechecar estado', self.checar_estado)
         self._botao(lateral, 'Limpar painel', self.limpar)
 
         self.log = tk.Text(root, bg=FUNDO, fg=TEXTO, font=mono, wrap='none',
@@ -86,6 +103,14 @@ class Painel:
         root.protocol('WM_DELETE_WINDOW', self.fechar)
         self.root.after(80, self.drenar)
         self.escrever(f'painel pronto — raiz {RAIZ}', 'painel')
+        self.checar_estado()
+        # app de um cmd antigo continua de pe e o painel nao o conhece: avisa,
+        # senao o Iniciar falha com "porta em uso" sem dizer por que.
+        externos = self.pids_na_porta()
+        if externos:
+            self.escrever(
+                f'atencao: ja tem algo escutando na porta {PORTA} (pid '
+                + ', '.join(externos) + ') — use "Derrubar porta"', 'atencao')
         if not os.path.exists(PYTHON):
             self.escrever('venv nao encontrado. Crie com: python -m venv venv', 'erro')
 
@@ -192,6 +217,89 @@ class Painel:
 
     def vivo(self):
         return self.proc is not None and self.proc.poll() is None
+
+    def pids_na_porta(self):
+        """PIDs escutando na porta do app — inclusive de um cmd antigo."""
+        r = subprocess.run(['netstat', '-ano', '-p', 'TCP'], capture_output=True,
+                           text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        pids = set()
+        for linha in r.stdout.splitlines():
+            partes = linha.split()
+            if len(partes) >= 5 and partes[3] == 'LISTENING' \
+                    and partes[1].endswith(f':{PORTA}'):
+                pids.add(partes[4])
+        return sorted(pids)
+
+    def derrubar_porta(self):
+        pids = self.pids_na_porta()
+        if not pids:
+            self.escrever(f'nada escutando na porta {PORTA}', 'painel')
+            return
+        for pid in pids:
+            subprocess.run(['taskkill', '/PID', pid, '/T', '/F'],
+                           capture_output=True,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+            self.escrever(f'[servidor] derrubado pid {pid} (porta {PORTA})', 'painel')
+        self.proc = None
+
+    # --- estado do repo/banco ---------------------------------------------
+    def checar_estado(self):
+        self.lbl_branch.configure(text='branch ...', fg=SUAVE)
+        threading.Thread(target=self._checar_estado, daemon=True).start()
+
+    def _checar_estado(self):
+        r = subprocess.run([PYTHON, ESTADO], cwd=RAIZ, capture_output=True,
+                           text=True, encoding='utf-8', errors='replace',
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            # o boot do app escreve no stdout antes do JSON: pega do 1o '{'.
+            self.estado = json.loads(r.stdout[r.stdout.index('{'):])
+        except (ValueError, json.JSONDecodeError):
+            self.estado = {'branch': '?', 'estado': 'erro',
+                           'mensagem': 'nao consegui ler o estado do banco'}
+            self.fila.put((r.stdout.strip() or r.stderr.strip(), 'erro'))
+        self.root.after(0, self._pintar_estado)
+
+    def _pintar_estado(self):
+        d = self.estado
+        self.lbl_branch.configure(text='branch ' + d.get('branch', '?'), fg=TEXTO)
+        cor = {'em_dia': OK, 'vazio': ATENCAO, 'atrasado': ATENCAO}.get(
+            d.get('estado'), ERRO)
+        self.lbl_banco.configure(text=d.get('mensagem', ''), fg=cor)
+        if d.get('estado') not in ('em_dia', None):
+            self.escrever('[banco] ' + d.get('mensagem', ''),
+                          'ok' if cor is OK else 'atencao')
+
+    def sincronizar(self):
+        d = getattr(self, 'estado', None)
+        if not d:
+            self.escrever('checando o estado primeiro...', 'painel')
+            self.checar_estado()
+            return
+        if d.get('estado') == 'em_dia':
+            self.escrever('[banco] ja esta em dia com a branch', 'ok')
+            return
+        if d.get('estado') == 'a_frente':
+            reverter = d.get('reverter') or []
+            if not reverter:
+                self.escrever('[banco] ' + d.get('mensagem', ''), 'erro')
+                return
+            lista = '\n'.join(f"  · {c['revision']} — {c['titulo']}" for c in reverter)
+            ok = messagebox.askyesno(
+                'Reverter migrations de outra branch?',
+                'O banco esta numa revisao que nao existe nesta branch.\n\n'
+                'Para sincronizar, estas migrations serao REVERTIDAS:\n\n'
+                f'{lista}\n\n'
+                'Reverter derruba as colunas e tabelas que elas criaram, com o '
+                'conteudo delas. Isso nao tem volta.\n\n'
+                'Se ha dado que so existe nessas tabelas, cancele e volte para a '
+                'branch ' + (reverter[0].get('ref', '').split('/')[-1] or '?') + '.',
+                icon='warning', default='no')
+            if not ok:
+                self.escrever('[banco] sincronizacao cancelada', 'painel')
+                return
+        self.tarefa([PYTHON, ESTADO, '--sincronizar'], 'sincronizar')
+        self.root.after(4000, self.checar_estado)
 
     def atualizar_status(self):
         if self.vivo():
