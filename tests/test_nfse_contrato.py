@@ -602,3 +602,61 @@ def test_tipo_e_interacao_do_incidente_cabem_na_coluna(app, ids):
 
         assert len(incidente.tipo_controle) <= 30
         assert len(incidente.interacao) <= 30
+
+
+def test_so_uma_candidata_recebe_o_resultado_da_validacao(app, ids):
+    """Sem esta guarda, uma validação em curso ressuscitava a versão que
+    `configurar_incidente` acabara de arquivar — a Central passava a oferecer
+    "Ativar" numa arquivada — e nada impedia a mesma chamada de tirar o
+    contrato ATIVO do estado `ativa`."""
+
+    incidente_id = _incidente_de_controle(app, interacao='texto', chave='Campo.Val')
+
+    with app.app_context():
+        primeira = nfse_contrato.configurar_incidente(
+            incidente_id, {'origem': 'intocavel'}
+        )
+        ativo_id = nfse_contrato.contrato_ativo().id
+
+        # A ativa nunca recebe resultado de validação.
+        with pytest.raises(nfse_contrato.ContratoNfseTransicaoInvalidaError):
+            nfse_contrato.registrar_validacao(ativo_id, None, ())
+
+        # Uma candidata arquivada no meio do caminho também não.
+        nfse_contrato.descartar_candidata(primeira.id)
+        with pytest.raises(nfse_contrato.ContratoNfseTransicaoInvalidaError):
+            nfse_contrato.registrar_validacao(primeira.id, None, ())
+
+
+def test_campo_novo_entra_no_fim_da_propria_etapa_sem_colidir(app, ids):
+    """`ordem` é a sequência de APLICAÇÃO do contrato inteiro, não a posição na
+    tela. Copiar `ordem_pagina` — um índice por etapa — para dentro dela
+    produzia valor duplicado e posição sem sentido."""
+
+    incidente_id = _incidente_de_controle(app, interacao='texto', chave='Campo.Ordem')
+
+    with app.app_context():
+        incidente = db.session.get(IncidenteContratoNfse, incidente_id)
+        # Posição na tela pequena de propósito: é o caso que colidia.
+        incidente.ordem_pagina = 2
+        db.session.commit()
+        antes = nfse_contrato.carregar_execucao()
+        ultima_de_pessoas = max(
+            campo.ordem for campo in antes.campos if campo.etapa == 'pessoas'
+        )
+
+        candidata = nfse_contrato.configurar_incidente(
+            incidente_id, {'origem': 'intocavel'}
+        )
+
+        ordens = [campo.ordem for campo in candidata.campos]
+        assert len(ordens) == len(set(ordens)), 'nenhuma ordem duplicada'
+        novo = next(c for c in candidata.campos if c.chave_semantica == 'Campo.Ordem')
+        assert novo.ordem == ultima_de_pessoas + 1
+        assert novo.etapa == 'pessoas'
+        # E continua depois de todos os campos de Pessoas que já existiam.
+        assert all(
+            campo.ordem < novo.ordem
+            for campo in candidata.campos
+            if campo.etapa == 'pessoas' and campo.chave_semantica != 'Campo.Ordem'
+        )

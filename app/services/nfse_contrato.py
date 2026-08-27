@@ -685,6 +685,19 @@ def _campo_da_diferenca(diferenca: Diferenca):
     return diferenca.observado or diferenca.esperado
 
 
+def _ordem_no_fim_da_etapa(campos, etapa):
+    """Primeira `ordem` livre depois do último campo desta etapa.
+
+    Mantém o agrupamento por etapa que a sequência de aplicação já tem, sem
+    inventar uma posição dentro dela.
+    """
+
+    da_etapa = [campo.ordem for campo in campos if campo.etapa == etapa]
+    if da_etapa:
+        return max(da_etapa) + 1
+    return max((campo.ordem for campo in campos), default=-1) + 1
+
+
 def _ordem_da_diferenca(diferenca: Diferenca):
     """Posição do controle na etapa, em ordem de documento.
 
@@ -1526,12 +1539,16 @@ def configurar_incidente(
             )
         campos.remove(campo_alvo)
     elif campo_alvo is None:
-        # A posição na tela manda quando ela é conhecida: o portal passou a
-        # abrir a etapa com uma pergunta que libera o resto do formulário, e um
-        # campo novo empilhado no fim seria preenchido depois dos que destrava.
-        proxima_ordem = max((campo.ordem for campo in campos), default=-1) + 1
-        if incidente.ordem_pagina is not None:
-            proxima_ordem = int(incidente.ordem_pagina)
+        # `ordem` e a sequencia de APLICACAO do contrato inteiro (0..N pelas
+        # quatro etapas), nao a posicao na tela. Copiar `ordem_pagina` — que e
+        # um indice por etapa — para dentro dela produzia valor duplicado e
+        # posicao sem sentido. O campo novo entra no fim da SUA etapa, e o que
+        # vem depois e renumerado; quem destrava a etapa e o retry de
+        # `preencher_etapa_pessoas`, nao a ordem.
+        proxima_ordem = _ordem_no_fim_da_etapa(campos, incidente.etapa)
+        for campo in campos:
+            if campo.ordem >= proxima_ordem:
+                campo.ordem += 1
         campo_alvo = _novo_campo_do_incidente(
             incidente, origem, fonte, valor_fixo, proxima_ordem
         )
@@ -1594,6 +1611,14 @@ def registrar_validacao(
     if contrato is None:
         raise ContratoNfseNaoEncontradoError(
             "a versão candidata da NFS-e não existe"
+        )
+    # Só uma candidata se valida. Sem esta guarda, uma validação em curso
+    # ressuscitava a versão que `configurar_incidente` acabara de arquivar
+    # (a Central passava a oferecer "Ativar" numa arquivada), e nada impedia
+    # a mesma chamada de tirar o contrato ATIVO do estado `ativa`.
+    if contrato.estado != "candidata":
+        raise ContratoNfseTransicaoInvalidaError(
+            "somente uma versão candidata pode receber o resultado da validação"
         )
     divergencias = tuple(resultado or ())
     elegivel = bool(getattr(resultado, "elegivel_automatico", False))
