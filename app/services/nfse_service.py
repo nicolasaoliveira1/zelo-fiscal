@@ -99,8 +99,32 @@ def _campos_da_etapa(contrato, etapa):
     return tuple(campo for campo in contrato.campos if campo.etapa == etapa)
 
 
+# `pre_avancar` é a única observação feita com a etapa já preenchida por
+# inteiro. Antes dela o formulário ainda está revelando campos, e ausência não
+# é remoção — ver `nfse_drift.comparar`.
+MOMENTO_FINAL_DA_ETAPA = 'pre_avancar'
+
+
+def _tela_ainda_e_da_etapa(driver, etapa):
+    """A janela continua na etapa que se pretende observar?
+
+    `_avancar` clica em "Avançar" e o ChromeDriver só devolve o controle com a
+    PRÓXIMA tela carregada. Observar ali inventaria o formulário seguinte e o
+    compara com o contrato da etapa anterior: todo controle obrigatório da tela
+    nova vira `controle_novo` crítico, a nota é bloqueada e a Central recebe
+    incidentes na etapa errada. Só se compara o que a URL confirma ser a etapa.
+    """
+
+    try:
+        atual = nfse_recon.etapa_da_url(getattr(driver, 'current_url', '') or '')
+    except Exception:
+        return True
+    return atual is None or atual == etapa
+
+
 def _observar_fronteira_contrato(
-    driver, contrato, etapa, momento, *, modo='assistido', execution_id=None
+    driver, contrato, etapa, momento, *, modo='assistido', execution_id=None,
+    acumulador=None,
 ):
     """Observa uma tela já alcançada, sem navegar ou interagir com ela."""
 
@@ -109,22 +133,40 @@ def _observar_fronteira_contrato(
     # se fosse mais um formulário.
     if etapa == 'revisao':
         return {'estado': 'observada', 'etapa': etapa, 'momento': momento}
+    if not _tela_ainda_e_da_etapa(driver, etapa):
+        log_event('nfse_recon_fora_da_etapa', contrato_id=contrato.contrato_id,
+                  etapa=etapa, momento=momento, execution_id=execution_id)
+        return {'estado': 'ignorada', 'etapa': etapa, 'momento': momento}
     inventario = nfse_recon.inventariar(driver, etapa)
     if inventario.estado != 'ok':
+        motivo = inventario.motivo or 'observação inconclusiva'
         log_event(
             'nfse_recon_desconhecida',
             level='WARNING',
             contrato_id=contrato.contrato_id,
             etapa=etapa,
             momento=momento,
+            motivo=motivo,
             execution_id=execution_id,
         )
         raise NfseDriftError(
-            f'Não foi possível observar com segurança a etapa {etapa}; '
-            'a nota foi pausada antes de avançar.'
+            f'Não foi possível observar com segurança a etapa {etapa} '
+            f'({motivo}); a nota foi pausada antes de avançar.'
         )
-    resultado = comparar(etapa, _campos_da_etapa(contrato, etapa), inventario)
-    if not resultado.diferencas:
+    if acumulador is not None:
+        inventario = acumulador.acumular(
+            nfse_recon.rascunho_da_url(driver.current_url), inventario
+        )
+    resultado = comparar(
+        etapa,
+        _campos_da_etapa(contrato, etapa),
+        inventario,
+        observacao_final=(momento == MOMENTO_FINAL_DA_ETAPA),
+    )
+    # O modo automático é conservador de propósito, mas conservadorismo que
+    # nunca deixa concluir não protege nada: a etapa é um formulário progressivo
+    # e "o campo ainda não apareceu" acontece em toda nota.
+    if not resultado.diferencas_acionaveis:
         return {'estado': resultado.compatibilidade, 'etapa': etapa, 'momento': momento}
 
     if contrato.contrato_id:
@@ -312,6 +354,10 @@ def preencher_nota(
     fronteira = {'etapa': None, 'momento': None}
     avisos_recon = []
 
+    # Um acumulador por emissão: a comparação de cada etapa é feita contra a
+    # união do que aquela etapa já mostrou, não contra o instantâneo da vez.
+    acumulador = nfse_recon.AcumuladorRecon()
+
     def observar(driver_atual, etapa, momento):
         fronteira['etapa'] = etapa
         fronteira['momento'] = momento
@@ -322,6 +368,7 @@ def preencher_nota(
             momento,
             modo=modo,
             execution_id=execution_id,
+            acumulador=acumulador,
         )
         if resultado.get('aviso'):
             avisos_recon.append(

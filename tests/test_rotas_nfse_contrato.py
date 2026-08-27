@@ -21,6 +21,8 @@ from app.models import (
     StatusNotaNfse,
 )
 from app.services import batch_engine
+from app.automation import nfse_recon as nfse_recon_modulo
+from app.routes import nfse as rotas_nfse
 from app.services import nfse_contrato
 from app.services.nfse_drift import CampoComparavel, Diferenca
 
@@ -29,9 +31,13 @@ from app.services.nfse_drift import CampoComparavel, Diferenca
 def _estado_lote_limpo():
     batch_engine.reset_batch_state(NFSE_BATCH_STATE)
     definir_nfse_batch_opcoes('lote')
+    # O acumulador de passes vive no processo: sem zerar, um teste herda os
+    # controles observados pelo anterior.
+    rotas_nfse.ACUMULADOR_RECON.descartar()
     yield
     batch_engine.reset_batch_state(NFSE_BATCH_STATE)
     definir_nfse_batch_opcoes('lote')
+    rotas_nfse.ACUMULADOR_RECON.descartar()
 
 
 def _criar_incidente(app, *, recomendado=False):
@@ -362,10 +368,17 @@ def test_recon_observa_tela_atual_sem_navegar_nem_escrever(
     assert resposta.status_code == 200
     observacao = resposta.get_json()['observacao']
     assert observacao['etapa'] == 'pessoas'
-    assert observacao['compatibilidade'] == 'incompativel'
-    assert observacao['incidentes'] > 0
+    # A recon assistida nunca é a observação final: o operador ainda pode
+    # preencher um campo e revelar os que faltam. A ausência é provisória — não
+    # conclui incompatibilidade e, sobretudo, NÃO vira incidente aberto, que
+    # fecharia o gate do modo automático por um fato que não aconteceu.
+    assert observacao['compatibilidade'] == 'compativel'
+    assert observacao['incidentes'] == 0
+    assert resposta.get_json()['passe'] == 1
     assert driver.current_url_reads == 1
-    assert driver.execute_script_calls == 1
+    # Dois scripts por passe: o inventário estrutural e o de preenchimento,
+    # que devolve só booleanos. Nenhum navega nem escreve.
+    assert driver.execute_script_calls == 2
     assert driver.get_calls == 0
     assert driver.click_calls == 0
     sessao.liberar.assert_called_once()
@@ -571,3 +584,85 @@ def test_ativar_falha_de_commit_preserva_estado(login_as, app, monkeypatch):
     with app.app_context():
         assert db.session.get(nfse_contrato.ContratoNfse, ativo_id).estado == 'ativa'
         assert db.session.get(nfse_contrato.ContratoNfse, candidato_id).estado == 'validada'
+
+
+def test_descartar_candidata_reabre_os_incidentes_para_reconfigurar(login_as, app):
+    """Configurar não pode ser via de mão única."""
+
+    contrato_id, candidato_id, incidente_id = _criar_candidata(app)
+    operador = login_as('operador')
+
+    resposta = operador.post(f'/nfse/contrato/{candidato_id}/descartar', json={})
+
+    assert resposta.status_code == 200
+    assert resposta.get_json()['reabertos'] >= 1
+    depois = operador.get('/nfse/contrato').get_json()
+    assert depois['candidatas'] == []
+    assert any(
+        item['id'] == incidente_id and item['estado'] == 'aberto'
+        for item in depois['incidentes']
+    )
+    assert depois['ativo']['id'] == contrato_id
+
+
+def test_descartar_recusa_versao_que_nao_e_candidata(login_as, app):
+    contrato_id, _incidente_id = _criar_incidente(app)
+
+    resposta = login_as('operador').post(
+        f'/nfse/contrato/{contrato_id}/descartar', json={}
+    )
+
+    assert resposta.status_code == 409
+
+
+def test_validacao_nao_exige_aliquota_conferida(login_as, app, monkeypatch):
+    """A validação preenche até a revisão e nunca emite (ND-005). Exigir o gate
+    aqui bloqueava a prova que precede qualquer emissão — e o operador via o
+    lote terminar em 2s sem explicação."""
+
+    from app.automation.batch_state import nfse_batch_opcoes
+
+    _contrato_id, candidato_id, _incidente_id = _criar_candidata(app)
+    nota_id = _criar_nota_emitivel(app)
+    sessao = MagicMock()
+    sessao.adquirir.return_value = True
+    sessao.aliquota_confirmada = False
+    monkeypatch.setattr('app.routes.nfse.SESSAO', sessao)
+    monkeypatch.setattr('app.routes.nfse.automacao_em_curso', lambda: None)
+    monkeypatch.setattr(
+        'app.services.batch_engine.run_worker', lambda worker_fn, app_factory: None
+    )
+
+    resposta = login_as('operador').post(
+        f'/nfse/contrato/{candidato_id}/validar', json={'nota_id': nota_id}
+    )
+
+    assert resposta.status_code == 200
+    assert nfse_batch_opcoes()['ignorar_aliquota'] is True
+
+
+def test_passe_inconclusivo_nao_se_esconde_atras_da_uniao(login_as, app, monkeypatch):
+    """Responder pela união quando ESTE passe falhou diria "compatível" sobre
+    uma tela que não foi lida agora: desfecho desconhecido virando chute."""
+
+    _contrato_id, _incidente_id = _criar_incidente(app)
+    driver = _DriverRecon()
+    sessao = MagicMock()
+    sessao.adquirir.return_value = True
+    sessao.driver = driver
+    monkeypatch.setattr('app.routes.nfse.SESSAO', sessao)
+
+    operador = login_as('operador')
+    operador.post('/nfse/contrato/recon', json={})
+
+    monkeypatch.setattr(
+        'app.routes.nfse.nfse_recon.inventariar',
+        lambda *_a, **_k: nfse_recon_modulo.InventarioEtapa.desconhecido(
+            'pessoas', 'a janela do portal não respondeu à observação'
+        ),
+    )
+
+    observacao = operador.post('/nfse/contrato/recon', json={}).get_json()['observacao']
+
+    assert observacao['estado'] == 'desconhecida'
+    assert observacao['compatibilidade'] == 'desconhecida'

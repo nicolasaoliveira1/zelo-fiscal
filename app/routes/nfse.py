@@ -54,6 +54,10 @@ from app.utils import (
     json_error,
 )
 
+# Uniao dos passes da recon assistida. Vive so em memoria, por processo: e
+# memoria de uma sessao de observacao, nunca contrato persistido.
+ACUMULADOR_RECON = nfse_recon.AcumuladorRecon()
+
 # 5 MB cobre com folga os dois formatos: o CSV mensal tem ~7 KB e o PDF do
 # Inter ~160 KB. O limite existe para recusar cedo o arquivo que obviamente nao
 # e um extrato mensal, nao para apertar o caso normal.
@@ -178,6 +182,49 @@ def nfse_contrato_configurar(incidente_id):
     }
 
 
+@bp.route('/nfse/contrato/<int:contrato_id>/descartar', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_descartar(contrato_id):
+    """Arquiva a candidata e reabre seus incidentes, para reconfigurar."""
+
+    try:
+        reabertos = nfse_contrato.descartar_candidata(
+            contrato_id, usuario_id=current_user.id
+        )
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+        return json_error(str(exc), 409)
+    except nfse_contrato.PersistenciaContratoError as exc:
+        return json_error(str(exc), 500)
+    return {'status': 'ok', 'reabertos': reabertos}
+
+
+@bp.route('/nfse/contrato/incidentes/descartar', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_incidentes_descartar():
+    """Descarta os incidentes abertos da versão ativa. Não altera o contrato."""
+
+    try:
+        descartados = nfse_contrato.descartar_incidentes(usuario_id=current_user.id)
+    except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+        return json_error(str(exc), 409)
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    except nfse_contrato.PersistenciaContratoError as exc:
+        return json_error(str(exc), 500)
+    return {'status': 'ok', 'descartados': descartados}
+
+
+@bp.route('/nfse/contrato/recon/descartar', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_recon_descartar():
+    """Zera os passes acumulados. Não toca contrato, incidente nem nota."""
+
+    ACUMULADOR_RECON.descartar()
+    return {'status': 'ok', 'passe': 0, 'controles_acumulados': 0}
+
+
 @bp.route('/nfse/contrato/recon', methods=['POST'])
 @requer_papel('operador')
 def nfse_contrato_recon():
@@ -215,13 +262,29 @@ def nfse_contrato_recon():
                 409,
                 motivo='sessao_nfse_ausente',
             )
-        etapa = nfse_recon.etapa_da_url(driver.current_url)
+        url_atual = driver.current_url
+        etapa = nfse_recon.etapa_da_url(url_atual)
         if etapa is None:
             return json_error(
                 'A tela atual não é uma etapa reconhecida da NFS-e.',
                 409,
                 motivo='etapa_nfse_desconhecida',
             )
+        # A etapa de Pessoas revela campos conforme e preenchida. Cada clique em
+        # "Recon da tela atual" e um passe: o que vale e a uniao dos passes desta
+        # mesma DPS, nao o instantaneo do ultimo.
+        inventario = nfse_recon.inventariar(driver, etapa)
+        uniao = ACUMULADOR_RECON.acumular(
+            nfse_recon.rascunho_da_url(url_atual),
+            inventario,
+            nfse_recon.preenchimento(driver),
+        )
+        # A uniao preserva o que ja foi observado, e e isso que se quer dela.
+        # Mas se ESTE passe falhou, responder pela uniao diria "compativel"
+        # sobre uma tela que nao foi lida agora — desfecho desconhecido virando
+        # chute. O passe inconclusivo responde por si.
+        if not inventario.conhecida:
+            uniao = inventario
         contrato = nfse_contrato.carregar_execucao()
         observacao = nfse_contrato.observar(
             driver,
@@ -229,9 +292,23 @@ def nfse_contrato_recon():
             etapa,
             'recon_assistida',
             modo='assistido',
+            inventario=uniao,
         )
         return {
             'status': 'ok',
+            'passe': ACUMULADOR_RECON.passes(etapa),
+            'controles_acumulados': len(uniao.controles),
+            'sugestoes': [
+                {
+                    'chave': item.chave,
+                    'rotulo': item.rotulo,
+                    'interacao': item.interacao,
+                    'obrigatorio': item.obrigatorio,
+                    'sugestao': item.sugestao,
+                    'motivo': item.motivo,
+                }
+                for item in ACUMULADOR_RECON.sugestoes(etapa)
+            ],
             'observacao': {
                 'contrato_id': observacao.contrato_id,
                 'etapa': observacao.etapa,
@@ -325,9 +402,12 @@ def nfse_contrato_validar(contrato_id):
         SESSAO.liberar()
         return json_error('Já existe um lote de NFS-e em andamento.', 409)
 
+    # A validação preenche até a revisão e nunca emite (ND-005): o gate da
+    # alíquota protege a EMISSÃO, e exigi-lo aqui bloqueia justamente a prova
+    # que precede qualquer emissão. O aviso continua no log da execução.
     definir_nfse_batch_opcoes(
         nfse_lote.MODO_INDIVIDUAL,
-        False,
+        True,
         contrato_id=contrato_id,
         validacao_contrato_id=contrato_id,
     )

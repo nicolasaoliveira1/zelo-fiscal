@@ -968,6 +968,10 @@ class IncidenteContratoNfse(db.Model):
     tipo = db.Column(db.String(30), nullable=False)
     severidade = db.Column(db.String(20), nullable=False)
     estado = db.Column(db.String(20), nullable=False, index=True)
+    # Posicao do controle na etapa, em ordem de documento. A Central lista na
+    # ordem em que o operador percorre a tela; por `id` a lista sai na ordem em
+    # que a recon comparou, que nao e a ordem de ninguem.
+    ordem_pagina = db.Column(db.Integer, nullable=True)
     chave_esperada = db.Column(db.String(100), nullable=True)
     chave_observada = db.Column(db.String(100), nullable=True)
     rotulo = db.Column(db.String(500), nullable=True)

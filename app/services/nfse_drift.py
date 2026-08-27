@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 from typing import Any, Iterable, Mapping
 
@@ -21,6 +21,9 @@ COMPATIVEL = "compativel"
 AVISO = "aviso"
 INCOMPATIVEL = "incompativel"
 DESCONHECIDA = "desconhecida"
+
+# Adaptadores que declaram política de preenchimento, não forma do controle.
+ADAPTADORES_DE_POLITICA = frozenset({"INTOCAVEL", "PADRAO PORTAL", "PADRAO_PORTAL"})
 
 CONTROLE_NOVO = "controle_novo"
 CONTROLE_REMOVIDO = "controle_removido"
@@ -58,6 +61,9 @@ class CampoComparavel:
     visivel: bool | None = None
     seletor_tipo: str = ""
     seletor: str = ""
+    identificador: str = ""
+    desabilitado: bool = False
+    somente_leitura: bool = False
     opcoes: tuple[OpcaoInventariada, ...] = ()
     classes_funcionais: tuple[str, ...] = field(default=(), compare=False, repr=False)
     ordem: int = field(default=0, compare=False, repr=False)
@@ -75,6 +81,11 @@ class Diferenca:
     esperado: CampoComparavel | None = None
     observado: CampoComparavel | None = None
     mensagem: str = ""
+    # Diferença que a observação ainda não tem autoridade para afirmar: o
+    # formulário é progressivo e o campo pode aparecer no próximo passo. Ela
+    # aparece como evidência, mas não vira incidente nem fecha o gate — uma
+    # ausência só é fato depois da observação final.
+    provisoria: bool = False
 
     @property
     def rotulo(self) -> str:
@@ -94,6 +105,12 @@ class ResultadoComparacao:
     @property
     def compatibilidade_normalizada(self) -> str:
         return self.compatibilidade
+
+    @property
+    def diferencas_acionaveis(self) -> tuple[Diferenca, ...]:
+        """As que pedem decisão. Provisória é estado do momento, não decisão."""
+
+        return tuple(item for item in self.diferencas if not item.provisoria)
 
 
 @dataclass(frozen=True)
@@ -147,10 +164,35 @@ def _campo_de(objeto: Any, etapa_padrao: str) -> CampoComparavel:
         visivel=visivel,
         seletor_tipo=str(_ler(objeto, "seletor_tipo", "") or ""),
         seletor=str(_ler(objeto, "seletor", "") or ""),
+        identificador=str(_ler(objeto, "id", "") or ""),
+        desabilitado=bool(_ler(objeto, "desabilitado", False)),
+        somente_leitura=bool(_ler(objeto, "somente_leitura", False)),
         opcoes=_opcoes_de(objeto),
         classes_funcionais=tuple(_ler(objeto, "classes_funcionais", ()) or ()),
         ordem=int(_ler(objeto, "ordem", _ler(objeto, "ordem_relativa", 0)) or 0),
     )
+
+
+def _preenchivel(campo: CampoComparavel) -> bool:
+    """O operador consegue digitar ou escolher algo neste controle?"""
+
+    if campo.visivel is False:
+        return False
+    return not campo.desabilitado and not campo.somente_leitura
+
+
+def _identidades_portal(campo: CampoComparavel) -> tuple[str, ...]:
+    """Nomes pelos quais o mesmo controle pode ser endereçado no portal."""
+
+    vistas: list[str] = []
+    candidatos = [campo.chave_semantica, campo.identificador]
+    if campo.seletor_tipo in {"id", "name"}:
+        candidatos.insert(0, campo.seletor)
+    for valor in candidatos:
+        texto = str(valor or "").strip()
+        if texto and texto not in vistas:
+            vistas.append(texto)
+    return tuple(vistas)
 
 
 def _chave_opcao(opcao: OpcaoInventariada) -> tuple[str, str]:
@@ -203,7 +245,11 @@ def _comparar_campo(esperado: CampoComparavel, observado: CampoComparavel):
                 "O tipo do controle mudou.",
             )
         )
-    if esperado.obrigatorio != observado.obrigatorio:
+    # Obrigatoriedade só diz respeito a quem preenche. Num controle `readonly`
+    # o asterisco do rótulo marca exigência do documento, não do operador — o
+    # portal é quem preenche (é o caso do nome do tomador, `intocavel` desde a
+    # primeira versão do contrato).
+    if _preenchivel(observado) and esperado.obrigatorio != observado.obrigatorio:
         diferencas.append(
             _diferenca(
                 esperado.etapa,
@@ -225,7 +271,16 @@ def _comparar_campo(esperado: CampoComparavel, observado: CampoComparavel):
                 "O conjunto de opções declaradas mudou.",
             )
         )
-    if esperado.interacao and observado.interacao and esperado.interacao != observado.interacao:
+    # `intocavel` e `padrao_portal` dizem o que a automação FAZ com o campo
+    # (nada), não como o controle é desenhado. O inventário sempre derivará
+    # "texto"/"select_direto" deles, e comparar as duas coisas acusa drift
+    # fiscal onde só há diferença de vocabulário.
+    if (
+        normalizar_chave(esperado.interacao) not in ADAPTADORES_DE_POLITICA
+        and esperado.interacao
+        and observado.interacao
+        and esperado.interacao != observado.interacao
+    ):
         diferencas.append(
             _diferenca(
                 esperado.etapa,
@@ -254,68 +309,117 @@ def comparar(
     etapa: str,
     campos_contrato: Iterable[Any],
     inventario: InventarioEtapa,
+    *,
+    observacao_final: bool = False,
 ) -> ResultadoComparacao:
-    """Compara uma etapa, sem decidir remapeamentos ou alterar configurações."""
+    """Compara uma etapa, sem decidir remapeamentos ou alterar configurações.
+
+    `observacao_final` diz se a etapa já foi percorrida inteira. O formulário do
+    portal é progressivo — o Regime de apuração só existe depois que a
+    competência recarrega a tela —, então um campo ausente numa observação
+    intermediária ainda pode aparecer. Só na observação final a ausência é
+    remoção de verdade.
+    """
 
     if inventario.estado != "ok" or inventario.etapa != etapa:
+        motivo = getattr(inventario, "motivo", None) or "observação inconclusiva"
         return ResultadoComparacao(
             etapa=etapa,
             compatibilidade=DESCONHECIDA,
-            evidencias=("não foi possível observar a etapa com segurança",),
+            evidencias=(
+                f"não foi possível observar a etapa com segurança: {motivo}",
+            ),
         )
 
+    # Uma conversão só por lado: `_campo_de` reconstrói as opções inteiras, e
+    # o select da NBS tem ~900 — converter no filtro e de novo no valor jogava
+    # fora esse trabalho a cada observação.
     esperados = tuple(
-        _campo_de(campo, etapa)
-        for campo in campos_contrato
-        if _campo_de(campo, etapa).etapa == etapa
+        campo for campo in map(lambda c: _campo_de(c, etapa), campos_contrato)
+        if campo.etapa == etapa
     )
     observados = tuple(
-        _campo_de(campo, etapa)
-        for campo in inventario.controles
-        if _campo_de(campo, etapa).etapa == etapa
+        campo for campo in map(lambda c: _campo_de(c, etapa), inventario.controles)
+        if campo.etapa == etapa
     )
-    def identidade_portal(campo):
-        if campo.seletor_tipo in {"id", "name"} and campo.seletor:
-            return campo.seletor
-        return campo.chave_semantica
 
-    esperados_por_chave = {identidade_portal(campo): campo for campo in esperados}
-    observados_por_chave = {campo.chave_semantica: campo for campo in observados}
+    # O portal é ASP.NET MVC: o mesmo campo se chama `Tomador.Inscricao` por
+    # `name` e `Tomador_Inscricao` por `id`. Casar por uma só das formas some
+    # com todo campo que o contrato endereça pelo id.
+    observados_por_identidade = {}
+    for campo in observados:
+        for identidade in _identidades_portal(campo):
+            observados_por_identidade.setdefault(identidade, campo)
+
+    pares = []
+    faltantes = []
+    casados = set()
+    for esperado in sorted(esperados, key=lambda campo: campo.chave_semantica):
+        observado = next(
+            (
+                observados_por_identidade[identidade]
+                for identidade in _identidades_portal(esperado)
+                if identidade in observados_por_identidade
+            ),
+            None,
+        )
+        if observado is None:
+            faltantes.append(esperado)
+        else:
+            pares.append((esperado, observado))
+            casados.add(observado.chave_semantica)
+    novos = sorted(
+        (campo for campo in observados if campo.chave_semantica not in casados),
+        key=lambda campo: campo.chave_semantica,
+    )
+
     diferencas = []
-
-    for chave in sorted(esperados_por_chave.keys() - observados_por_chave.keys()):
-        esperado = esperados_por_chave[chave]
+    for esperado in faltantes:
         diferencas.append(
-            _diferenca(
-                etapa,
-                CONTROLE_REMOVIDO,
-                "critica",
-                esperado,
-                None,
-                "O controle esperado não foi encontrado.",
+            replace(
+                _diferenca(
+                    etapa,
+                    CONTROLE_REMOVIDO,
+                    "critica" if observacao_final else "informativa",
+                    esperado,
+                    None,
+                    "O controle esperado não foi encontrado."
+                    if observacao_final
+                    else "O controle esperado ainda não apareceu nesta etapa.",
+                ),
+                provisoria=not observacao_final,
             )
         )
-    for chave in sorted(observados_por_chave.keys() - esperados_por_chave.keys()):
-        observado = observados_por_chave[chave]
-        severidade = "critica" if observado.obrigatorio else "informativa"
+    for observado in novos:
+        # O contrato é um recorte: declara os campos que a automação dirige, não
+        # a página inteira. Controle que o operador não consegue preencher —
+        # oculto, desabilitado ou somente-leitura — não é decisão pendente: são
+        # os blocos que o portal preenche sozinho e os que a tela mantém
+        # fechados. Listá-los afoga os poucos que importam.
+        if not _preenchivel(observado):
+            continue
+        exigido = bool(observado.obrigatorio)
         diferencas.append(
             _diferenca(
                 etapa,
                 CONTROLE_NOVO,
-                severidade,
+                "critica" if exigido else "informativa",
                 None,
                 observado,
-                "Foi encontrado um controle que não existe no contrato.",
+                "O portal passou a exigir um controle que não existe no contrato."
+                if exigido
+                else "Foi encontrado um controle que não existe no contrato.",
             )
         )
-    for chave in sorted(esperados_por_chave.keys() & observados_por_chave.keys()):
-        diferencas.extend(
-            _comparar_campo(esperados_por_chave[chave], observados_por_chave[chave])
-        )
+    for esperado, observado in pares:
+        diferencas.extend(_comparar_campo(esperado, observado))
 
-    if not diferencas:
+    # A compatibilidade responde pelo que pede decisão: uma ausência que a
+    # observação ainda não pode afirmar não torna a tela incompatível.
+    acionaveis = [item for item in diferencas if not item.provisoria]
+    if not acionaveis:
         compatibilidade = COMPATIVEL
-    elif any(diferenca.severidade in {"fiscal", "critica"} for diferenca in diferencas):
+    elif any(item.severidade in {"fiscal", "critica"} for item in acionaveis):
         compatibilidade = INCOMPATIVEL
     else:
         compatibilidade = AVISO
@@ -344,10 +448,28 @@ def _canonico_campo(campo: CampoComparavel | None) -> dict[str, Any] | None:
     }
 
 
+def _canonico_identidade(campo: CampoComparavel | None) -> dict[str, Any] | None:
+    """Identidade estável de um controle, sem o que muda de passe a passe.
+
+    `obrigatorio` e `visivel` mudam conforme a tela é preenchida. Deixá-los na
+    assinatura fazia o mesmo controle virar um incidente novo a cada passe da
+    recon, multiplicando a Central em vez de atualizar a linha que já existia.
+    """
+
+    canonico = _canonico_campo(campo)
+    if canonico is None:
+        return None
+    return {
+        chave: valor
+        for chave, valor in canonico.items()
+        if chave not in {"obrigatorio", "visivel"}
+    }
+
+
 def assinar_incidente(contrato_id: int | str, diferenca: Diferenca) -> str:
     """Gera uma assinatura estável para a dimensão semântica observada."""
 
-    observado = _canonico_campo(diferenca.observado)
+    observado = _canonico_identidade(diferenca.observado)
     forma_observada = json.dumps(
         observado,
         ensure_ascii=False,
@@ -362,7 +484,7 @@ def assinar_incidente(contrato_id: int | str, diferenca: Diferenca) -> str:
             diferenca.tipo,
             diferenca.chave_esperada or "",
             assinatura_observada,
-            _canonico_campo(diferenca.esperado).__repr__(),
+            _canonico_identidade(diferenca.esperado).__repr__(),
         )
     )
     return hashlib.sha256(forma.encode("utf-8")).hexdigest()

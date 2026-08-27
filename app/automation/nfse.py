@@ -24,6 +24,7 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 
 from app.services import nfse_contrato
+from app.services.execution_logger import log_event
 
 BASE = 'https://www.nfse.gov.br/EmissorNacional'
 URL_LOGIN = f'{BASE}/Login?ReturnUrl=%2fEmissorNacional'
@@ -948,6 +949,23 @@ def _aplicar_campo_contrato(driver, campo, valor):
     )
 
 
+def _liberadores_de_etapa(adicionais):
+    """Campos do contrato capazes de destravar o resto do formulario.
+
+    A reforma tributaria pos uma pergunta no topo da etapa de Pessoas
+    ("Preencher as informacoes IBS/CBS?") que mantem os demais campos inertes
+    ate ser respondida. Sao sempre a mesma forma: um clique com valor ja
+    decidido no contrato — nada que dependa da nota, nada que digite texto.
+    """
+
+    return tuple(
+        campo
+        for campo in adicionais
+        if _valor_regra_contrato(campo, 'interacao') == 'radio'
+        and _valor_regra_contrato(campo, 'origem') == 'fixo'
+    )
+
+
 def _campos_adicionais_etapa(contrato, etapa, chaves_principais):
     return tuple(
         campo
@@ -976,12 +994,36 @@ def preencher_etapa_pessoas(
     campo_nome = _campo_contrato(contrato, CHAVE_NOME_TOMADOR)
 
     _observar_fronteira(observar, driver, 'pessoas', 'entrada')
+    adicionais = _campos_adicionais_etapa(
+        contrato,
+        'pessoas',
+        {
+            CHAVE_DATA_COMPETENCIA,
+            CHAVE_REGIME_APURACAO,
+            CHAVE_DOMICILIO_TOMADOR,
+            CHAVE_INSCRICAO_TOMADOR,
+        },
+    )
     valor_data = _valor_contrato(
         valores_contrato, CHAVE_DATA_COMPETENCIA, data_competencia
     )
     if hasattr(valor_data, 'strftime'):
         valor_data = formatar_data(valor_data)
-    _aplicar_campo_contrato(driver, campo_data, valor_data)
+    try:
+        _aplicar_campo_contrato(driver, campo_data, valor_data)
+    except InteracaoPortalError:
+        # A competencia e o primeiro campo desta etapa desde sempre; se ela nao
+        # esta disponivel, alguma pergunta nova a mantem inerte. O contrato ja
+        # traz a resposta decidida pelo operador — aplica-la e tenta uma vez
+        # mais. Falhando de novo, o erro original sobe: o desfecho continua
+        # sendo o do portal, nao um chute nosso.
+        liberadores = _liberadores_de_etapa(adicionais)
+        if not liberadores:
+            raise
+        log_event('nfse_etapa_destravada', etapa='pessoas',
+                  campos=len(liberadores))
+        aplicar_campos_adicionais(driver, liberadores, valores_contrato)
+        _aplicar_campo_contrato(driver, campo_data, valor_data)
 
     # O portal so carrega o emitente depois que a data sai do foco, e os campos
     # seguintes ficam nao-interagiveis ate la. Esperar o CNPJ do emitente
@@ -1022,16 +1064,6 @@ def preencher_etapa_pessoas(
             'Confira se esta correto e ativo na Receita.')
     if pausa:
         pausa()
-    adicionais = _campos_adicionais_etapa(
-        contrato,
-        'pessoas',
-        {
-            CHAVE_DATA_COMPETENCIA,
-            CHAVE_REGIME_APURACAO,
-            CHAVE_DOMICILIO_TOMADOR,
-            CHAVE_INSCRICAO_TOMADOR,
-        },
-    )
     aplicar_campos_adicionais(driver, adicionais, valores_contrato)
     _observar_fronteira(observar, driver, 'pessoas', 'pre_avancar')
     _avancar(driver)

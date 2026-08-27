@@ -556,19 +556,29 @@ def observar(
     *,
     modo="assistido",
     execution_id=None,
+    inventario=None,
+    observacao_final=False,
 ) -> Observacao:
-    """Observa a tela atual, compara metadados e registra drift seguro."""
+    """Observa a tela atual, compara metadados e registra drift seguro.
+
+    `inventario` permite comparar contra a união dos passes já observados nesta
+    etapa, em vez do instantâneo da tela: o formulário é progressivo e revela
+    campos conforme é preenchido.
+    """
 
     if modo not in {"assistido", "automatico"}:
         raise ValueError("modo de observação inválido")
-    inventario = nfse_recon.inventariar(driver, etapa)
+    if inventario is None:
+        inventario = nfse_recon.inventariar(driver, etapa)
     if inventario.estado != "ok":
+        motivo = inventario.motivo or "observação inconclusiva"
         log_event(
             "nfse_recon_desconhecida",
             level="WARNING",
             contrato_id=contrato_execucao.contrato_id,
             etapa=etapa,
             momento=momento,
+            motivo=motivo,
             execution_id=execution_id,
         )
         return Observacao(
@@ -577,7 +587,9 @@ def observar(
             momento=momento,
             estado="desconhecida",
             compatibilidade="desconhecida",
-            evidencias=("não foi possível observar a etapa com segurança",),
+            evidencias=(
+                f"não foi possível observar a etapa com segurança: {motivo}",
+            ),
         )
 
     # A revisão é composta por pares dt/dd e precisa de uma nota para que os
@@ -598,9 +610,10 @@ def observar(
         etapa,
         _campos_da_etapa(contrato_execucao, etapa),
         inventario,
+        observacao_final=observacao_final,
     )
     incidentes = ()
-    if resultado.diferencas and contrato_execucao.contrato_id:
+    if resultado.diferencas_acionaveis and contrato_execucao.contrato_id:
         incidentes = tuple(
             registrar_incidentes(contrato_execucao.contrato_id, resultado)
         )
@@ -672,6 +685,19 @@ def _campo_da_diferenca(diferenca: Diferenca):
     return diferenca.observado or diferenca.esperado
 
 
+def _ordem_da_diferenca(diferenca: Diferenca):
+    """Posição do controle na etapa, em ordem de documento.
+
+    O observado manda: é ele que reflete a tela de agora. Um controle que sumiu
+    só tem a ordem que o contrato guardou, e é a melhor aproximação disponível.
+    """
+
+    for campo in (diferenca.observado, diferenca.esperado):
+        if campo is not None and campo.ordem is not None:
+            return int(campo.ordem)
+    return None
+
+
 def _incidente_novo(contrato_id, diferenca: Diferenca, assinatura: str, agora):
     campo = _campo_da_diferenca(diferenca)
     incidente = IncidenteContratoNfse(
@@ -687,6 +713,7 @@ def _incidente_novo(contrato_id, diferenca: Diferenca, assinatura: str, agora):
         tipo_controle=campo.tipo if campo else None,
         interacao=campo.interacao if campo else None,
         obrigatorio=campo.obrigatorio if campo else None,
+        ordem_pagina=_ordem_da_diferenca(diferenca),
         primeira_observacao_em=agora,
         ultima_observacao_em=agora,
         observacoes=1,
@@ -720,7 +747,17 @@ def _registrar_uma_diferenca(contrato_id, diferenca: Diferenca, agora):
         if existente is not None:
             existente.ultima_observacao_em = agora
             existente.observacoes = (existente.observacoes or 0) + 1
-            existente.estado = "aberto"
+            # Reabrir um incidente já configurado quebraria a cobertura da
+            # candidata: `ativar` exige que todo pendente esteja `configurado`
+            # e apontando para ela. Observar de novo a mesma diferença não
+            # desfaz a decisão do operador — só o descarte explícito desfaz.
+            if existente.estado not in {"configurado", "resolvido", "descartado"}:
+                existente.estado = "aberto"
+            # A posição não entra na assinatura (o campo continua o mesmo se o
+            # portal o move de lugar), mas a lista precisa refletir a tela atual.
+            ordem = _ordem_da_diferenca(diferenca)
+            if ordem is not None:
+                existente.ordem_pagina = ordem
             try:
                 db.session.commit()
                 return existente, assinatura
@@ -736,7 +773,8 @@ def _registrar_uma_diferenca(contrato_id, diferenca: Diferenca, agora):
             return incidente, assinatura
         except (IntegrityError, OperationalError) as exc:
             db.session.rollback()
-            codigo = getattr(getattr(exc, "orig", None), "args", (None,))[0]
+            args = getattr(getattr(exc, "orig", None), "args", None) or (None,)
+            codigo = args[0]
             concorrencia = isinstance(exc, IntegrityError) or codigo in {1205, 1213}
             if tentativa < 2 and concorrencia:
                 continue
@@ -750,11 +788,150 @@ def _registrar_uma_diferenca(contrato_id, diferenca: Diferenca, agora):
     raise PersistenciaContratoError("não foi possível registrar o incidente da NFS-e")
 
 
+def contrato_base_de_incidentes(contrato_id=None) -> int | None:
+    """Contra qual versão um incidente observado deve ser gravado.
+
+    Sempre a ATIVA. Durante a validação de uma candidata o preenchimento carrega
+    a candidata, e gravar contra ela escondia o incidente: a Central lista os da
+    versão ativa, e `configurar_incidente` exige base ativa. O portal podia mudar
+    no meio do teste e o operador não ficava sabendo.
+    """
+
+    try:
+        return contrato_ativo().id
+    except ContratoNfseError:
+        return contrato_id
+
+
+# A etapa ordena antes da posição: percorrer a Central deve ser percorrer o
+# formulário, e o formulário tem uma ordem própria entre as telas.
+_ORDEM_DAS_ETAPAS = ("pessoas", "servico", "tributacao", "revisao")
+
+
+def _ordenar_por_tela(incidentes):
+    """Ordena como o operador percorre: etapa, depois posição na página.
+
+    Incidente sem posição (registrado antes da coluna existir, ou vindo de um
+    campo que o contrato não localizou) vai para o fim da própria etapa.
+    """
+
+    def chave(incidente):
+        try:
+            etapa = _ORDEM_DAS_ETAPAS.index(incidente.etapa or "")
+        except ValueError:
+            etapa = len(_ORDEM_DAS_ETAPAS)
+        ordem = incidente.ordem_pagina
+        return (etapa, ordem is None, ordem if ordem is not None else 0, incidente.id)
+
+    return sorted(incidentes, key=chave)
+
+
+def descartar_incidentes(contrato_id=None, usuario_id=None, *, agora=None) -> int:
+    """Descarta os incidentes abertos de uma versão, sem tocar no contrato.
+
+    Serve para o caso em que a própria observação estava errada: os incidentes
+    persistem por upsert de assinatura e nada os expira, então uma recon
+    defeituosa deixa a Central entulhada para sempre. Descartar é escriturar
+    uma decisão — o incidente fica no banco, com autor e instante.
+
+    Recusa se houver incidente `configurado`: esse já pertence a uma candidata,
+    e descartá-lo esvaziaria a cobertura que a ativação exige.
+    """
+
+    contrato_id = contrato_id if contrato_id is not None else contrato_ativo().id
+    pendentes = (
+        IncidenteContratoNfse.query
+        .filter(
+            IncidenteContratoNfse.contrato_base_id == contrato_id,
+            IncidenteContratoNfse.estado.in_(("aberto", "configurado")),
+        )
+        .with_for_update()
+        .all()
+    )
+    if any(incidente.estado == "configurado" for incidente in pendentes):
+        raise ContratoNfseTransicaoInvalidaError(
+            "há incidentes já configurados numa candidata; descarte a candidata antes"
+        )
+    agora = agora or utcnow_naive()
+    for incidente in pendentes:
+        incidente.estado = "descartado"
+        incidente.resolvido_em = agora
+        incidente.resolvido_por_id = usuario_id
+    try:
+        db.session.commit()
+    except Exception as exc:
+        _persistencia_falhou("descartar_incidentes_nfse", exc)
+    if pendentes:
+        log_event("nfse_incidentes_descartados", level="WARNING",
+                  contrato_id=contrato_id, quantidade=len(pendentes))
+        auditoria.registrar(
+            "nfse.incidente.descartar", alvo_tipo="contrato_nfse",
+            alvo_id=contrato_id,
+            detalhe=f"contrato_id={contrato_id};quantidade={len(pendentes)}",
+        )
+    return len(pendentes)
+
+
+def descartar_candidata(contrato_id, usuario_id=None, *, agora=None) -> int:
+    """Arquiva uma candidata e devolve seus incidentes ao estado aberto.
+
+    É o inverso exato da sequência de configurações que a construiu: cada
+    `configurar_incidente` reconstrói a candidata inteira a partir da anterior,
+    então não existe "meia candidata" para preservar. Não apaga nada: a versão
+    fica `arquivada`, com rastro em auditoria.
+    """
+
+    candidata = db.session.get(ContratoNfse, contrato_id)
+    if candidata is None:
+        raise ContratoNfseNaoEncontradoError("a versão candidata da NFS-e não existe")
+    if candidata.estado not in {"candidata", "validada"}:
+        raise ContratoNfseTransicaoInvalidaError(
+            "somente uma versão candidata ou validada pode ser descartada"
+        )
+    presos = (
+        IncidenteContratoNfse.query
+        .filter(IncidenteContratoNfse.contrato_candidato_id == candidata.id)
+        .with_for_update()
+        .all()
+    )
+    agora = agora or utcnow_naive()
+    for incidente in presos:
+        incidente.contrato_candidato_id = None
+        # Só o que ela prendeu volta a pedir decisão; incidente já resolvido por
+        # uma ativação anterior continua resolvido.
+        if incidente.estado == "configurado":
+            incidente.estado = "aberto"
+            incidente.resolvido_em = None
+            incidente.resolvido_por_id = None
+    candidata.estado = "arquivada"
+    candidata.validado_em = None
+    candidata.elegivel_automatico = False
+    candidata.erro_validacao = None
+    try:
+        db.session.commit()
+    except Exception as exc:
+        _persistencia_falhou("descartar_candidata_nfse", exc)
+    log_event("nfse_candidata_descartada", level="WARNING",
+              contrato_id=candidata.id, quantidade=len(presos))
+    auditoria.registrar(
+        "nfse.contrato.descartar", alvo_tipo="contrato_nfse", alvo_id=candidata.id,
+        detalhe=(f"contrato_id={candidata.id};usuario_id={usuario_id};"
+                 f"incidentes_reabertos={len(presos)}"),
+    )
+    return len(presos)
+
+
 def registrar_incidentes(contrato_id, resultado, *, agora=None):
     """Faz upsert por assinatura, preservando o primeiro instante observado."""
 
-    diferencas: Iterable[Diferenca] = getattr(resultado, "diferencas", resultado or ())
+    # `hasattr`, nunca `or`: tupla vazia de acionáveis é a resposta certa e o
+    # `or` cairia no fallback, registrando justamente o que se quer ignorar.
+    if hasattr(resultado, "diferencas_acionaveis"):
+        diferencas: Iterable[Diferenca] = resultado.diferencas_acionaveis
+    else:
+        diferencas = getattr(resultado, "diferencas", resultado or ())
     agora = agora or utcnow_naive()
+    contrato_id = contrato_base_de_incidentes(contrato_id)
     persistidos = []
     for diferenca in diferencas:
         if not isinstance(diferenca, Diferenca):
@@ -982,8 +1159,19 @@ def _campo_do_incidente(incidente, campos):
     return next((campo for campo in campos if campo.chave_semantica == chave), None)
 
 
+# Origens que NÃO tocam o controle. Para elas o executor deriva o adaptador da
+# própria origem e ignora a interação (`automation/nfse.py`), então exigir um
+# adaptador de DOM aqui barra uma decisão que não interage com nada.
+ORIGENS_SEM_INTERACAO = frozenset({"intocavel", "padrao_portal"})
+
+
 def _adaptador_observado(interacao):
+    # O mapa recebe DUAS famílias e precisa aceitar as duas: o tipo cru do DOM
+    # (`text`, `date`) e o adaptador que o inventário já derivou (`texto`), que
+    # é o que o incidente guarda. Faltava a identidade de `texto`, e por isso
+    # configurar qualquer campo de texto falhava.
     adaptadores = {
+        "texto": "texto",
         "text": "texto",
         "date": "texto",
         "number": "texto",
@@ -991,6 +1179,11 @@ def _adaptador_observado(interacao):
         "tel": "texto",
         "textarea": "textarea",
         "radio": "radio",
+        # Checkbox e o controle que só revela um bloco são clique, e o clique
+        # do portal é sempre por `input[name][value]` — nunca por id, que os
+        # grupos repetem entre as opções (`_marcar_radio`).
+        "checkbox": "radio",
+        "acao": "radio",
         "select": "select_direto",
         "select2": "select_busca",
         "select_direto": "select_direto",
@@ -1055,7 +1248,11 @@ def _novo_campo_do_incidente(incidente, origem, fonte, valor_fixo, ordem):
         seletor=_seletor_css_identidade(chave),
         rotulo=incidente.rotulo or chave,
         tipo=incidente.tipo_controle or "text",
-        interacao=_adaptador_observado(incidente.interacao or "text"),
+        interacao=(
+            origem
+            if origem in ORIGENS_SEM_INTERACAO
+            else _adaptador_observado(incidente.interacao or "text")
+        ),
         obrigatorio=bool(incidente.obrigatorio),
         ordem=ordem,
         origem=origem,
@@ -1319,7 +1516,12 @@ def configurar_incidente(
             )
         campos.remove(campo_alvo)
     elif campo_alvo is None:
+        # A posição na tela manda quando ela é conhecida: o portal passou a
+        # abrir a etapa com uma pergunta que libera o resto do formulário, e um
+        # campo novo empilhado no fim seria preenchido depois dos que destrava.
         proxima_ordem = max((campo.ordem for campo in campos), default=-1) + 1
+        if incidente.ordem_pagina is not None:
+            proxima_ordem = int(incidente.ordem_pagina)
         campo_alvo = _novo_campo_do_incidente(
             incidente, origem, fonte, valor_fixo, proxima_ordem
         )
@@ -1563,6 +1765,9 @@ def _resumo_incidente(incidente, recomendacao=None):
         "tipo": incidente.tipo,
         "severidade": incidente.severidade,
         "estado": incidente.estado,
+        # O desfazer da Central precisa saber qual candidata descartar; sem
+        # isto o botão nascia sem alvo e não fazia nada, em silêncio.
+        "contrato_candidato_id": incidente.contrato_candidato_id,
         "campo": campo,
         "observacoes": incidente.observacoes,
         "primeira_observacao_em": _data_iso(incidente.primeira_observacao_em),
@@ -1588,10 +1793,15 @@ def estado_painel():
         .order_by(ContratoNfse.versao.desc())
         .all()
     )
-    incidentes = (
+    # Só o que está pendente — o mesmo conjunto que fecha o gate do automático.
+    # Sem o filtro, incidente resolvido ou descartado fica na Central para
+    # sempre, e o painel deixa de dizer o que ainda precisa de decisão.
+    incidentes = _ordenar_por_tela(
         IncidenteContratoNfse.query
-        .filter(IncidenteContratoNfse.contrato_base_id == ativo.id)
-        .order_by(IncidenteContratoNfse.id.desc())
+        .filter(
+            IncidenteContratoNfse.contrato_base_id == ativo.id,
+            IncidenteContratoNfse.estado.in_(("aberto", "configurado")),
+        )
         .all()
     )
     recomendacoes = {
@@ -1640,8 +1850,7 @@ def detalhe_contrato(contrato_id):
         for campo in sorted(contrato.campos, key=lambda item: item.ordem)
     ]
     dados["incidentes"] = [
-        _resumo_incidente(item)
-        for item in sorted(contrato.incidentes, key=lambda item: item.id)
+        _resumo_incidente(item) for item in _ordenar_por_tela(contrato.incidentes)
     ]
     return dados
 
