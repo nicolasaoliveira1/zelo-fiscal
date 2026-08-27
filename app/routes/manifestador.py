@@ -78,7 +78,7 @@ def manifestador_painel():
 @bp.route('/manifestador/cofre')
 @requer_papel('operador')
 def manifestador_cofre_estado():
-    """Pre-voo: quantas empresas estao prontas e quantas nao.
+    """Pre-voo: quantas empresas estao prontas, quais nao, e o que vence.
 
     Le BANCO, nunca rede — a varredura do drive custa ~135 s e nao pode
     acontecer a cada carregamento da pagina."""
@@ -105,12 +105,29 @@ def manifestador_cofre_estado():
                               if certificado.verificado_em else None),
         })
 
+    # Os vencimentos vem do MESMO servico que alimenta o cartao da Visao Geral
+    # (`resumo_de_vencimento`), e nao de uma segunda contagem aqui: o cartao e a
+    # regua dizem a mesma frase porque leem a mesma fonte. Quem chega pelo
+    # cartao espera reencontrar exatamente aqueles nomes.
+    vencimento = manifestador_cofre.resumo_de_vencimento()
+
     return {
         'status': 'ok',
         'contagem': contagem,
         'prontas': contagem.get(EstadoCertificado.PRONTO, 0),
         'problemas': problemas,
         'inventariado': bool(contagem),
+        'vencimentos': {
+            'itens': [{
+                'empresa_id': item['empresa_id'],
+                'empresa_nome': item['empresa_nome'],
+                'not_after': item['not_after'].isoformat(),
+                'dias_restantes': item['dias_restantes'],
+                'causa': item['causa'],
+            } for item in vencimento['itens']],
+            'com_vencimento': vencimento['com_vencimento'],
+            'janela_dias': vencimento['janela_dias'],
+        },
     }
 
 

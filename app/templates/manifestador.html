@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_zelo.html" import zl_page %}
+{% from "_zelo.html" import zl_page, zl_secao %}
 {% block titulo %}Manifestador{% endblock %}
 
 {% block content %}
@@ -16,12 +16,15 @@
   </button>
   {% endcall %}
 
-  {# ── régua do cofre ─────────────────────────────────────────────────── #}
+  {# ── régua dos certificados ─────────────────────────────────────────────
+     A régua se CHAMA: sem o rótulo, quem chega pelo cartão de Certificados da
+     Visão Geral cai numa contagem de "empresas prontas" que não parece ter
+     nada a ver com o vencimento que ele veio ver. E a frase é montada em JS
+     (`linha_do_cofre`) porque muda de assunto conforme o dia — vencimento
+     quando há, pré-voo quando não há. #}
   <div class="manif-regua" id="manifRegua">
-    <span class="manif-regua-txt">
-      <strong class="manif-num" id="manifCofrePronto">—</strong> de
-      <strong class="manif-num" id="manifCofreTotal">—</strong> empresas prontas
-    </span>
+    <span class="manif-regua-rot">Certificados</span>
+    <span class="manif-regua-txt" id="manifCofreLinha">Lendo o cofre…</span>
     <div class="zl-comp-bar is-mini manif-regua-bar" id="manifCofreBarra" aria-hidden="true"></div>
     <span class="manif-st is-warn" id="manifCofreAviso" hidden></span>
     <button type="button" class="manif-regua-btn" id="manifCofreToggle"
@@ -32,6 +35,20 @@
 
   <section class="card border-0 shadow-sm rounded-3 mt-2 d-none" id="manifCofreDetalhe">
     <div class="card-body">
+      {#- Recado de quem chegou pela tela de uma empresa: se ela não aparece em
+          nenhuma das duas listas, o silêncio sozinho parece defeito. -#}
+      <p class="manif-cofre-foco text-secondary small mb-3" id="manifCofreFoco" hidden></p>
+
+      {#- VENCIMENTOS primeiro: é a pergunta que traz o operador até aqui, e a
+          lista reusa `.vg-lista`/`.vg-cert-*` do cartão da Visão Geral de
+          propósito — mesmo dado, mesma forma, para o reencontro ser imediato. -#}
+      {{ zl_secao('Vencimentos', 3) }}
+      <div class="vg-lista zl-ficha mb-4" id="manifCofreVencimentos"></div>
+
+      {#- PENDÊNCIAS: o que impede o certificado de ser usado, que é outra
+          pergunta — um certificado pode estar longe de vencer e mesmo assim
+          não abrir. -#}
+      {{ zl_secao('Pendências', 3) }}
       <div class="zl-comp-leg mt-0 mb-3" id="manifCofreLegenda"></div>
       <div class="table-responsive">
         <table class="table table-sm align-middle mb-2 manif-tbl">

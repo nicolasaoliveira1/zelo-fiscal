@@ -10,7 +10,9 @@ import {
   balanco_vazio as balancoVazio,
   chave_segmentada as chaveSegmentada,
   escapar_html as escapar,
+  linha_do_cofre as linhaDoCofre,
   somar_balanco as somarBalanco,
+  vazio_de_vencimentos as vazioDeVencimentos,
 } from './manifestador_dados.js';
 
 const $ = (id) => document.getElementById(id);
@@ -123,13 +125,34 @@ function pintarLegenda(elemento, partes) {
 
 // --- cofre ------------------------------------------------------------------
 
+/* `abrir` omitido alterna; explicito forca o estado, que e o que o link
+ * `?cofre=1` precisa — abrir a regua e diferente de "inverter o que estiver
+ * la", e simular um clique erraria se a regua ja estivesse aberta. */
+function alternarCofre(abrir) {
+  const detalhe = $('manifCofreDetalhe');
+  const aberto = abrir === undefined ? detalhe.classList.contains('d-none') : abrir;
+  detalhe.classList.toggle('d-none', !aberto);
+  const botao = $('manifCofreToggle');
+  botao.setAttribute('aria-expanded', String(aberto));
+  botao.innerHTML = `${aberto ? 'Fechar' : 'Abrir'} `
+    + `<i class="bi bi-chevron-${aberto ? 'up' : 'down'}" aria-hidden="true"></i>`;
+  return aberto;
+}
+
 async function carregarCofre() {
   const dados = await pedir('/manifestador/cofre');
   const contagem = dados.contagem || {};
   const total = Object.values(contagem).reduce((s, n) => s + n, 0);
 
-  $('manifCofrePronto').textContent = dados.prontas ?? 0;
-  $('manifCofreTotal').textContent = total;
+  const vencimentos = dados.vencimentos || {};
+  $('manifCofreLinha').innerHTML = linhaDoCofre({
+    inventariado: Boolean(dados.inventariado),
+    prontas: dados.prontas ?? 0,
+    total,
+    itens: vencimentos.itens || [],
+    com_vencimento: vencimentos.com_vencimento ?? 0,
+    janela_dias: vencimentos.janela_dias ?? 0,
+  });
 
   const partes = ORDEM_COFRE
     .filter((estado) => contagem[estado])
@@ -156,7 +179,70 @@ async function carregarCofre() {
     aviso.hidden = true;
   }
 
+  pintarVencimentos({
+    itens: vencimentos.itens || [],
+    com_vencimento: vencimentos.com_vencimento ?? 0,
+    janela_dias: vencimentos.janela_dias ?? 0,
+    inventariado: Boolean(dados.inventariado),
+  });
   pintarPendencias(dados.problemas || []);
+  destacarEmpresaEmFoco();
+}
+
+/* Mesma forma do cartao da Visao Geral (`.vg-lista`/`.vg-cert-*`), de proposito:
+ * quem chegou de la reencontra os mesmos nomes na mesma ordem e no mesmo
+ * desenho. Fork de estilo aqui obrigaria a manter duas listas do mesmo dado. */
+function pintarVencimentos({ itens, com_vencimento, janela_dias, inventariado }) {
+  const caixa = $('manifCofreVencimentos');
+  if (!itens.length) {
+    /* Lista vazia nao e sinonimo de "nada vencendo": sem inventario, e sem
+     * nenhum `not_after` conhecido, o sistema nao sabe. Quem decide a frase e
+     * `vazio_de_vencimentos`, a mesma leitura do cartao da Visao Geral. */
+    const vazio = vazioDeVencimentos({ inventariado, com_vencimento, janela_dias });
+    caixa.innerHTML = `<p class="${vazio.classe}"><i class="bi bi-${vazio.icone}"></i> `
+      + `${escapar(vazio.texto)}</p>`;
+    return;
+  }
+  caixa.innerHTML = itens.map((item) => {
+    const vencido = item.causa === 'vencido';
+    const quando = vencido ? 'vencido' : `vence em ${item.dias_restantes} dias`;
+    const dia = item.not_after.slice(8, 10);
+    const mes = item.not_after.slice(5, 7);
+    return `<div class="zl-ficha-row" data-empresa="${item.empresa_id}">
+      <span class="zl-ficha-l">
+        <span class="vg-cert-quando cert-status-${vencido ? 'danger' : 'warn'}">${quando}</span>
+        <span class="vg-cert-nome" title="${escapar(item.empresa_nome)}"
+              >${escapar(item.empresa_nome)}</span>
+      </span>
+      <span class="zl-ficha-v">${dia}/${mes}</span>
+    </div>`;
+  }).join('');
+}
+
+/* Quem veio da tela de UMA empresa perguntou por ela, nao pela carteira. Se ela
+ * aparece, a linha e destacada; se nao aparece, o silencio e explicado — sem
+ * isso, "nao achei nada" e indistinguivel de "a tela nao funcionou". */
+function destacarEmpresaEmFoco() {
+  const foco = Number(new URLSearchParams(window.location.search).get('empresa'));
+  const recado = $('manifCofreFoco');
+  if (!foco) {
+    recado.hidden = true;
+    return;
+  }
+
+  /* As DUAS listas: a empresa pode estar vencendo, pode estar sem senha, e pode
+   * estar nas duas — sao perguntas diferentes sobre o mesmo certificado. */
+  const achadas = [...document.querySelectorAll(
+    `#manifCofreVencimentos [data-empresa="${foco}"], `
+    + `#manifCofreLista [data-empresa="${foco}"]`)];
+  achadas.forEach((linha) => linha.classList.add('is-foco'));
+
+  const nome = empresas.find((e) => e.id === foco)?.nome || 'Esta empresa';
+  recado.hidden = false;
+  recado.textContent = achadas.length
+    ? `${nome}: destacada abaixo.`
+    : `${nome} não tem pendência nem vencimento próximo no cofre.`;
+  achadas[0]?.scrollIntoView({ block: 'nearest' });
 }
 
 function pintarPendencias(problemas) {
@@ -177,7 +263,7 @@ function pintarPendencias(problemas) {
          </button>`
       : `<span class="manif-st is-${COR_COFRE[p.estado] || 'muted'}">
            ${escapar(ROTULO_COFRE[p.estado] || p.estado)}</span>`;
-    return `<tr>
+    return `<tr data-empresa="${p.empresa_id}">
       <td class="manif-emp">${escapar(p.empresa)}</td>
       <td class="manif-motivo">${escapar(p.detalhe || p.caminho || '')}</td>
       <td class="text-end">${acao}</td>
@@ -319,7 +405,7 @@ async function manifestar() {
   } catch (erro) {
     if (erro.dados?.motivo === 'cofre_vazio') {
       toast(erro.message, 'warning');
-      $('manifCofreToggle').click();
+      alternarCofre(true);
       return;
     }
     toast(erro.message, 'error');
@@ -588,13 +674,7 @@ async function importarXml() {
 // --- ligação ----------------------------------------------------------------
 
 function ligar() {
-  $('manifCofreToggle').addEventListener('click', (e) => {
-    const detalhe = $('manifCofreDetalhe');
-    const aberto = detalhe.classList.toggle('d-none') === false;
-    e.currentTarget.setAttribute('aria-expanded', String(aberto));
-    e.currentTarget.innerHTML = `${aberto ? 'Fechar' : 'Abrir'} `
-      + `<i class="bi bi-chevron-${aberto ? 'up' : 'down'}" aria-hidden="true"></i>`;
-  });
+  $('manifCofreToggle').addEventListener('click', () => alternarCofre());
 
   $('manifCofreLista').addEventListener('click', async (e) => {
     const botao = e.target.closest('[data-senha]');
@@ -706,6 +786,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   ligar();
   carregarEmpresas();
   await Promise.all([carregarCofre(), carregarChaves()]);
+  /* Porta nomeada do cartao de Certificados da Visao Geral: quem clica em
+   * "Abrir Certificados" chega com a regua ja aberta, senao cairia numa tela
+   * de fila com o que ele veio ver escondido atras de mais um clique. */
+  if (new URLSearchParams(window.location.search).get('cofre')) {
+    alternarCofre(true);
+    $('manifRegua').scrollIntoView({ block: 'start' });
+  }
   const { lote } = await pedir('/manifestador/lote/status').catch(() => ({ lote: {} }));
   if (['running', 'paused'].includes(lote?.status)) {
     $('manifAndamento').classList.remove('d-none');

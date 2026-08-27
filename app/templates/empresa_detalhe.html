@@ -20,6 +20,19 @@
             aria-label="Abrir pasta de certidões da empresa {{ empresa.nome }}">
             <i class="bi bi-folder2-open me-1"></i>Abrir pasta
         </button>
+        {#- Gate pelo papel da tela de DESTINO: `/manifestador` e `operador`, e um
+            botao que so leva a 403 e pior que botao nenhum. -#}
+        {% if current_user.papel in ['operador', 'admin'] %}
+        {#- O cofre e da carteira inteira, mas a pergunta nasce aqui: "o
+            certificado DESTA empresa esta em dia?". O `empresa` faz a regua
+            destacar a linha dela — e dizer que nao ha nenhuma, quando nao ha,
+            em vez de deixar o operador procurar num silencio ambiguo. -#}
+        <a class="btn btn-ghost"
+           href="{{ url_for('main.manifestador_painel', cofre=1, empresa=empresa.id) }}"
+           aria-label="Ver o certificado A1 de {{ empresa.nome }} no cofre">
+            <i class="bi bi-patch-check me-1"></i>Certificado A1
+        </a>
+        {% endif %}
         <a class="btn btn-outline-secondary" href="{{ url_for('main.empresas') }}" aria-label="Voltar para lista de empresas">Voltar</a>
         <a class="btn btn-success" href="{{ url_for('main.nova_empresa') }}" aria-label="Cadastrar nova empresa">Nova Empresa</a>
     </div>

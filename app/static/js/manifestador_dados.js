@@ -112,3 +112,122 @@ export function agrupar_arquivos_xml(lista) {
   });
   return grupos;
 }
+
+/**
+ * Item de vencimento vindo de `/manifestador/cofre`.
+ *
+ * @typedef {Object} ItemVencimento
+ * @property {number} empresa_id
+ * @property {string} empresa_nome
+ * @property {string} not_after
+ * @property {number} dias_restantes
+ * @property {'vencido'|'vencendo'} causa
+ */
+
+/**
+ * A frase da régua do cofre, em HTML.
+ *
+ * A régua tem UMA linha e responde à pergunta do dia. Nos dias em que há
+ * certificado vencido ou vencendo, a pergunta é essa — é o que o operador veio
+ * ver quando chegou pelo cartão da Visão Geral, que fala de vencimento. Nos
+ * dias calmos ela volta ao pré-voo ("N de M empresas prontas"), que é o que a
+ * régua sempre disse e o que a manifestação de fato exige.
+ *
+ * Os dois números NUNCA saem da mesma população, e por isso nunca aparecem
+ * juntos: `prontas/total` conta empresas com certificado cadastrado, e
+ * `vencendo/com_vencimento` conta só aquelas cujo vencimento é CONHECIDO. Somar
+ * as duas leituras numa frase só transformaria "não sei" em "está em dia" — o
+ * erro que o cartão da Visão Geral evita de propósito.
+ *
+ * Devolve HTML porque os números vão em `.manif-num`; só inteiros entram nele,
+ * nunca texto de origem externa.
+ *
+ * @param {Object} estado
+ * @param {boolean} estado.inventariado
+ * @param {number} estado.prontas
+ * @param {number} estado.total  empresas com certificado cadastrado
+ * @param {ItemVencimento[]} estado.itens
+ * @param {number} estado.com_vencimento
+ * @param {number} estado.janela_dias
+ * @returns {string}
+ */
+export function linha_do_cofre({
+  inventariado, prontas, total, itens, com_vencimento, janela_dias,
+}) {
+  const num = (/** @type {number} */ valor) => `<strong class="manif-num">${Number(valor) || 0}</strong>`;
+
+  /* Cofre nunca inventariado não é "0 vencendo": é não saber. A régua diz isso
+   * com todas as letras em vez de exibir um zero tranquilizador. */
+  if (!inventariado) return 'Cofre nunca inventariado';
+
+  const lista = Array.isArray(itens) ? itens : [];
+  const vencidos = lista.filter((item) => item.causa === 'vencido').length;
+  const vencendo = lista.length - vencidos;
+
+  /* Vencido e vencendo são estados diferentes com ações diferentes — o primeiro
+   * já parou a manifestação daquela empresa, o segundo ainda dá tempo. Quando
+   * os dois existem, os dois são ditos; o denominador sai de cena porque a
+   * frase já carrega dois números e um terceiro só a embaralha. */
+  if (vencidos && vencendo) {
+    return `${num(vencidos)} ${vencidos === 1 ? 'vencido' : 'vencidos'} e `
+      + `${num(vencendo)} vencendo em ${janela_dias} dias`;
+  }
+  if (vencidos) {
+    return `${num(vencidos)} de ${num(com_vencimento)} `
+      + `${vencidos === 1 ? 'certificado vencido' : 'certificados vencidos'}`;
+  }
+  if (vencendo) {
+    return `${num(vencendo)} de ${num(com_vencimento)} `
+      + `${vencendo === 1 ? 'vence' : 'vencem'} em ${janela_dias} dias`;
+  }
+
+  return `${num(prontas)} de ${num(total)} empresas prontas`;
+}
+
+/**
+ * O estado vazio da lista de vencimentos do cofre.
+ *
+ * Lista vazia tem TRÊS causas, e só uma delas é boa notícia. Sem inventário não
+ * se sabe nada; com inventário mas sem nenhum `not_after` conhecido também não —
+ * `sem_arquivo` e `sem_pasta` não estão "sem vencer". Dizer "nenhum vence nos
+ * próximos N dias" nesses dois casos transforma desconhecido em alívio, que é
+ * exatamente o que o cartão da Visão Geral evita de propósito (e com as mesmas
+ * palavras: as duas telas falam do mesmo dado).
+ *
+ * @param {Object} estado
+ * @param {boolean} estado.inventariado
+ * @param {number} estado.com_vencimento  certificados com vencimento CONHECIDO
+ * @param {number} estado.janela_dias
+ * @returns {{ classe: string, icone: string, texto: string }}
+ */
+export function vazio_de_vencimentos({ inventariado, com_vencimento, janela_dias }) {
+  const conhecidos = Number(com_vencimento) || 0;
+  const dias = Number(janela_dias) || 0;
+
+  if (!inventariado) {
+    return {
+      classe: 'vg-falha',
+      icone: 'question-circle',
+      texto: 'O cofre ainda não foi inventariado — não sei quais certificados vencem.',
+    };
+  }
+  if (conhecidos === 0) {
+    return {
+      classe: 'vg-falha',
+      icone: 'question-circle',
+      texto: 'Nenhum certificado tem vencimento conhecido.',
+    };
+  }
+  if (conhecidos === 1) {
+    return {
+      classe: 'vg-vazio mb-0',
+      icone: 'check2',
+      texto: `O único certificado com vencimento conhecido não vence nos próximos ${dias} dias.`,
+    };
+  }
+  return {
+    classe: 'vg-vazio mb-0',
+    icone: 'check2',
+    texto: `Nenhum dos ${conhecidos} certificados vence nos próximos ${dias} dias.`,
+  };
+}

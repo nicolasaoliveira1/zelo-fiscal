@@ -3053,8 +3053,29 @@ tr.filter-hidden {
     font-size: var(--zl-fs-2);
 }
 
+/* A regua se NOMEIA. Sem isto, quem chega pelo cartao de Certificados da Visao
+   Geral encontra uma contagem solta e nao liga uma coisa a outra. Peso e tinta,
+   nenhuma cor: a unica cor e o status. */
+.manif-regua-rot {
+    font-weight: 600;
+    color: var(--bs-emphasis-color);
+}
+
 .manif-regua-bar {
     width: 11rem;
+}
+
+/* Linha da empresa que o operador pediu ao vir de `empresa_detalhe`. E um
+   PONTEIRO, nao um status — por isso a barra usa a tinta de enfase e nao um
+   token de status, que aqui mentiria sobre a saude do certificado. */
+.zl-ficha-row.is-foco,
+.manif-tbl tr.is-foco > td {
+    background: var(--zelo-mist);
+}
+
+.zl-ficha-row.is-foco,
+.manif-tbl tr.is-foco > td:first-child {
+    box-shadow: inset 2px 0 0 var(--bs-emphasis-color);
 }
 
 .manif-regua-btn {
