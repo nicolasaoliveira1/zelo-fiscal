@@ -851,14 +851,19 @@ def _valor_busca_contrato(campo, valor):
 def _marcar_radio_contrato(driver, campo, valor):
     if campo.seletor_tipo == 'name':
         return _marcar_radio(driver, campo.seletor, valor)
-    try:
-        elementos = driver.find_elements(
-            {
-                'id': By.ID,
-                'css': By.CSS_SELECTOR,
-            }.get(campo.seletor_tipo, By.CSS_SELECTOR),
-            campo.seletor,
+    # Seletor fora do conjunto aprovado e recusado, nunca adivinhado: cair em
+    # CSS por omissao faria o clique procurar o grupo por uma sintaxe que nao e
+    # a dele, e um clique errado em documento fiscal nao tem rollback.
+    by = {
+        'id': By.ID,
+        'css': By.CSS_SELECTOR,
+    }.get(campo.seletor_tipo)
+    if by is None:
+        raise ContratoNfseIncompativelError(
+            f'O seletor do campo "{campo.chave_semantica}" não é aprovado.'
         )
+    try:
+        elementos = driver.find_elements(by, campo.seletor)
     except WebDriverException as exc:
         raise ContratoNfseIncompativelError(
             f'O grupo "{campo.chave_semantica}" não pôde ser localizado.'

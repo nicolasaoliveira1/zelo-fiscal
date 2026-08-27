@@ -1267,12 +1267,21 @@ _LIMITE_CHAVE_SELETOR = (_LARGURA_SELETOR - 17) // 2
 
 def _seletor_css_identidade(chave):
     chave = str(chave or "")
-    if not chave or len(chave) > _LIMITE_CHAVE_SELETOR:
+    if not chave:
         raise ConfiguracaoContratoInvalidaError(
             "o controle observado não possui identidade estável"
         )
     escapada = chave.replace("\\", "\\\\").replace('"', '\\"')
-    return f'[name="{escapada}"], [id="{escapada}"]'
+    seletor = f'[name="{escapada}"], [id="{escapada}"]'
+    # A medida e do seletor JA ESCAPADO, nao da chave crua: a barra e a aspa
+    # dobram de tamanho ao escapar, entao uma chave dentro do limite pode virar
+    # um seletor fora dele. Estourar aqui e o caso da licao 3 (o SQLite aceita,
+    # o MySQL levanta DataError em producao).
+    if len(seletor) > _LARGURA_SELETOR:
+        raise ConfiguracaoContratoInvalidaError(
+            "o controle observado não possui identidade estável"
+        )
+    return seletor
 
 
 def _substituir_opcoes(campo, incidente):
@@ -1730,13 +1739,17 @@ def ativar(contrato_id, usuario_id=None, *, agora=None):
         raise ContratoNfseTransicaoInvalidaError(
             "a versão precisa ser validada antes da ativação"
         )
-    ativo = (
+    # `.all()`, nao `.first()`: se por qualquer motivo houver mais de uma ativa,
+    # arquivar so a primeira deixaria a duplicidade viva e silenciosa. A base da
+    # candidata continua sendo a de maior versao.
+    ativos = (
         ContratoNfse.query
         .filter(ContratoNfse.estado == "ativa")
         .order_by(ContratoNfse.versao.desc())
         .with_for_update()
-        .first()
+        .all()
     )
+    ativo = ativos[0] if ativos else None
     if ativo is None:
         raise ContratoNfseTransicaoInvalidaError(
             "não há versão ativa para validar a base da candidata"
@@ -1769,13 +1782,19 @@ def ativar(contrato_id, usuario_id=None, *, agora=None):
             "a candidata não cobre todos os incidentes pendentes da versão ativa"
         )
     agora = agora or utcnow_naive()
-    ativo.estado = "arquivada"
+    for anterior in ativos:
+        anterior.estado = "arquivada"
     outras = ContratoNfse.query.filter(
         ContratoNfse.id != candidato.id,
         ContratoNfse.estado.in_(("candidata", "validada")),
     ).all()
     for outra in outras:
         outra.estado = "arquivada"
+    # O arquivamento vai ao banco ANTES da promocao: a constraint
+    # `uq_contrato_nfse_ativa` so admite uma linha com a sentinela preenchida,
+    # e sem este flush a ordem dos UPDATEs dentro da transacao decidiria se a
+    # ativacao passa ou esbarra na propria antecessora.
+    db.session.flush()
     candidato.estado = "ativa"
     candidato.ativado_em = agora
     candidato.ativado_por_id = usuario_id

@@ -537,6 +537,24 @@ def test_campo_adicional_desconhecido_ou_dependencia_ausente_bloqueia(driver):
     assert driver.tocados() == set()
 
 
+def test_radio_com_seletor_nao_aprovado_e_recusado(driver):
+    """O grupo de radio seguia a mesma regra dos demais adaptadores só por
+    coincidência: `seletor_tipo` fora do conjunto caía em CSS por omissão, em
+    vez de recusar. Clique errado em documento fiscal não tem rollback, e a
+    coluna é `String(20)` sem `CHECK` — nada além deste guarda impede um valor
+    novo chegar aqui."""
+
+    regra = _regra_sintetica(
+        chave_semantica='campo.radio', seletor_tipo='xpath',
+        seletor='//input[@name="GrupoSintetico"]', interacao='radio',
+        origem='fixo', fonte=None, valor_fixo='1',
+    )
+
+    with pytest.raises(nfse.ContratoNfseIncompativelError):
+        nfse.aplicar_campos_adicionais(driver, [regra], {'campo.radio': '1'})
+    assert driver.tocados() == set()
+
+
 def test_espera_o_portal_carregar_o_emitente_antes_de_seguir(driver):
     """O emitente so aparece depois que a data perde o foco; seguir antes disso
     encontra os campos ainda travados."""

@@ -585,6 +585,14 @@ def test_limite_da_chave_sai_da_largura_da_coluna(app, ids):
     with pytest.raises(nfse_contrato.ConfiguracaoContratoInvalidaError):
         nfse_contrato._seletor_css_identidade("c" * (limite + 1))
 
+    # A conta do limite vale para chave sem caractere que escapa. Aspa e barra
+    # DOBRAM ao escapar: uma chave dentro do limite pode gerar seletor fora
+    # dele, e quem tem de recusar e a medida do seletor pronto.
+    com_aspas = 'c' * (limite - 4) + '""""'
+    assert len(com_aspas) <= limite
+    with pytest.raises(nfse_contrato.ConfiguracaoContratoInvalidaError):
+        nfse_contrato._seletor_css_identidade(com_aspas)
+
 
 def test_tipo_e_interacao_do_incidente_cabem_na_coluna(app, ids):
     """`tipo_controle` e `interacao` são String(30)."""
@@ -660,3 +668,56 @@ def test_campo_novo_entra_no_fim_da_propria_etapa_sem_colidir(app, ids):
             for campo in candidata.campos
             if campo.etapa == 'pessoas' and campo.chave_semantica != 'Campo.Ordem'
         )
+
+
+def test_segunda_versao_ativa_esbarra_no_banco(app, ids):
+    """O invariante "só uma ativa" agora é do banco, não só do serviço.
+
+    O `with_for_update()` de `ativar()` é no-op no SQLite — o dialeto descarta
+    `FOR UPDATE` em silêncio — e SQLite é o padrão quando `DATABASE_URL` não
+    está definida. A sentinela `ativa_unica` faz a segunda ativa esbarrar na
+    constraint em qualquer um dos dois bancos.
+    """
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models import ContratoNfse
+
+    with app.app_context():
+        ativo = nfse_contrato.garantir_contrato_inicial()
+        assert ativo.estado == 'ativa'
+
+        intrusa = ContratoNfse(
+            versao=ativo.versao + 1,
+            estado='ativa',
+            fingerprint='f' * 64,
+        )
+        db.session.add(intrusa)
+        with pytest.raises(IntegrityError):
+            db.session.commit()
+        db.session.rollback()
+
+
+def test_sentinela_acompanha_o_estado_sem_o_chamador_saber(app, ids):
+    """Quem mantém a coluna é o listener: nenhum write de `estado` precisa
+    lembrar de atualizar duas colunas, e é por isso que ela não vaza para os
+    serviços."""
+
+    from app.models import ContratoNfse
+
+    with app.app_context():
+        contrato = nfse_contrato.garantir_contrato_inicial()
+        assert contrato.ativa_unica == 1
+
+        contrato.estado = 'arquivada'
+        db.session.commit()
+        db.session.refresh(contrato)
+        assert contrato.ativa_unica is None
+
+        outra = ContratoNfse(
+            versao=contrato.versao + 1, estado='ativa', fingerprint='a' * 64,
+        )
+        db.session.add(outra)
+        db.session.commit()
+        db.session.refresh(outra)
+        assert outra.ativa_unica == 1
