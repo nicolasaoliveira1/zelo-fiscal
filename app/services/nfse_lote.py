@@ -21,6 +21,7 @@ de proposito: o dono do navegador e a `NfseSession`, e deixar o motor
 """
 import time
 from datetime import date, datetime
+from threading import Lock
 from decimal import Decimal, InvalidOperation
 
 from app import db
@@ -279,6 +280,7 @@ def _registrar_validacao_candidata(nota_id, contrato_id, execution_id):
         # vive no CONTRATO, que sobrevive a nota e aparece na Central.
         valores_sensiveis=(documento, str(valor), descricao),
     )
+    _publicar_validacao(contrato_id, nota_id, resultado)
     if resultado:
         _capturar_revisao_da_validacao(contrato_id, nota_id, execution_id)
     log_event(
@@ -292,6 +294,42 @@ def _registrar_validacao_candidata(nota_id, contrato_id, execution_id):
         execution_id=execution_id,
     )
     return resultado
+
+
+# Desfecho da ultima validacao, para o status poder contar enquanto o navegador
+# ainda esta aberto. Fica FORA de NFSE_BATCH_STATE pelo mesmo motivo das opcoes:
+# `init_batch_run` chama `reset_batch_state` e apagaria isto.
+_VALIDACAO_LOCK = Lock()
+_ULTIMA_VALIDACAO = {}
+
+
+def _publicar_validacao(contrato_id, nota_id, resultado):
+    """Publica o desfecho ASSIM QUE ele existe, não no fim do lote.
+
+    A validação acontece logo depois do preenchimento e antes da espera pelo
+    operador — ela nunca dependeu de emitir. Só que o resultado ficava invisível
+    até alguém recarregar a Central, e o operador, na dúvida, emitia uma nota de
+    verdade para "fechar" a validação. Documento fiscal não é ferramenta de
+    diagnóstico.
+    """
+    with _VALIDACAO_LOCK:
+        _ULTIMA_VALIDACAO.clear()
+        _ULTIMA_VALIDACAO.update({
+            'contrato_id': contrato_id,
+            'nota_id': nota_id,
+            'divergencias': list(resultado or ()),
+            'aprovada': not resultado,
+        })
+
+
+def validacao_em_curso():
+    with _VALIDACAO_LOCK:
+        return dict(_ULTIMA_VALIDACAO) if _ULTIMA_VALIDACAO else None
+
+
+def limpar_validacao_publicada():
+    with _VALIDACAO_LOCK:
+        _ULTIMA_VALIDACAO.clear()
 
 
 def _capturar_revisao_da_validacao(contrato_id, nota_id, execution_id):
@@ -468,6 +506,22 @@ def _esperar_e_registrar(nota_id, opcoes, execution_id):
         # fechar, e marcar qualquer um dos dois lados por conta propria erra
         # feio — ou perde uma nota emitida, ou emite de novo mes que vem.
         batch_engine.marcar_resultado_pendente(NFSE_BATCH_STATE, NFSE_BATCH_LOCK)
+        validacao = validacao_em_curso()
+        if opcoes.get('validacao_contrato_id') and validacao is not None:
+            # Numa VALIDACAO fechar sem emitir e o desfecho previsto, nao um
+            # acidente: a prova que interessa e a tela de revisao, e ela ja foi
+            # conferida antes desta espera. Marcar GRAVE_FATAL aqui pausava o
+            # lote e mandava o operador "marcar como emitida" uma nota que ele
+            # deliberadamente nao emitiu — foi o que o levou a emitir de verdade
+            # so para encerrar a validacao.
+            veredito = (
+                'sem divergencias' if validacao['aprovada']
+                else f"{len(validacao['divergencias'])} divergencia(s)"
+            )
+            return False, None, (
+                f'Validacao concluida ({veredito}). A nota {nota_id} ficou '
+                'preenchida e nao emitida — use "Nao emiti" na lista para '
+                'devolve-la a fila.')
         return False, batch_engine.GRAVE_FATAL, (
             f'O navegador foi fechado com a nota {nota_id} na tela de revisao. '
             'Se voce chegou a emitir, marque a linha como emitida na lista.')
@@ -596,4 +650,5 @@ def status():
     # `tem_driver`, nao `driver_vivo()`: este payload e consultado de 2 em 2
     # segundos e nao pode custar uma ida ao chromedriver (ver `tem_driver`).
     dados['sessao_ativa'] = SESSAO.tem_driver
+    dados['validacao'] = validacao_em_curso()
     return dados

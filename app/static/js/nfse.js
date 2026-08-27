@@ -999,7 +999,7 @@ function pintarLote(lote) {
   if (rotulo) rotulo.textContent = ROTULO_LOTE[lote.status] || lote.status;
 
   const mensagem = document.getElementById('nfseProgressoMensagem');
-  if (mensagem) mensagem.textContent = lote.message || '';
+  if (mensagem) mensagem.textContent = textoDoProgresso(lote);
 
   destacarNotaAtual(lote.nota_id, rodando);
 
@@ -1010,8 +1010,24 @@ function pintarLote(lote) {
   });
 }
 
+function textoDoProgresso(lote) {
+  // O veredito da validação aparece ENQUANTO o navegador ainda está aberto. Ele
+  // é registrado logo depois do preenchimento e nunca dependeu de emitir — mas
+  // ficava invisível até alguém recarregar a Central, e na dúvida o operador
+  // emitia uma nota de verdade só para "fechar" a validação.
+  const v = lote.validacao;
+  if (v && lote.status === 'running') {
+    return v.aprovada
+      ? 'Contrato validado: a revisão conferiu sem divergências. '
+        + 'Você pode emitir, ou fechar o navegador sem emitir.'
+      : `Contrato reprovado: ${v.divergencias.length} divergência(s). `
+        + 'Não emita — feche o navegador e veja os motivos na Central.';
+  }
+  return lote.message || '';
+}
+
 const ROTULO_LOTE = {
-  running: 'Aguardando você conferir e emitir no navegador',
+  running: 'Aguardando você conferir no navegador',
   paused: 'Pausado nesta nota',
   stopped: 'Interrompido',
   completed: 'Concluído',

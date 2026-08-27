@@ -490,6 +490,10 @@ def nfse_contrato_validar(contrato_id):
         validacao_contrato_id=contrato_id,
     )
     nfse_lote.preparar_nova_fila()
+    # Veredito da validação anterior não pode sobreviver à nova: o painel o
+    # mostra em tempo real, e um resultado velho ali diria "validado" sobre uma
+    # execução que ainda nem preencheu.
+    nfse_lote.limpar_validacao_publicada()
     try:
         dados_lote = batch_engine.init_batch_run(
             NFSE_BATCH_LOCK,

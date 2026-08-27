@@ -911,3 +911,85 @@ def test_modos_assistidos_nunca_emitem_sozinhos(fila, monkeypatch, modo):
 
     assert not automacao.emitir.called
     assert not automacao.conferir_revisao.called
+
+
+# --- validar sem precisar emitir --------------------------------------------
+
+def test_validacao_e_registrada_antes_da_espera_pelo_operador(monkeypatch):
+    """A validação nunca dependeu de emitir: ela roda logo depois do
+    preenchimento e antes da espera. O teste fixa essa ordem, que é o que
+    permite ao operador fechar o navegador sem emitir."""
+
+    ordem = []
+    monkeypatch.setattr(
+        nfse_lote, '_registrar_validacao_candidata',
+        lambda *a, **k: ordem.append('validou'))
+    monkeypatch.setattr(
+        nfse_lote, '_esperar_e_registrar',
+        lambda *a, **k: (ordem.append('esperou'), (True, None, 'ok'))[1])
+    monkeypatch.setattr(
+        nfse_lote, '_ja_esta_na_revisao', lambda _id: False)
+    monkeypatch.setattr(
+        nfse_lote.nfse_service, 'preencher_nota',
+        lambda *a, **k: {'status': 'aguardando_confirmacao'})
+    monkeypatch.setattr(
+        nfse_lote, 'nfse_batch_opcoes',
+        lambda: {'modo': 'individual', 'ignorar_aliquota': True,
+                 'contrato_id': 7, 'validacao_contrato_id': 7})
+
+    nfse_lote._emitir_nota(1, None, 'execucao-sintetica')
+
+    assert ordem == ['validou', 'esperou']
+
+
+def test_fechar_a_janela_numa_validacao_nao_e_desfecho_grave(banco, monkeypatch):
+    """Fechar sem emitir é o desfecho previsto de uma validação. Marcar
+    GRAVE_FATAL pausava o lote e mandava "marcar como emitida" uma nota que o
+    operador deliberadamente não emitiu."""
+
+    monkeypatch.setattr(nfse_lote, 'aguardar_confirmacao',
+                        lambda _d: nfse_lote.JANELA_FECHADA)
+    monkeypatch.setattr(nfse_lote.batch_engine, 'marcar_resultado_pendente',
+                        lambda *a, **k: None)
+    nota = _nota(StatusNotaNfse.AGUARDANDO_CONFIRMACAO)
+    nfse_lote._publicar_validacao(7, nota.id, [])
+
+    sucesso, grave, mensagem = nfse_lote._esperar_e_registrar(
+        nota.id, {'modo': 'individual', 'validacao_contrato_id': 7},
+        'execucao-sintetica',
+    )
+
+    assert sucesso is False
+    assert grave is None
+    assert 'Validacao concluida' in mensagem
+    assert 'sem divergencias' in mensagem
+    nfse_lote.limpar_validacao_publicada()
+
+
+def test_fora_da_validacao_a_janela_fechada_continua_grave(banco, monkeypatch):
+    """Numa emissão de verdade a incerteza da ND-011 continua valendo."""
+
+    monkeypatch.setattr(nfse_lote, 'aguardar_confirmacao',
+                        lambda _d: nfse_lote.JANELA_FECHADA)
+    monkeypatch.setattr(nfse_lote.batch_engine, 'marcar_resultado_pendente',
+                        lambda *a, **k: None)
+    nfse_lote.limpar_validacao_publicada()
+    nota = _nota(StatusNotaNfse.AGUARDANDO_CONFIRMACAO)
+
+    _sucesso, grave, mensagem = nfse_lote._esperar_e_registrar(
+        nota.id, {'modo': 'individual'}, 'execucao-sintetica',
+    )
+
+    assert grave is nfse_lote.batch_engine.GRAVE_FATAL
+    assert 'marque a linha como emitida' in mensagem
+
+
+def test_status_publica_o_veredito_da_validacao():
+    nfse_lote._publicar_validacao(7, 1, ['uma divergencia sintetica'])
+    try:
+        publicado = nfse_lote.validacao_em_curso()
+        assert publicado['aprovada'] is False
+        assert publicado['contrato_id'] == 7
+    finally:
+        nfse_lote.limpar_validacao_publicada()
+    assert nfse_lote.validacao_em_curso() is None
