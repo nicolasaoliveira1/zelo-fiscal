@@ -114,6 +114,32 @@ def _achados_do_texto(texto: str) -> list[tuple[int, str, str]]:
     return achados
 
 
+def _blobs_do_indice() -> list[tuple[str, str]]:
+    """Conteúdo EM ÍNDICE dos arquivos staged, como (caminho, texto).
+
+    O que vai no commit é o índice, não a árvore de trabalho: editar o arquivo
+    depois do `git add` faria a verificação aprovar bytes que não serão gravados.
+    """
+
+    nomes = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "-z", "--diff-filter=ACM"],
+        capture_output=True,
+        check=True,
+    ).stdout.split(b"\0")
+    conteudos: list[tuple[str, str]] = []
+    for bruto in nomes:
+        if not bruto:
+            continue
+        caminho = bruto.decode("utf-8", "surrogateescape")
+        if Path(caminho).suffix.lower() not in EXTENSOES:
+            continue
+        blob = subprocess.run(["git", "show", f":{caminho}"], capture_output=True)
+        if blob.returncode != 0:
+            continue
+        conteudos.append((caminho, blob.stdout.decode("utf-8", "ignore")))
+    return conteudos
+
+
 def _arquivos_versionados() -> list[Path]:
     saida = subprocess.run(
         ["git", "ls-files"], capture_output=True, text=True, check=True
@@ -136,13 +162,36 @@ def verificar(caminhos: list[Path]) -> int:
             problemas += 1
             print(f"{caminho}:{numero_linha}: {tipo} com DV valido fora da lista sintetica: {valor}")
     if problemas:
-        print()
-        print(f"{problemas} ocorrencia(s). O repositorio e publico e o historico do git nao esquece.")
-        print("Use documento inventado com DV valido e registre-o em DOCUMENTOS_SINTETICOS.")
+        _resumo(problemas)
+    return 1 if problemas else 0
+
+
+def _resumo(problemas: int) -> None:
+    print()
+    print(
+        f"{problemas} ocorrencia(s). O repositorio e publico e o historico do "
+        f"git nao esquece."
+    )
+    print("Use documento inventado com DV valido e registre-o em DOCUMENTOS_SINTETICOS.")
+
+
+def verificar_staged() -> int:
+    problemas = 0
+    for caminho, texto in _blobs_do_indice():
+        for numero_linha, tipo, valor in _achados_do_texto(texto):
+            problemas += 1
+            print(
+                f"{caminho}:{numero_linha}: {tipo} com DV valido fora da lista "
+                f"sintetica: {valor}"
+            )
+    if problemas:
+        _resumo(problemas)
     return 1 if problemas else 0
 
 
 def main(argv: list[str]) -> int:
+    if "--staged" in argv[1:]:
+        return verificar_staged()
     caminhos = [Path(a) for a in argv[1:]] or _arquivos_versionados()
     return verificar(caminhos)
 
