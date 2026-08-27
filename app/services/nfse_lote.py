@@ -25,6 +25,8 @@ from decimal import Decimal, InvalidOperation
 
 from app import db
 from app.automation import nfse as automacao
+from app.automation import nfse_recon as automacao_recon
+from app.automation.capture import salvar_artefato_sanitizado
 from app.automation.batch_state import (
     NFSE_BATCH_LOCK,
     NFSE_BATCH_STATE,
@@ -277,6 +279,8 @@ def _registrar_validacao_candidata(nota_id, contrato_id, execution_id):
         # vive no CONTRATO, que sobrevive a nota e aparece na Central.
         valores_sensiveis=(documento, str(valor), descricao),
     )
+    if resultado:
+        _capturar_revisao_da_validacao(contrato_id, nota_id, execution_id)
     log_event(
         'nfse_validacao_contrato_registrada',
         contrato_id=contrato_id,
@@ -288,6 +292,36 @@ def _registrar_validacao_candidata(nota_id, contrato_id, execution_id):
         execution_id=execution_id,
     )
     return resultado
+
+
+def _capturar_revisao_da_validacao(contrato_id, nota_id, execution_id):
+    """Guarda a revisão sanitizada quando a autorrevisão reprova.
+
+    "Não consegui ler o CPF/CNPJ do tomador na revisão" nomeia o sintoma e não
+    deixa nada para investigar: a nota é emitida, a tela some, e no dia seguinte
+    não há como saber o que mudou no portal. O inventário estrutural é o mesmo
+    das fronteiras de etapa — só rótulo, tipo e visibilidade, sem valor de
+    cliente.
+
+    Nunca derruba a validação: o resultado já está registrado, e uma falha ao
+    guardar evidência não pode virar falha do fluxo que ela documenta.
+    """
+    try:
+        inventario = automacao_recon.inventariar(SESSAO.driver, 'revisao')
+        salvar_artefato_sanitizado(
+            f'nfse_revisao_validacao_{contrato_id}',
+            automacao_recon.inventario_para_html(inventario),
+            execution_id=execution_id,
+        )
+    except Exception as exc:
+        log_event(
+            'nfse_captura_revisao_falhou',
+            level='WARNING',
+            contrato_id=contrato_id,
+            nota_id=nota_id,
+            error_type=type(exc).__name__,
+            execution_id=execution_id,
+        )
 
 
 def _regras_autorrevisao_contrato(contrato, nota, config):

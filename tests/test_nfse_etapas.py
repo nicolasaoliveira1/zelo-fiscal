@@ -687,3 +687,52 @@ def test_valor_e_data_vao_para_o_portal_no_formato_brasileiro():
     assert nfse._texto_para_o_portal(_Decimal('649.00')) == '649,00'
     assert nfse._texto_para_o_portal(_date(2026, 8, 27)) == '27/08/2026'
     assert nfse._texto_para_o_portal('texto-sintetico') == 'texto-sintetico'
+
+
+# --- leitura da revisão -----------------------------------------------------
+
+def test_revisao_lida_mesmo_quando_a_secao_muda_de_forma(monkeypatch):
+    """A seção exige `h4` com classe e título exatos. O portal trocar a tag ou
+    acrescentar uma palavra no título não é erro fiscal — mas fazia a
+    autorrevisão parar de conferir, e "não consegui ler" virava divergência
+    num documento correto."""
+
+    achado = MagicMock()
+    achado.text = '  12,34  '
+    driver = MagicMock()
+    # A busca com seção não acha; a busca ampla acha um só.
+    monkeypatch.setattr(nfse, '_localizar', lambda *a, **k: None)
+    driver.find_elements.return_value = [achado]
+
+    lido = nfse._dd_da_secao(driver, 'Valores do Serviço Prestado',
+                             nfse.ROTULO_VALOR)
+
+    assert lido == '12,34'
+
+
+def test_rotulo_repetido_na_pagina_continua_sendo_recusa(monkeypatch):
+    """Prestador e tomador têm ambos um CNPJ: dois casamentos não podem virar
+    leitura, senão a conferência aprovaria o documento da parte errada."""
+
+    driver = MagicMock()
+    monkeypatch.setattr(nfse, '_localizar', lambda *a, **k: None)
+    driver.find_elements.return_value = [MagicMock(), MagicMock()]
+
+    assert nfse._dd_da_secao(driver, 'Tomador do Serviço',
+                             nfse.ROTULO_DOCUMENTO) is None
+
+
+def test_secao_exata_continua_tendo_prioridade(monkeypatch):
+    """O caminho preciso não pode ser trocado pelo tolerante: com as duas
+    leituras disponíveis, vale a que conhece a seção."""
+
+    da_secao = MagicMock()
+    da_secao.text = 'valor-da-secao'
+    outro = MagicMock()
+    outro.text = 'valor-da-pagina'
+    driver = MagicMock()
+    monkeypatch.setattr(nfse, '_localizar', lambda *a, **k: da_secao)
+    driver.find_elements.return_value = [outro]
+
+    assert nfse._dd_da_secao(driver, 'Tomador do Serviço',
+                             nfse.ROTULO_DOCUMENTO) == 'valor-da-secao'

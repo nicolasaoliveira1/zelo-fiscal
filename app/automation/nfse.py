@@ -1284,11 +1284,39 @@ _XP_SECAO = ("//h4[contains(@class,'emissao-titulo')][normalize-space()='{secao}
 
 
 def _dd_da_secao(driver, secao, condicao_rotulo):
-    """Valor do campo cujo <dt> satisfaz `condicao_rotulo`, dentro de `secao`."""
+    """Valor do campo cujo <dt> satisfaz `condicao_rotulo`, dentro de `secao`.
+
+    Dois caminhos, e a ordem importa. O primeiro exige a seção: `h4` com a
+    classe certa e o título exato. É o mais preciso e continua sendo o
+    preferido.
+
+    O segundo existe porque o primeiro quebra por motivo que não é fiscal — o
+    portal trocar `h4` por `h3`, mexer na classe, ou acrescentar uma palavra ao
+    título. Quando isso acontece, a autorrevisão não erra a conferência: ela
+    para de conferir, e "não consegui ler" vira divergência num documento que
+    está certo. O caminho tolerante procura o `<dt>` na página inteira e só
+    aceita se houver EXATAMENTE UM: duas seções com o mesmo rótulo (prestador e
+    tomador têm as duas um CNPJ) continuam sendo recusa.
+
+    O que NÃO afrouxa é a comparação. Ler com mais tolerância não aprova valor
+    errado — quem decide continua sendo a igualdade lá em cima.
+    """
     xpath = (_XP_SECAO.format(secao=secao)
              + f"//dt[{condicao_rotulo}]/following-sibling::dd[1]")
     elemento = _localizar(driver, By.XPATH, xpath, exigir_visivel=False)
-    return None if elemento is None else (elemento.text or '').strip()
+    if elemento is not None:
+        return (elemento.text or '').strip()
+
+    try:
+        candidatos = driver.find_elements(
+            By.XPATH, f"//dt[{condicao_rotulo}]/following-sibling::dd[1]",
+        )
+    except WebDriverException:
+        return None
+    if len(candidatos) != 1:
+        return None
+    log_event('nfse_revisao_secao_ignorada', secao=secao)
+    return (candidatos[0].text or '').strip()
 
 
 def _dds_da_secao(driver, secao):
