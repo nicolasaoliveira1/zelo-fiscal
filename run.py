@@ -24,12 +24,20 @@ if __name__ == '__main__':
     debug = os.environ.get('FLASK_DEBUG', '').strip().lower() in {'1', 'true', 'yes', 'on'}
 
     if debug:
-        # O reloader vigia so o arquivo-gatilho: editar codigo nao derruba a
-        # sessao no meio de um teste. Para recarregar, toque reload.trigger
-        # (botao "Reload" do painel.pyw).
+        # Dois modos de reload, escolhidos por FLASK_RELOAD_AUTO (o painel seta;
+        # na mao o padrao e o de sempre, vigiando o codigo):
+        #   1 -> reloader normal, reinicia a cada .py salvo;
+        #   0 -> vigia so o arquivo-gatilho, para editar codigo sem derrubar uma
+        #        sessao de teste em andamento.
+        # O gatilho vale nos dois: o botao "Reload" do painel funciona igual.
+        automatico = os.environ.get('FLASK_RELOAD_AUTO', '1').strip().lower() \
+            not in {'0', 'false', 'no', 'off'}
         gatilho = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reload.trigger')
         open(gatilho, 'a').close()
-        app.run(debug=True, use_reloader=True,
-                extra_files=[gatilho], exclude_patterns=['*.py'])
+        if automatico:
+            app.run(debug=True, use_reloader=True, extra_files=[gatilho])
+        else:
+            app.run(debug=True, use_reloader=True,
+                    extra_files=[gatilho], exclude_patterns=['*.py'])
     else:
         app.run(debug=False)
