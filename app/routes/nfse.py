@@ -27,6 +27,7 @@ from app.automation.batch_state import (
     NFSE_BATCH_STATE,
     automacao_em_curso,
     definir_nfse_batch_opcoes,
+    mensagem_automacao_em_curso,
     nfse_batch_opcoes,
 )
 from app.routes import _current_app_object, bp
@@ -160,6 +161,13 @@ def nfse_contrato_configurar(incidente_id):
         return json_error(str(exc), 404)
     except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
         return json_error(str(exc), 409)
+    except nfse_contrato.PersistenciaContratoError as exc:
+        # Duas configuracoes simultaneas podem escolher a mesma proxima versao.
+        # Sem este except o Flask devolve o 500 em HTML e o `chamar()` da tela
+        # cai no `catch` sem `message`, mostrando "Falha na requisicao (500)" —
+        # e esta e a rota que o operador usa em TODO incidente. As rotas de
+        # descartar e ativar ja tratam; faltava a mais usada das tres.
+        return json_error(str(exc), 500)
     return {
         'status': 'ok',
         'incidente_id': incidente_id,
@@ -350,6 +358,36 @@ def _validacao_propria_na_revisao(contrato_id):
     return nota is not None and nota.status == StatusNotaNfse.AGUARDANDO_CONFIRMACAO
 
 
+def _pausa_abandonada_de_validacao():
+    """A pausa que sobrou de uma validação já resolvida fora do navegador.
+
+    A validação pausa o lote quando o formulário diverge (é o que faz o
+    operador ir configurar os controles novos). Resolvido isso, o lote continua
+    `paused` para sempre: o worker já morreu, ninguém vai retomar, e a pausa
+    passa a barrar justamente a revalidação que ela pediu.
+
+    NÃO olha o `contrato_id`: configurar o incidente ARQUIVA a candidata e cria
+    outra, então a pausa que sobrou é sempre de uma versão diferente da que o
+    operador está tentando validar agora. Casar por id nunca acertaria.
+
+    Duas coisas protegem o que não pode ser descartado:
+
+    - `validacao_contrato_id` só existe em lote de validação; um lote de
+      emissão de verdade não tem, e não é tocado aqui;
+    - nota em `aguardando_confirmacao` é DPS preenchida esperando o operador no
+      portal. Parar ali abandonaria um documento em aberto, e documento fiscal
+      não tem rollback (ND-005/ND-011).
+    """
+    if not nfse_batch_opcoes().get('validacao_contrato_id'):
+        return False
+    with NFSE_BATCH_LOCK:
+        if NFSE_BATCH_STATE.get('status') != 'paused':
+            return False
+        nota_id = NFSE_BATCH_STATE.get('current_id')
+    nota = db.session.get(NotaNfse, nota_id) if nota_id else None
+    return nota is None or nota.status != StatusNotaNfse.AGUARDANDO_CONFIRMACAO
+
+
 @bp.route('/nfse/contrato/<int:contrato_id>/validar', methods=['POST'])
 @requer_papel('operador')
 def nfse_contrato_validar(contrato_id):
@@ -381,9 +419,20 @@ def nfse_contrato_validar(contrato_id):
         return json_error(str(exc), 400, campo='nota_id')
 
     em_curso = automacao_em_curso()
+    if em_curso is not None and _pausa_abandonada_de_validacao():
+        # `request_stop` grava `stopped` na hora, sem depender do worker — que
+        # neste ponto ja morreu. Sem isto a pausa fica para sempre e so um
+        # "Parar" manual libera, que e o que o operador nao tinha como saber.
+        batch_engine.request_stop(NFSE_BATCH_LOCK, NFSE_BATCH_STATE)
+        log_event('nfse_validacao_pausa_descartada', contrato_id=contrato_id)
+        em_curso = automacao_em_curso()
     if em_curso is not None:
+        # Mensagem COMPARTILHADA (`mensagem_automacao_em_curso`), como em
+        # `routes/lotes.py`. A copia local dizia "Aguarde terminar", e para lote
+        # pausado esse e o unico conselho que nunca funciona: pausa nao termina
+        # sozinha, quem a fecha e retomar ou parar.
         return json_error(
-            'Já existe uma automação em andamento. Aguarde terminar.',
+            mensagem_automacao_em_curso(em_curso),
             409,
             motivo='automacao_em_curso',
         )

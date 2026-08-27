@@ -709,3 +709,145 @@ def test_estado_visual_limpo_quando_nao_ha_pendencia(login_as, app):
     assert estado['incidentes'] == []
     assert estado['estado_visual'] == 'compativel'
     assert estado['ativo']['id'] == contrato_id
+
+
+# --- pausa que sobra de uma validação já resolvida --------------------------
+
+def _pausar_como_validacao(nota_id, contrato_id, status_nota=None, app=None):
+    """Reproduz o estado que o log mostrou: lote de validação PAUSADO e worker
+    já morto (`nfse_batch_end status=paused`)."""
+    definir_nfse_batch_opcoes(
+        'individual', True,
+        contrato_id=contrato_id, validacao_contrato_id=contrato_id,
+    )
+    with NFSE_BATCH_LOCK:
+        NFSE_BATCH_STATE['status'] = 'paused'
+        NFSE_BATCH_STATE['current_id'] = nota_id
+    if status_nota is not None and app is not None:
+        with app.app_context():
+            nota = db.session.get(NotaNfse, nota_id)
+            nota.status = status_nota
+            db.session.commit()
+
+
+def test_pausa_de_validacao_ja_resolvida_nao_barra_a_revalidacao(
+    login_as, app, monkeypatch
+):
+    """O caso real: a validação pausa por divergência, o operador configura os
+    controles e tenta validar de novo — e a pausa, cujo worker já morreu, barra
+    exatamente a revalidação que ela pediu.
+
+    Configurar o incidente ARQUIVA a candidata e cria outra, então a pausa que
+    sobrou é sempre de uma versão diferente da que está sendo validada agora.
+    """
+    _contrato_id, candidato_id, _incidente_id = _criar_candidata(app)
+    nota_id = _criar_nota_emitivel(app)
+    # Pausa de OUTRA candidata, como acontece de verdade.
+    _pausar_como_validacao(nota_id, candidato_id + 999)
+
+    sessao = MagicMock()
+    sessao.adquirir.return_value = True
+    inicializar = MagicMock(
+        return_value={'ids': [nota_id], 'total': 1, 'vencidas': 0, 'a_vencer': 0}
+    )
+    monkeypatch.setattr('app.routes.nfse.SESSAO', sessao)
+    monkeypatch.setattr('app.routes.nfse.batch_engine.init_batch_run', inicializar)
+
+    resposta = login_as('operador').post(
+        f'/nfse/contrato/{candidato_id}/validar', json={'nota_id': nota_id},
+    )
+
+    assert resposta.status_code == 200
+    with NFSE_BATCH_LOCK:
+        assert NFSE_BATCH_STATE['status'] == 'stopped'
+
+
+def test_pausa_com_nota_na_revisao_continua_barrando(login_as, app, monkeypatch):
+    """Nota em `aguardando_confirmacao` é DPS preenchida esperando o operador no
+    portal. Descartar a pausa ali abandonaria um documento em aberto, e
+    documento fiscal não tem rollback."""
+    _contrato_id, candidato_id, _incidente_id = _criar_candidata(app)
+    nota_id = _criar_nota_emitivel(app)
+    # A nota PRESA na revisão é outra: a que o operador passa agora precisa
+    # continuar emitível, senão a recusa vem do gate anterior e o teste não
+    # prova nada sobre a pausa.
+    nota_na_revisao = _criar_nota_emitivel(app)
+    _pausar_como_validacao(
+        nota_na_revisao, candidato_id + 999,
+        status_nota=StatusNotaNfse.AGUARDANDO_CONFIRMACAO, app=app,
+    )
+    monkeypatch.setattr('app.routes.nfse.SESSAO', MagicMock())
+
+    resposta = login_as('operador').post(
+        f'/nfse/contrato/{candidato_id}/validar', json={'nota_id': nota_id},
+    )
+
+    assert resposta.status_code == 409
+    with NFSE_BATCH_LOCK:
+        assert NFSE_BATCH_STATE['status'] == 'paused'
+
+
+def test_lote_de_emissao_pausado_nunca_e_descartado(login_as, app, monkeypatch):
+    """Sem `validacao_contrato_id` o lote é emissão de verdade: a validação não
+    pode pará-lo por conta própria."""
+    _contrato_id, candidato_id, _incidente_id = _criar_candidata(app)
+    nota_id = _criar_nota_emitivel(app)
+    definir_nfse_batch_opcoes('lote')
+    with NFSE_BATCH_LOCK:
+        NFSE_BATCH_STATE['status'] = 'paused'
+        NFSE_BATCH_STATE['current_id'] = nota_id
+    monkeypatch.setattr('app.routes.nfse.SESSAO', MagicMock())
+
+    resposta = login_as('operador').post(
+        f'/nfse/contrato/{candidato_id}/validar', json={'nota_id': nota_id},
+    )
+
+    assert resposta.status_code == 409
+    with NFSE_BATCH_LOCK:
+        assert NFSE_BATCH_STATE['status'] == 'paused'
+
+
+def test_mensagem_de_lote_pausado_diz_o_que_fazer(login_as, app, monkeypatch):
+    """"Aguarde terminar" era o único conselho que nunca funciona: pausa não
+    termina sozinha. A mensagem é a compartilhada com `routes/lotes.py`."""
+    _contrato_id, candidato_id, _incidente_id = _criar_candidata(app)
+    nota_id = _criar_nota_emitivel(app)
+    monkeypatch.setattr('app.routes.nfse.SESSAO', MagicMock())
+    monkeypatch.setattr(
+        'app.routes.nfse.automacao_em_curso',
+        lambda: {'tipo': 'lote', 'rotulo': 'de NFS-e', 'status': 'paused'},
+    )
+
+    resposta = login_as('operador').post(
+        f'/nfse/contrato/{candidato_id}/validar', json={'nota_id': nota_id},
+    )
+
+    assert resposta.status_code == 409
+    mensagem = resposta.get_json()['message']
+    assert 'pausado' in mensagem
+    assert 'Retome' in mensagem or 'pare o lote' in mensagem
+    assert 'Aguarde terminar' not in mensagem
+
+
+def test_falha_de_persistencia_ao_configurar_devolve_json(login_as, app, monkeypatch):
+    """Rota JSON responde JSON até no 500. Sem o `except`, o Flask devolve HTML
+    e o `chamar()` da tela mostra "Falha na requisição (500)" — e esta é a rota
+    usada em TODO incidente."""
+    # Incidente ainda ABERTO: `_criar_candidata` já o configura, e aí a recusa
+    # viria do gate de estado, antes de chegar na persistência.
+    _contrato_id, incidente_id = _criar_incidente(app)
+    monkeypatch.setattr(
+        'app.routes.nfse.nfse_contrato.configurar_incidente',
+        MagicMock(side_effect=nfse_contrato.PersistenciaContratoError(
+            'nao foi possivel gravar a versao')),
+    )
+
+    resposta = login_as('operador').post(
+        f'/nfse/contrato/incidente/{incidente_id}/configurar',
+        json={'origem': 'intocavel'},
+    )
+
+    assert resposta.status_code == 500
+    corpo = resposta.get_json()
+    assert corpo['status'] == 'error'
+    assert 'gravar' in corpo['message']
