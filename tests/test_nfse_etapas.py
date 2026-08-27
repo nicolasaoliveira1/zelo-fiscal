@@ -632,3 +632,58 @@ def test_sem_porteira_no_contrato_o_erro_do_portal_sobe_inalterado(driver):
         nfse.preencher_etapa_pessoas(driver, NOTA, CONFIG, date(2026, 7, 28))
 
     assert 'DataCompetencia' in str(erro.value)
+
+
+# --- campos novos do contrato: alvo e formato -------------------------------
+
+def _elemento_falso(visivel):
+    elemento = MagicMock()
+    elemento.is_displayed.return_value = visivel
+    elemento.size = {'width': 10 if visivel else 0, 'height': 10 if visivel else 0}
+    return elemento
+
+
+def test_alvo_repetido_resolve_pelo_visivel(monkeypatch):
+    """O portal repete `name`/`id` em partes ocultas — é por isso que
+    `_localizar` prefere o visível. Exigir um único elemento na página inteira
+    recusava campo que tem só uma cópia utilizável: foi o
+    `"Valores.ValorServico" não possui alvo inequívoco` do log."""
+
+    oculto, visivel = _elemento_falso(False), _elemento_falso(True)
+    driver = MagicMock()
+    driver.find_elements.return_value = [oculto, visivel]
+    monkeypatch.setattr(nfse, '_visivel', lambda e: e.is_displayed())
+    campo = SimpleNamespace(
+        chave_semantica='Valores.ValorServico', seletor_tipo='css',
+        seletor='[name="Valores.ValorServico"], [id="Valores.ValorServico"]',
+    )
+
+    assert nfse._localizar_campo_contrato(driver, campo) is visivel
+
+
+def test_duas_copias_visiveis_continuam_sendo_ambiguas(monkeypatch):
+    """Ambiguidade de verdade continua recusando: escolher no chute
+    preencheria a cópia errada de um documento fiscal."""
+
+    driver = MagicMock()
+    driver.find_elements.return_value = [_elemento_falso(True), _elemento_falso(True)]
+    monkeypatch.setattr(nfse, '_visivel', lambda e: e.is_displayed())
+    campo = SimpleNamespace(
+        chave_semantica='Campo.Ambiguo', seletor_tipo='css', seletor='[name="x"]',
+    )
+
+    with pytest.raises(nfse.ContratoNfseIncompativelError):
+        nfse._localizar_campo_contrato(driver, campo)
+
+
+def test_valor_e_data_vao_para_o_portal_no_formato_brasileiro():
+    """`str()` cru entrega `649.00` e `2026-08-27`; o portal usa vírgula
+    decimal e dd/mm/aaaa. Os campos históricos já formatavam — os campos NOVOS
+    do contrato caíam no `str()`, então "Valor final da nota" digitava ponto."""
+
+    from datetime import date as _date
+    from decimal import Decimal as _Decimal
+
+    assert nfse._texto_para_o_portal(_Decimal('649.00')) == '649,00'
+    assert nfse._texto_para_o_portal(_date(2026, 8, 27)) == '27/08/2026'
+    assert nfse._texto_para_o_portal('texto-sintetico') == 'texto-sintetico'

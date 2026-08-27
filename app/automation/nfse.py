@@ -18,6 +18,8 @@ Duas armadilhas do portal ditam o desenho deste modulo:
    depois de setar** (ND-008).
 """
 from collections.abc import Mapping
+from datetime import date, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 
 from selenium.common.exceptions import WebDriverException
@@ -757,11 +759,19 @@ def _localizar_campo_contrato(driver, campo):
             elementos = driver.find_elements(by, campo.seletor)
         except WebDriverException:
             elementos = []
-        if len(elementos) != 1:
+        # "Inequivoco" e entre o que da para DIRIGIR, nao no DOM inteiro. O
+        # portal repete `name`/`id` em partes ocultas do formulario — e por isso
+        # que `_localizar` prefere o visivel —, entao exigir um unico elemento na
+        # pagina recusava campo que so tem uma copia utilizavel. Ambiguidade de
+        # verdade e duas VISIVEIS; ai continua recusando, porque escolher no
+        # chute preencheria a copia errada de um documento fiscal.
+        visiveis = [elemento for elemento in elementos if _visivel(elemento)]
+        candidatos = visiveis or elementos
+        if len(candidatos) != 1:
             raise ContratoNfseIncompativelError(
                 f'O campo "{campo.chave_semantica}" não possui alvo inequívoco.'
             )
-        elemento = elementos[0]
+        elemento = candidatos[0]
     else:
         elemento = _localizar(driver, by, campo.seletor, exigir_visivel=False)
     if elemento is None:
@@ -806,13 +816,31 @@ def _esperar_preenchido_contrato(driver, campo):
     )
 
 
+def _texto_para_o_portal(valor):
+    """O que digitar, no formato que o portal espera.
+
+    `str()` cru entrega `649.00` para um Decimal e `2026-08-27` para uma data —
+    o portal usa virgula decimal e dd/mm/aaaa. Os campos historicos ja passavam
+    por `formatar_valor`/`formatar_data`; os campos NOVOS do contrato caiam
+    direto no `str()`, entao configurar "Valor final da nota" num campo de texto
+    digitava o numero com ponto.
+    """
+    if isinstance(valor, Decimal):
+        return formatar_valor(valor)
+    if isinstance(valor, datetime):
+        return formatar_data(valor.date())
+    if isinstance(valor, date):
+        return formatar_data(valor)
+    return str(valor)
+
+
 def _preencher_campo_contrato(driver, campo, valor):
     if campo.seletor_tipo == 'id':
-        return _preencher(driver, campo.seletor, valor)
+        return _preencher(driver, campo.seletor, _texto_para_o_portal(valor))
     elemento = _localizar_campo_contrato(driver, campo)
     try:
         elemento.clear()
-        elemento.send_keys(str(valor))
+        elemento.send_keys(_texto_para_o_portal(valor))
         _sair_do_campo(elemento)
     except (WebDriverException, AttributeError) as exc:
         raise ContratoNfseIncompativelError(
