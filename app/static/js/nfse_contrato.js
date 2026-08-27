@@ -410,7 +410,17 @@ function renderizarHistorico(estado, root) {
     const versao = criarElemento('td', candidata.versao ?? '—');
     versao.className = 'nfse-mono';
     linha.appendChild(versao);
-    linha.appendChild(criarElemento('td', candidata.estado || 'desconhecida'));
+    const celulaEstado = criarElemento('td', candidata.estado || 'desconhecida');
+    // Validacao que reprovou tem de PARECER que reprovou. Sem isto a linha fica
+    // igual a de uma candidata que nunca foi validada, e o operador que acabou
+    // de emitir a nota de validacao conclui que o fluxo nao rodou — quando ele
+    // rodou, conferiu e recusou.
+    if (candidata.erro_validacao) {
+      const motivo = criarElemento('div', candidata.erro_validacao);
+      motivo.className = 'nfse-hint mb-0';
+      celulaEstado.appendChild(motivo);
+    }
+    linha.appendChild(celulaEstado);
     const acao = criarElemento('td');
     acao.className = 'text-end';
     const botao = criarElemento(

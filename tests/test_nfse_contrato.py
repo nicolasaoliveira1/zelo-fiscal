@@ -721,3 +721,76 @@ def test_sentinela_acompanha_o_estado_sem_o_chamador_saber(app, ids):
         db.session.commit()
         db.session.refresh(outra)
         assert outra.ativa_unica == 1
+
+
+def test_erro_de_validacao_diz_o_que_reprovou_sem_dado_da_nota():
+    """A contagem ia para o log e a coluna guardava sempre a mesma frase — que
+    a interface nem mostrava. Para o operador a validação falhava sem sintoma.
+
+    E o que a divergência cita da tela é dado de cliente: `erro_validacao` vive
+    no CONTRATO, que sobrevive à nota e aparece na Central."""
+
+    divergencias = [
+        'O tomador na tela e 44.556.677/0001-86, e a nota e de 11.222.333/0001-81.',
+        'O valor na tela e 1.234,56, e a nota e de 649,00.',
+    ]
+    resumo = nfse_contrato.resumo_das_divergencias(
+        divergencias, ('44.556.677/0001-86', '649,00', 'Honorários contábeis'),
+    )
+
+    assert resumo.startswith('2 divergência(s) na revisão: ')
+    # A frase sobrevive: é ela que diz QUAL conferência reprovou.
+    assert 'O tomador na tela' in resumo
+    assert 'O valor na tela' in resumo
+    # Os números não sobrevivem — nem o que foi declarado sensível, nem o que
+    # tem forma de documento e escapou da lista.
+    assert '44.556.677/0001-86' not in resumo
+    assert '11.222.333/0001-81' not in resumo
+    assert '649,00' not in resumo
+
+
+def test_resumo_da_validacao_cabe_na_coluna():
+    """`erro_validacao` é String(500): o SQLite ignora largura de VARCHAR e o
+    MySQL levanta DataError (lição 3)."""
+
+    resumo = nfse_contrato.resumo_das_divergencias(['x' * 400] * 5)
+
+    assert len(resumo) <= nfse_contrato._LARGURA_ERRO_VALIDACAO
+    assert resumo.endswith('…')
+
+
+def test_sem_divergencia_legivel_ainda_sobra_uma_frase():
+    """Mascarar tudo não pode devolver string vazia: a coluna é o único sinal
+    de que a validação reprovou."""
+
+    assert nfse_contrato.resumo_das_divergencias(['', '   ']) != ''
+
+
+def test_validacao_reprovada_grava_o_motivo_na_candidata(app, ids):
+    from app.models import ContratoNfse
+
+    with app.app_context():
+        nfse_contrato.garantir_contrato_inicial()
+        incidente_id = None
+        candidata = None
+        diferenca = _diferenca_de_controle('texto', 'Campo.Motivo')
+        contrato = nfse_contrato.contrato_ativo()
+        incidente, _ = nfse_contrato._registrar_uma_diferenca(
+            contrato.id, diferenca, datetime(2026, 8, 27, 12, 0, 0),
+        )
+        db.session.commit()
+        incidente_id = incidente.id
+        candidata = nfse_contrato.configurar_incidente(
+            incidente_id, {'origem': 'intocavel'}
+        )
+
+        nfse_contrato.registrar_validacao(
+            candidata.id, None,
+            ['O valor na tela e 1.234,56, e a nota e de 649,00.'],
+            valores_sensiveis=('649,00',),
+        )
+
+        gravada = db.session.get(ContratoNfse, candidata.id)
+        assert gravada.estado == 'candidata'
+        assert '1 divergência(s) na revisão' in gravada.erro_validacao
+        assert '649,00' not in gravada.erro_validacao

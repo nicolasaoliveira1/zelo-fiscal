@@ -303,6 +303,25 @@ test('incidente configurado oferece desfazer, e a candidata é descartável', as
   assert.deepEqual(posts, ['/nfse/contrato/9/descartar']);
 });
 
+test('candidata reprovada mostra POR QUE reprovou no histórico', async () => {
+  // Sem isto a linha fica idêntica à de uma candidata que nunca foi validada,
+  // e quem acabou de emitir a nota de validação conclui que o fluxo não rodou
+  // — quando ele rodou, conferiu e recusou.
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async () => resposta(estadoBase({
+      candidatas: [{
+        id: 9, versao: 2, estado: 'candidata',
+        erro_validacao: '3 divergência(s) na revisão: A descricao na tela nao e a esperada.',
+      }],
+    })),
+  });
+
+  const linha = document.querySelector('[data-contrato-candidato="9"]');
+  assert.ok(linha.textContent.includes('3 divergência(s) na revisão'));
+  assert.ok(linha.textContent.includes('A descricao na tela nao e a esperada'));
+});
+
 test('monta payloads somente com as origens e fontes do catálogo', () => {
   assert.deepEqual(montarDadosCandidato({
     origem: 'fixo', valorFixo: 'OPCAO-SINTETICA', fontes,

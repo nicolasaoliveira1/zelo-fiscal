@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
@@ -1663,8 +1664,69 @@ def configurar_incidente(
     return candidato
 
 
+# `ContratoNfse.erro_validacao` e String(500). O limite sai DA COLUNA, como o
+# do seletor: o SQLite ignora largura de VARCHAR e o MySQL levanta DataError
+# (licao 3 do CLAUDE.md).
+_LARGURA_ERRO_VALIDACAO = 500
+
+# Corrida de digitos que so pode ser documento, inscricao ou chave. Valor
+# monetario nao chega aqui: `_mascarar` ja apagou o da nota antes.
+_CORRIDA_DE_DIGITOS = re.compile(r"\d[\d.\-/]{5,}\d")
+
+
+def _mascarar(texto, valores_sensiveis):
+    """Tira da mensagem o que e da NOTA, deixando o que e do CONTRATO.
+
+    A divergencia da autorrevisao vem escrita para o operador e cita o que leu
+    na tela: "o tomador na tela e X, e a nota e de Y". X e Y sao dado de
+    cliente, e `erro_validacao` fica no contrato — que sobrevive a nota, aparece
+    na Central e e o mesmo registro que os artefatos ja sanitizam. Guardar o
+    numero aqui abriria pela porta dos fundos o que `salvar_artefato_sanitizado`
+    fecha pela frente.
+
+    Some com o VALOR e preserva a FRASE: o que faz a mensagem util e saber qual
+    conferencia reprovou, nao qual documento estava na tela — esse o operador ve
+    na propria nota.
+    """
+    texto = " ".join(str(texto or "").split())
+    for valor in sorted(
+        {str(v or "").strip() for v in valores_sensiveis}, key=len, reverse=True
+    ):
+        # Valor curto nao e segredo e casa em todo lugar (os fixos do contrato
+        # sao '0' e '1'), mesmo motivo do `MIN_VALOR_SENSIVEL` na recon.
+        if len(valor) < nfse_recon.MIN_VALOR_SENSIVEL:
+            continue
+        texto = re.sub(re.escape(valor), "[...]", texto, flags=re.IGNORECASE)
+    return _CORRIDA_DE_DIGITOS.sub("[...]", texto)
+
+
+def resumo_das_divergencias(divergencias, valores_sensiveis=()):
+    """Mensagem de `erro_validacao` que diz O QUE reprovou, nao so que reprovou.
+
+    Antes a contagem era registrada no log e a coluna guardava sempre a mesma
+    frase generica — que a interface nem chegava a mostrar. Para o operador a
+    validacao falhava sem sintoma: a linha do historico ficava identica a de uma
+    candidata que nunca foi validada.
+    """
+    partes = []
+    for divergencia in divergencias:
+        limpa = _mascarar(divergencia, valores_sensiveis)
+        if limpa:
+            partes.append(limpa)
+    if not partes:
+        return "a revisão da validação apresentou divergências"
+    prefixo = f"{len(partes)} divergência(s) na revisão: "
+    corpo = " | ".join(partes)
+    # Mede o texto PRONTO, com prefixo e reticencias, nunca so o corpo.
+    folga = _LARGURA_ERRO_VALIDACAO - len(prefixo)
+    if len(corpo) > folga:
+        corpo = corpo[: max(folga - 1, 0)] + "…"
+    return f"{prefixo}{corpo}"
+
+
 def registrar_validacao(
-    contrato_id, nota_id, resultado, usuario_id=None, *, agora=None
+    contrato_id, nota_id, resultado, usuario_id=None, *, agora=None,
+    valores_sensiveis=(),
 ) -> ContratoNfse:
     """Registra a revisão da candidata sem persistir valores da nota."""
 
@@ -1689,7 +1751,9 @@ def registrar_validacao(
     if divergencias:
         contrato.estado = "candidata"
         contrato.validado_em = None
-        contrato.erro_validacao = "a revisão da validação apresentou divergências"
+        contrato.erro_validacao = resumo_das_divergencias(
+            divergencias, valores_sensiveis
+        )
     else:
         contrato.estado = "validada"
         contrato.validado_em = agora

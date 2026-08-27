@@ -271,7 +271,12 @@ def _registrar_validacao_candidata(nota_id, contrato_id, execution_id):
         descricao,
         regras_adicionais=regras,
     )
-    nfse_contrato.registrar_validacao(contrato_id, nota_id, resultado)
+    nfse_contrato.registrar_validacao(
+        contrato_id, nota_id, resultado,
+        # O que a divergencia cita da tela e dado de cliente, e `erro_validacao`
+        # vive no CONTRATO, que sobrevive a nota e aparece na Central.
+        valores_sensiveis=(documento, str(valor), descricao),
+    )
     log_event(
         'nfse_validacao_contrato_registrada',
         contrato_id=contrato_id,
