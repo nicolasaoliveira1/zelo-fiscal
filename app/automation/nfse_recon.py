@@ -13,7 +13,7 @@ import time
 import unicodedata
 from dataclasses import dataclass, field
 from html import escape
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 from urllib.parse import parse_qs, urlparse
 
 from selenium.common.exceptions import WebDriverException
@@ -950,6 +950,95 @@ def mensagens_validacao(driver: Any, valores_sensiveis: Iterable[str]) -> list[s
 
 def _atributo(nome: str, valor: Any) -> str:
     return f' {nome}="{escape(str(valor), quote=True)}"'
+
+
+JS_ESTRUTURA_DECLARATIVA = r"""
+return (function () {
+  // A tela de revisao NAO tem controle de formulario: e um resumo. O
+  // inventario de controles sai vazio nela, e foi por isso que a primeira
+  // captura nao explicou nada.
+  //
+  // Aqui sai so o ESQUELETO: o texto dos titulos e o dos rotulos. O VALOR
+  // (<dd>, <td>) nunca e lido — e ele que carrega CNPJ, nome e valor do
+  // cliente. Sem os valores nao ha o que vazar, e com os rotulos da para
+  // saber por que o leitor nao achou o campo.
+  var limite = 500;
+  function texto(elemento) {
+    return String(elemento.textContent || '').replace(/\s+/g, ' ').trim().slice(0, limite);
+  }
+  var titulos = [];
+  document.querySelectorAll('h1,h2,h3,h4,h5,h6,legend').forEach(function (e) {
+    var t = texto(e);
+    if (t) titulos.push({ tag: e.tagName.toLowerCase(), classe: String(e.className || ''), texto: t });
+  });
+  var rotulos = [];
+  document.querySelectorAll('dt,th,label').forEach(function (e) {
+    var t = texto(e);
+    if (!t) return;
+    var irmao = e.nextElementSibling;
+    rotulos.push({
+      tag: e.tagName.toLowerCase(),
+      classe: String(e.className || ''),
+      texto: t,
+      // A TAG do irmao, nunca o conteudo dele: e o que diz se o par
+      // <dt>/<dd> que o leitor procura existe mesmo.
+      irmao: irmao ? irmao.tagName.toLowerCase() : null
+    });
+  });
+  return JSON.stringify({ titulos: titulos, rotulos: rotulos });
+}());
+"""
+
+
+def estrutura_declarativa(driver: Any) -> dict:
+    """Esqueleto de uma tela de resumo: títulos e rótulos, nunca valores."""
+
+    try:
+        bruto = driver.execute_script(JS_ESTRUTURA_DECLARATIVA)
+    except WebDriverException:
+        return {"titulos": [], "rotulos": []}
+    if isinstance(bruto, str):
+        try:
+            bruto = json.loads(bruto)
+        except (TypeError, ValueError):
+            return {"titulos": [], "rotulos": []}
+    if not isinstance(bruto, dict):
+        return {"titulos": [], "rotulos": []}
+    return {
+        "titulos": list(bruto.get("titulos") or ()),
+        "rotulos": list(bruto.get("rotulos") or ()),
+    }
+
+
+def estrutura_para_html(estrutura: Mapping[str, Any]) -> str:
+    """Artefato legível do esqueleto, com os textos escapados."""
+
+    from html import escape
+
+    def linhas(itens, campos):
+        saida = []
+        for item in itens:
+            partes = [
+                f"{campo}={escape(str(item.get(campo) or ''))}"
+                for campo in campos
+            ]
+            saida.append("<li>" + " | ".join(partes) + "</li>")
+        return "".join(saida) or "<li>(nenhum)</li>"
+
+    return (
+        "<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\">"
+        "<title>Esqueleto sanitizado — revisão</title></head><body>"
+        "<h1>Esqueleto da tela de revisão</h1>"
+        "<p>Somente títulos e rótulos. Valores não são lidos.</p>"
+        "<h2>Títulos</h2><ol>"
+        + linhas(estrutura.get("titulos") or (), ("tag", "classe", "texto"))
+        + "</ol><h2>Rótulos</h2><ol>"
+        + linhas(
+            estrutura.get("rotulos") or (),
+            ("tag", "classe", "texto", "irmao"),
+        )
+        + "</ol></body></html>"
+    )
 
 
 def inventario_para_html(inventario: InventarioEtapa) -> str:

@@ -89,8 +89,15 @@ def _campo(
     opcoes=(),
     revisao_secao=None,
     revisao_rotulo=None,
-    conferivel_automatico=True,
+    conferivel_automatico=None,
 ):
+    # `conferivel_automatico` SAI do leitor, não de um default otimista. Sem
+    # `revisao_secao` e `revisao_rotulo` não há o que ler na revisão, e afirmar
+    # que o campo é conferível automaticamente é prometer o que o contrato não
+    # tem como cumprir — a promessa virava uma divergência por nota, sempre a
+    # mesma, num documento correto.
+    if conferivel_automatico is None:
+        conferivel_automatico = bool(revisao_secao and revisao_rotulo)
     return {
         "chave_semantica": chave_semantica,
         "etapa": etapa,
@@ -1880,6 +1887,25 @@ def resumo_das_divergencias(divergencias, valores_sensiveis=()):
     return f"{prefixo}{corpo}"
 
 
+def _resumo_assistido(avisos, valores_sensiveis=()):
+    """Por que a candidata só serve para os modos assistidos."""
+
+    base = "a revisão permite somente modos assistidos"
+    partes = [
+        limpa for limpa in (
+            _mascarar(aviso, valores_sensiveis) for aviso in avisos
+        ) if limpa
+    ]
+    if not partes:
+        return base
+    prefixo = f"{base}: "
+    corpo = " | ".join(partes)
+    folga = _LARGURA_ERRO_VALIDACAO - len(prefixo)
+    if len(corpo) > folga:
+        corpo = corpo[: max(folga - 1, 0)] + "…"
+    return f"{prefixo}{corpo}"
+
+
 def registrar_validacao(
     contrato_id, nota_id, resultado, usuario_id=None, *, agora=None,
     valores_sensiveis=(),
@@ -1900,6 +1926,7 @@ def registrar_validacao(
             "somente uma versão candidata pode receber o resultado da validação"
         )
     divergencias = tuple(resultado or ())
+    avisos = tuple(getattr(resultado, "avisos_assistidos", ()) or ())
     elegivel = bool(getattr(resultado, "elegivel_automatico", False))
     agora = agora or utcnow_naive()
     contrato.nota_validacao_id = nota_id
@@ -1913,10 +1940,16 @@ def registrar_validacao(
     else:
         contrato.estado = "validada"
         contrato.validado_em = agora
+        # Os avisos assistidos eram calculados e jogados fora. Sem eles a
+        # candidata dizia "permite somente modos assistidos" sem dizer POR
+        # QUE, e a lacuna do contrato — campo fiscal sem leitor declarado na
+        # revisão — ficava invisível, portanto permanente. Ela não bloqueia a
+        # nota, que está correta; ela precisa aparecer onde se conserta, que é
+        # o contrato.
         contrato.erro_validacao = (
             None
             if contrato.elegivel_automatico
-            else "a revisão permite somente modos assistidos"
+            else _resumo_assistido(avisos, valores_sensiveis)
         )
     try:
         db.session.commit()

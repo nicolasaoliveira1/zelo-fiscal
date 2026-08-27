@@ -248,6 +248,14 @@ def test_revisao_declarativa_acusa_secao_ambigua_e_rotulo_duplicado():
 
 
 def test_campo_fiscal_sem_leitor_e_padrao_obrigatorio_sem_prova_bloqueiam_auto():
+    """Campo sem leitor fecha o gate do AUTOMÁTICO, e é isso que importa.
+
+    Ele não vira divergência da nota: sem `revisao_secao`/`revisao_rotulo` não
+    há o que ler na revisão, então "não consegui conferir" é uma lacuna do
+    CONTRATO, igual em toda nota, e não um achado sobre esta. Como divergência
+    ela reprovava documento correto; some da lista da nota e aparece onde se
+    conserta — no `erro_validacao` da candidata.
+    """
     sem_leitor = _regra_revisao(
         chave_semantica='campo.sem_leitor',
         revisao_secao=None,
@@ -267,8 +275,11 @@ def test_campo_fiscal_sem_leitor_e_padrao_obrigatorio_sem_prova_bloqueiam_auto()
         regras_adicionais=[sem_leitor, padrao_sem_prova],
     )
 
-    assert any('sem_leitor' in item for item in resultado)
+    # O gate do automático continua fechado — a garantia que este teste guarda.
     assert not resultado.elegivel_automatico
+    # E a lacuna continua dita, como aviso do modo assistido.
+    assert any('sem_leitor' in aviso for aviso in resultado.avisos_assistidos)
+    assert not any('sem_leitor' in item for item in resultado)
 
 
 def test_campo_nao_conferivel_aprova_somente_fluxo_assistido():

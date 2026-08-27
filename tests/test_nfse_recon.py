@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 
 import pytest
+from selenium.common.exceptions import WebDriverException
+from unittest.mock import MagicMock
 
+from app.automation import nfse_recon
 from app.automation.nfse_recon import (
     JS_INVENTARIO_SEGURO,
     JS_MENSAGENS_VALIDACAO,
@@ -508,3 +511,38 @@ def test_identidade_longa_nao_derruba_o_passe_de_preenchimento():
 
     assert estado["Campo"] is False
     assert all(len(chave) <= 100 for chave in estado)
+
+
+# --- esqueleto de tela declarativa (a revisão é resumo, não formulário) -----
+
+def test_esqueleto_da_revisao_nao_le_valores():
+    """A revisão carrega CNPJ, nome e valor do cliente nos `<dd>`. O esqueleto
+    existe para explicar por que o leitor não achou o campo — títulos e
+    rótulos bastam, e valor nenhum pode entrar no artefato."""
+
+    driver = MagicMock()
+    driver.execute_script.return_value = json.dumps({
+        'titulos': [{'tag': 'h4', 'classe': 'emissao-titulo',
+                     'texto': 'Tomador do Serviço'}],
+        'rotulos': [{'tag': 'dt', 'classe': '', 'texto': 'CPF/CNPJ',
+                     'irmao': 'dd'}],
+    })
+
+    estrutura = nfse_recon.estrutura_declarativa(driver)
+
+    assert estrutura['titulos'][0]['texto'] == 'Tomador do Serviço'
+    assert estrutura['rotulos'][0]['irmao'] == 'dd'
+    # O contrato do JS: nenhum campo carrega conteúdo de valor.
+    assert 'valor' not in estrutura['rotulos'][0]
+    html = nfse_recon.estrutura_para_html(estrutura)
+    assert 'CPF/CNPJ' in html
+    assert 'Tomador do Serviço' in html
+
+
+def test_esqueleto_tolera_driver_mudo():
+    driver = MagicMock()
+    driver.execute_script.side_effect = WebDriverException('sem sessão')
+
+    assert nfse_recon.estrutura_declarativa(driver) == {
+        'titulos': [], 'rotulos': [],
+    }

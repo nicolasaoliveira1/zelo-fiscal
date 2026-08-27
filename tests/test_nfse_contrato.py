@@ -386,7 +386,11 @@ def test_validacao_sem_leitor_ativa_somente_para_modos_assistidos(
         )
         ativada = nfse_contrato.ativar(validada.id)
 
-        assert validada.erro_validacao == 'a revisão permite somente modos assistidos'
+        # A frase base continua, agora seguida do MOTIVO: sem nomear a lacuna,
+        # "permite somente modos assistidos" não dizia onde consertar.
+        assert validada.erro_validacao.startswith(
+            'a revisão permite somente modos assistidos')
+        assert 'Campo sintético sem leitor.' in validada.erro_validacao
         assert ativada.estado == 'ativa'
         assert ativada.elegivel_automatico is False
 
@@ -974,3 +978,36 @@ def test_controle_removido_explica_a_unica_saida(app, ids):
         assert all(
             c.chave_semantica != alvo.chave_semantica for c in candidata.campos
         )
+
+
+def test_candidata_assistida_diz_qual_lacuna_a_prende(app, ids):
+    """Os avisos assistidos eram calculados e jogados fora: a candidata dizia
+    "permite somente modos assistidos" sem dizer por quê, e a lacuna do
+    contrato ficava invisível, portanto permanente."""
+
+    from app.models import ContratoNfse
+
+    class _Resultado(list):
+        elegivel_automatico = False
+        avisos_assistidos = (
+            'O contrato não declara onde conferir "Tomador_Nome" na revisão; '
+            'confira à vista.',
+        )
+
+    with app.app_context():
+        contrato = nfse_contrato.garantir_contrato_inicial()
+        incidente, _ = nfse_contrato._registrar_uma_diferenca(
+            contrato.id, _diferenca_de_controle('texto', 'Campo.Assistido'),
+            datetime(2026, 8, 27, 12, 0, 0),
+        )
+        db.session.commit()
+        candidata = nfse_contrato.configurar_incidente(
+            incidente.id, {'origem': 'intocavel'})
+
+        nfse_contrato.registrar_validacao(candidata.id, None, _Resultado())
+
+        gravada = db.session.get(ContratoNfse, candidata.id)
+        assert gravada.estado == 'validada'
+        assert 'somente modos assistidos' in gravada.erro_validacao
+        assert 'Tomador_Nome' in gravada.erro_validacao
+        assert len(gravada.erro_validacao) <= nfse_contrato._LARGURA_ERRO_VALIDACAO

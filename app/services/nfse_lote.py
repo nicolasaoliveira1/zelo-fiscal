@@ -345,10 +345,14 @@ def _capturar_revisao_da_validacao(contrato_id, nota_id, execution_id):
     guardar evidência não pode virar falha do fluxo que ela documenta.
     """
     try:
-        inventario = automacao_recon.inventariar(SESSAO.driver, 'revisao')
+        # ESQUELETO, nao inventario de controles: a revisao e um resumo e nao
+        # tem controle de formulario nenhum — a primeira captura saiu vazia e
+        # nao explicou nada. Titulos e rotulos dizem por que o leitor nao achou
+        # o campo; os valores, que sao o dado do cliente, nao sao lidos.
+        estrutura = automacao_recon.estrutura_declarativa(SESSAO.driver)
         salvar_artefato_sanitizado(
             f'nfse_revisao_validacao_{contrato_id}',
-            automacao_recon.inventario_para_html(inventario),
+            automacao_recon.estrutura_para_html(estrutura),
             execution_id=execution_id,
         )
     except Exception as exc:

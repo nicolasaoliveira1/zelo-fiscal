@@ -1435,18 +1435,17 @@ def _conferir_regras_adicionais(driver, regras):
     for regra in regras or ():
         chave = _valor_regra_revisao(regra, 'chave_semantica', 'campo sem chave')
         if not _regra_tem_leitor(regra):
+            # SEM LEITOR nao existe conferencia automatica possivel, e o
+            # `conferivel_automatico` do campo nao muda esse fato — ele so
+            # afirmava uma capacidade que o contrato nao declarou. Enquanto a
+            # flag mandava, o mesmo campo virava divergencia em TODA nota:
+            # sempre a mesma, nao diz nada sobre esta nota, e fechava o gate do
+            # automatico por um motivo que nao e do portal.
             if _regra_fiscal(regra):
-                mensagem = (
-                    f'Não consegui conferir o campo contratado "{chave}" na revisão.'
+                avisos_assistidos.append(
+                    f'O contrato não declara onde conferir "{chave}" na '
+                    'revisão; confira à vista.'
                 )
-                if bool(
-                    _valor_regra_revisao(
-                        regra, 'conferivel_automatico', False
-                    )
-                ):
-                    divergencias.append(mensagem)
-                else:
-                    avisos_assistidos.append(mensagem)
             continue
         texto, erro = _dd_declarativo(
             driver,
