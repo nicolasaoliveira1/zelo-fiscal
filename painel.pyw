@@ -42,9 +42,33 @@ class Painel:
 
         mono = tkfont.Font(family='Consolas', size=10)
 
-        lateral = tk.Frame(root, bg=FUNDO_LATERAL, width=210)
-        lateral.pack(side='left', fill='y')
-        lateral.pack_propagate(False)
+        root.minsize(820, 380)
+
+        # A lateral rola: numa janela baixa os ultimos botoes ficavam fora da
+        # tela, e so dava para alcanca-los esticando a janela.
+        moldura = tk.Frame(root, bg=FUNDO_LATERAL, width=210)
+        moldura.pack(side='left', fill='y')
+        moldura.pack_propagate(False)
+
+        self.canvas_lateral = tk.Canvas(moldura, bg=FUNDO_LATERAL,
+                                        highlightthickness=0, borderwidth=0)
+        self.barra_lateral = tk.Scrollbar(moldura, orient='vertical',
+                                          command=self.canvas_lateral.yview,
+                                          bg=FUNDO_LATERAL, troughcolor=FUNDO,
+                                          borderwidth=0)
+        self.canvas_lateral.configure(yscrollcommand=self.barra_lateral.set)
+        self.canvas_lateral.pack(side='left', fill='both', expand=True)
+
+        lateral = tk.Frame(self.canvas_lateral, bg=FUNDO_LATERAL)
+        self.janela_lateral = self.canvas_lateral.create_window(
+            (0, 0), window=lateral, anchor='nw')
+        lateral.bind('<Configure>', self._ajustar_lateral)
+        self.canvas_lateral.bind('<Configure>', self._ajustar_lateral)
+        # roda so com o ponteiro sobre a lateral: o log tem a rolagem dele.
+        moldura.bind('<Enter>', lambda _: self.canvas_lateral.bind_all(
+            '<MouseWheel>', self._rolar_lateral))
+        moldura.bind('<Leave>', lambda _: self.canvas_lateral.unbind_all(
+            '<MouseWheel>'))
 
         self.status = tk.Label(lateral, text='parado', bg=FUNDO_LATERAL, fg=SUAVE,
                                font=('Segoe UI', 10, 'bold'), anchor='w', padx=14)
@@ -126,6 +150,24 @@ class Painel:
             self.escrever('venv nao encontrado. Crie com: python -m venv venv', 'erro')
 
     # --- widgets -----------------------------------------------------------
+    def _ajustar_lateral(self, _=None):
+        canvas = self.canvas_lateral
+        canvas.configure(scrollregion=canvas.bbox('all'))
+        canvas.itemconfigure(self.janela_lateral, width=canvas.winfo_width())
+        # a barra so aparece quando ha o que rolar.
+        conteudo = canvas.bbox('all')
+        precisa = bool(conteudo) and conteudo[3] > canvas.winfo_height()
+        if precisa and not self.barra_lateral.winfo_ismapped():
+            # antes do canvas: o canvas ocupa a largura toda e, empacotada
+            # depois, a barra ficaria com zero de largura (sem aparecer).
+            self.barra_lateral.pack(side='right', fill='y',
+                                    before=self.canvas_lateral)
+        elif not precisa and self.barra_lateral.winfo_ismapped():
+            self.barra_lateral.pack_forget()
+
+    def _rolar_lateral(self, evento):
+        self.canvas_lateral.yview_scroll(-1 * (evento.delta // 120), 'units')
+
     def _secao(self, pai, titulo):
         tk.Label(pai, text=titulo.upper(), bg=FUNDO_LATERAL, fg=SUAVE,
                  font=('Segoe UI', 8, 'bold'), anchor='w',
@@ -297,9 +339,14 @@ class Painel:
         threading.Thread(target=self._checar_estado, daemon=True).start()
 
     def _checar_estado(self):
-        r = subprocess.run([PYTHON, ESTADO], cwd=RAIZ, capture_output=True,
-                           text=True, encoding='utf-8', errors='replace',
-                           creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            r = subprocess.run([PYTHON, ESTADO], cwd=RAIZ, capture_output=True,
+                               text=True, encoding='utf-8', errors='replace',
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+        except OSError as e:  # venv ausente, por exemplo
+            self.estado = {'branch': '?', 'estado': 'erro', 'mensagem': str(e)}
+            self.root.after(0, self._pintar_estado)
+            return
         try:
             # o boot do app escreve no stdout antes do JSON: pega do 1o '{'.
             self.estado = json.loads(r.stdout[r.stdout.index('{'):])
