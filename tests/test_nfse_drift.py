@@ -14,6 +14,7 @@ from app.services.nfse_drift import (
     CONTROLE_REMOVIDO,
     DESCONHECIDA,
     INCOMPATIVEL,
+    INTERACAO_ALTERADA,
     OPCOES_ALTERADAS,
     CampoComparavel,
     assinar_incidente,
@@ -309,3 +310,40 @@ def test_obrigatoriedade_continua_valendo_no_campo_que_o_operador_preenche():
 
     assert [d.tipo for d in resultado.diferencas] == ["obrigatoriedade_alterada"]
     assert resultado.compatibilidade == INCOMPATIVEL
+
+
+def test_identidade_repetida_prefere_o_controle_visivel():
+    """O portal reaproveita `name`/`id` em partes ocultas. Quem preenche já
+    escolhe o visível (`automation/nfse._localizar`); o comparador precisa
+    olhar o MESMO elemento, senão inspeciona a cópia oculta, marca a visível
+    como já casada e deixa passar por compatível um campo fiscal alterado."""
+
+    esperado = CampoComparavel(
+        chave_semantica='Servico.Aliquota',
+        etapa='servico',
+        rotulo='Alíquota',
+        tipo='text',
+        interacao='texto',
+        obrigatorio=True,
+        seletor_tipo='name',
+        seletor='Servico.Aliquota',
+    )
+    oculto = ControleInventariado(
+        chave_semantica='Servico.Aliquota', etapa='servico', tag='input',
+        tipo='text', id='Servico_Aliquota', name='Servico.Aliquota',
+        rotulo='Alíquota', seletor_tipo='name', seletor='Servico.Aliquota',
+        obrigatorio=True, desabilitado=False, somente_leitura=False,
+        visivel=False, interacao='texto',
+    )
+    # Mesma identidade, VISÍVEL, e com a interação trocada — é a divergência
+    # que precisa aparecer.
+    visivel = replace(oculto, visivel=True, interacao='select_direto', tipo='select')
+
+    # O oculto vem ANTES no DOM: é o caso que o `setdefault` errava.
+    resultado = comparar(
+        'servico', [esperado],
+        InventarioEtapa(etapa='servico', controles=(oculto, visivel)),
+    )
+
+    assert resultado.compatibilidade != 'compativel'
+    assert any(d.tipo == INTERACAO_ALTERADA for d in resultado.diferencas)

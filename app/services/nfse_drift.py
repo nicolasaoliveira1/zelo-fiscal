@@ -351,10 +351,21 @@ def comparar(
     # O portal é ASP.NET MVC: o mesmo campo se chama `Tomador.Inscricao` por
     # `name` e `Tomador_Inscricao` por `id`. Casar por uma só das formas some
     # com todo campo que o contrato endereça pelo id.
+    #
+    # Identidade repetida existe: o portal reaproveita `name`/`id` em partes
+    # ocultas do formulario. Quem PREENCHE ja escolhe o visivel
+    # (`automation/nfse._localizar`, "o primeiro do DOM pode estar numa delas"),
+    # entao o comparador tem de olhar o MESMO elemento que vai ser dirigido.
+    # Com `setdefault` a identidade ficava presa no primeiro do DOM: bastava a
+    # copia oculta vir antes para a visivel — a que muda de verdade — ser
+    # suprimida como "ja casada" e um campo fiscal alterado passar por
+    # compativel. Documento fiscal nao tem rollback.
     observados_por_identidade = {}
     for campo in observados:
         for identidade in _identidades_portal(campo):
-            observados_por_identidade.setdefault(identidade, campo)
+            atual = observados_por_identidade.get(identidade)
+            if atual is None or (campo.visivel and not atual.visivel):
+                observados_por_identidade[identidade] = campo
 
     pares = []
     faltantes = []

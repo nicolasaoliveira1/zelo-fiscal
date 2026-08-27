@@ -62,8 +62,46 @@ DOCUMENTOS_SINTETICOS = {
     "83567984004",
 }
 
-EXTENSOES = {".py", ".js", ".mjs", ".html", ".xml", ".csv", ".json", ".md", ".txt", ".yml", ".yaml"}
+# Lista NEGATIVA, nunca positiva. Uma lista de extensoes permitidas deixa passar
+# todo formato de texto que o repositorio ganhar depois — `.env.example`,
+# `.toml`, `.ini`, `.cfg`, `.bat`, `.sql`, um `Dockerfile` sem extensao —, e a
+# regra do CLAUDE.md vale para QUALQUER arquivo versionado, nao para uma lista.
+# Aqui a pergunta e "isto e binario?", e quem responde e a decodificacao.
+EXTENSOES_BINARIAS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".bmp", ".webp", ".svgz",
+    ".pdf", ".zip", ".gz", ".tar", ".7z", ".rar",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    ".xlsx", ".xls", ".docx", ".doc", ".odt", ".ods",
+    ".exe", ".dll", ".so", ".dylib", ".pyc", ".pyd", ".whl",
+    ".db", ".sqlite", ".sqlite3", ".mo", ".pfx", ".p12", ".jks",
+    ".mp4", ".mp3", ".wav", ".avi", ".mov",
+}
 IGNORAR_DIRETORIOS = {".git", "venv", "node_modules", "__pycache__", "logs", ".specs"}
+
+
+def _texto_ou_none(dados: bytes) -> str | None:
+    """O conteudo como texto, ou None se for binario.
+
+    Decodifica em MODO ESTRITO de proposito: com `errors="ignore"` todo binario
+    vira texto e o verificador gastaria tempo procurando CNPJ dentro de PNG.
+    O byte NUL e o segundo teste — arquivo de texto nao tem, e ha binario que
+    decodifica como latin-1 por acidente.
+    """
+    if b"\0" in dados:
+        return None
+    try:
+        return dados.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _verificavel(caminho) -> bool:
+    from pathlib import Path as _Path
+
+    caminho = _Path(caminho)
+    if caminho.suffix.lower() in EXTENSOES_BINARIAS:
+        return False
+    return not (set(caminho.parts) & IGNORAR_DIRETORIOS)
 
 _SO_DIGITOS = re.compile(r"\D")
 _CANDIDATO_CNPJ = re.compile(r"(?<!\d)\d{2}[.\s]?\d{3}[.\s]?\d{3}[/\s]?\d{4}[-\s]?\d{2}(?!\d)")
@@ -131,12 +169,15 @@ def _blobs_do_indice() -> list[tuple[str, str]]:
         if not bruto:
             continue
         caminho = bruto.decode("utf-8", "surrogateescape")
-        if Path(caminho).suffix.lower() not in EXTENSOES:
+        if not _verificavel(caminho):
             continue
         blob = subprocess.run(["git", "show", f":{caminho}"], capture_output=True)
         if blob.returncode != 0:
             continue
-        conteudos.append((caminho, blob.stdout.decode("utf-8", "ignore")))
+        texto = _texto_ou_none(blob.stdout)
+        if texto is None:
+            continue
+        conteudos.append((caminho, texto))
     return conteudos
 
 
@@ -150,13 +191,13 @@ def _arquivos_versionados() -> list[Path]:
 def verificar(caminhos: list[Path]) -> int:
     problemas = 0
     for caminho in caminhos:
-        if caminho.suffix.lower() not in EXTENSOES:
-            continue
-        if set(caminho.parts) & IGNORAR_DIRETORIOS:
+        if not _verificavel(caminho):
             continue
         try:
-            texto = caminho.read_text(encoding="utf-8", errors="ignore")
+            texto = _texto_ou_none(caminho.read_bytes())
         except OSError:
+            continue
+        if texto is None:
             continue
         for numero_linha, tipo, valor in _achados_do_texto(texto):
             problemas += 1
