@@ -892,3 +892,85 @@ def test_edicao_de_linha_nao_loga_como_descarte_do_operador(app, ids, monkeypatc
         descartes = [c for nome, c in eventos if nome == 'nfse_candidata_descartada']
         assert descartes[0]['motivo'] == 'descarte'
         assert descartes[0]['level'] == 'WARNING'
+
+
+def test_controle_ja_contratado_em_outra_etapa_e_recusado(app, ids):
+    """O portal é ASP.NET: o MESMO input é `Valores.ValorServico` por `name` e
+    `Valores_ValorServico` por `id`. Sem canonizar o ponto, as duas formas
+    passam por controles diferentes — e o valor do serviço acabou contratado em
+    duas etapas, deixando o seletor sem alvo único e o incidente oscilando
+    entre "novo" e "removido"."""
+
+    with app.app_context():
+        contrato = nfse_contrato.garantir_contrato_inicial()
+        ja_contratado = next(
+            c for c in contrato.campos
+            if c.chave_semantica == 'Valores_ValorServico'
+        )
+        diferenca = _diferenca_de_controle('texto', 'Valores.ValorServico')
+        incidente, _ = nfse_contrato._registrar_uma_diferenca(
+            contrato.id, diferenca, datetime(2026, 8, 27, 12, 0, 0),
+        )
+        db.session.commit()
+
+        with pytest.raises(
+            nfse_contrato.ConfiguracaoContratoInvalidaError
+        ) as erro:
+            nfse_contrato.configurar_incidente(
+                incidente.id, {'origem': 'nota', 'fonte': 'valor_final'},
+            )
+
+        # A mensagem precisa dizer ONDE ele já está, senão o operador não tem
+        # como saber que decisão tomar.
+        assert ja_contratado.etapa in str(erro.value)
+
+
+def test_controle_removido_explica_a_unica_saida(app, ids):
+    """"Exige a decisão de não tocar" nomeava a regra sem dizer o que fazer nem
+    por que as outras origens somem."""
+
+    with app.app_context():
+        contrato = nfse_contrato.garantir_contrato_inicial()
+        alvo = next(
+            c for c in contrato.campos
+            if c.chave_semantica == 'ServicoPrestado_Descricao'
+        )
+        diferenca = Diferenca(
+            etapa=alvo.etapa,
+            tipo=nfse_contrato.CONTROLE_REMOVIDO,
+            severidade='fiscal',
+            chave_esperada=alvo.chave_semantica,
+            esperado=CampoComparavel(
+                chave_semantica=alvo.chave_semantica,
+                etapa=alvo.etapa,
+                rotulo=alvo.rotulo,
+                tipo=alvo.tipo,
+                interacao=alvo.interacao,
+                obrigatorio=alvo.obrigatorio,
+            ),
+            observado=None,
+            mensagem='O controle esperado não foi encontrado.',
+        )
+        incidente, _ = nfse_contrato._registrar_uma_diferenca(
+            contrato.id, diferenca, datetime(2026, 8, 27, 12, 0, 0),
+        )
+        db.session.commit()
+
+        with pytest.raises(
+            nfse_contrato.ConfiguracaoContratoInvalidaError
+        ) as erro:
+            nfse_contrato.configurar_incidente(
+                incidente.id, {'origem': 'nota', 'fonte': 'descricao'},
+            )
+
+        mensagem = str(erro.value)
+        assert 'Não tocar' in mensagem
+        assert 'não está mais na tela' in mensagem
+
+        # E a decisão possível continua funcionando.
+        candidata = nfse_contrato.configurar_incidente(
+            incidente.id, {'origem': 'intocavel'},
+        )
+        assert all(
+            c.chave_semantica != alvo.chave_semantica for c in candidata.campos
+        )

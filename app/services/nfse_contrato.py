@@ -1325,6 +1325,29 @@ def _copiar_campo(campo):
     return copia
 
 
+def _identidade_canonica_portal(chave):
+    """Identidade do controle independente da forma com que é endereçado.
+
+    O portal é ASP.NET MVC: o MESMO input se chama `Valores.ValorServico` por
+    `name` e `Valores_ValorServico` por `id`. Sem canonizar o ponto, as duas
+    formas passam por controles diferentes — e foi assim que o valor do serviço
+    acabou contratado duas vezes, em duas etapas, deixando o seletor sem alvo
+    único e o incidente oscilando entre "novo" e "removido".
+    """
+    return str(chave or "").strip().replace(".", "_").casefold()
+
+
+def _campo_com_mesma_identidade(chave, campos):
+    alvo = _identidade_canonica_portal(chave)
+    if not alvo:
+        return None
+    for campo in campos:
+        formas = (campo.chave_semantica, campo.seletor)
+        if any(_identidade_canonica_portal(forma) == alvo for forma in formas):
+            return campo
+    return None
+
+
 def _campo_do_incidente(incidente, campos):
     chave = incidente.chave_esperada or incidente.chave_observada
     return next((campo for campo in campos if campo.chave_semantica == chave), None)
@@ -1681,6 +1704,19 @@ def configurar_incidente(
             campo="chave_observada",
         )
 
+    if incidente.tipo == CONTROLE_NOVO and incidente_observado is None:
+        gemeo = _campo_com_mesma_identidade(
+            incidente.chave_observada, ativo.campos
+        )
+        if gemeo is not None:
+            raise ConfiguracaoContratoInvalidaError(
+                f"Este controle já está no contrato, na etapa \"{gemeo.etapa}\" "
+                f"(como \"{gemeo.chave_semantica}\"). Contratá-lo de novo faria a "
+                "automação preencher o mesmo campo duas vezes e o seletor deixaria "
+                "de ter alvo único. Se ele mudou de etapa, resolva primeiro a "
+                "remoção na etapa antiga.",
+            )
+
     agora = utcnow_naive()
     candidata_base = (
         ContratoNfse.query
@@ -1706,9 +1742,18 @@ def configurar_incidente(
         incidente.tipo == CONTROLE_REMOVIDO and incidente_observado is None
     )
     if remover_campo:
-        if origem != "intocavel" or campo_alvo is None:
+        if campo_alvo is None:
             raise ConfiguracaoContratoInvalidaError(
-                "um controle removido sem remapeamento exige a decisão de não tocar"
+                "o controle removido não está mais no contrato desta versão"
+            )
+        if origem != "intocavel":
+            # A mensagem antiga ("exige a decisão de não tocar") nomeava a regra
+            # sem dizer o que fazer nem por que as outras origens somem: um
+            # controle que NÃO ESTÁ MAIS NA TELA não tem o que receber valor.
+            raise ConfiguracaoContratoInvalidaError(
+                "Este controle não está mais na tela, então não há onde escrever "
+                "um valor. A decisão possível é \"Não tocar\", que o tira do "
+                "contrato — ou remapeá-lo para o controle que tomou o lugar dele.",
             )
         campos.remove(campo_alvo)
     elif campo_alvo is None:
