@@ -680,10 +680,20 @@ function ligar() {
     const botao = e.target.closest('[data-senha]');
     if (!botao) return;
     try {
-      await pedir(`/manifestador/cofre/senha/${botao.dataset.empresa}`,
+      /* Senha CERTA em certificado VENCIDO grava a senha e MANTEM a pendencia
+       * (`gravar_senha`): sem dizer qual dos dois desfechos foi, a linha que
+       * fica na lista com razao parece defeito da tela. */
+      const { estado } = await pedir(`/manifestador/cofre/senha/${botao.dataset.empresa}`,
         comoJson({ senha: botao.dataset.senha }));
-      toast('Senha guardada.', 'success');
-      carregarCofre();
+      if (estado === 'vencido') {
+        toast('Senha guardada, mas o certificado está vencido — renove antes de manifestar.',
+          'warning');
+      } else {
+        toast('Senha guardada. Certificado pronto.', 'success');
+      }
+      /* `await`: sem ele a rejeicao escapa do try/catch, que ja saiu de cena —
+       * a lista nao repinta E nao aparece erro nenhum, o pior dos dois mundos. */
+      await carregarCofre();
     } catch (erro) {
       toast(erro.message, 'error');
     }
@@ -695,7 +705,7 @@ function ligar() {
       await pedir('/manifestador/cofre/inventariar', { method: 'POST' });
       $('manifRelerAviso').textContent = '';
       toast('Cofre atualizado.', 'success');
-      carregarCofre();
+      await carregarCofre();
     } catch (erro) {
       $('manifRelerAviso').textContent = '';
       toast(erro.message, 'error');

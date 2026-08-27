@@ -207,6 +207,33 @@ def test_senha_errada_e_recusada_e_nao_volta_no_json(app, ids, login_as,
     assert 'Isa@2110' not in resposta.get_data(as_text=True)
 
 
+def test_senha_certa_em_certificado_vencido_devolve_o_estado_vencido(
+        app, ids, login_as, monkeypatch):
+    """A senha e aceita e a pendencia CONTINUA — sao coisas diferentes.
+
+    `gravar_senha` grava a senha e marca VENCIDO quando o .pfx abre mas ja
+    passou da validade. A tela depende deste `estado` para dizer o que
+    aconteceu: sem ele, a linha que fica na lista (com razao) parece defeito.
+    """
+    from app.services import manifestador_cofre
+
+    with app.app_context():
+        emp = _empresa(estado_cert=EstadoCertificado.SENHA_PENDENTE)
+        empresa_id = emp.id
+
+    def _grava_vencido(empresa, senha):
+        empresa.certificado.estado = EstadoCertificado.VENCIDO
+        db.session.commit()
+        return True
+
+    monkeypatch.setattr(manifestador_cofre, 'gravar_senha', _grava_vencido)
+    resposta = login_as('admin').post(
+        f'/manifestador/cofre/senha/{empresa_id}', json={'senha': 'Isa@2110'})
+
+    assert resposta.status_code == 200
+    assert resposta.get_json()['estado'] == 'vencido'
+
+
 # --- importacao (MANIF-09, MANIF-11) ----------------------------------------
 
 def test_importar_colagem_devolve_o_balanco_nomeado(app, ids, client):
