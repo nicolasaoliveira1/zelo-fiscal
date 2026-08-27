@@ -218,14 +218,14 @@ def test_politica_usa_indice_proprio_e_nao_herda_o_certificado_do_rs(monkeypatch
         'NFSE_CERT_AUTOSELECT_PATTERN': 'https://certificado.nfse.gov.br',
         'NFSE_CERT_AUTOSELECT_POLICY_INDEX': '2',
         'NFSE_CERT_AUTOSELECT_ISSUER_CN': 'AC SyngularID Multipla',
-        'NFSE_CERT_AUTOSELECT_SUBJECT_CN': 'FULANO:94645405000120',
+        'NFSE_CERT_AUTOSELECT_SUBJECT_CN': 'FULANO:11222333000181',
     }
     monkeypatch.setattr(sessao_mod, 'get_config_value',
                         lambda nome, default=None: valores.get(nome, default))
     politica = sessao_mod.politica_nfse()
     assert politica.indice == '2'
     assert politica.indice != '1', 'o indice 1 e do RS'
-    assert politica.subject_cn.endswith('94645405000120')
+    assert politica.subject_cn.endswith('11222333000181')
     montada = politica.montar()
     assert montada['filter']['ISSUER']['CN'] == 'AC SyngularID Multipla'
 
@@ -272,7 +272,7 @@ def test_politica_e_montada_a_partir_do_config_da_aplicacao(app):
             NFSE_CERT_AUTOSELECT_PATTERN='https://certificado.nfse.gov.br',
             NFSE_CERT_AUTOSELECT_POLICY_INDEX='2',
             NFSE_CERT_AUTOSELECT_ISSUER_CN='AC SyngularID Multipla',
-            NFSE_CERT_AUTOSELECT_SUBJECT_CN='FULANO:94645405000120',
+            NFSE_CERT_AUTOSELECT_SUBJECT_CN='FULANO:11222333000181',
         )
         politica = sessao_mod.politica_nfse()
 

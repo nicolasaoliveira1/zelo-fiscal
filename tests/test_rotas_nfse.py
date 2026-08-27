@@ -125,7 +125,7 @@ def test_cnpj_valido_de_empresa_nao_cadastrada_fica_cadastro_pendente(client, ap
     with app.app_context():
         nota_id = _primeira_nota().id
     resposta = client.post(f'/nfse/nota/{nota_id}/resolver',
-                           json={'cnpj': '33.684.001/0001-51'})
+                           json={'cnpj': '44.556.677/0001-86'})
     assert resposta.status_code == 200
     assert resposta.get_json()['nota']['status'] == StatusNotaNfse.CADASTRO_PENDENTE
 
@@ -182,11 +182,11 @@ def test_template_sem_placeholder_devolve_400_apontando_o_campo(client):
 
 def test_nova_empresa_aceita_nome_e_cnpj_da_querystring(login_as):
     resposta = login_as('operador').get(
-        '/empresa/nova?nome=ACME+TRANSPORTES&cnpj=33.684.001/0001-51')
+        '/empresa/nova?nome=ACME+TRANSPORTES&cnpj=44.556.677/0001-86')
     assert resposta.status_code == 200
     corpo = resposta.get_data(as_text=True)
     assert 'ACME TRANSPORTES' in corpo
-    assert '33.684.001/0001-51' in corpo
+    assert '44.556.677/0001-86' in corpo
 
 
 def test_nova_empresa_sem_querystring_continua_igual(login_as):

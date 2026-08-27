@@ -16,7 +16,7 @@ from app.services import nfse_import as imp
 
 FIXTURE = os.path.join(os.path.dirname(__file__), 'fixtures', 'extrato_banco.csv')
 
-LINHA = ('"13/07/2026";"L LUIS PETRY ME";"0001443038";"062623";"05/07/2026";'
+LINHA = ('"13/07/2026";"PAPELARIA CENTRAL ME";"0001443038";"062623";"05/07/2026";'
          '"811,00";"16,22";"1,13";"826,09";"COBRANCA SIMPLES"')
 
 
@@ -48,7 +48,7 @@ def test_competencia_sem_vencimento_levanta():
 
 def test_parse_extrai_as_colunas_uteis_e_descarta_as_outras():
     linha = imp.parse_csv(LINHA)[0]
-    assert linha.nome == 'L LUIS PETRY ME'
+    assert linha.nome == 'PAPELARIA CENTRAL ME'
     assert linha.data_pagamento == date(2026, 7, 13)
     assert linha.vencimento == date(2026, 7, 5)
     assert linha.valor_titulo == Decimal('811.00')
@@ -70,13 +70,13 @@ def test_nome_normalizado_colapsa_espaco_e_remove_acento():
 # --- encoding --------------------------------------------------------------
 
 def test_le_cp1252_quando_nao_e_utf8():
-    bruto = LINHA.replace('L LUIS PETRY ME', 'PADARIA SÃO JOÃO')
+    bruto = LINHA.replace('PAPELARIA CENTRAL ME', 'PADARIA SÃO JOÃO')
     linha = imp.parse_csv(bruto.encode('cp1252'))[0]
     assert linha.nome == 'PADARIA SÃO JOÃO'
 
 
 def test_le_utf8_com_bom():
-    bruto = LINHA.replace('L LUIS PETRY ME', 'PADARIA SÃO JOÃO')
+    bruto = LINHA.replace('PAPELARIA CENTRAL ME', 'PADARIA SÃO JOÃO')
     linha = imp.parse_csv(bruto.encode('utf-8-sig'))[0]
     assert linha.nome == 'PADARIA SÃO JOÃO'
 
@@ -124,7 +124,7 @@ def test_linha_com_menos_colunas_vira_invalida_sem_abortar():
 
 def test_nome_vazio_nao_invalida_a_linha():
     # nome vazio deixa a nota pendente de empresa, mas os valores sao validos
-    linha = imp.parse_csv(LINHA.replace('"L LUIS PETRY ME"', '""'))[0]
+    linha = imp.parse_csv(LINHA.replace('"PAPELARIA CENTRAL ME"', '""'))[0]
     assert not linha.invalida
     assert linha.nome == ''
     assert linha.valor_final == Decimal('826.09')

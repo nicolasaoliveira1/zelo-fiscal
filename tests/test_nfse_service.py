@@ -492,7 +492,7 @@ def test_falha_conhecida_do_selenium_vira_explicacao_correta(ambiente):
 
 def test_erro_da_propria_automacao_e_mostrado_como_escrito(ambiente):
     from app.automation.nfse import InteracaoPortalError
-    texto = 'O portal nao reconheceu o documento 33.684.001/0001-51 do tomador.'
+    texto = 'O portal nao reconheceu o documento 44.556.677/0001-86 do tomador.'
     assert nfse_service.mensagem_da_falha(InteracaoPortalError(texto)) == texto
 
 

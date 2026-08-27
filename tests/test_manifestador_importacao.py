@@ -7,9 +7,9 @@ from app import db
 from app.models import ChaveManifestacao, Empresa, StatusManifestacao
 from app.services import manifestador_import as imp
 
-CHAVE_A = '43170107461248000107650010000045391000045390'
-CHAVE_B = '43170107461248000107650010000045401000045404'
-CHAVE_C = '43170107461248000107650010000045751000045752'
+CHAVE_A = '43170122333444000181650010000045391000045393'
+CHAVE_B = '43170122333444000181650010000045401000045408'
+CHAVE_C = '43170122333444000181650010000045751000045756'
 DV_ERRADO = CHAVE_A[:43] + str((int(CHAVE_A[43]) + 1) % 10)
 
 
@@ -49,7 +49,7 @@ def test_chave_importada_nasce_pendente_com_competencia_e_emitente(app, ids):
         linha = ChaveManifestacao.query.filter_by(chave=CHAVE_A).first()
         assert linha.status == StatusManifestacao.PENDENTE
         assert linha.competencia == '2017-01'
-        assert linha.cnpj_emitente == '07461248000107'
+        assert linha.cnpj_emitente == '22333444000181'
         assert linha.empresa_id == emp.id
         assert linha.origem == 'colagem'
         assert linha.competencia_ajustada is False

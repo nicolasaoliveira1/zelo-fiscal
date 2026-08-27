@@ -1,0 +1,41 @@
+#!/bin/sh
+# Barreira ANTES do commit: trocar o valor depois nao apaga o historico do git.
+# Instale uma vez com:  git config core.hooksPath .githooks
+set -e
+
+raiz=$(git rev-parse --show-toplevel)
+verificador="$raiz/tools/verificar_dados_sensiveis.py"
+
+if [ -x "$raiz/venv/Scripts/python.exe" ]; then
+    python_bin="$raiz/venv/Scripts/python.exe"
+elif [ -x "$raiz/venv/bin/python" ]; then
+    python_bin="$raiz/venv/bin/python"
+else
+    python_bin=python3
+fi
+
+# O que vai no commit e o CONTEUDO EM INDICE, nao o da arvore de trabalho:
+# editar o arquivo depois do `git add` faria o hook aprovar bytes que nao sao
+# os que serao gravados. Materializa cada blob do indice num diretorio
+# temporario, preservando o caminho relativo para o erro apontar o arquivo real.
+staged=$(mktemp -d)
+trap 'rm -rf "$staged"' EXIT INT TERM
+
+git diff --cached --name-only -z --diff-filter=ACM |
+    while IFS= read -r -d '' arquivo; do
+        destino="$staged/$arquivo"
+        mkdir -p "$(dirname "$destino")" || continue
+        git show ":$arquivo" > "$destino" 2>/dev/null || continue
+        printf '%s\0' "$arquivo"
+    done > "$staged/.lista"
+
+[ -s "$staged/.lista" ] || exit 0
+
+# `xargs -0` preserva nome de arquivo com espaco; o `cd` faz o verificador
+# receber caminhos relativos identicos aos do repositorio.
+if ! (cd "$staged" && xargs -0 "$python_bin" "$verificador" < .lista); then
+    echo
+    echo "Commit recusado. Corrija acima, ou registre o documento sintetico em"
+    echo "tools/verificar_dados_sensiveis.py se ele for inventado."
+    exit 1
+fi

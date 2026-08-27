@@ -21,8 +21,8 @@ from app.models import (
     StatusManifestacao,
 )
 
-CHAVE_A = '43170107461248000107650010000045391000045390'
-CHAVE_B = '43170107461248000107650010000045401000045404'
+CHAVE_A = '43170122333444000181650010000045391000045393'
+CHAVE_B = '43170122333444000181650010000045401000045408'
 
 
 def _empresa(nome='Empresa Manifesto', cnpj='33.000.167/0001-01'):
@@ -185,7 +185,7 @@ def test_campos_do_desfecho_persistem(app, ids):
         emp = _empresa()
         chave = ChaveManifestacao(
             chave=CHAVE_A, empresa_id=emp.id, competencia='2017-01',
-            competencia_ajustada=True, cnpj_emitente='07461248000107',
+            competencia_ajustada=True, cnpj_emitente='22333444000181',
             origem='colagem', status=StatusManifestacao.MANIFESTADA,
             tipo_evento='210200', cstat='135',
             xmotivo='Evento registrado e vinculado a NF-e',
@@ -197,7 +197,7 @@ def test_campos_do_desfecho_persistem(app, ids):
         recarregada = db.session.get(ChaveManifestacao, chave.id)
         assert recarregada.competencia == '2017-01'
         assert recarregada.competencia_ajustada is True
-        assert recarregada.cnpj_emitente == '07461248000107'
+        assert recarregada.cnpj_emitente == '22333444000181'
         assert recarregada.origem == 'colagem'
         assert recarregada.tipo_evento == '210200'
         assert recarregada.cstat == '135'

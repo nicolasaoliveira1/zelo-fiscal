@@ -13,7 +13,7 @@
 -->
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
   <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
-    <infNFe versao="4.00" Id="NFe43250707461248000107550010000012341000012340">
+    <infNFe versao="4.00" Id="NFe43250722333444000181550010000012341000012344">
       <ide>
         <cUF>43</cUF>
         <cNF>00001234</cNF>
@@ -32,7 +32,7 @@
         <finNFe>1</finNFe>
       </ide>
       <emit>
-        <CNPJ>07461248000107</CNPJ>
+        <CNPJ>22333444000181</CNPJ>
         <xNome>FORNECEDOR EXEMPLO LTDA</xNome>
         <enderEmit>
           <xLgr>AV RIO GRANDE</xLgr>
@@ -70,7 +70,7 @@
   </NFe>
   <protNFe versao="4.00">
     <infProt>
-      <chNFe>43250707461248000107550010000012341000012340</chNFe>
+      <chNFe>43250722333444000181550010000012341000012344</chNFe>
       <nProt>143250000123456</nProt>
       <cStat>100</cStat>
       <xMotivo>Autorizado o uso da NF-e</xMotivo>

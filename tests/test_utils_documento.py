@@ -10,14 +10,14 @@ import pytest
 from app import utils
 
 CPF_OK = '529.982.247-25'
-CNPJ_OK = '33.684.001/0001-51'
+CNPJ_OK = '44.556.677/0001-86'
 
 
 @pytest.mark.parametrize('valor,esperado', [
     (CPF_OK, 'cpf'),
     ('52998224725', 'cpf'),
     (CNPJ_OK, 'cnpj'),
-    ('33684001000151', 'cnpj'),
+    ('44556677000186', 'cnpj'),
     ('123', None),
     ('', None),
     (None, None),
@@ -56,7 +56,7 @@ def test_cnpj_valido():
 
 
 def test_cnpj_com_digito_trocado_e_recusado():
-    assert not utils.cnpj_valido('33.684.001/0001-52')
+    assert not utils.cnpj_valido('44.556.677/0001-87')
 
 
 def test_cnpj_com_todos_os_digitos_iguais_e_recusado():
@@ -86,7 +86,7 @@ def test_cpf_nao_e_avaliado_como_cnpj():
 
 def test_formata_cada_tipo_com_sua_mascara():
     assert utils.formatar_documento('52998224725') == '529.982.247-25'
-    assert utils.formatar_documento('33684001000151') == '33.684.001/0001-51'
+    assert utils.formatar_documento('44556677000186') == '44.556.677/0001-86'
 
 
 def test_formatar_o_que_nao_e_documento_devolve_o_texto():

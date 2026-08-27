@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 from app.automation import nfse
 
-DOCUMENTO = '33.684.001/0001-51'
+DOCUMENTO = '44.556.677/0001-86'
 VALOR = Decimal('826.09')
 DESCRICAO = 'HONORÁRIOS PROFISSIONAIS REFERENTES AO MÊS DE 06/2026'
 
@@ -74,7 +74,7 @@ def test_tudo_conferindo_nao_acusa_divergencia():
 def test_documento_e_comparado_por_digitos():
     """A tela mostra formatado e a nota guarda formatado, mas um dos dois pode
     mudar de formato sem que nada esteja errado."""
-    assert _conferir(_driver_revisao(documento='33684001000151')) == []
+    assert _conferir(_driver_revisao(documento='44556677000186')) == []
 
 
 def test_valor_com_milhar_e_lido_corretamente():

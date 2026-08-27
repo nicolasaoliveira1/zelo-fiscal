@@ -88,8 +88,8 @@ def test_truncamento_do_banco_resolve_pelo_fuzzy():
 
 
 def test_abreviacao_do_banco_resolve_quando_inequivoca():
-    empresas = [_empresa(1, 'REPRESENTACOES LITORAL'), _empresa(2, 'ANELISE LITORAL')]
-    v = imp.resolver_empresa('REPRESENTACOES LITORAL COMERCIAIS LTDA', empresas)
+    empresas = [_empresa(1, 'REPRESENTACOES EXEMPLO'), _empresa(2, 'ANELISE EXEMPLO')]
+    v = imp.resolver_empresa('REPRESENTACOES EXEMPLO COMERCIAIS LTDA', empresas)
     assert v.empresa.id == 1
 
 
@@ -186,10 +186,10 @@ def test_apelido_com_documento_avulso_resolve_sem_empresa():
 
 
 def test_apelido_com_cnpj_avulso_tambem_resolve():
-    apelidos = [_apelido('CONSTRUTORA NOVA LTDA', documento='33.684.001/0001-51',
+    apelidos = [_apelido('CONSTRUTORA NOVA LTDA', documento='44.556.677/0001-86',
                          tipo_documento='cnpj')]
     v = imp.resolver_empresa('CONSTRUTORA NOVA LTDA', [], apelidos)
-    assert v.documento == '33.684.001/0001-51'
+    assert v.documento == '44.556.677/0001-86'
     assert v.empresa is None
 
 

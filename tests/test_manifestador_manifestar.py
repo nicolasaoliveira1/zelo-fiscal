@@ -21,7 +21,7 @@ from app.services import manifestador_service as svc
 from app.services.nfe_sefaz import RespostaSefaz
 from tests.test_manifestador_cofre import _fazer_pfx
 
-CHAVE = '43170107461248000107650010000045391000045390'
+CHAVE = '43170122333444000181650010000045391000045393'
 TAG_CNPJ = '{http://www.portalfiscal.inf.br/nfe}CNPJ'
 TAG_TPEVENTO = '{http://www.portalfiscal.inf.br/nfe}tpEvento'
 

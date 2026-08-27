@@ -20,9 +20,9 @@ from app.services import manifestador_lote as lote
 from app.services import manifestador_service as svc
 
 CHAVES = [
-    '43170107461248000107650010000045391000045390',
-    '43170107461248000107650010000045401000045404',
-    '43170107461248000107650010000045751000045752',
+    '43170122333444000181650010000045391000045393',
+    '43170122333444000181650010000045401000045408',
+    '43170122333444000181650010000045751000045756',
 ]
 
 
@@ -148,14 +148,14 @@ def test_empresa_sem_certificado_pronto_tem_o_grupo_inteiro_pulado(app, ids,
 def test_grupos_sem_certificado_nomeia_a_empresa(app, ids):
     """"2 empresas puladas" manda o operador caçar quais; o nome ele resolve."""
     with app.app_context():
-        ruim = _empresa('REPRESENTACOES LITORAL', '11.222.333/0001-81',
+        ruim = _empresa('REPRESENTACOES EXEMPLO', '11.222.333/0001-81',
                         pronta=False)
         c = _chave(ruim, CHAVES[0])
 
         pulados = lote.grupos_sem_certificado([c.id])
 
-        assert list(pulados) == ['REPRESENTACOES LITORAL']
-        assert 'vencido' in pulados['REPRESENTACOES LITORAL']
+        assert list(pulados) == ['REPRESENTACOES EXEMPLO']
+        assert 'vencido' in pulados['REPRESENTACOES EXEMPLO']
 
 
 # --- emissao de um item -----------------------------------------------------

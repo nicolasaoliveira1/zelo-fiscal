@@ -84,7 +84,7 @@ def test_mesma_razao_social_em_cnpjs_diferentes_nao_se_confunde():
 def test_e_cpf_nao_vira_cnpj():
     """e-CPF tem 11 digitos. Manifestar exige e-CNPJ do destinatario, entao um
     e-CPF de socio NAO pode casar como se fosse a empresa."""
-    assert cofre.cnpj_do_cn('JURACI DA ROSA OLIVEIRA:34560971072') is None
+    assert cofre.cnpj_do_cn('FULANO DE TAL:12345678909') is None
 
 
 def test_cn_sem_documento_devolve_none():

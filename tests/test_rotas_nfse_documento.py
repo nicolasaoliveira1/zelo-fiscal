@@ -14,7 +14,7 @@ from app import db
 from app.models import ApelidoNfse, Empresa, NotaNfse, StatusNotaNfse
 
 CPF_OK = '529.982.247-25'
-CNPJ_OK = '33.684.001/0001-51'
+CNPJ_OK = '44.556.677/0001-86'
 LINHA = ('"13/07/2026";"{nome}";"0001443038";"062623";"{venc}";'
          '"811,00";"16,22";"1,13";"826,09";"COBRANCA SIMPLES"')
 
@@ -59,7 +59,7 @@ def test_cnpj_invalido_e_recusado_citando_cnpj(client, app):
     _importar(client, 'ALGUMA COISA LTDA')
     nota_id = _ultima_nota(app)
     resposta = client.post(f'/nfse/nota/{nota_id}/resolver',
-                           json={'documento': '33.684.001/0001-52'})
+                           json={'documento': '44.556.677/0001-87'})
     assert resposta.status_code == 400
     assert 'CNPJ' in resposta.get_json()['message']
 

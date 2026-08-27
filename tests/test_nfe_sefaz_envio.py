@@ -12,7 +12,7 @@ from app.services import manifestador_service as svc
 from app.services import nfe_assinatura as assin
 from tests.test_nfe_assinatura import _par_de_teste
 
-CHAVE = '43170107461248000107650010000045391000045390'
+CHAVE = '43170122333444000181650010000045391000045393'
 NS_NFE = 'http://www.portalfiscal.inf.br/nfe'
 
 
