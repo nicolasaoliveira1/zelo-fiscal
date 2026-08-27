@@ -1,4 +1,5 @@
 import enum
+from sqlalchemy import event
 from app import db
 from app.utils import utcnow_naive
 from datetime import date, datetime, timezone
@@ -845,11 +846,22 @@ class ContratoNfse(db.Model):
     __tablename__ = 'contrato_nfse'
     __table_args__ = (
         db.UniqueConstraint('versao', name='uq_contrato_nfse_versao'),
+        db.UniqueConstraint('ativa_unica', name='uq_contrato_nfse_ativa'),
     )
 
     id = db.Column(db.Integer, primary_key=True)
     versao = db.Column(db.Integer, nullable=False)
     estado = db.Column(db.String(20), nullable=False, index=True)
+    # Sentinela que faz "só uma versão ativa" ser regra DO BANCO, e não apenas
+    # do serviço: vale 1 quando `estado == 'ativa'` e NULL nos demais casos.
+    # NULL não colide em índice único nem no MySQL nem no SQLite, então uma
+    # segunda ativa esbarra na constraint. O `with_for_update()` de `ativar()`
+    # não cobria isto: o dialeto SQLite descarta `FOR UPDATE` em silêncio, e
+    # SQLite é o banco padrão quando `DATABASE_URL` não está definido.
+    # Quem mantém a coluna é o listener abaixo, nunca o chamador — todo write
+    # de `estado` passa pelo ORM, e um write novo não pode depender de alguém
+    # lembrar de atualizar duas colunas.
+    ativa_unica = db.Column(db.Integer, nullable=True)
     fingerprint = db.Column(db.String(64), nullable=False, index=True)
     elegivel_automatico = db.Column(db.Boolean, nullable=False, default=False)
     criado_em = db.Column(db.DateTime, nullable=False, default=utcnow_naive)
@@ -885,6 +897,12 @@ class ContratoNfse(db.Model):
 
     def __repr__(self):
         return f'<ContratoNfse v{self.versao} {self.estado}>'
+
+
+@event.listens_for(ContratoNfse, 'before_insert')
+@event.listens_for(ContratoNfse, 'before_update')
+def _sincronizar_ativa_unica(mapper, connection, alvo):
+    alvo.ativa_unica = 1 if alvo.estado == 'ativa' else None
 
 
 class CampoContratoNfse(db.Model):

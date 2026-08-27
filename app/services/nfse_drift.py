@@ -291,6 +291,11 @@ def _comparar_campo(esperado: CampoComparavel, observado: CampoComparavel):
                 "O adaptador de interação do controle mudou.",
             )
         )
+    # Hoje `CampoContratoNfse` nao guarda visibilidade, entao `esperado.visivel`
+    # e sempre None e este ramo nao dispara. Fica de proposito: o `None` e o que
+    # o guarda ja trata como "o contrato nao declarou", e a comparacao passa a
+    # valer sozinha no dia em que a coluna existir. Apagar o ramo tornaria a
+    # coluna nova silenciosa justamente por parecer que ninguem a compara.
     if esperado.visivel is not None and esperado.visivel != observado.visivel:
         diferencas.append(
             _diferenca(
