@@ -359,34 +359,94 @@
         color: var(--zelo-slate);
         font-size: 0.82rem;
     }
+    /* Uma linha por incidente, com a configuracao no proprio lugar: sao dezenas
+       de decisoes por recon, e um modal por decisao custa o dobro dos cliques. */
     .nfse-contrato-incidente {
         border-top: 1px solid var(--zelo-line);
-        padding: 0.85rem 0;
+        padding: 0.4rem 0;
     }
-    .nfse-contrato-incidente:first-child { border-top: 0; padding-top: 0; }
-    .nfse-contrato-incidente:last-child { padding-bottom: 0; }
-    .nfse-contrato-incidente h3 {
-        font-size: 1rem;
-        margin: 0;
+    .nfse-contrato-incidente:first-child { border-top: 0; }
+    .nfse-contrato-linha {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.3rem 0.5rem;
     }
-    .nfse-contrato-dados {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-        gap: 0.55rem 1rem;
-        margin: 0.65rem 0;
+    .nfse-contrato-campo { flex: 1 1 13rem; min-width: 0; }
+    .nfse-contrato-campo strong {
+        display: block;
+        font-size: 0.9rem;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
-    .nfse-contrato-dados dt {
+    .nfse-contrato-config {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.3rem;
+    }
+    .nfse-contrato-config .form-select,
+    .nfse-contrato-config .form-control {
+        width: auto;
+        min-width: 7.5rem;
+        max-width: 13rem;
+    }
+    .nfse-contrato-confirmar {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        font-size: 0.8rem;
         color: var(--zelo-slate);
+        white-space: nowrap;
+    }
+    .nfse-contrato-incidente .nfse-status {
+        font-size: 0.68rem;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        border: 1px solid;
+        border-radius: 999px;
+        padding: 0.05rem 0.45rem;
+        white-space: nowrap;
+    }
+    .nfse-contrato-opcoes {
+        margin: 0.2rem 0 0;
+        font-size: 0.8rem;
+        color: var(--zelo-slate);
+    }
+    .nfse-contrato-opcoes summary {
+        cursor: pointer;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .nfse-contrato-opcoes ul {
+        margin: 0.3rem 0 0;
+        padding-left: 1.2rem;
+        max-height: 11rem;
+        overflow-y: auto;
+    }
+    .nfse-contrato-opcoes code { font-family: var(--zelo-font-mono); }
+    .nfse-contrato-erro:empty { display: none; }
+    .nfse-contrato-erro { font-size: 0.8rem; margin-top: 0.2rem; }
+    /* O que os passes sugerem: proposta, nunca decisao aplicada. */
+    .nfse-contrato-sugestoes {
+        margin-top: 0.75rem;
+        border: 1px dashed var(--zelo-line);
+        border-radius: 8px;
+        padding: 0.5rem 0.7rem;
+        font-size: 0.82rem;
+    }
+    .nfse-contrato-sugestoes h4 {
         font-size: 0.7rem;
         letter-spacing: 0.04em;
         text-transform: uppercase;
+        color: var(--zelo-slate);
+        margin: 0 0 0.35rem;
     }
-    .nfse-contrato-dados dd { margin: 0; }
-    .nfse-contrato-opcoes {
-        margin: 0.55rem 0 0.75rem;
-        padding-left: 1.2rem;
-    }
-    .nfse-contrato-opcoes code { font-family: var(--zelo-font-mono); }
+    .nfse-contrato-sugestoes ul { margin: 0; padding-left: 1.1rem; }
+    .nfse-contrato-sugestoes .motivo { color: var(--zelo-slate); }
     .nfse-contrato-historico {
         border-top: 1px solid var(--zelo-line);
         margin-top: 1rem;
@@ -490,9 +550,16 @@
                 Contrato ativo · versão <span class="nfse-mono">{{ contrato_estado.ativo.versao }}</span>
             </p>
         </div>
-        <div class="d-flex gap-2 flex-wrap">
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+            <span class="nfse-hint nfse-mono d-none" id="nfseReconPasses"></span>
             <button class="btn btn-soft-primary btn-sm" type="button" id="btnReconContrato">
                 Recon da tela atual
+            </button>
+            <button class="btn btn-ghost btn-sm d-none" type="button" id="btnReconDescartar">
+                Descartar acumulado
+            </button>
+            <button class="btn btn-ghost btn-sm" type="button" id="btnDescartarIncidentes">
+                Descartar incidentes
             </button>
         </div>
     </div>
@@ -514,73 +581,16 @@
         {% endif %}
     </div>
 
+    {# A lista e montada por `nfse_contrato.js` a partir de /nfse/contrato: a
+       linha carrega a configuracao inline e precisa das fontes do catalogo,
+       que so a rota devolve. Aqui fica so a primeira pintura. #}
+    <div class="nfse-contrato-sugestoes d-none" id="nfseReconSugestoes"
+         aria-live="polite"></div>
+
     <div class="mt-3" id="nfseContratoIncidentes" aria-live="polite">
-        {% if contrato_abertos %}
-            {% for incidente in contrato_abertos %}
-            <article class="nfse-contrato-incidente" data-incidente-id="{{ incidente.id }}">
-                <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
-                    <div>
-                        <h3>{{ incidente.campo.rotulo or 'Campo sem rótulo' }}</h3>
-                        <div class="nfse-contrato-meta">Etapa: {{ incidente.etapa }}</div>
-                    </div>
-                    <span class="nfse-status" data-status="{{ incidente.severidade }}">
-                        {{ incidente.tipo }}
-                    </span>
-                </div>
-                <dl class="nfse-contrato-dados">
-                    <div>
-                        <dt>Tipo</dt>
-                        <dd>{{ incidente.tipo }}</dd>
-                    </div>
-                    <div>
-                        <dt>Obrigatoriedade</dt>
-                        <dd>{{ 'Obrigatório' if incidente.campo.obrigatorio else 'Opcional' }}</dd>
-                    </div>
-                    <div>
-                        <dt>Observações</dt>
-                        <dd class="nfse-mono">{{ incidente.observacoes }}</dd>
-                    </div>
-                </dl>
-                {% if incidente.opcoes %}
-                <div class="nfse-contrato-meta">Opções apresentadas pelo portal</div>
-                <ul class="nfse-contrato-opcoes">
-                    {% for opcao in incidente.opcoes %}
-                    <li>{{ opcao.rotulo }} <code>{{ opcao.valor }}</code></li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-                {% if incidente.recomendacao %}
-                <div class="nfse-contrato-recomendacao">
-                    <strong>
-                        {% if incidente.recomendacao.ambigua %}
-                        Recomendação ambígua
-                        {% else %}
-                        Remapeamento sugerido · confiança {{ incidente.recomendacao.confianca }}
-                        {% endif %}
-                    </strong>
-                    <p class="nfse-hint mb-0">
-                        {{ incidente.recomendacao.evidencias | join('; ') }}
-                    </p>
-                </div>
-                {% endif %}
-                <div class="d-flex justify-content-end">
-                    {% if incidente.estado == 'aberto' %}
-                    <button class="btn btn-primary btn-sm" type="button"
-                            data-configurar-incidente="{{ incidente.id }}"
-                            data-bs-toggle="modal" data-bs-target="#modalConfigContrato">
-                        Configurar alteração
-                    </button>
-                    {% else %}
-                    <span>Incluído na versão candidata.</span>
-                    {% endif %}
-                </div>
-            </article>
-            {% endfor %}
-        {% else %}
         <p class="nfse-hint mb-0" id="nfseContratoVazio">
-            Não há incidentes no contrato ativo.
+            {% if contrato_abertos %}Carregando alterações…{% else %}Não há incidentes no contrato ativo.{% endif %}
         </p>
-        {% endif %}
     </div>
 
     <div class="nfse-contrato-historico" id="nfseContratoHistorico">
@@ -625,73 +635,6 @@
     </div>
     <div class="nfse-hint mt-3" id="nfseReconEstado" role="status" aria-live="polite"></div>
 </section>
-
-<div class="modal fade" id="modalConfigContrato" tabindex="-1"
-     aria-labelledby="modalConfigContratoTitulo" aria-hidden="true"
-     data-bs-backdrop="static">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title" id="modalConfigContratoTitulo">Configurar alteração</h2>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
-            </div>
-            <form id="formConfigContrato">
-                <div class="modal-body">
-                    <p class="nfse-hint" id="nfseContratoCampoSelecionado"></p>
-                    <input type="hidden" id="nfseContratoIncidenteId" name="incidente_id">
-                    <div class="mb-3">
-                        <label class="form-label" for="nfseContratoOrigem">Origem do valor</label>
-                        <select class="form-select" id="nfseContratoOrigem" name="origem" required>
-                            <option value="" selected>Escolha uma origem…</option>
-                            <option value="fixo">Valor fixo</option>
-                            <option value="nota">Fonte da nota</option>
-                            <option value="derivado">Valor derivado</option>
-                            <option value="configuracao">Configuração existente</option>
-                            <option value="padrao_portal">Manter padrão do portal</option>
-                            <option value="intocavel">Não tocar no campo</option>
-                        </select>
-                    </div>
-                    <div class="mb-3" id="nfseContratoFonteGrupo">
-                        <label class="form-label" for="nfseContratoFonte">Fonte</label>
-                        <select class="form-select" id="nfseContratoFonte" name="fonte">
-                            <option value="" selected>Escolha uma fonte…</option>
-                        </select>
-                    </div>
-                    <div class="mb-3" id="nfseContratoValorGrupo">
-                        <label class="form-label" for="nfseContratoValorFixo">Valor fixo</label>
-                        <input class="form-control" id="nfseContratoValorFixo" name="valor_fixo"
-                               maxlength="500" autocomplete="off">
-                    </div>
-                    <div class="d-none mb-3" id="nfseContratoEscolhaGrupo">
-                        <label class="form-label" for="nfseContratoChaveObservada">
-                            Controle correspondente
-                        </label>
-                        <select class="form-select" id="nfseContratoChaveObservada"
-                                name="chave_observada">
-                            <option value="" selected>Escolha o controle…</option>
-                        </select>
-                    </div>
-                    <div class="form-check d-none" id="nfseContratoRecomendacaoGrupo">
-                        <input class="form-check-input" type="checkbox"
-                               id="nfseContratoConfirmarRecomendacao"
-                               name="confirmar_recomendacao">
-                        <label class="form-check-label" for="nfseContratoConfirmarRecomendacao">
-                            Confirmo a recomendação para este incidente.
-                        </label>
-                        <div class="nfse-hint" id="nfseContratoRecomendacaoEvidencias"></div>
-                    </div>
-                    <div class="text-danger" id="nfseContratoErro" role="alert" aria-live="assertive"></div>
-                </div>
-                <div class="modal-footer batch-modal-footer">
-                    <button type="button" class="btn btn-ghost btn-sm" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="submit" class="btn btn-primary btn-sm" id="btnSalvarConfigContrato">
-                        Salvar configuração
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
 
 <div class="modal fade" id="modalValidarContrato" tabindex="-1"
      aria-labelledby="modalValidarContratoTitulo" aria-hidden="true"

@@ -66,30 +66,15 @@ function markup() {
         <div id="nfseContratoStatusTitulo"></div>
         <div id="nfseContratoStatusTexto"></div>
       </div>
+      <div id="nfseReconSugestoes" class="d-none"></div>
       <div id="nfseContratoIncidentes"></div>
       <div id="nfseContratoHistorico"></div>
       <div id="nfseReconEstado" role="status" aria-live="polite"></div>
     </section>
     <button id="btnReconContrato" type="button">Recon</button>
-    <div id="modalConfigContrato"></div>
-    <form id="formConfigContrato">
-      <input id="nfseContratoIncidenteId">
-      <p id="nfseContratoCampoSelecionado"></p>
-      <select id="nfseContratoOrigem">
-        <option value="" selected>Escolha uma origem…</option>
-        <option value="fixo">Valor fixo</option>
-        <option value="nota">Fonte da nota</option>
-      </select>
-      <div id="nfseContratoFonteGrupo"><select id="nfseContratoFonte"></select></div>
-      <div id="nfseContratoValorGrupo"><input id="nfseContratoValorFixo"></div>
-      <div id="nfseContratoEscolhaGrupo"><select id="nfseContratoChaveObservada"></select></div>
-      <div id="nfseContratoRecomendacaoGrupo">
-        <input id="nfseContratoConfirmarRecomendacao" type="checkbox">
-        <div id="nfseContratoRecomendacaoEvidencias"></div>
-      </div>
-      <div id="nfseContratoErro" role="alert"></div>
-      <button id="btnSalvarConfigContrato" type="submit">Salvar configuração</button>
-    </form>
+    <span id="nfseReconPasses" class="d-none"></span>
+    <button id="btnReconDescartar" class="d-none" type="button">Descartar</button>
+    <button id="btnDescartarIncidentes" type="button">Descartar incidentes</button>
     <div id="modalValidarContrato"></div>
     <form id="formValidarContrato">
       <select id="nfseNotaValidacao"><option value="" selected disabled>Escolha uma nota…</option></select>
@@ -137,27 +122,177 @@ test('renderiza os quatro estados e mantém texto recebido fora do HTML', () => 
   assert.match(document.getElementById('nfseContratoIncidentes').textContent, /<img src=x>sentinela/);
 });
 
-test('renderiza opções do portal com rótulo e código sem selecionar a primeira', async () => {
+test('a configuração acontece na própria linha, sem modal', async () => {
   const chamadas = [];
   await inicializarContratoNfse({
     root: document,
-    fetchImpl: async (url) => {
-      chamadas.push(url);
-      return resposta(estadoBase());
+    fetchImpl: async (url, opcoes) => {
+      chamadas.push({ url, opcoes });
+      return resposta(estadoBase({ incidentes: [incidente] }));
     },
   });
 
-  const origem = document.getElementById('nfseContratoOrigem');
+  const linha = document.querySelector('.nfse-contrato-incidente .nfse-contrato-config');
+  assert.ok(linha, 'a linha do incidente traz o formulário embutido');
+  assert.equal(linha.dataset.configIncidente, String(incidente.id));
+
+  const origem = linha.querySelector('[data-campo="origem"]');
+  const fonte = linha.querySelector('[data-campo="fonte"]');
+  const valor = linha.querySelector('[data-campo="valor_fixo"]');
+
+  assert.equal(fonte.hidden, true);
+  assert.equal(valor.hidden, true);
+
   origem.value = 'nota';
-  origem.dispatchEvent(new Event('change'));
-  const select = document.getElementById('nfseContratoFonte');
-  assert.equal(select.options[1].textContent, 'Documento');
-  assert.equal(select.options[1].value, 'documento');
-  assert.equal(select.options[1].selected, false);
-  assert.equal(document.getElementById('nfseContratoFonteGrupo').hidden, false);
-  assert.equal(document.getElementById('nfseContratoValorGrupo').hidden, true);
+  origem.dispatchEvent(new Event('change', { bubbles: true }));
+  assert.equal(fonte.hidden, false);
+  assert.equal(valor.hidden, true);
+  assert.equal(fonte.options[1].textContent, 'Documento');
+  assert.equal(fonte.options[1].selected, false);
+
+  origem.value = 'fixo';
+  origem.dispatchEvent(new Event('change', { bubbles: true }));
+  assert.equal(fonte.hidden, true);
+  assert.equal(valor.hidden, false);
+
   assert.deepEqual(opcoesDaOrigem(fontes, 'nota'), [fontes[1]]);
   assert.equal(chamadas.length, 1);
+});
+
+test('valor fixo vira escolha entre as opções declaradas pelo controle', async () => {
+  // O operador escolhe "Não", não decora que "Não" é 0.
+  const comOpcoes = {
+    ...incidente,
+    opcoes: [{ valor: '1', rotulo: 'Sim' }, { valor: '0', rotulo: 'Não' }],
+  };
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => (opcoes
+      ? resposta({}) : resposta(estadoBase({ incidentes: [comOpcoes] }))),
+  });
+
+  const valor = document.querySelector('[data-campo="valor_fixo"]');
+  assert.equal(valor.tagName, 'SELECT');
+  assert.deepEqual(
+    [...valor.options].map((o) => [o.value, o.textContent]),
+    [['', 'Escolha a opção…'], ['1', 'Sim (1)'], ['0', 'Não (0)']],
+  );
+  assert.equal(valor.options[1].selected, false);
+  // A lista expansível some: existia só para descobrir qual código era qual.
+  assert.equal(document.querySelector('.nfse-contrato-opcoes'), null);
+});
+
+test('salvar na linha envia só o payload do catálogo', async () => {
+  const posts = [];
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => {
+      if (opcoes) {
+        posts.push({ url, corpo: JSON.parse(opcoes.body) });
+        return resposta({ status: 'ok' });
+      }
+      return resposta(estadoBase({ incidentes: [incidente] }));
+    },
+  });
+
+  const forma = document.querySelector('.nfse-contrato-config');
+  const origem = forma.querySelector('[data-campo="origem"]');
+  origem.value = 'fixo';
+  origem.dispatchEvent(new Event('change', { bubbles: true }));
+  forma.querySelector('[data-campo="valor_fixo"]').value = 'OPCAO-SINTETICA';
+  forma.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await proximoTurno();
+  await proximoTurno();
+  await proximoTurno();
+
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].url, `/nfse/contrato/incidente/${incidente.id}/configurar`);
+  assert.deepEqual(posts[0].corpo, { origem: 'fixo', valor_fixo: 'OPCAO-SINTETICA' });
+});
+
+test('origem inválida para na linha e não chega a chamar a rota', async () => {
+  const posts = [];
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => {
+      if (opcoes) { posts.push(url); return resposta({}); }
+      return resposta(estadoBase({ incidentes: [incidente] }));
+    },
+  });
+
+  document.querySelector('.nfse-contrato-config')
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await proximoTurno();
+
+  assert.equal(posts.length, 0);
+  assert.match(document.querySelector('.nfse-contrato-erro').textContent, /origem/i);
+});
+
+test('salvar uma linha preserva as escolhas ainda não salvas das outras', async () => {
+  // Marcar dez incidentes e ir salvando um a um só é possível se o redesenho
+  // que vem depois do Salvar não apagar o que ainda não foi salvo.
+  const outro = {
+    ...incidente,
+    id: 9,
+    campo: { ...incidente.campo, chave_observada: 'campo.outro', rotulo: 'Campo outro' },
+  };
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => (opcoes
+      ? resposta({ status: 'ok' })
+      : resposta(estadoBase({ incidentes: [incidente, outro] }))),
+  });
+
+  const linhaDe = (id) => document.querySelector(
+    `.nfse-contrato-incidente[data-incidente-id="${id}"] .nfse-contrato-config`,
+  );
+
+  [incidente.id, outro.id].forEach((id) => {
+    const forma = linhaDe(id);
+    const origem = forma.querySelector('[data-campo="origem"]');
+    origem.value = 'fixo';
+    origem.dispatchEvent(new Event('change', { bubbles: true }));
+    forma.querySelector('[data-campo="valor_fixo"]').value = 'OPCAO-SINTETICA';
+  });
+
+  linhaDe(incidente.id).dispatchEvent(
+    new Event('submit', { bubbles: true, cancelable: true }),
+  );
+  await proximoTurno();
+  await proximoTurno();
+  await proximoTurno();
+
+  const preservada = linhaDe(outro.id);
+  assert.equal(preservada.querySelector('[data-campo="origem"]').value, 'fixo');
+  assert.equal(preservada.querySelector('[data-campo="valor_fixo"]').value, 'OPCAO-SINTETICA');
+  assert.equal(preservada.querySelector('[data-campo="valor_fixo"]').hidden, false);
+  assert.equal(preservada.querySelector('[data-campo="fonte"]').hidden, true);
+});
+
+test('incidente configurado oferece desfazer, e a candidata é descartável', async () => {
+  const posts = [];
+  globalThis.confirm = () => true;
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => {
+      if (opcoes) { posts.push(url); return resposta({ reabertos: 2 }); }
+      return resposta(estadoBase({
+        incidentes: [{ ...incidente, estado: 'configurado', contrato_candidato_id: 9 }],
+        candidatas: [{ id: 9, versao: 2, estado: 'candidata' }],
+      }));
+    },
+  });
+
+  assert.equal(document.querySelector('.nfse-contrato-config'), null);
+  const desfazer = document.querySelector('[data-desfazer-candidata]');
+  assert.equal(desfazer.dataset.desfazerCandidata, '9');
+
+  desfazer.click();
+  await proximoTurno();
+  await proximoTurno();
+  await proximoTurno();
+
+  assert.deepEqual(posts, ['/nfse/contrato/9/descartar']);
 });
 
 test('monta payloads somente com as origens e fontes do catálogo', () => {
@@ -197,7 +332,7 @@ test('recusa opção fora do catálogo e recomendação ambígua', () => {
   );
 });
 
-test('inicialização consulta somente o estado e ações mostram loading sem duplicar envio', async () => {
+test('inicialização consulta somente o estado e a linha não duplica envio', async () => {
   const chamadas = [];
   let liberarPost;
   const inicializacao = inicializarContratoNfse({
@@ -212,19 +347,18 @@ test('inicialização consulta somente o estado e ações mostram loading sem du
   assert.equal(chamadas.length, 1);
   assert.equal(chamadas[0].opcoes, undefined);
 
-  document.querySelector('[data-configurar-incidente]').click();
-  const origem = document.getElementById('nfseContratoOrigem');
+  const forma = document.querySelector('.nfse-contrato-config');
+  const origem = forma.querySelector('[data-campo="origem"]');
   origem.value = 'fixo';
-  origem.dispatchEvent(new Event('change'));
-  document.getElementById('nfseContratoValorFixo').value = 'OPCAO-SINTETICA';
-  const formulario = document.getElementById('formConfigContrato');
-  formulario.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  origem.dispatchEvent(new Event('change', { bubbles: true }));
+  forma.querySelector('[data-campo="valor_fixo"]').value = 'OPCAO-SINTETICA';
+  forma.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   await proximoTurno();
 
-  const botao = document.getElementById('btnSalvarConfigContrato');
+  const botao = forma.querySelector('button[type="submit"]');
   assert.equal(chamadas.filter((item) => item.opcoes).length, 1);
   assert.equal(botao.disabled, true);
-  formulario.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  forma.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   assert.equal(chamadas.filter((item) => item.opcoes).length, 1);
 
   liberarPost();
@@ -232,7 +366,8 @@ test('inicialização consulta somente o estado e ações mostram loading sem du
   await proximoTurno();
   assert.equal(botao.disabled, false);
   assert.equal(botao.dataset.carregando, undefined);
-  assert.match(document.getElementById('nfseContratoErro').textContent, /ação/);
+  // A falha fica na própria linha, não num modal que já foi fechado.
+  assert.ok(document.querySelector('.nfse-contrato-erro').textContent);
 });
 
 test('recomendação inequívoca exige confirmação explícita no payload', () => {
@@ -309,6 +444,113 @@ test('botão de recon chama somente a ação explícita e mostra estado desconhe
   assert.equal(posts[0].opcoes.method, 'POST');
   assert.equal(document.getElementById('nfseContratoStatus').dataset.estado, 'desconhecido');
   assert.match(document.getElementById('nfseReconEstado').textContent, /desconhecida/);
+});
+
+test('cada recon é um passe acumulado, e o descarte zera a contagem', async () => {
+  const posts = [];
+  let passe = 0;
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => {
+      if (!opcoes) return resposta(estadoBase());
+      posts.push(url);
+      if (url === '/nfse/contrato/recon/descartar') {
+        return resposta({ passe: 0, controles_acumulados: 0 });
+      }
+      passe += 1;
+      return resposta({
+        passe,
+        controles_acumulados: passe * 10,
+        observacao: { compatibilidade: 'aviso', evidencias: [] },
+      });
+    },
+  });
+
+  const botao = document.getElementById('btnReconContrato');
+  const rotulo = document.getElementById('nfseReconPasses');
+  const descartar = document.getElementById('btnReconDescartar');
+  assert.equal(rotulo.classList.contains('d-none'), true);
+
+  botao.click();
+  await proximoTurno(); await proximoTurno(); await proximoTurno();
+  assert.match(rotulo.textContent, /passe 1 . 10 controles/);
+  assert.equal(descartar.classList.contains('d-none'), false);
+
+  botao.click();
+  await proximoTurno(); await proximoTurno(); await proximoTurno();
+  assert.match(rotulo.textContent, /passe 2 . 20 controles/);
+
+  descartar.click();
+  await proximoTurno(); await proximoTurno();
+  assert.equal(rotulo.classList.contains('d-none'), true);
+  assert.deepEqual(posts, [
+    '/nfse/contrato/recon', '/nfse/contrato/recon', '/nfse/contrato/recon/descartar',
+  ]);
+});
+
+test('a recon propõe intocável e pendente sem aplicar nada', async () => {
+  // O bloco do tomador chega preenchido junto com o CNPJ: a recon reconhece,
+  // mas quem decide é o operador.
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => {
+      if (!opcoes) return resposta(estadoBase());
+      return resposta({
+        passe: 2,
+        controles_acumulados: 40,
+        sugestoes: [
+          { chave: 'Tomador.Nome', rotulo: 'Nome/Razão Social', sugestao: 'intocavel',
+            motivo: 'ficou preenchido entre os passes', obrigatorio: false },
+          { chave: 'PreencherInfoIBSCBS', rotulo: 'Preencher as informações IBS/CBS?',
+            sugestao: 'preencher', motivo: 'continua vazio e o portal exige',
+            obrigatorio: true },
+        ],
+        observacao: { compatibilidade: 'aviso', evidencias: [] },
+      });
+    },
+  });
+
+  document.getElementById('btnReconContrato').click();
+  await proximoTurno(); await proximoTurno(); await proximoTurno();
+
+  const painel = document.getElementById('nfseReconSugestoes');
+  assert.equal(painel.classList.contains('d-none'), false);
+  assert.match(painel.textContent, /não tocar/i);
+  assert.match(painel.textContent, /Nome\/Razão Social/);
+  // Sem incidente aberto correspondente não há o que configurar, e diz isso.
+  assert.match(painel.textContent, /sem incidente aberto/);
+});
+
+test('sugestão com incidente aberto leva ao campo e pré-seleciona a origem', async () => {
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => {
+      if (!opcoes) return resposta(estadoBase({ incidentes: [incidente] }));
+      return resposta({
+        passe: 2,
+        controles_acumulados: 40,
+        sugestoes: [{
+          chave: 'campo.sintetico', rotulo: 'Campo sintético', sugestao: 'intocavel',
+          motivo: 'ficou preenchido entre os passes', obrigatorio: false,
+        }],
+        observacao: { compatibilidade: 'aviso', evidencias: [] },
+      });
+    },
+  });
+
+  document.getElementById('btnReconContrato').click();
+  await proximoTurno(); await proximoTurno(); await proximoTurno();
+
+  const acao = document.querySelector('[data-sugestao-incidente]');
+  assert.equal(acao.dataset.sugestaoOrigem, 'intocavel');
+  acao.click();
+
+  // Pré-seleciona e leva até a linha; salvar continua sendo ato do operador.
+  const origem = document.querySelector(
+    `.nfse-contrato-incidente[data-incidente-id="${incidente.id}"] [data-campo="origem"]`,
+  );
+  assert.equal(origem.value, 'intocavel');
+  assert.equal(origem.closest('form').querySelector('[data-campo="fonte"]').hidden, true);
 });
 
 test('gate fechado desabilita automático e continua recusando início se o DOM for alterado', async () => {

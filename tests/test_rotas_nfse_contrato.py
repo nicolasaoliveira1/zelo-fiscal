@@ -181,7 +181,6 @@ def test_pagina_exibe_central_com_aria_e_estado_vazio(login_as):
     assert 'role="status"' in corpo
     assert 'aria-live="polite"' in corpo
     assert 'Não há incidentes no contrato ativo.' in corpo
-    assert 'id="modalConfigContrato"' in corpo
     assert 'id="modalValidarContrato"' in corpo
     assert 'aria-label="Fechar"' in corpo
     assert 'class="btn btn-ghost btn-sm"' in corpo
@@ -189,22 +188,32 @@ def test_pagina_exibe_central_com_aria_e_estado_vazio(login_as):
     assert '<option value="" selected disabled>Escolha uma nota…</option>' in corpo
 
 
-def test_pagina_exibe_incidente_sem_seletor_e_com_acao(login_as, app):
+def test_pagina_nao_carrega_incidente_no_html_e_a_rota_o_entrega_sanitizado(
+    login_as, app
+):
+    """A lista virou client-side: a linha traz a configuração inline e precisa
+    das fontes do catálogo, que só `/nfse/contrato` devolve. O HTML da página
+    não carrega mais dado de incidente — e a garantia de sanitização passa a
+    valer sobre o payload."""
+
     _contrato_id, incidente_id = _criar_incidente(app)
+    operador = login_as('operador')
 
-    resposta = login_as('operador').get('/nfse')
+    pagina = operador.get('/nfse')
+    estado = operador.get('/nfse/contrato')
 
-    assert resposta.status_code == 200
-    corpo = resposta.get_data(as_text=True)
-    assert f'data-incidente-id="{incidente_id}"' in corpo
-    assert 'Campo sintético' in corpo
-    assert 'Opção sintética' in corpo
-    assert 'Configurar alteração' in corpo
+    corpo = pagina.get_data(as_text=True)
+    assert pagina.status_code == 200
+    assert 'id="nfseContratoIncidentes"' in corpo
+    assert 'Campo sintético' not in corpo
     assert 'SENTINELA' not in corpo
-    inicio = corpo.index(f'data-incidente-id="{incidente_id}"')
-    trecho_incidente = corpo[inicio:corpo.index('</article>', inicio)]
-    assert 'seletor' not in trecho_incidente.lower()
-    assert 'xpath' not in trecho_incidente.lower()
+
+    incidente = next(
+        item for item in estado.get_json()['incidentes'] if item['id'] == incidente_id
+    )
+    assert incidente['campo']['rotulo'] == 'Campo sintético'
+    assert 'seletor' not in estado.get_data(as_text=True)
+    assert 'SENTINELA' not in estado.get_data(as_text=True)
 
 
 def test_papel_leitura_nao_recebe_central_no_template(login_as):

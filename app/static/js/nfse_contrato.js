@@ -92,16 +92,222 @@ function preencherStatus(estado, root) {
   return visual;
 }
 
-function adicionarDado(lista, rotulo, valor) {
-  const grupo = criarElemento('div');
-  grupo.appendChild(criarElemento('dt', rotulo));
-  grupo.appendChild(criarElemento('dd', valor));
-  lista.appendChild(grupo);
+
+const ROTULOS_ORIGEM = [
+  ['fixo', 'Valor fixo'],
+  ['nota', 'Fonte da nota'],
+  ['derivado', 'Valor derivado'],
+  ['configuracao', 'Configuração'],
+  ['padrao_portal', 'Padrão do portal'],
+  ['intocavel', 'Não tocar'],
+];
+
+// Quantas opções cabem antes de o `<details>` valer a pena. O select de país
+// tem 200+; despejá-las na linha enterra os incidentes seguintes.
+const OPCOES_VISIVEIS = 4;
+
+const CAMPOS_DA_LINHA = ['origem', 'fonte', 'valor_fixo', 'chave_observada'];
+
+function montarSelect(classe, placeholder, itens) {
+  const select = criarElemento('select');
+  select.className = `form-select form-select-sm ${classe}`.trim();
+  const vazio = criarElemento('option', placeholder);
+  vazio.value = '';
+  vazio.selected = true;
+  select.appendChild(vazio);
+  itens.forEach(([valor, rotulo]) => {
+    const item = criarElemento('option', rotulo);
+    item.value = valor;
+    select.appendChild(item);
+  });
+  return select;
+}
+
+function campoDaLinha(linha, nome) {
+  return linha?.querySelector(`[data-campo="${nome}"]`) || null;
+}
+
+function exibirCampo(elemento, visivel) {
+  if (!elemento) return;
+  elemento.hidden = !visivel;
+  elemento.classList.toggle('d-none', !visivel);
+}
+
+/**
+ * Mostra na linha só os campos que a origem escolhida exige.
+ *
+ * @param {HTMLElement} linha
+ * @param {Array<object>} fontes
+ * @param {string} origem
+ */
+function aplicarOrigemNaLinha(linha, fontes, origem) {
+  const fonte = campoDaLinha(linha, 'fonte');
+  const valor = campoDaLinha(linha, 'valor_fixo');
+  exibirCampo(fonte, Boolean(origem) && !ORIGENS_SEM_FONTE.has(origem));
+  exibirCampo(valor, origem === 'fixo');
+  limparInvalido(fonte);
+  limparInvalido(valor);
+  const artigo = linha?.closest?.('.nfse-contrato-incidente');
+  const erro = artigo?.querySelector('.nfse-contrato-erro');
+  if (erro) erro.textContent = '';
+  if (!fonte) return;
+  limpar(fonte);
+  const vazio = criarElemento('option', 'Fonte…');
+  vazio.value = '';
+  vazio.selected = true;
+  fonte.appendChild(vazio);
+  opcoesDaOrigem(fontes, origem).forEach((opcao) => {
+    const item = criarElemento('option', opcao.rotulo || opcao.fonte || 'Fonte');
+    item.value = opcao.fonte || '';
+    fonte.appendChild(item);
+  });
+  if (valor && origem !== 'fixo') valor.value = '';
+}
+
+function montarOpcoes(incidente) {
+  const opcoes = Array.isArray(incidente.opcoes) ? incidente.opcoes : [];
+  if (!opcoes.length) return null;
+  const bloco = criarElemento('details');
+  bloco.className = 'nfse-contrato-opcoes';
+  const resumo = criarElemento('summary');
+  const visiveis = opcoes.slice(0, OPCOES_VISIVEIS)
+    .map((opcao) => opcao.rotulo || opcao.valor || '')
+    .join(' · ');
+  const restante = opcoes.length - OPCOES_VISIVEIS;
+  resumo.textContent = restante > 0
+    ? `${opcoes.length} opções: ${visiveis} +${restante}`
+    : `${opcoes.length} opções: ${visiveis}`;
+  bloco.appendChild(resumo);
+  const lista = criarElemento('ul');
+  opcoes.forEach((opcao) => {
+    const item = criarElemento('li');
+    item.appendChild(document.createTextNode(`${opcao.rotulo || ''} `));
+    item.appendChild(criarElemento('code', opcao.valor || ''));
+    lista.appendChild(item);
+  });
+  bloco.appendChild(lista);
+  return bloco;
+}
+
+function montarConfiguracao(incidente, estado) {
+  const forma = criarElemento('form');
+  forma.className = 'nfse-contrato-config';
+  forma.dataset.configIncidente = String(incidente.id ?? '');
+
+  const origem = montarSelect('', 'Origem…', ROTULOS_ORIGEM);
+  origem.dataset.campo = 'origem';
+  origem.required = true;
+  origem.setAttribute('aria-label', 'Origem do valor');
+  forma.appendChild(origem);
+
+  const fonte = montarSelect('', 'Fonte…', []);
+  fonte.dataset.campo = 'fonte';
+  fonte.setAttribute('aria-label', 'Fonte do valor');
+  forma.appendChild(fonte);
+
+  // Quando o controle declara opções, o valor fixo é uma escolha entre elas —
+  // não um código para o operador decorar. O rótulo é o que ele lê na tela; o
+  // código aparece junto só para conferência.
+  const declaradas = Array.isArray(incidente.opcoes) ? incidente.opcoes : [];
+  const valor = declaradas.length
+    ? montarSelect('', 'Escolha a opção…', declaradas.map((opcao) => [
+      opcao.valor || '',
+      opcao.valor ? `${opcao.rotulo || opcao.valor} (${opcao.valor})` : (opcao.rotulo || ''),
+    ]))
+    : criarElemento('input');
+  if (!declaradas.length) {
+    valor.className = 'form-control form-control-sm';
+    valor.maxLength = 500;
+    valor.autocomplete = 'off';
+    valor.placeholder = 'Valor fixo';
+  }
+  valor.dataset.campo = 'valor_fixo';
+  valor.setAttribute('aria-label', 'Valor fixo');
+  forma.appendChild(valor);
+
+  // A recomendação de remapeamento é rara; quando existe, o operador precisa
+  // escolher o controle e confirmar na mesma linha, sem sair para um modal.
+  const recomendacao = recomendacaoDoIncidente(incidente);
+  if (recomendacao) {
+    const escolha = montarSelect('', 'Controle…',
+      (recomendacao.candidatos || []).map((chave) => [chave, chave]));
+    escolha.dataset.campo = 'chave_observada';
+    escolha.setAttribute('aria-label', 'Controle correspondente');
+    if (!recomendacao.ambigua && recomendacao.chave_observada) {
+      escolha.value = recomendacao.chave_observada;
+    }
+    forma.appendChild(escolha);
+
+    const confirmar = criarElemento('label');
+    confirmar.className = 'nfse-contrato-confirmar';
+    const caixa = criarElemento('input');
+    caixa.type = 'checkbox';
+    caixa.className = 'form-check-input';
+    caixa.dataset.campo = 'confirmar_recomendacao';
+    confirmar.appendChild(caixa);
+    confirmar.appendChild(document.createTextNode(
+      recomendacao.ambigua ? ' confirmo (ambígua)' : ' confirmo',
+    ));
+    confirmar.title = (recomendacao.evidencias || []).join('; ');
+    forma.appendChild(confirmar);
+  }
+
+  const salvar = criarElemento('button', 'Salvar');
+  salvar.type = 'submit';
+  salvar.className = 'btn btn-soft-primary btn-sm';
+  forma.appendChild(salvar);
+
+  aplicarOrigemNaLinha(forma, estado?.fontes || [], '');
+  return forma;
+}
+
+/**
+ * Fotografa o que o operador já escolheu e ainda não salvou.
+ *
+ * Salvar uma linha recarrega o estado e redesenha a lista inteira. Sem esta
+ * foto, marcar dez incidentes e ir salvando um a um é impossível: o primeiro
+ * Salvar apaga as outras nove escolhas.
+ *
+ * @param {HTMLElement} lista
+ * @returns {Map<string, object>}
+ */
+function fotografarEscolhas(lista) {
+  const foto = new Map();
+  lista.querySelectorAll('.nfse-contrato-incidente').forEach((artigo) => {
+    const forma = artigo.querySelector('.nfse-contrato-config');
+    if (!forma) return;
+    const valores = {};
+    CAMPOS_DA_LINHA.forEach((nome) => {
+      const campo = campoDaLinha(forma, nome);
+      if (campo && campo.value) valores[nome] = campo.value;
+    });
+    const confirmar = campoDaLinha(forma, 'confirmar_recomendacao');
+    if (confirmar?.checked) valores.confirmar_recomendacao = true;
+    if (Object.keys(valores).length) foto.set(artigo.dataset.incidenteId, valores);
+  });
+  return foto;
+}
+
+function restaurarEscolhas(forma, valores, fontes) {
+  if (!valores) return;
+  const origem = campoDaLinha(forma, 'origem');
+  if (valores.origem && origem) {
+    origem.value = valores.origem;
+    // Repovoa fonte e troca fonte↔valor antes de devolver os demais valores.
+    aplicarOrigemNaLinha(forma, fontes, valores.origem);
+  }
+  CAMPOS_DA_LINHA.filter((nome) => nome !== 'origem').forEach((nome) => {
+    const campo = campoDaLinha(forma, nome);
+    if (campo && valores[nome] !== undefined) campo.value = valores[nome];
+  });
+  const confirmar = campoDaLinha(forma, 'confirmar_recomendacao');
+  if (confirmar && valores.confirmar_recomendacao) confirmar.checked = true;
 }
 
 function renderizarIncidentes(estado, root) {
   const lista = porId(root, 'nfseContratoIncidentes');
   if (!lista) return;
+  const escolhas = fotografarEscolhas(lista);
   limpar(lista);
   const incidentes = incidentesPendentes(estado);
   if (!incidentes.length) {
@@ -117,77 +323,61 @@ function renderizarIncidentes(estado, root) {
     artigo.className = 'nfse-contrato-incidente';
     artigo.dataset.incidenteId = String(incidente.id ?? '');
 
-    const cabecalho = criarElemento('div');
-    cabecalho.className = 'd-flex justify-content-between align-items-start gap-2 flex-wrap';
-    const tituloGrupo = criarElemento('div');
-    tituloGrupo.appendChild(criarElemento('h3', incidente.campo?.rotulo || 'Campo sem rótulo'));
-    const etapa = criarElemento('div', `Etapa: ${incidente.etapa || 'desconhecida'}`);
-    etapa.className = 'nfse-contrato-meta';
-    tituloGrupo.appendChild(etapa);
-    cabecalho.appendChild(tituloGrupo);
+    const linha = criarElemento('div');
+    linha.className = 'nfse-contrato-linha';
 
-    const selo = criarElemento('span', incidente.tipo || 'diferença');
+    const identidade = criarElemento('div');
+    identidade.className = 'nfse-contrato-campo';
+    const nome = criarElemento('strong', incidente.campo?.rotulo || 'Campo sem rótulo');
+    nome.title = incidente.campo?.chave_observada || incidente.campo?.chave_esperada || '';
+    identidade.appendChild(nome);
+    const meta = criarElemento('span', [
+      incidente.etapa || 'etapa desconhecida',
+      incidente.tipo || 'diferença',
+      incidente.campo?.obrigatorio ? 'obrigatório' : 'opcional',
+      `${incidente.observacoes ?? 0}×`,
+    ].join(' · '));
+    meta.className = 'nfse-contrato-meta';
+    identidade.appendChild(meta);
+    linha.appendChild(identidade);
+
+    const selo = criarElemento('span', incidente.severidade || 'informativa');
     selo.className = 'nfse-status';
     selo.dataset.status = incidente.severidade || 'informativa';
-    cabecalho.appendChild(selo);
-    artigo.appendChild(cabecalho);
+    linha.appendChild(selo);
 
-    const dados = criarElemento('dl');
-    dados.className = 'nfse-contrato-dados';
-    adicionarDado(dados, 'Tipo', incidente.tipo || '—');
-    adicionarDado(
-      dados,
-      'Obrigatoriedade',
-      incidente.campo?.obrigatorio ? 'Obrigatório' : 'Opcional',
-    );
-    adicionarDado(dados, 'Observações', incidente.observacoes ?? 0);
-    artigo.appendChild(dados);
-
-    if (Array.isArray(incidente.opcoes) && incidente.opcoes.length) {
-      const legenda = criarElemento('div', 'Opções apresentadas pelo portal');
-      legenda.className = 'nfse-contrato-meta';
-      artigo.appendChild(legenda);
-      const opcoes = criarElemento('ul');
-      opcoes.className = 'nfse-contrato-opcoes';
-      incidente.opcoes.forEach((opcao) => {
-        const item = criarElemento('li');
-        item.appendChild(document.createTextNode(`${opcao.rotulo || ''} `));
-        item.appendChild(criarElemento('code', opcao.valor || ''));
-        opcoes.appendChild(item);
-      });
-      artigo.appendChild(opcoes);
-    }
-
-    if (incidente.recomendacao) {
-      const recomendacao = criarElemento('div');
-      recomendacao.className = 'nfse-contrato-recomendacao';
-      const tituloRecomendacao = incidente.recomendacao.ambigua
-        ? 'Recomendação ambígua'
-        : `Remapeamento sugerido · confiança ${incidente.recomendacao.confianca || '—'}`;
-      recomendacao.appendChild(criarElemento('strong', tituloRecomendacao));
-      const evidencias = criarElemento(
-        'p',
-        (incidente.recomendacao.evidencias || []).join('; '),
-      );
-      evidencias.className = 'nfse-hint mb-0';
-      recomendacao.appendChild(evidencias);
-      artigo.appendChild(recomendacao);
-    }
-
-    const acoes = criarElemento('div');
-    acoes.className = 'd-flex justify-content-end';
     if (incidente.estado === 'aberto') {
-      const configurar = criarElemento('button', 'Configurar alteração');
-      configurar.type = 'button';
-      configurar.className = 'btn btn-primary btn-sm';
-      configurar.dataset.configurarIncidente = String(incidente.id ?? '');
-      configurar.setAttribute('data-bs-toggle', 'modal');
-      configurar.setAttribute('data-bs-target', '#modalConfigContrato');
-      acoes.appendChild(configurar);
+      const forma = montarConfiguracao(incidente, estado);
+      restaurarEscolhas(forma, escolhas.get(String(incidente.id ?? '')), estado?.fontes || []);
+      linha.appendChild(forma);
     } else {
-      acoes.appendChild(criarElemento('span', 'Incluído na versão candidata.'));
+      const feito = criarElemento('span', 'configurado');
+      feito.className = 'nfse-contrato-meta';
+      linha.appendChild(feito);
+      // Configurar não pode ser via de mão única: o desfazer devolve o
+      // incidente a `aberto` para ser reconfigurado na mesma linha.
+      if (incidente.contrato_candidato_id) {
+        const desfazer = criarElemento('button', 'Desfazer');
+        desfazer.type = 'button';
+        desfazer.className = 'btn btn-ghost btn-sm';
+        desfazer.dataset.desfazerCandidata = String(incidente.contrato_candidato_id);
+        linha.appendChild(desfazer);
+      }
     }
-    artigo.appendChild(acoes);
+    artigo.appendChild(linha);
+
+    // Com o select de opções na linha, a lista expansível vira ruído: ela
+    // existia só para o operador descobrir qual código era qual.
+    if (incidente.estado !== 'aberto') {
+      const opcoes = montarOpcoes(incidente);
+      if (opcoes) artigo.appendChild(opcoes);
+    }
+
+    const erro = criarElemento('div');
+    erro.className = 'nfse-contrato-erro text-danger';
+    erro.setAttribute('role', 'alert');
+    artigo.appendChild(erro);
+
     lista.appendChild(artigo);
   });
 }
@@ -243,7 +433,12 @@ function renderizarHistorico(estado, root) {
       botao.setAttribute('data-bs-toggle', 'modal');
       botao.setAttribute('data-bs-target', '#modalValidarContrato');
     }
+    const descartar = criarElemento('button', 'Descartar');
+    descartar.type = 'button';
+    descartar.className = 'btn btn-ghost btn-sm ms-1';
+    descartar.dataset.desfazerCandidata = String(candidata.id ?? '');
     acao.appendChild(botao);
+    acao.appendChild(descartar);
     linha.appendChild(acao);
     corpo.appendChild(linha);
   });
@@ -369,45 +564,8 @@ function mostrarErro(root, id, mensagem) {
   if (elemento) elemento.textContent = mensagem || '';
 }
 
-function limparErrosConfiguracao(root) {
-  mostrarErro(root, 'nfseContratoErro', '');
-  mostrarErro(root, 'nfseValidacaoErro', '');
-  ['nfseContratoOrigem', 'nfseContratoFonte', 'nfseContratoValorFixo']
-    .forEach((id) => limparInvalido(porId(root, id)));
-}
 
-function exibirGrupo(elemento, visivel) {
-  if (!elemento) return;
-  elemento.hidden = !visivel;
-  elemento.classList.toggle('d-none', !visivel);
-  elemento.setAttribute('aria-hidden', String(!visivel));
-}
 
-function atualizarCamposOrigem(root, fontes, origem) {
-  limparErrosConfiguracao(root);
-  const fonteGrupo = porId(root, 'nfseContratoFonteGrupo');
-  const valorGrupo = porId(root, 'nfseContratoValorGrupo');
-  const fonteSelect = porId(root, 'nfseContratoFonte');
-  const valorInput = porId(root, 'nfseContratoValorFixo');
-  const opcoes = opcoesDaOrigem(fontes, origem);
-  const exigeFonte = Boolean(origem) && !ORIGENS_SEM_FONTE.has(origem);
-  exibirGrupo(fonteGrupo, exigeFonte);
-  exibirGrupo(valorGrupo, origem === 'fixo');
-
-  if (fonteSelect) {
-    limpar(fonteSelect);
-    const placeholder = criarElemento('option', 'Escolha uma fonte…');
-    placeholder.value = '';
-    placeholder.selected = true;
-    fonteSelect.appendChild(placeholder);
-    opcoes.forEach((opcao) => {
-      const item = criarElemento('option', opcao.rotulo || opcao.fonte || 'Fonte');
-      item.value = opcao.fonte || '';
-      fonteSelect.appendChild(item);
-    });
-  }
-  if (valorInput && origem !== 'fixo') valorInput.value = '';
-}
 
 function definirCarregando(botao, carregando, textoOriginal) {
   if (!botao) return;
@@ -473,6 +631,14 @@ function preencherNotasValidacao(root) {
     });
 }
 
+function incidenteDaChave(estado, chave) {
+  if (!chave) return null;
+  return (estado?.incidentes || []).find(
+    (item) => item?.estado === 'aberto'
+      && (item.campo?.chave_observada === chave || item.campo?.chave_esperada === chave),
+  ) || null;
+}
+
 function incidentePorId(estado, id) {
   return (estado?.incidentes || []).find((item) => String(item.id) === String(id));
 }
@@ -482,39 +648,6 @@ function recomendacaoDoIncidente(incidente) {
 }
 
 
-function prepararRecomendacao(root, recomendacao, estado) {
-  const grupo = porId(root, 'nfseContratoRecomendacaoGrupo');
-  const escolhaGrupo = porId(root, 'nfseContratoEscolhaGrupo');
-  const escolha = porId(root, 'nfseContratoChaveObservada');
-  const evidencia = porId(root, 'nfseContratoRecomendacaoEvidencias');
-  exibirGrupo(grupo, Boolean(recomendacao));
-  exibirGrupo(escolhaGrupo, Boolean(recomendacao?.ambigua));
-  if (evidencia) {
-    evidencia.textContent = recomendacao
-      ? (recomendacao.evidencias || []).join('; ')
-      : '';
-  }
-  if (escolha) {
-    limpar(escolha);
-    const placeholder = criarElemento('option', 'Escolha o controle…');
-    placeholder.value = '';
-    placeholder.selected = true;
-    escolha.appendChild(placeholder);
-    (recomendacao?.candidatos || []).forEach((chave, indice) => {
-      const correspondente = (estado?.incidentes || []).find(
-        (item) => item?.campo?.chave_observada === chave,
-      );
-      const rotulo = correspondente?.campo?.rotulo
-        || `Controle observado ${indice + 1}`;
-      const opcao = criarElemento('option', rotulo);
-      opcao.value = chave;
-      if (!recomendacao.ambigua && chave === recomendacao.chave_observada) {
-        opcao.selected = true;
-      }
-      escolha.appendChild(opcao);
-    });
-  }
-}
 
 /**
  * Inicializa a central, carregando apenas o estado persistido no servidor.
@@ -527,14 +660,73 @@ export async function inicializarContratoNfse(opcoes = {}) {
   const fetchImpl = opcoes.fetchImpl || globalThis.fetch.bind(globalThis);
   const estadoUrl = opcoes.estadoUrl || '/nfse/contrato';
   let estado = null;
-  let incidenteAtual = null;
   let candidataAtual = null;
 
-  const origem = porId(root, 'nfseContratoOrigem');
-  const formConfig = porId(root, 'formConfigContrato');
   const formValidar = porId(root, 'formValidarContrato');
   const notaValidacao = porId(root, 'nfseNotaValidacao');
   const botaoRecon = porId(root, 'btnReconContrato');
+  const botaoDescartar = porId(root, 'btnReconDescartar');
+  const botaoIncidentes = porId(root, 'btnDescartarIncidentes');
+  const rotuloPasses = porId(root, 'nfseReconPasses');
+  // Os handlers delegados moram no container da central, nao no documento:
+  // ancorados no documento eles sobrevivem a cada nova inicializacao e passam
+  // a responder com o `fetchImpl` de uma sessao antiga.
+  const central = porId(root, 'nfseContratoCentral') || root;
+
+  // A etapa de Pessoas revela campos conforme e preenchida: cada clique e um
+  // passe, e o que a recon compara e a uniao dos passes desta mesma DPS.
+  const mostrarPasses = (passe, controles) => {
+    const acumulando = Number(passe) > 0;
+    rotuloPasses?.classList.toggle('d-none', !acumulando);
+    botaoDescartar?.classList.toggle('d-none', !acumulando);
+    if (rotuloPasses && acumulando) {
+      rotuloPasses.textContent = `passe ${passe} · ${controles} controles`;
+    }
+  };
+
+  // A recon PROPOE; quem decide e o operador. Nada aqui altera contrato.
+  const mostrarSugestoes = (sugestoes) => {
+    const painel = porId(root, 'nfseReconSugestoes');
+    if (!painel) return;
+    limpar(painel);
+    const itens = Array.isArray(sugestoes) ? sugestoes : [];
+    painel.classList.toggle('d-none', itens.length === 0);
+    if (!itens.length) return;
+    [
+      ['intocavel', 'O portal preenche sozinho — candidatos a “não tocar”'],
+      ['preencher', 'Continuam vazios e o portal exige'],
+    ].forEach(([chave, titulo]) => {
+      const doGrupo = itens.filter((item) => item.sugestao === chave);
+      if (!doGrupo.length) return;
+      painel.appendChild(criarElemento('h4', titulo));
+      const lista = criarElemento('ul');
+      doGrupo.forEach((item) => {
+        const linha = criarElemento('li');
+        linha.appendChild(criarElemento('strong', item.rotulo || item.chave));
+        const motivo = criarElemento('span', ` — ${item.motivo || ''}`);
+        motivo.className = 'motivo';
+        linha.appendChild(motivo);
+        // A sugestao so vale se houver incidente aberto para configurar.
+        const incidente = incidenteDaChave(estado, item.chave);
+        if (incidente) {
+          const ir = criarElemento(
+            'button', chave === 'intocavel' ? 'Aplicar “não tocar”' : 'Ir ao campo',
+          );
+          ir.type = 'button';
+          ir.className = 'btn btn-ghost btn-sm ms-2';
+          ir.dataset.sugestaoIncidente = String(incidente.id ?? '');
+          if (chave === 'intocavel') ir.dataset.sugestaoOrigem = 'intocavel';
+          linha.appendChild(ir);
+        } else {
+          const sem = criarElemento('span', ' — sem incidente aberto para configurar');
+          sem.className = 'motivo';
+          linha.appendChild(sem);
+        }
+        lista.appendChild(linha);
+      });
+      painel.appendChild(lista);
+    });
+  };
 
   const carregar = async () => {
     try {
@@ -544,7 +736,6 @@ export async function inicializarContratoNfse(opcoes = {}) {
       renderizarEstadoContrato(estado, root);
       if (typeof opcoes.onEstado === 'function') opcoes.onEstado(estado);
       preencherNotasValidacao(root);
-      atualizarCamposOrigem(root, estado?.fontes || [], origem?.value || '');
       mostrarErro(root, 'nfseReconEstado', '');
     } catch (erro) {
       estado = null;
@@ -556,30 +747,32 @@ export async function inicializarContratoNfse(opcoes = {}) {
     }
   };
 
-  origem?.addEventListener('change', () => {
-    atualizarCamposOrigem(root, estado?.fontes || [], origem.value);
-  });
-
   botaoRecon?.addEventListener('click', () => {
     void comCarregamento(botaoRecon, async () => {
       try {
         const dados = await chamar(fetchImpl, '/nfse/contrato/recon', {});
         await carregar();
+        mostrarPasses(dados.passe, dados.controles_acumulados);
+        mostrarSugestoes(dados.sugestoes);
         const observacao = dados.observacao || {};
+        // A evidencia carrega o motivo tecnico: sem ela, 'desconhecida' nao
+        // diz ao operador o que conferir na tela.
+        const evidencia = (observacao.evidencias || [])[0] || '';
         if (observacao.compatibilidade === 'desconhecida') {
           const faixa = porId(root, 'nfseContratoStatus');
           if (faixa) faixa.dataset.estado = 'desconhecido';
           const titulo = porId(root, 'nfseContratoStatusTitulo');
           const texto = porId(root, 'nfseContratoStatusTexto');
           if (titulo) titulo.textContent = rotulosEstado.desconhecido.titulo;
-          if (texto) texto.textContent = rotulosEstado.desconhecido.texto;
+          if (texto) texto.textContent = evidencia || rotulosEstado.desconhecido.texto;
         }
         mostrarErro(
           root,
           'nfseReconEstado',
           observacao.compatibilidade === 'compativel'
             ? 'Recon concluída: a tela atual é compatível.'
-            : `Recon concluída: ${observacao.compatibilidade || 'estado desconhecido'}.`,
+            : `Recon concluída: ${observacao.compatibilidade || 'estado desconhecido'}.`
+              + (evidencia ? ` ${evidencia}` : ''),
         );
       } catch (erro) {
         const mensagem = erro instanceof Error ? erro.message : 'Não foi possível executar a recon.';
@@ -589,21 +782,129 @@ export async function inicializarContratoNfse(opcoes = {}) {
     });
   });
 
-  root.addEventListener('click', (evento) => {
-    const alvo = evento.target?.closest?.('[data-configurar-incidente], [data-validar-contrato], [data-ativar-contrato]');
+  botaoDescartar?.addEventListener('click', () => {
+    void comCarregamento(botaoDescartar, async () => {
+      try {
+        await chamar(fetchImpl, '/nfse/contrato/recon/descartar', {});
+        mostrarPasses(0, 0);
+        mostrarSugestoes([]);
+        mostrarErro(root, 'nfseReconEstado', 'Passes acumulados descartados.');
+      } catch (erro) {
+        const mensagem = erro instanceof Error ? erro.message : 'Não foi possível descartar.';
+        mostrarErro(root, 'nfseReconEstado', mensagem);
+        showToast(mensagem, 'error');
+      }
+    });
+  });
+
+  botaoIncidentes?.addEventListener('click', () => {
+    // Incidente persiste por upsert de assinatura e nada o expira: uma recon
+    // defeituosa entulha a Central para sempre sem esta saida.
+    if (!globalThis.confirm('Descartar todos os incidentes abertos do contrato ativo?')) return;
+    void comCarregamento(botaoIncidentes, async () => {
+      try {
+        const dados = await chamar(fetchImpl, '/nfse/contrato/incidentes/descartar', {});
+        await carregar();
+        mostrarErro(root, 'nfseReconEstado', `${dados.descartados} incidente(s) descartado(s).`);
+      } catch (erro) {
+        const mensagem = erro instanceof Error ? erro.message : 'Não foi possível descartar.';
+        mostrarErro(root, 'nfseReconEstado', mensagem);
+        showToast(mensagem, 'error');
+      }
+    });
+  });
+
+  // A origem escolhida decide quais campos da linha aparecem; sem isto o
+  // operador ve fonte e valor fixo ao mesmo tempo, e um deles sempre sobra.
+  central.addEventListener('change', (evento) => {
+    const campo = evento.target;
+    if (campo?.dataset?.campo !== 'origem') return;
+    const forma = campo.closest('.nfse-contrato-config');
+    if (forma) aplicarOrigemNaLinha(forma, estado?.fontes || [], campo.value);
+  });
+
+  central.addEventListener('submit', (evento) => {
+    const forma = evento.target?.closest?.('.nfse-contrato-config');
+    if (!forma) return;
+    evento.preventDefault();
+    const incidenteId = forma.dataset.configIncidente;
+    const incidente = incidentePorId(estado, incidenteId);
+    const artigo = forma.closest('.nfse-contrato-incidente');
+    const erro = artigo?.querySelector('.nfse-contrato-erro');
+    const origemCampo = campoDaLinha(forma, 'origem');
+    const fonteCampo = campoDaLinha(forma, 'fonte');
+    const valorCampo = campoDaLinha(forma, 'valor_fixo');
+    let payload;
+    try {
+      payload = montarDadosCandidato({
+        origem: origemCampo?.value,
+        fonte: fonteCampo?.value,
+        valorFixo: valorCampo?.value,
+        fontes: estado?.fontes || [],
+        recomendacao: recomendacaoDoIncidente(incidente),
+        chaveObservada: campoDaLinha(forma, 'chave_observada')?.value,
+        confirmarRecomendacao:
+          campoDaLinha(forma, 'confirmar_recomendacao')?.checked === true,
+      });
+    } catch (falha) {
+      const mensagem = falha instanceof Error ? falha.message : 'Revise a configuração.';
+      marcarInvalido(
+        (origemCampo?.value === 'fixo' ? valorCampo : fonteCampo) || origemCampo, mensagem,
+      );
+      if (erro) erro.textContent = mensagem;
+      return;
+    }
+    void comCarregamento(forma.querySelector('button[type="submit"]'), async () => {
+      try {
+        await chamar(fetchImpl, `/nfse/contrato/incidente/${incidenteId}/configurar`, payload);
+        showToast('Configuração salva como candidata.', 'success');
+        await carregar();
+      } catch (falha) {
+        const mensagem = falha instanceof Error ? falha.message : 'Não foi possível salvar.';
+        if (erro) erro.textContent = mensagem;
+        showToast(mensagem, 'error');
+      }
+    });
+  });
+
+  central.addEventListener('click', (evento) => {
+    const alvo = evento.target?.closest?.(
+      '[data-sugestao-incidente], [data-desfazer-candidata],'
+      + ' [data-validar-contrato], [data-ativar-contrato]',
+    );
     if (!alvo) return;
-    if (alvo.dataset.configurarIncidente) {
-      incidenteAtual = incidentePorId(estado, alvo.dataset.configurarIncidente);
-      const id = porId(root, 'nfseContratoIncidenteId');
-      if (id) id.value = alvo.dataset.configurarIncidente;
-      const campo = porId(root, 'nfseContratoCampoSelecionado');
-      if (campo) campo.textContent = incidenteAtual?.campo?.rotulo || 'Campo selecionado';
-      if (origem) origem.value = '';
-      atualizarCamposOrigem(root, estado?.fontes || [], '');
-      const recomendacao = recomendacaoDoIncidente(incidenteAtual);
-      prepararRecomendacao(root, recomendacao, estado);
-      const checkbox = porId(root, 'nfseContratoConfirmarRecomendacao');
-      if (checkbox) checkbox.checked = false;
+    if (alvo.dataset.sugestaoIncidente) {
+      const artigo = central.querySelector(
+        `.nfse-contrato-incidente[data-incidente-id="${alvo.dataset.sugestaoIncidente}"]`,
+      );
+      const origemCampo = artigo?.querySelector('[data-campo="origem"]');
+      if (alvo.dataset.sugestaoOrigem && origemCampo) {
+        // Pre-seleciona, nao salva: a decisao continua sendo um Salvar explicito.
+        origemCampo.value = alvo.dataset.sugestaoOrigem;
+        origemCampo.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      artigo?.scrollIntoView({ block: 'center' });
+      origemCampo?.focus();
+      return;
+    }
+    if (alvo.dataset.desfazerCandidata) {
+      const botao = alvo;
+      if (!globalThis.confirm(
+        'Descartar a versão candidata? Os incidentes dela voltam a ficar abertos '
+        + 'para reconfiguração.',
+      )) return;
+      void comCarregamento(botao, async () => {
+        try {
+          const dados = await chamar(
+            fetchImpl, `/nfse/contrato/${botao.dataset.desfazerCandidata}/descartar`, {},
+          );
+          showToast(`${dados.reabertos} incidente(s) voltaram a ficar abertos.`, 'success');
+          await carregar();
+        } catch (falha) {
+          const mensagem = falha instanceof Error ? falha.message : 'Não foi possível descartar.';
+          showToast(mensagem, 'error');
+        }
+      });
     } else if (alvo.dataset.validarContrato) {
       candidataAtual = alvo.dataset.validarContrato;
       if (notaValidacao) notaValidacao.value = '';
@@ -621,48 +922,6 @@ export async function inicializarContratoNfse(opcoes = {}) {
         }
       });
     }
-  });
-
-  formConfig?.addEventListener('submit', (evento) => {
-    evento.preventDefault();
-    const botao = porId(root, 'btnSalvarConfigContrato');
-    const recomendacao = recomendacaoDoIncidente(incidenteAtual);
-    let payload;
-    try {
-      payload = montarDadosCandidato({
-        origem: origem?.value,
-        fonte: porId(root, 'nfseContratoFonte')?.value,
-        valorFixo: porId(root, 'nfseContratoValorFixo')?.value,
-        fontes: estado?.fontes || [],
-        recomendacao,
-        chaveObservada: porId(root, 'nfseContratoChaveObservada')?.value,
-        confirmarRecomendacao: porId(root, 'nfseContratoConfirmarRecomendacao')?.checked === true,
-      });
-    } catch (erro) {
-      const mensagem = erro instanceof Error ? erro.message : 'Revise a configuração.';
-      const campo = origem?.value === 'fixo'
-        ? porId(root, 'nfseContratoValorFixo')
-        : porId(root, 'nfseContratoFonte');
-      marcarInvalido(campo || origem, mensagem);
-      mostrarErro(root, 'nfseContratoErro', mensagem);
-      return;
-    }
-    void comCarregamento(botao, async () => {
-      try {
-        await chamar(
-          fetchImpl,
-          `/nfse/contrato/incidente/${porId(root, 'nfseContratoIncidenteId')?.value}/configurar`,
-          payload,
-        );
-        esconderModal('modalConfigContrato');
-        showToast('Configuração salva como candidata.', 'success');
-        await carregar();
-      } catch (erro) {
-        const mensagem = erro instanceof Error ? erro.message : 'Não foi possível salvar a configuração.';
-        mostrarErro(root, 'nfseContratoErro', mensagem);
-        showToast(mensagem, 'error');
-      }
-    });
   });
 
   formValidar?.addEventListener('submit', (evento) => {
