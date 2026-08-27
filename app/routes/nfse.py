@@ -175,6 +175,39 @@ def nfse_contrato_configurar(incidente_id):
     }
 
 
+@bp.route('/nfse/contrato/incidente/<int:incidente_id>/reabrir', methods=['POST'])
+@requer_papel('operador')
+def nfse_contrato_reabrir_incidente(incidente_id):
+    """Desfaz a decisão de UM incidente, preservando as outras.
+
+    O "Descartar candidata" do topo continua existindo e continua sendo tudo ou
+    nada; este é o par por linha, que era o que o botão da linha aparentava ser
+    sem ser.
+    """
+
+    try:
+        candidata = nfse_contrato.reabrir_incidente(
+            incidente_id, usuario_id=current_user.id
+        )
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+        return json_error(str(exc), 409)
+    except nfse_contrato.ConfiguracaoContratoInvalidaError as exc:
+        return json_error(str(exc), 400, campo=getattr(exc, 'campo', 'origem'))
+    except nfse_contrato.PersistenciaContratoError as exc:
+        return json_error(str(exc), 500)
+    return {
+        'status': 'ok',
+        'incidente_id': incidente_id,
+        'contrato': (
+            nfse_contrato.detalhe_contrato(candidata.id)
+            if candidata is not None else None
+        ),
+        'estado': nfse_contrato.estado_painel(),
+    }
+
+
 @bp.route('/nfse/contrato/<int:contrato_id>/descartar', methods=['POST'])
 @requer_papel('operador')
 def nfse_contrato_descartar(contrato_id):

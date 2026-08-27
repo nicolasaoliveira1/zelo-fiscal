@@ -349,14 +349,17 @@ function renderizarIncidentes(estado, root) {
       const feito = criarElemento('span', 'configurado');
       feito.className = 'nfse-contrato-meta';
       linha.appendChild(feito);
-      // Configurar não pode ser via de mão única: o desfazer devolve o
-      // incidente a `aberto` para ser reconfigurado na mesma linha.
+      // Configurar não pode ser via de mão única. "Editar" desfaz SÓ esta
+      // linha: antes ele apontava para o descarte da candidata inteira, então
+      // quem quisesse corrigir um campo perdia a configuração de todos.
+      // O descarte total continua existindo, no topo do histórico.
       if (incidente.contrato_candidato_id) {
-        const desfazer = criarElemento('button', 'Desfazer');
-        desfazer.type = 'button';
-        desfazer.className = 'btn btn-ghost btn-sm';
-        desfazer.dataset.desfazerCandidata = String(incidente.contrato_candidato_id);
-        linha.appendChild(desfazer);
+        const editar = criarElemento('button', 'Editar');
+        editar.type = 'button';
+        editar.className = 'btn btn-ghost btn-sm';
+        editar.title = 'Voltar esta decisão para edição, mantendo as demais';
+        editar.dataset.editarIncidente = String(incidente.id ?? '');
+        linha.appendChild(editar);
       }
     }
     artigo.appendChild(linha);
@@ -889,6 +892,7 @@ export async function inicializarContratoNfse(opcoes = {}) {
   central.addEventListener('click', (evento) => {
     const alvo = evento.target?.closest?.(
       '[data-sugestao-incidente], [data-desfazer-candidata],'
+      + ' [data-editar-incidente],'
       + ' [data-validar-contrato], [data-ativar-contrato]',
     );
     if (!alvo) return;
@@ -904,6 +908,25 @@ export async function inicializarContratoNfse(opcoes = {}) {
       }
       artigo?.scrollIntoView({ block: 'center' });
       origemCampo?.focus();
+      return;
+    }
+    if (alvo.dataset.editarIncidente) {
+      const botao = alvo;
+      void comCarregamento(botao, async () => {
+        try {
+          await chamar(
+            fetchImpl,
+            `/nfse/contrato/incidente/${botao.dataset.editarIncidente}/reabrir`,
+            {},
+          );
+          showToast('Decisão liberada para edição.', 'success');
+          await carregar();
+        } catch (falha) {
+          const mensagem = falha instanceof Error
+            ? falha.message : 'Não foi possível liberar para edição.';
+          showToast(mensagem, 'error');
+        }
+      });
       return;
     }
     if (alvo.dataset.desfazerCandidata) {

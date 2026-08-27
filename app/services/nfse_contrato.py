@@ -932,6 +932,100 @@ def descartar_incidentes(contrato_id=None, usuario_id=None, *, agora=None) -> in
     return len(pendentes)
 
 
+def reabrir_incidente(incidente_id, usuario_id=None) -> ContratoNfse | None:
+    """Desfaz a decisão de UM incidente, preservando as outras.
+
+    A candidata não guarda contribuições separáveis: cada `configurar_incidente`
+    a reconstrói inteira a partir da anterior, então não existe o campo "que
+    veio deste incidente" para arrancar sozinho. O que existe é a SEQUÊNCIA que
+    a construiu — e ela é reproduzível.
+
+    Então o inverso de uma decisão é: fotografar as decisões das outras
+    (lendo-as da candidata atual, que é onde `origem`/`fonte`/`valor_fixo`
+    moram), descartar a candidata pelo caminho que já existe, e reaplicar as
+    fotografadas. Nenhuma lógica nova de montagem — as guardas de ordem,
+    remapeamento e renumeração continuam sendo as do caminho de ida, que é o
+    único testado contra o portal.
+
+    O preço é uma versão por decisão reaplicada. É o mesmo preço que a tela já
+    paga a cada linha salva, e o histórico é justamente o que permitiu
+    recuperar configuração perdida antes.
+
+    Devolve a candidata reconstruída, ou `None` quando o incidente desfeito era
+    o único (aí não sobra candidata nenhuma).
+    """
+
+    alvo = db.session.get(IncidenteContratoNfse, incidente_id)
+    if alvo is None:
+        raise ContratoNfseNaoEncontradoError("o incidente solicitado não existe")
+    if alvo.estado != "configurado":
+        raise ContratoNfseTransicaoInvalidaError(
+            "somente um incidente configurado pode voltar a ser editado"
+        )
+    candidata_id = alvo.contrato_candidato_id
+    if candidata_id is None:
+        raise ContratoNfseTransicaoInvalidaError(
+            "o incidente não está preso a nenhuma candidata"
+        )
+    candidata = _contrato_com_campos(candidata_id)
+    if candidata is None:
+        raise ContratoNfseNaoEncontradoError("a versão candidata não existe")
+
+    irmas = [
+        incidente
+        for incidente in IncidenteContratoNfse.query.filter_by(
+            contrato_candidato_id=candidata_id, estado="configurado",
+        ).order_by(IncidenteContratoNfse.id).all()
+        if incidente.id != alvo.id
+    ]
+    # Retrato ANTES de descartar: depois do descarte a candidata é arquivada e
+    # `_campo_do_incidente` não teria mais onde ler a decisão.
+    retrato = []
+    for irma in irmas:
+        campo = _campo_do_incidente(irma, candidata.campos)
+        if campo is None:
+            # Remapeada: o campo vive sob a chave observada, não a esperada.
+            campo = next(
+                (
+                    item for item in candidata.campos
+                    if item.chave_semantica == irma.chave_observada
+                ),
+                None,
+            )
+        if campo is None:
+            continue
+        dados = {"origem": campo.origem}
+        if campo.fonte:
+            dados["fonte"] = campo.fonte
+        if campo.valor_fixo is not None:
+            dados["valor_fixo"] = campo.valor_fixo
+        retrato.append((irma.id, dados, campo.chave_semantica))
+
+    descartar_candidata(candidata_id, usuario_id=usuario_id)
+
+    reconstruida = None
+    for irma_id, dados, chave in retrato:
+        irma = db.session.get(IncidenteContratoNfse, irma_id)
+        if irma is None or irma.estado != "aberto":
+            continue
+        pendentes = IncidenteContratoNfse.query.filter_by(
+            contrato_base_id=irma.contrato_base_id
+        ).all()
+        tem_recomendacao = recomendacao_incidente(irma, pendentes) is not None
+        reconstruida = configurar_incidente(
+            irma_id, dados, usuario_id=usuario_id,
+            chave_observada=chave if tem_recomendacao else None,
+            confirmar_recomendacao=tem_recomendacao,
+        )
+    log_event(
+        "nfse_incidente_reaberto",
+        incidente_id=incidente_id,
+        candidata_descartada=candidata_id,
+        reaplicados=len(retrato),
+    )
+    return reconstruida
+
+
 def descartar_candidata(contrato_id, usuario_id=None, *, agora=None) -> int:
     """Arquiva uma candidata e devolve seus incidentes ao estado aberto.
 

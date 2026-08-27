@@ -794,3 +794,61 @@ def test_validacao_reprovada_grava_o_motivo_na_candidata(app, ids):
         assert gravada.estado == 'candidata'
         assert '1 divergência(s) na revisão' in gravada.erro_validacao
         assert '649,00' not in gravada.erro_validacao
+
+
+def test_editar_uma_linha_preserva_as_decisoes_das_outras(app, ids):
+    """O botão da linha desfazia a candidata INTEIRA: corrigir um campo custava
+    a configuração de todos os outros. Aconteceu de verdade."""
+
+    with app.app_context():
+        contrato = nfse_contrato.garantir_contrato_inicial()
+        agora = datetime(2026, 8, 27, 12, 0, 0)
+        primeiro, _ = nfse_contrato._registrar_uma_diferenca(
+            contrato.id, _diferenca_de_controle('texto', 'Campo.Um'), agora,
+        )
+        segundo, _ = nfse_contrato._registrar_uma_diferenca(
+            contrato.id, _diferenca_de_controle('texto', 'Campo.Dois'), agora,
+        )
+        db.session.commit()
+        id_um, id_dois = primeiro.id, segundo.id
+
+        nfse_contrato.configurar_incidente(id_um, {'origem': 'intocavel'})
+        nfse_contrato.configurar_incidente(id_dois, {'origem': 'padrao_portal'})
+
+        candidata = nfse_contrato.reabrir_incidente(id_um)
+
+        # O desfeito volta a pedir decisão...
+        assert db.session.get(IncidenteContratoNfse, id_um).estado == 'aberto'
+        # ...e o outro continua configurado, com a MESMA decisão.
+        assert db.session.get(IncidenteContratoNfse, id_dois).estado == 'configurado'
+        chaves = {c.chave_semantica: c.origem for c in candidata.campos}
+        assert chaves.get('Campo.Dois') == 'padrao_portal'
+        assert 'Campo.Um' not in chaves
+
+
+def test_editar_a_unica_decisao_nao_deixa_candidata(app, ids):
+    with app.app_context():
+        contrato = nfse_contrato.garantir_contrato_inicial()
+        incidente, _ = nfse_contrato._registrar_uma_diferenca(
+            contrato.id, _diferenca_de_controle('texto', 'Campo.Solo'),
+            datetime(2026, 8, 27, 12, 0, 0),
+        )
+        db.session.commit()
+        incidente_id = incidente.id
+        nfse_contrato.configurar_incidente(incidente_id, {'origem': 'intocavel'})
+
+        assert nfse_contrato.reabrir_incidente(incidente_id) is None
+        assert db.session.get(IncidenteContratoNfse, incidente_id).estado == 'aberto'
+
+
+def test_editar_recusa_incidente_que_nao_esta_configurado(app, ids):
+    with app.app_context():
+        contrato = nfse_contrato.garantir_contrato_inicial()
+        incidente, _ = nfse_contrato._registrar_uma_diferenca(
+            contrato.id, _diferenca_de_controle('texto', 'Campo.Aberto'),
+            datetime(2026, 8, 27, 12, 0, 0),
+        )
+        db.session.commit()
+
+        with pytest.raises(nfse_contrato.ContratoNfseTransicaoInvalidaError):
+            nfse_contrato.reabrir_incidente(incidente.id)

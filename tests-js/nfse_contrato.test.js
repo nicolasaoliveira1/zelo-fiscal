@@ -292,6 +292,10 @@ test('incidente configurado oferece desfazer, e a candidata é descartável', as
   });
 
   assert.equal(document.querySelector('.nfse-contrato-config'), null);
+  // A linha oferece "Editar", que desfaz SÓ ela; o descarte total é o botão do
+  // histórico, e é esse que este teste exercita.
+  const editar = document.querySelector('[data-editar-incidente]');
+  assert.equal(editar.textContent, 'Editar');
   const desfazer = document.querySelector('[data-desfazer-candidata]');
   assert.equal(desfazer.dataset.desfazerCandidata, '9');
 
@@ -320,6 +324,27 @@ test('candidata reprovada mostra POR QUE reprovou no histórico', async () => {
   const linha = document.querySelector('[data-contrato-candidato="9"]');
   assert.ok(linha.textContent.includes('3 divergência(s) na revisão'));
   assert.ok(linha.textContent.includes('A descricao na tela nao e a esperada'));
+});
+
+test('Editar na linha chama o reabrir daquele incidente, não o descarte total', async () => {
+  const posts = [];
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => {
+      if (opcoes) { posts.push(url); return resposta({ contrato: null }); }
+      return resposta(estadoBase({
+        incidentes: [{ ...incidente, id: 7, estado: 'configurado', contrato_candidato_id: 9 }],
+        candidatas: [{ id: 9, versao: 2, estado: 'candidata' }],
+      }));
+    },
+  });
+
+  document.querySelector('[data-editar-incidente]').click();
+  await proximoTurno();
+  await proximoTurno();
+  await proximoTurno();
+
+  assert.deepEqual(posts, ['/nfse/contrato/incidente/7/reabrir']);
 });
 
 test('monta payloads somente com as origens e fontes do catálogo', () => {

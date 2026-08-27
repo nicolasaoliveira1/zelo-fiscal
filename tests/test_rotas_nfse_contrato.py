@@ -851,3 +851,41 @@ def test_falha_de_persistencia_ao_configurar_devolve_json(login_as, app, monkeyp
     corpo = resposta.get_json()
     assert corpo['status'] == 'error'
     assert 'gravar' in corpo['message']
+
+
+def test_rota_de_reabrir_devolve_o_incidente_a_aberto(login_as, app):
+    """Par por linha do descarte total: só a decisão desta volta a ser pedida."""
+    _contrato_id, candidato_id, incidente_id = _criar_candidata(app)
+
+    resposta = login_as('operador').post(
+        f'/nfse/contrato/incidente/{incidente_id}/reabrir', json={},
+    )
+
+    assert resposta.status_code == 200
+    with app.app_context():
+        incidente = db.session.get(IncidenteContratoNfse, incidente_id)
+        assert incidente.estado == 'aberto'
+        assert incidente.contrato_candidato_id is None
+        candidata = db.session.get(nfse_contrato.ContratoNfse, candidato_id)
+        assert candidata.estado == 'arquivada'
+
+
+def test_reabrir_incidente_aberto_responde_409(login_as, app):
+    _contrato_id, incidente_id = _criar_incidente(app)
+
+    resposta = login_as('operador').post(
+        f'/nfse/contrato/incidente/{incidente_id}/reabrir', json={},
+    )
+
+    assert resposta.status_code == 409
+    assert resposta.get_json()['status'] == 'error'
+
+
+def test_reabrir_exige_papel_de_operador(login_as, app):
+    _contrato_id, _candidato_id, incidente_id = _criar_candidata(app)
+
+    resposta = login_as('leitura').post(
+        f'/nfse/contrato/incidente/{incidente_id}/reabrir', json={},
+    )
+
+    assert resposta.status_code == 403
