@@ -31,7 +31,7 @@ CONFIG = SimpleNamespace(
 )
 
 NOTA = SimpleNamespace(
-    documento='33.684.001/0001-51',
+    documento='44.556.677/0001-86',
     valor_final=Decimal('826.09'),
     competencia='06/2026',
 )
@@ -53,8 +53,8 @@ class DriverEspiao:
 
     def __init__(self):
         self.autopreenchidos = {
-            'Prestador_Inscricao': '94.645.405/0001-20',
-            'Tomador_Nome': 'L. LUIS PETRY',
+            'Prestador_Inscricao': '11.222.333/0001-81',
+            'Tomador_Nome': 'PAPELARIA CENTRAL',
         }
         # rotulo -> valor, por campo de busca (como o portal devolve)
         self.catalogo = {
@@ -212,7 +212,7 @@ def test_etapa_pessoas_preenche_data_regime_tomador_e_avanca(driver):
     assert driver.preenchidos['DataCompetencia'] == '28/07/2026'
     assert driver.chosen['SimplesNacional_RegimeApuracaoTributosSN'] == '1'
     assert driver.radios['Tomador.LocalDomicilio'] == '1'   # Brasil
-    assert driver.preenchidos['Tomador_Inscricao'] == '33.684.001/0001-51'
+    assert driver.preenchidos['Tomador_Inscricao'] == '44.556.677/0001-86'
     assert 'btnAvancar' in driver.clicados
 
 
@@ -557,3 +557,60 @@ def test_documento_nao_reconhecido_pelo_portal_da_erro_acionavel(driver):
         nfse.preencher_etapa_pessoas(driver, NOTA, CONFIG, date(2026, 7, 28))
     assert NOTA.documento in str(exc.value)
     assert 'btnAvancar' not in driver.clicados, 'avancou com o tomador vazio'
+
+
+def test_pergunta_nova_no_topo_da_etapa_destrava_a_competencia(driver, monkeypatch):
+    """Achado de UAT: a reforma pôs "Preencher as informações IBS/CBS?" no topo
+    de Pessoas, e ela mantém os demais campos inertes até ser respondida. A
+    competência é o primeiro campo que a automação toca desde sempre — sem
+    responder a pergunta, o preenchimento morria ali."""
+
+    from app.services import nfse_contrato
+
+    execucao = nfse_contrato.contrato_inicial_execucao()
+    porteira = SimpleNamespace(
+        chave_semantica='PreencherInfoIBSCBS', etapa='pessoas',
+        seletor_tipo='name', seletor='PreencherInfoIBSCBS',
+        rotulo='Preencher as informações IBS/CBS?', tipo='radio',
+        interacao='radio', obrigatorio=True, ordem=99,
+        condicao_chave=None, condicao_valor=None, origem='fixo', fonte=None,
+        valor_fixo='0', revisao_secao=None, revisao_rotulo=None,
+        conferivel_automatico=False, opcoes=(),
+    )
+    contrato = SimpleNamespace(
+        contrato_id=execucao.contrato_id,
+        campos=tuple(execucao.campos) + (porteira,),
+        campo=execucao.campo,
+    )
+
+    driver.desabilitados.add('DataCompetencia')
+    original = nfse._marcar_radio
+
+    def marcar(drv, name, valor):
+        elemento = original(drv, name, valor)
+        if name == 'PreencherInfoIBSCBS':
+            drv.desabilitados.discard('DataCompetencia')
+        return elemento
+
+    monkeypatch.setattr(nfse, '_marcar_radio', marcar)
+
+    nfse.preencher_etapa_pessoas(
+        driver, NOTA, CONFIG, date(2026, 7, 28), contrato=contrato,
+        # No fluxo real quem resolve é `_resolver_valores_contrato`.
+        valores_contrato={'PreencherInfoIBSCBS': '0'},
+    )
+
+    assert driver.radios['PreencherInfoIBSCBS'] == '0'
+    assert driver.preenchidos['DataCompetencia'] == '28/07/2026'
+
+
+def test_sem_porteira_no_contrato_o_erro_do_portal_sobe_inalterado(driver):
+    """Sem resposta decidida no contrato, o desfecho continua sendo o do
+    portal — não um chute nosso."""
+
+    driver.desabilitados.add('DataCompetencia')
+
+    with pytest.raises(nfse.InteracaoPortalError) as erro:
+        nfse.preencher_etapa_pessoas(driver, NOTA, CONFIG, date(2026, 7, 28))
+
+    assert 'DataCompetencia' in str(erro.value)

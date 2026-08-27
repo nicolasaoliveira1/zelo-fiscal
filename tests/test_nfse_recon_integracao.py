@@ -193,3 +193,57 @@ def test_select_sem_catalogo_declarado_nao_cria_drift_falso():
 
     assert resultado.compatibilidade == "compativel"
     assert resultado.diferencas == ()
+
+
+def _campo_esperado(chave="campo.contratado"):
+    return CampoComparavel(
+        chave_semantica=chave,
+        etapa="servico",
+        rotulo="Campo contratado",
+        tipo="text",
+        interacao="texto",
+        obrigatorio=True,
+        seletor_tipo="name",
+        seletor=chave,
+    )
+
+
+def test_ausencia_provisoria_nao_bloqueia_o_modo_automatico(monkeypatch):
+    """O automático é conservador de propósito, mas conservadorismo que nunca
+    deixa concluir não protege nada: a etapa é um formulário progressivo e "o
+    campo ainda não apareceu" acontece em toda nota."""
+
+    monkeypatch.setattr(
+        nfse_service.nfse_recon, "inventariar",
+        lambda *_: InventarioEtapa(etapa="servico", controles=()),
+    )
+    registrar = MagicMock()
+    monkeypatch.setattr(nfse_service.nfse_contrato, "registrar_incidentes", registrar)
+
+    resultado = nfse_service._observar_fronteira_contrato(
+        MagicMock(), _contrato([_campo_esperado()], contrato_id=71),
+        "servico", "entrada", modo="automatico",
+    )
+
+    assert resultado["estado"] == "compativel"
+    # E, sobretudo: nada vira incidente. Um incidente aberto aqui fecharia o
+    # gate do automático para sempre, por um fato que não aconteceu.
+    registrar.assert_not_called()
+
+
+def test_ausencia_na_observacao_final_continua_bloqueando_o_automatico(monkeypatch):
+    """Percorrida a etapa inteira, o campo que não apareceu sumiu de verdade."""
+
+    monkeypatch.setattr(
+        nfse_service.nfse_recon, "inventariar",
+        lambda *_: InventarioEtapa(etapa="servico", controles=()),
+    )
+    monkeypatch.setattr(
+        nfse_service.nfse_contrato, "registrar_incidentes", MagicMock()
+    )
+
+    with pytest.raises(nfse_service.NfseDriftError):
+        nfse_service._observar_fronteira_contrato(
+            MagicMock(), _contrato([_campo_esperado()], contrato_id=71),
+            "servico", "pre_avancar", modo="automatico",
+        )

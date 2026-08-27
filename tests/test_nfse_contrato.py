@@ -10,6 +10,7 @@ import pytest
 
 from app import db
 from app.automation import nfse as automacao_nfse
+from app.automation import nfse_recon as automacao_recon
 from app.automation.nfse_recon import OpcaoInventariada
 from app.models import IncidenteContratoNfse
 from app.services import nfse_contrato
@@ -437,3 +438,134 @@ def test_falha_de_auditoria_nao_desfaz_candidata(app, ids, monkeypatch):
         )
 
         assert db.session.get(type(candidato), candidato.id) is not None
+
+
+def _diferenca_de_controle(interacao, chave="Campo.Novo"):
+    campo = CampoComparavel(
+        chave_semantica=chave, etapa="pessoas",
+        rotulo="Informar série e número da DPS", tipo="checkbox",
+        interacao=interacao, obrigatorio=True,
+        opcoes=(OpcaoInventariada("true", "Informar série e número da DPS", 0),),
+    )
+    return Diferenca(
+        etapa="pessoas", tipo="controle_novo", severidade="critica",
+        chave_observada=chave, observado=campo,
+        mensagem="O portal passou a exigir um controle que não existe no contrato.",
+    )
+
+
+def _incidente_de_controle(app, *, interacao, chave="Campo.Novo"):
+    with app.app_context():
+        contrato = nfse_contrato.garantir_contrato_inicial()
+        incidente, _ = nfse_contrato._registrar_uma_diferenca(
+            contrato.id, _diferenca_de_controle(interacao, chave),
+            datetime(2026, 8, 26, 12, 0, 0),
+        )
+        return incidente.id
+
+
+@pytest.mark.parametrize("origem", ["intocavel", "padrao_portal"])
+def test_nao_tocar_dispensa_adaptador_do_controle(app, ids, origem):
+    """O executor deriva o adaptador da própria origem quando ela não interage:
+    exigir um adaptador de DOM barrava a decisão de justamente NÃO mexer."""
+
+    incidente_id = _incidente_de_controle(app, interacao="acao")
+
+    with app.app_context():
+        candidata = nfse_contrato.configurar_incidente(incidente_id, {"origem": origem})
+        campo = next(c for c in candidata.campos if c.chave_semantica == "Campo.Novo")
+        assert campo.interacao == origem
+        assert campo.interacao in automacao_nfse._ADAPTADORES_CONTRATO
+
+
+def test_toda_interacao_que_o_inventario_produz_tem_adaptador():
+    """Guarda que faltava: o inventário deriva a interação (`texto`), e o mapa
+    só conhecia o tipo cru do DOM (`text`). Configurar qualquer campo de texto
+    falhava com "não possui adaptador seguro"."""
+
+    produzidas = {
+        automacao_recon._interacao("input", tipo, (), revela)
+        for tipo in ("text", "date", "number", "email", "tel", "radio", "checkbox")
+        for revela in (False, True)
+    } | {
+        automacao_recon._interacao("textarea", "textarea", ()),
+        automacao_recon._interacao("select", "select", ()),
+        automacao_recon._interacao("select", "select", ("form-chosen",)),
+        automacao_recon._interacao("select", "select", ("select2-hidden-accessible",)),
+    }
+
+    for interacao in produzidas:
+        assert nfse_contrato._adaptador_observado(interacao) in (
+            automacao_nfse._ADAPTADORES_CONTRATO
+        ), interacao
+
+
+def test_reobservar_nao_reabre_incidente_ja_configurado(app, ids):
+    """Uma emissão assistida entre configurar e validar reobserva a mesma
+    diferença. Reabrir quebraria a cobertura da candidata e obrigaria o
+    operador a configurar tudo de novo sem entender por quê."""
+
+    incidente_id = _incidente_de_controle(app, interacao='texto', chave='Campo.Reobs')
+
+    with app.app_context():
+        candidata = nfse_contrato.configurar_incidente(
+            incidente_id, {'origem': 'intocavel'}
+        )
+        contrato_id = nfse_contrato.contrato_ativo().id
+        incidente = db.session.get(IncidenteContratoNfse, incidente_id)
+        observacoes_antes = incidente.observacoes
+
+        nfse_contrato._registrar_uma_diferenca(
+            contrato_id, _diferenca_de_controle('texto', 'Campo.Reobs'),
+            datetime(2026, 8, 26, 13, 0, 0),
+        )
+
+        db.session.refresh(incidente)
+        assert incidente.estado == 'configurado'
+        assert incidente.contrato_candidato_id == candidata.id
+        assert incidente.observacoes > observacoes_antes
+
+
+def test_incidente_da_validacao_e_gravado_contra_a_versao_ativa(app, ids):
+    """Durante a validação o preenchimento carrega a CANDIDATA. Gravar contra
+    ela escondia o incidente: a Central lista os da ativa."""
+
+    incidente_id = _incidente_de_controle(app, interacao='texto', chave='Campo.Base')
+
+    with app.app_context():
+        candidata = nfse_contrato.configurar_incidente(
+            incidente_id, {'origem': 'intocavel'}
+        )
+        ativo_id = nfse_contrato.contrato_ativo().id
+        assert candidata.id != ativo_id
+
+        novos = nfse_contrato.registrar_incidentes(
+            candidata.id,
+            type('R', (), {
+                'diferencas': (_diferenca_de_controle('texto', 'Campo.Drift'),),
+            })(),
+        )
+
+        assert [item.contrato_base_id for item in novos] == [ativo_id]
+        chaves = [
+            item['campo']['chave_observada']
+            for item in nfse_contrato.estado_painel()['incidentes']
+        ]
+        assert 'Campo.Drift' in chaves
+
+
+def test_descartar_incidentes_tira_do_gate_sem_alterar_contrato(app, ids):
+    """Recon defeituosa entulha a Central: o incidente persiste e nada o expira."""
+
+    incidente_id = _incidente_de_controle(app, interacao='texto', chave='Campo.Lixo')
+
+    with app.app_context():
+        assert nfse_contrato.estado_painel()['incidentes']
+        contrato_id = nfse_contrato.contrato_ativo().id
+
+        descartados = nfse_contrato.descartar_incidentes(contrato_id)
+
+        assert descartados >= 1
+        assert nfse_contrato.estado_painel()['incidentes'] == []
+        assert nfse_contrato.contrato_ativo().id == contrato_id
+        assert incidente_id is not None
