@@ -1818,6 +1818,22 @@ def _resumo_incidente(incidente, recomendacao=None):
     return resumo
 
 
+def _estado_visual(ativo, incidentes):
+    """Traduz para a tela o mesmo fato que fecha o gate do automático.
+
+    `bloqueado` é exatamente o que `validar_contrato_automatico` recusa: versão
+    não elegível, ou qualquer incidente pendente. Havia divergência aqui — as
+    cópias de tela chamavam de "aviso" um incidente pendente `informativa` que
+    o servidor já tratava como bloqueio.
+    """
+
+    if ativo is None:
+        return "desconhecido"
+    if not ativo.elegivel_automatico or incidentes:
+        return "bloqueado"
+    return "compativel"
+
+
 def estado_painel():
     """Serializa o estado persistido sem dados da nota ou do DOM."""
 
@@ -1843,16 +1859,23 @@ def estado_painel():
         (item.etapa, item.chave_esperada): item
         for item in _recomendacoes_incidentes(incidentes)
     }
+    resumos = [
+        _resumo_incidente(
+            item, recomendacoes.get((item.etapa, item.chave_esperada)),
+        )
+        for item in incidentes
+    ]
     return {
         "ativo": _resumo_contrato(ativo),
+        # Fonte única do estado visual. A regra vivia em quatro lugares — este
+        # painel, o Jinja da primeira pintura, `estadoVisual` e
+        # `contratoPermiteAutomatico` — e as cópias já discordavam: a faixa
+        # dizia "aviso" ao lado do rádio do automático desabilitado, sem
+        # explicação. Quem decide é `validar_contrato_automatico`; aqui só se
+        # traduz o mesmo fato para a tela.
+        "estado_visual": _estado_visual(ativo, incidentes),
         "candidatas": [_resumo_contrato(item) for item in candidatos],
-        "incidentes": [
-            _resumo_incidente(
-                item,
-                recomendacoes.get((item.etapa, item.chave_esperada)),
-            )
-            for item in incidentes
-        ],
+        "incidentes": resumos,
         "fontes": fontes_disponiveis(),
     }
 

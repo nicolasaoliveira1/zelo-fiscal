@@ -17,14 +17,6 @@ const ORIGENS = new Set([
 ]);
 
 const ORIGENS_SEM_FONTE = new Set(['fixo', 'padrao_portal', 'intocavel']);
-const STATUS_EMITIVEIS = new Set([
-  'pronta',
-  'cadastro_pendente',
-  'pessoa_fisica',
-  'falha',
-  'pulada',
-]);
-
 const rotulosEstado = {
   compativel: {
     titulo: 'Contrato compatível',
@@ -72,13 +64,16 @@ function incidentesPendentes(estado) {
 
 function estadoVisual(estado) {
   if (!estado?.ativo || !Array.isArray(estado.incidentes)) return 'desconhecido';
-  const abertos = incidentesPendentes(estado);
-  if (estado.ativo.elegivel_automatico === false
-      || abertos.some((item) => item.estado === 'configurado'
-        || ['critica', 'fiscal'].includes(item.severidade))) {
-    return 'bloqueado';
+  // O servidor manda: `estado_visual` traduz o mesmo fato que fecha o gate do
+  // automatico. A regra vivia em quatro copias e elas ja discordavam — a faixa
+  // dizia "aviso" ao lado do radio desabilitado. O fallback so cobre payload
+  // antigo, e segue a mesma regra do servidor.
+  if (typeof estado.estado_visual === 'string' && estado.estado_visual) {
+    return estado.estado_visual;
   }
-  return abertos.length ? 'aviso' : 'compativel';
+  const abertos = incidentesPendentes(estado);
+  if (estado.ativo.elegivel_automatico === false || abertos.length) return 'bloqueado';
+  return 'compativel';
 }
 
 function preencherStatus(estado, root) {
@@ -620,7 +615,10 @@ function preencherNotasValidacao(root) {
   limpar(select);
   select.appendChild(placeholder);
   notas
-    .filter((nota) => STATUS_EMITIVEIS.has(nota?.status))
+    // O veredito vem do servidor (`nfse_service.emitivel`): a regra barra
+    // proposta de agrupamento pendente e duplicata nao liberada, que uma lista
+    // de status nao ve. Recriar a regra aqui ja tinha divergido.
+    .filter((nota) => nota?.emitivel === true)
     .forEach((nota) => {
       const identificador = String(nota.id ?? '');
       const texto = [nota.nome_csv || nota.documento || 'Nota', nota.competencia]

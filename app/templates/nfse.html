@@ -525,19 +525,11 @@
 </div>
 
 {% set contrato_abertos = contrato_estado.incidentes | selectattr('estado', 'in', ('aberto', 'configurado')) | list %}
-{% set ns_contrato = namespace(bloqueado=false) %}
-{% for incidente in contrato_abertos %}
-    {% if incidente.estado == 'configurado' or incidente.severidade in ('critica', 'fiscal') %}
-        {% set ns_contrato.bloqueado = true %}
-    {% endif %}
-{% endfor %}
-{% if not contrato_estado.ativo.elegivel_automatico or ns_contrato.bloqueado %}
-    {% set contrato_estado_visual = 'bloqueado' %}
-{% elif contrato_abertos %}
-    {% set contrato_estado_visual = 'aviso' %}
-{% else %}
-    {% set contrato_estado_visual = 'compativel' %}
-{% endif %}
+{# O estado visual vem calculado do servidor (`nfse_contrato._estado_visual`),
+   que traduz o MESMO fato que fecha o gate do automatico. Rededuzir a regra
+   aqui ja produziu divergencia: a faixa dizia "aviso" ao lado do radio do
+   automatico desabilitado, sem explicar por que. #}
+{% set contrato_estado_visual = contrato_estado.estado_visual or 'desconhecido' %}
 
 <!-- Central de alterações do contrato adaptativo da NFS-e -->
 <section class="nfse-card mb-3" id="nfseContratoCentral"

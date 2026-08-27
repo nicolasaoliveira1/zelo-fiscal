@@ -521,6 +521,11 @@ def _nota_para_json(nota):
         'valor': f'{nota.valor_final:.2f}'.replace('.', ',') if nota.valor_final else None,
         'vencimento': nota.vencimento.strftime('%d/%m/%Y') if nota.vencimento else None,
         'status': nota.status,
+        # A regra de "esta nota pode ser preenchida" mora em
+        # `nfse_service.emitivel` — que barra proposta de agrupamento pendente e
+        # duplicata não liberada, coisas que uma lista de status não vê. O
+        # cliente consome o veredito; recriar a regra em JS ja tinha divergido.
+        'emitivel': nfse_service.emitivel(nota),
         'origem_vinculo': nota.origem_vinculo,
         'score_match': nota.score_match,
         'divergencia_valor': nota.divergencia_valor,

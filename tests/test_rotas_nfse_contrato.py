@@ -675,3 +675,37 @@ def test_passe_inconclusivo_nao_se_esconde_atras_da_uniao(login_as, app, monkeyp
 
     assert observacao['estado'] == 'desconhecida'
     assert observacao['compatibilidade'] == 'desconhecida'
+
+
+def test_estado_visual_vem_do_servidor_e_segue_o_gate(login_as, app):
+    """A regra "quando o contrato está bloqueado" vivia em quatro cópias — o
+    painel, o Jinja da primeira pintura, `estadoVisual` e
+    `contratoPermiteAutomatico` — e elas já discordavam: a faixa dizia "aviso"
+    ao lado do rádio do automático desabilitado, sem explicar por quê."""
+
+    _contrato_id, _incidente_id = _criar_incidente(app)
+    operador = login_as('operador')
+
+    estado = operador.get('/nfse/contrato').get_json()
+
+    # Há incidente pendente: é exatamente o que o gate do automático recusa.
+    assert estado['estado_visual'] == 'bloqueado'
+    with app.app_context():
+        with pytest.raises(nfse_contrato.ContratoNfseNaoElegivelError):
+            nfse_contrato.validar_contrato_automatico(estado['ativo']['id'])
+
+    # E a primeira pintura usa o mesmo valor, sem rededuzir a regra.
+    corpo = operador.get('/nfse').get_data(as_text=True)
+    assert 'data-estado="bloqueado"' in corpo
+
+
+def test_estado_visual_limpo_quando_nao_ha_pendencia(login_as, app):
+    contrato_id, _incidente_id = _criar_incidente(app)
+    operador = login_as('operador')
+
+    operador.post('/nfse/contrato/incidentes/descartar', json={})
+
+    estado = operador.get('/nfse/contrato').get_json()
+    assert estado['incidentes'] == []
+    assert estado['estado_visual'] == 'compativel'
+    assert estado['ativo']['id'] == contrato_id

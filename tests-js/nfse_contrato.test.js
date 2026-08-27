@@ -82,8 +82,9 @@ function markup() {
       <button id="btnValidarContrato" type="submit">Iniciar validação</button>
     </form>
     <script id="dadosNotas" type="application/json">[
-      {"id": 10, "status": "pronta", "nome_csv": "NOTA SINTÉTICA", "competencia": "08/2026"},
-      {"id": 11, "status": "emitida", "nome_csv": "FORA DA FILA", "competencia": "08/2026"}
+      {"id": 10, "status": "pronta", "emitivel": true, "nome_csv": "NOTA SINTÉTICA", "competencia": "08/2026"},
+      {"id": 11, "status": "emitida", "emitivel": false, "nome_csv": "FORA DA FILA", "competencia": "08/2026"},
+      {"id": 12, "status": "pronta", "emitivel": false, "nome_csv": "PROPOSTA PENDENTE", "competencia": "08/2026"}
     ]</script>`;
 }
 
@@ -101,9 +102,16 @@ beforeEach(() => {
 
 test('renderiza os quatro estados e mantém texto recebido fora do HTML', () => {
   const estados = [
-    [estadoBase(), 'compativel'],
-    [estadoBase({ incidentes: [{ ...incidente, severidade: 'informativa' }] }), 'aviso'],
+    // O servidor manda quando ele responde.
+    [estadoBase({ estado_visual: 'compativel' }), 'compativel'],
+    [estadoBase({ estado_visual: 'bloqueado' }), 'bloqueado'],
+    // Fallback para payload antigo, seguindo a MESMA regra do servidor:
+    // qualquer incidente pendente bloqueia, inclusive `informativa`. As cópias
+    // antigas chamavam isso de "aviso" e mostravam faixa amarela ao lado do
+    // rádio do automático desabilitado, sem explicar por quê.
+    [estadoBase({ incidentes: [{ ...incidente, severidade: 'informativa' }] }), 'bloqueado'],
     [estadoBase({ ativo: { id: 1, versao: 1, elegivel_automatico: false } }), 'bloqueado'],
+    [estadoBase(), 'compativel'],
     [{}, 'desconhecido'],
   ];
 
@@ -591,4 +599,20 @@ test('gate fechado desabilita automático e continua recusando início se o DOM 
   } finally {
     globalThis.fetch = fetchOriginal;
   }
+});
+
+
+test('a fila de validação segue o veredito do servidor, não o status', async () => {
+  // `nfse_service.emitivel` barra proposta de agrupamento pendente e duplicata
+  // não liberada — coisas que uma lista de status não vê. A nota 12 está
+  // "pronta" e mesmo assim não é emitível.
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async () => resposta(estadoBase()),
+  });
+
+  const select = document.getElementById('nfseNotaValidacao');
+  const ids = [...select.options].map((o) => o.value).filter(Boolean);
+
+  assert.deepEqual(ids, ['10']);
 });
