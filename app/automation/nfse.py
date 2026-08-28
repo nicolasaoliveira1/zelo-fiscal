@@ -1295,6 +1295,17 @@ _XP_SECAO = ("//h4[contains(@class,'emissao-titulo')][normalize-space()='{secao}
              "/following-sibling::div[contains(@class,'emissao-conteudo')][1]")
 
 
+def _elemento_unico_da_revisao(driver, xpath):
+    """Resolve um valor sem escolher silenciosamente entre cópias ambíguas."""
+    try:
+        candidatos = driver.find_elements(By.XPATH, xpath)
+    except WebDriverException:
+        return None
+    visiveis = [elemento for elemento in candidatos if _visivel(elemento)]
+    utilizaveis = visiveis or candidatos
+    return utilizaveis[0] if len(utilizaveis) == 1 else None
+
+
 def _dd_da_secao(driver, secao, condicao_rotulo):
     """Valor do campo cujo <dt> satisfaz `condicao_rotulo`, dentro de `secao`.
 
@@ -1315,20 +1326,17 @@ def _dd_da_secao(driver, secao, condicao_rotulo):
     """
     xpath = (_XP_SECAO.format(secao=secao)
              + f"//dt[{condicao_rotulo}]/following-sibling::dd[1]")
-    elemento = _localizar(driver, By.XPATH, xpath, exigir_visivel=False)
+    elemento = _elemento_unico_da_revisao(driver, xpath)
     if elemento is not None:
         return (elemento.text or '').strip()
 
-    try:
-        candidatos = driver.find_elements(
-            By.XPATH, f"//dt[{condicao_rotulo}]/following-sibling::dd[1]",
-        )
-    except WebDriverException:
-        return None
-    if len(candidatos) != 1:
+    elemento = _elemento_unico_da_revisao(
+        driver, f"//dt[{condicao_rotulo}]/following-sibling::dd[1]",
+    )
+    if elemento is None:
         return None
     log_event('nfse_revisao_secao_ignorada', secao=secao)
-    return (candidatos[0].text or '').strip()
+    return (elemento.text or '').strip()
 
 
 def _dds_da_secao(driver, secao):
@@ -1350,28 +1358,40 @@ def _xpath_literal(texto):
 
 
 def _dd_declarativo(driver, secao, rotulo):
-    """Lê exatamente um par dt/dd de uma seção declarada."""
-    secao_literal = _xpath_literal(secao)
-    rotulo_literal = _xpath_literal(rotulo)
-    xpath = (
-        "//h4[contains(@class,'emissao-titulo')]"
-        f"[normalize-space()={secao_literal}]"
-        "/following-sibling::div[contains(@class,'emissao-conteudo')][1]"
-        f"//dt[normalize-space()={rotulo_literal}]/following-sibling::dd[1]"
+    """Lê um par declarado pelo mesmo núcleo tolerante dos campos essenciais."""
+    texto = _dd_da_secao(
+        driver,
+        secao,
+        f"normalize-space()={_xpath_literal(rotulo)}",
     )
-    try:
-        elementos = driver.find_elements(By.XPATH, xpath)
-    except WebDriverException:
-        return None, 'não foi possível ler a seção ou o rótulo declarados'
-    if len(elementos) != 1:
+    if texto is None:
         return None, 'seção ou rótulo da revisão ausente ou ambíguo'
-    try:
-        texto = (elementos[0].text or '').strip()
-    except WebDriverException:
-        texto = ''
     if not texto:
         return None, 'o valor da revisão está ilegível'
     return texto, None
+
+
+def _descricao_confere_na_revisao(driver, descricao):
+    """Confere a descrição na seção; só usa a página toda se a seção sumiu."""
+    esperada = _comparavel(descricao)
+    textos_secao = _dds_da_secao(driver, SECAO_SERVICO)
+    if textos_secao:
+        return any(_comparavel(texto) == esperada for texto in textos_secao)
+
+    try:
+        candidatos = driver.find_elements(By.XPATH, '//dd')
+    except WebDriverException:
+        return False
+    textos = [
+        (elemento.text or '').strip()
+        for elemento in candidatos
+        if _visivel(elemento)
+    ]
+    casamentos = [texto for texto in textos if _comparavel(texto) == esperada]
+    if len(casamentos) != 1:
+        return False
+    log_event('nfse_revisao_secao_ignorada', secao=SECAO_SERVICO)
+    return True
 
 
 # Era copia byte a byte de `_valor_regra_contrato`, no mesmo arquivo. Duas
@@ -1528,8 +1548,7 @@ def conferir_revisao(
 
     # A descricao e conferida contra todos os <dd> da secao (ver o comentario do
     # bloco): o texto que pretendemos emitir precisa estar na tela.
-    esperada = _comparavel(descricao)
-    if not any(_comparavel(dd) == esperada for dd in _dds_da_secao(driver, SECAO_SERVICO)):
+    if not _descricao_confere_na_revisao(driver, descricao):
         divergencias.append(
             f'A descricao na tela nao e a esperada ("{descricao}"). '
             'Confira principalmente a competencia.')

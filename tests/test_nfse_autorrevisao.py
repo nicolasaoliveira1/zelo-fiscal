@@ -89,6 +89,21 @@ def test_descricao_com_acento_ou_caixa_diferente_ainda_confere():
     assert _conferir(driver) == []
 
 
+def test_descricao_continua_legivel_quando_a_secao_muda_de_forma():
+    """O valor completo e único permite tolerar mudança estrutural da seção."""
+    driver = _driver_revisao(descricoes=[])
+    original = driver.find_elements.side_effect
+
+    def encontrar(by, xpath):
+        if xpath == '//dd':
+            return [_elemento(DESCRICAO)]
+        return original(by, xpath)
+
+    driver.find_elements.side_effect = encontrar
+
+    assert _conferir(driver) == []
+
+
 # --- o que precisa BARRAR a emissao -----------------------------------------
 
 def test_valor_adulterado_impede_a_emissao():
@@ -245,6 +260,27 @@ def test_revisao_declarativa_acusa_secao_ambigua_e_rotulo_duplicado():
     assert len(ambigua) == 1
     assert 'ambíguo' in ambigua[0]
     assert not ambigua.elegivel_automatico
+
+
+def test_revisao_declarativa_reusa_fallback_de_secao():
+    regra = _regra_revisao()
+    driver = _driver_revisao()
+    original = driver.find_elements.side_effect
+
+    def encontrar(by, xpath):
+        if 'Rótulo sintético' in xpath and 'Seção sintética' not in xpath:
+            return [_elemento('Valor sintético')]
+        if 'Rótulo sintético' in xpath:
+            return []
+        return original(by, xpath)
+
+    driver.find_elements.side_effect = encontrar
+    resultado = nfse.conferir_revisao(
+        driver, DOCUMENTO, VALOR, DESCRICAO, regras_adicionais=[regra]
+    )
+
+    assert resultado == []
+    assert resultado.elegivel_automatico is True
 
 
 def test_campo_fiscal_sem_leitor_e_padrao_obrigatorio_sem_prova_bloqueiam_auto():

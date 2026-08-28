@@ -734,6 +734,20 @@ def test_rotulo_repetido_na_pagina_continua_sendo_recusa(monkeypatch):
                              nfse.ROTULO_DOCUMENTO) is None
 
 
+def test_copia_oculta_nao_torna_o_valor_visivel_ambiguo(monkeypatch):
+    """O portal mantém cópias ocultas; uma visível continua sendo inequívoca."""
+    oculto = _elemento_falso(False)
+    visivel = _elemento_falso(True)
+    visivel.text = '12,34'
+    driver = MagicMock()
+    monkeypatch.setattr(nfse, '_localizar', lambda *a, **k: None)
+    driver.find_elements.return_value = [oculto, visivel]
+
+    assert nfse._dd_da_secao(
+        driver, 'Valores do Serviço Prestado', nfse.ROTULO_VALOR
+    ) == '12,34'
+
+
 def test_secao_exata_continua_tendo_prioridade(monkeypatch):
     """O caminho preciso não pode ser trocado pelo tolerante: com as duas
     leituras disponíveis, vale a que conhece a seção."""
@@ -743,8 +757,9 @@ def test_secao_exata_continua_tendo_prioridade(monkeypatch):
     outro = MagicMock()
     outro.text = 'valor-da-pagina'
     driver = MagicMock()
-    monkeypatch.setattr(nfse, '_localizar', lambda *a, **k: da_secao)
-    driver.find_elements.return_value = [outro]
+    driver.find_elements.side_effect = lambda _by, xpath: (
+        [da_secao] if 'emissao-titulo' in xpath else [outro]
+    )
 
     assert nfse._dd_da_secao(driver, 'Tomador do Serviço',
                              nfse.ROTULO_DOCUMENTO) == 'valor-da-secao'
