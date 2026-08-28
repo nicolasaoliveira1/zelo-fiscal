@@ -140,6 +140,20 @@ def _observar_fronteira_contrato(
                   etapa=etapa, momento=momento, execution_id=execution_id)
         return {'estado': 'ignorada', 'etapa': etapa, 'momento': momento}
     inventario = nfse_recon.inventariar(driver, etapa)
+    # A URL conferida ACIMA foi lida antes do inventário, e `_avancar` clica sem
+    # esperar a navegação: entre a leitura e o script a tela podia já ter virado
+    # a etapa seguinte. Quando isso acontecia, o inventário da tela NOVA era
+    # rotulado com a etapa VELHA, e a etapa seguinte inteira — que o contrato
+    # declara, só que sob outra etapa — virava `controle_novo`. Duas dessas são
+    # obrigatórias, então a comparação saía `incompativel` e pausava uma nota
+    # correta. Aqui a evidência é do próprio script: o caminho veio no mesmo
+    # turno em que o DOM foi percorrido, e não há janela entre os dois.
+    observada = nfse_recon.etapa_da_url(inventario.caminho or '')
+    if observada is not None and observada != etapa:
+        log_event('nfse_recon_fora_da_etapa', contrato_id=contrato.contrato_id,
+                  etapa=etapa, momento=momento, observada=observada,
+                  execution_id=execution_id)
+        return {'estado': 'ignorada', 'etapa': etapa, 'momento': momento}
     if inventario.estado != 'ok':
         motivo = inventario.motivo or 'observação inconclusiva'
         log_event(
@@ -191,19 +205,13 @@ def _observar_fronteira_contrato(
 
 
 def _resolver_valores_contrato(contrato, nota, config, hoje):
-    """Materializa uma vez o catálogo seguro fixado para toda a nota."""
+    """Materializa uma vez o catálogo seguro fixado para toda a nota.
 
-    valores = {}
-    for campo in contrato.campos:
-        if campo.etapa == 'revisao':
-            continue
-        valor = nfse_contrato.resolver_valor(campo, nota, config, hoje)
-        if campo.fonte == 'municipio_servico_codigo' and valor is not None:
-            valor = (valor, config.municipio_servico_nome)
-        elif campo.fonte == 'codigo_tributacao' and valor is not None:
-            valor = (valor, valor)
-        valores[campo.chave_semantica] = valor
-    return valores
+    O núcleo mora em `nfse_contrato`: a autorrevisão precisa do MESMO esperado
+    por campo, e a cópia que existia aqui já divergia dela.
+    """
+
+    return nfse_contrato.resolver_valores_contrato(contrato, nota, config, hoje)
 
 
 def _registrar_validacao_portal(

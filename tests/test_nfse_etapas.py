@@ -555,6 +555,54 @@ def test_radio_com_seletor_nao_aprovado_e_recusado(driver):
     assert driver.tocados() == set()
 
 
+def test_texto_que_nao_gruda_no_campo_e_recusado_na_hora(driver):
+    """Confirmar o valor logo apos digitar e o que sustenta `prova_aplicacao`.
+
+    A autorrevisao deixou de exigir leitor na revisao para campos que o resumo
+    nao exibe, aceitando o preenchimento como prova. Essa troca so e honesta se
+    o preenchimento ELE MESMO confirmar o que gravou: um campo mascarado que
+    descarta o texto passaria a nota adiante com o campo em branco."""
+
+    class Surdo(DriverEspiao):
+        def find_element(self, by, valor):
+            elemento = super().find_element(by, valor)
+            if valor == 'campo-texto':
+                elemento.send_keys.side_effect = lambda texto: None
+            return elemento
+
+    surdo = Surdo()
+    regra = _regra_sintetica(chave_semantica='campo.texto', seletor='campo-texto')
+
+    with pytest.raises(nfse.ContratoNfseIncompativelError) as exc:
+        nfse.aplicar_campos_adicionais(
+            surdo, [regra], {'campo.texto': 'texto-sintético'}
+        )
+    assert 'confirmou' in str(exc.value)
+
+
+def test_radio_que_nao_fica_marcado_e_recusado_na_hora(driver):
+    """Mesmo contrato do texto, do lado do radio: clique sem marcacao nao e
+    prova. O portal desabilita opcao por regra de negocio e o clique via JS nao
+    levanta — sem `is_selected` o grupo seguiria com a opcao do portal."""
+
+    class Teimoso(DriverEspiao):
+        def find_element(self, by, valor):
+            elemento = super().find_element(by, valor)
+            if str(valor).startswith('input[name="GrupoSintetico"'):
+                elemento.is_selected.side_effect = lambda: False
+            return elemento
+
+    regra = _regra_sintetica(
+        chave_semantica='campo.radio', seletor_tipo='name',
+        seletor='GrupoSintetico', interacao='radio', origem='fixo',
+        fonte=None, valor_fixo='1',
+    )
+
+    with pytest.raises(nfse.InteracaoPortalError) as exc:
+        nfse.aplicar_campos_adicionais(Teimoso(), [regra], {'campo.radio': '1'})
+    assert 'confirmou' in str(exc.value)
+
+
 def test_espera_o_portal_carregar_o_emitente_antes_de_seguir(driver):
     """O emitente so aparece depois que a data perde o foco; seguir antes disso
     encontra os campos ainda travados."""
@@ -603,6 +651,8 @@ def test_pergunta_nova_no_topo_da_etapa_destrava_a_competencia(driver, monkeypat
 
     driver.desabilitados.add('DataCompetencia')
     original = nfse._marcar_radio
+    aplicar_original = nfse._aplicar_campo_contrato
+    tentativas_competencia = []
 
     def marcar(drv, name, valor):
         elemento = original(drv, name, valor)
@@ -612,6 +662,13 @@ def test_pergunta_nova_no_topo_da_etapa_destrava_a_competencia(driver, monkeypat
 
     monkeypatch.setattr(nfse, '_marcar_radio', marcar)
 
+    def aplicar(drv, campo, valor):
+        if campo.chave_semantica == 'DataCompetencia':
+            tentativas_competencia.append(valor)
+        return aplicar_original(drv, campo, valor)
+
+    monkeypatch.setattr(nfse, '_aplicar_campo_contrato', aplicar)
+
     nfse.preencher_etapa_pessoas(
         driver, NOTA, CONFIG, date(2026, 7, 28), contrato=contrato,
         # No fluxo real quem resolve é `_resolver_valores_contrato`.
@@ -620,6 +677,9 @@ def test_pergunta_nova_no_topo_da_etapa_destrava_a_competencia(driver, monkeypat
 
     assert driver.radios['PreencherInfoIBSCBS'] == '0'
     assert driver.preenchidos['DataCompetencia'] == '28/07/2026'
+    assert tentativas_competencia == ['28/07/2026'], (
+        'a porteira deve ser respondida antes, sem esperar a competência falhar'
+    )
 
 
 def test_sem_porteira_no_contrato_o_erro_do_portal_sobe_inalterado(driver):
@@ -722,6 +782,20 @@ def test_rotulo_repetido_na_pagina_continua_sendo_recusa(monkeypatch):
                              nfse.ROTULO_DOCUMENTO) is None
 
 
+def test_copia_oculta_nao_torna_o_valor_visivel_ambiguo(monkeypatch):
+    """O portal mantém cópias ocultas; uma visível continua sendo inequívoca."""
+    oculto = _elemento_falso(False)
+    visivel = _elemento_falso(True)
+    visivel.text = '12,34'
+    driver = MagicMock()
+    monkeypatch.setattr(nfse, '_localizar', lambda *a, **k: None)
+    driver.find_elements.return_value = [oculto, visivel]
+
+    assert nfse._dd_da_secao(
+        driver, 'Valores do Serviço Prestado', nfse.ROTULO_VALOR
+    ) == '12,34'
+
+
 def test_secao_exata_continua_tendo_prioridade(monkeypatch):
     """O caminho preciso não pode ser trocado pelo tolerante: com as duas
     leituras disponíveis, vale a que conhece a seção."""
@@ -731,8 +805,9 @@ def test_secao_exata_continua_tendo_prioridade(monkeypatch):
     outro = MagicMock()
     outro.text = 'valor-da-pagina'
     driver = MagicMock()
-    monkeypatch.setattr(nfse, '_localizar', lambda *a, **k: da_secao)
-    driver.find_elements.return_value = [outro]
+    driver.find_elements.side_effect = lambda _by, xpath: (
+        [da_secao] if 'emissao-titulo' in xpath else [outro]
+    )
 
     assert nfse._dd_da_secao(driver, 'Tomador do Serviço',
                              nfse.ROTULO_DOCUMENTO) == 'valor-da-secao'

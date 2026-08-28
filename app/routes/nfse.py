@@ -438,14 +438,19 @@ def nfse_contrato_validar(contrato_id):
     if isinstance(nota_id, bool) or not isinstance(nota_id, int) or nota_id <= 0:
         return json_error('Escolha uma nota emitível.', 400, campo='nota_id')
 
-    candidato = db.session.get(nfse_contrato.ContratoNfse, contrato_id)
-    if candidato is None:
-        return json_error('A versão candidata não existe.', 404)
-    if candidato.estado != 'candidata':
+    contrato = db.session.get(nfse_contrato.ContratoNfse, contrato_id)
+    if contrato is None:
+        return json_error('A versão do contrato não existe.', 404)
+    if contrato.estado not in {'candidata', 'ativa'}:
         return json_error(
-            'A versão precisa estar no estado candidata para ser validada.',
+            'Somente uma versão candidata ou ativa pode ser validada.',
             409,
         )
+    if contrato.estado == 'ativa':
+        try:
+            nfse_contrato.validar_revalidacao_ativa(contrato.id)
+        except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+            return json_error(str(exc), 409)
     try:
         nfse_lote.validar_nota_para_validacao(nota_id)
     except ValueError as exc:
@@ -540,6 +545,41 @@ def nfse_contrato_ativar(contrato_id):
         )
     try:
         contrato = nfse_contrato.ativar(contrato_id, usuario_id=current_user.id)
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+        return json_error(str(exc), 409)
+    except nfse_contrato.PersistenciaContratoError as exc:
+        return json_error(str(exc), 500)
+    return {
+        'status': 'ok',
+        'contrato': nfse_contrato.detalhe_contrato(contrato.id),
+    }
+
+
+@bp.route(
+    '/nfse/contrato/<int:contrato_id>/liberar-automatico', methods=['POST']
+)
+@requer_papel('operador')
+def nfse_contrato_liberar_automatico(contrato_id):
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return json_error('Envie um objeto JSON para a liberação.', 400, campo='corpo')
+    extras = set(dados) - {'liberar'}
+    if extras:
+        return json_error(
+            'Campo não permitido na liberação.', 400, campo=sorted(extras)[0]
+        )
+    if not isinstance(dados.get('liberar'), bool):
+        return json_error(
+            'Informe se deseja liberar ou revogar o modo automático.',
+            400,
+            campo='liberar',
+        )
+    try:
+        contrato = nfse_contrato.definir_liberacao_automatica(
+            contrato_id, dados['liberar'], usuario_id=current_user.id
+        )
     except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
         return json_error(str(exc), 404)
     except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
@@ -1670,30 +1710,58 @@ def nfse_lote_pular():
 @bp.route('/nfse/lote/pausar', methods=['POST'])
 @requer_papel('operador')
 def nfse_lote_pausar():
-    batch_engine.request_pause(NFSE_BATCH_LOCK, NFSE_BATCH_STATE)
-    return {'status': 'ok', 'message': 'Emissao pausada.'}
+    if not nfse_lote.pedir_pausa():
+        return json_error('Não há emissão em andamento para pausar.', 400)
+    return {'status': 'ok', 'message': 'Pausa solicitada.'}
 
 
 @bp.route('/nfse/lote/parar', methods=['POST'])
 @requer_papel('operador')
 def nfse_lote_parar():
-    batch_engine.request_stop(NFSE_BATCH_LOCK, NFSE_BATCH_STATE)
-    return {'status': 'ok', 'message': 'Emissao interrompida.'}
+    if not nfse_lote.pedir_parada():
+        return json_error('Não há emissão em andamento para parar.', 400)
+    return {'status': 'ok', 'message': 'Fila interrompida.'}
 
 
 @bp.route('/nfse/lote/retomar', methods=['POST'])
 @requer_papel('operador')
 def nfse_lote_retomar():
     """Recomeca pela nota onde parou — o motor nao avanca o indice ao pausar."""
+    with NFSE_BATCH_LOCK:
+        pausado = NFSE_BATCH_STATE.get('status') == 'paused'
+    if not pausado:
+        return json_error('A emissão não está pausada.', 400)
+
+    opcoes = nfse_batch_opcoes()
+    contrato = None
+    if opcoes['modo'] == nfse_lote.MODO_AUTOMATICO:
+        try:
+            # Um desvio pausa o lote sobre a nota atual. Depois que o operador
+            # configura, valida e ativa a nova versão, a retomada precisa usar
+            # essa versão — manter o id fixado no início repetiria o desvio.
+            contrato = nfse_contrato.validar_contrato_automatico()
+        except nfse_contrato.ContratoNfseNaoElegivelError as exc:
+            return json_error(
+                str(exc), 409, motivo='contrato_nfse_nao_elegivel'
+            )
+
     if not SESSAO.adquirir():
         return json_error(
             'Ja existe uma emissao da NFSe em andamento. Aguarde terminar.', 409)
+    # Só depois de tomar a sessão: uma retomada que morre em 409 não pode ter
+    # trocado o contrato fixado da fila que continua pausada.
+    if contrato is not None:
+        definir_nfse_batch_opcoes(
+            opcoes['modo'],
+            opcoes['ignorar_aliquota'],
+            contrato_id=contrato.id,
+        )
     nfse_lote.preparar_nova_fila()
     if not batch_engine.resume_batch(NFSE_BATCH_LOCK, NFSE_BATCH_STATE,
                                      nfse_lote.worker,
                                      app_factory=_current_app_object):
         SESSAO.liberar()
-        return json_error('A emissao nao esta pausada.', 400)
+        return json_error('A emissão não está pausada.', 400)
     return {'status': 'ok'}
 
 

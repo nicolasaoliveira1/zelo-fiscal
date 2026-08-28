@@ -89,6 +89,21 @@ def test_descricao_com_acento_ou_caixa_diferente_ainda_confere():
     assert _conferir(driver) == []
 
 
+def test_descricao_continua_legivel_quando_a_secao_muda_de_forma():
+    """O valor completo e único permite tolerar mudança estrutural da seção."""
+    driver = _driver_revisao(descricoes=[])
+    original = driver.find_elements.side_effect
+
+    def encontrar(by, xpath):
+        if xpath == '//dd':
+            return [_elemento(DESCRICAO)]
+        return original(by, xpath)
+
+    driver.find_elements.side_effect = encontrar
+
+    assert _conferir(driver) == []
+
+
 # --- o que precisa BARRAR a emissao -----------------------------------------
 
 def test_valor_adulterado_impede_a_emissao():
@@ -195,6 +210,21 @@ def _driver_com_campo_adicional(valores):
     return driver
 
 
+def _driver_com_rotulo_descoberto(rotulo, valor):
+    driver = _driver_revisao()
+    original = driver.find_elements.side_effect
+    termo = _elemento(rotulo)
+    termo.find_element.return_value = _elemento(valor)
+
+    def _find_elements(by, xpath):
+        if xpath == '//dt[following-sibling::dd[1]]':
+            return [termo]
+        return original(by, xpath)
+
+    driver.find_elements.side_effect = _find_elements
+    return driver
+
+
 def test_revisao_declarativa_confere_valor_e_mantem_elegibilidade():
     regra = _regra_revisao()
     resultado = nfse.conferir_revisao(
@@ -245,6 +275,96 @@ def test_revisao_declarativa_acusa_secao_ambigua_e_rotulo_duplicado():
     assert len(ambigua) == 1
     assert 'ambíguo' in ambigua[0]
     assert not ambigua.elegivel_automatico
+
+
+def test_revisao_declarativa_reusa_fallback_de_secao():
+    regra = _regra_revisao()
+    driver = _driver_revisao()
+    original = driver.find_elements.side_effect
+
+    def encontrar(by, xpath):
+        if 'Rótulo sintético' in xpath and 'Seção sintética' not in xpath:
+            return [_elemento('Valor sintético')]
+        if 'Rótulo sintético' in xpath:
+            return []
+        return original(by, xpath)
+
+    driver.find_elements.side_effect = encontrar
+    resultado = nfse.conferir_revisao(
+        driver, DOCUMENTO, VALOR, DESCRICAO, regras_adicionais=[regra]
+    )
+
+    assert resultado == []
+    assert resultado.elegivel_automatico is True
+
+
+def test_revisao_descobre_campo_por_rotulo_e_rotulo_da_opcao():
+    regra = _regra_revisao(
+        chave_semantica='campo.pergunta',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        revisao_rotulo_candidato='Preencher as informações IBS/CBS?',
+        valores_esperados=('0', 'Não'),
+        prova_aplicacao=True,
+    )
+
+    resultado = nfse.conferir_revisao(
+        _driver_com_rotulo_descoberto(
+            'Preencher as informações IBS/CBS:', 'Não'
+        ),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert resultado == []
+    assert resultado.avisos_assistidos == ()
+    assert resultado.elegivel_automatico is True
+
+
+def test_revisao_descoberta_continua_bloqueando_valor_divergente():
+    regra = _regra_revisao(
+        chave_semantica='campo.pergunta',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        revisao_rotulo_candidato='Pergunta sintética?',
+        valores_esperados=('0', 'Não'),
+        prova_aplicacao=True,
+    )
+
+    resultado = nfse.conferir_revisao(
+        _driver_com_rotulo_descoberto('Pergunta sintética:', 'Sim'),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert any('campo.pergunta' in item for item in resultado)
+    assert resultado.elegivel_automatico is False
+
+
+def test_campo_ausente_da_revisao_usa_prova_do_preenchimento():
+    regra = _regra_revisao(
+        chave_semantica='campo.ausente.do.resumo',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        revisao_rotulo_candidato='Campo ausente do resumo',
+        prova_aplicacao=True,
+    )
+
+    resultado = nfse.conferir_revisao(
+        _driver_revisao(),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert resultado == []
+    assert resultado.avisos_assistidos == ()
+    assert resultado.elegivel_automatico is True
 
 
 def test_campo_fiscal_sem_leitor_e_padrao_obrigatorio_sem_prova_bloqueiam_auto():
@@ -300,4 +420,52 @@ def test_campo_nao_conferivel_aprova_somente_fluxo_assistido():
 
     assert resultado == []
     assert resultado.avisos_assistidos
+    assert resultado.elegivel_automatico is False
+
+
+def test_controle_opcional_sem_efeito_fiscal_nao_bloqueia_por_ser_select():
+    regra = _regra_revisao(
+        chave_semantica='campo.opcional.intocavel',
+        tipo='select',
+        obrigatorio=False,
+        origem='intocavel',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        conferivel_automatico=False,
+    )
+
+    resultado = nfse.conferir_revisao(
+        _driver_revisao(),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert resultado == []
+    assert resultado.avisos_assistidos == ()
+    assert resultado.elegivel_automatico is True
+
+
+def test_controle_opcional_preenchido_continua_exigindo_leitor():
+    regra = _regra_revisao(
+        chave_semantica='campo.opcional.preenchido',
+        tipo='select',
+        obrigatorio=False,
+        origem='configuracao',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        conferivel_automatico=False,
+    )
+
+    resultado = nfse.conferir_revisao(
+        _driver_revisao(),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert resultado == []
+    assert any('opcional.preenchido' in item for item in resultado.avisos_assistidos)
     assert resultado.elegivel_automatico is False

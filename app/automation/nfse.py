@@ -20,6 +20,7 @@ Duas armadilhas do portal ditam o desenho deste modulo:
 from collections.abc import Mapping
 from datetime import date, datetime
 from decimal import Decimal
+import re
 from types import SimpleNamespace
 
 from selenium.common.exceptions import WebDriverException
@@ -118,6 +119,29 @@ def _selecionar(driver, elemento_id, valor):
     return resultado
 
 
+def _confirmar_marcado(elemento, relocalizar):
+    """`is_selected` tolerante ao re-render que o proprio clique dispara.
+
+    Marcar "Brasil" REVELA os campos do tomador: o portal troca o pedaco da
+    arvore e a referencia anterior fica stale. Ler o stale como "nao marcou"
+    reprovaria uma nota que o portal aceitou — a segunda leitura sai de um
+    elemento recem-localizado, e so ela decide."""
+    try:
+        return bool(elemento.is_selected())
+    except (WebDriverException, AttributeError):
+        pass
+    try:
+        atual = relocalizar()
+    except (WebDriverException, AttributeError):
+        return False
+    if atual is None:
+        return False
+    try:
+        return bool(atual.is_selected())
+    except (WebDriverException, AttributeError):
+        return False
+
+
 def _marcar_radio(driver, name, valor):
     """Marca a opcao de um grupo de radio por (name, value).
 
@@ -129,6 +153,14 @@ def _marcar_radio(driver, name, valor):
         raise InteracaoPortalError(
             f'Opcao "{valor}" do grupo "{name}" nao esta disponivel nesta tela.')
     driver.execute_script('arguments[0].click();', elemento)
+    if not _confirmar_marcado(
+        elemento,
+        lambda: _localizar(
+            driver, By.CSS_SELECTOR, seletor, exigir_visivel=False
+        ),
+    ):
+        raise InteracaoPortalError(
+            f'O grupo "{name}" não confirmou a opção selecionada.')
     return elemento
 
 
@@ -834,18 +866,45 @@ def _texto_para_o_portal(valor):
     return str(valor)
 
 
+def _texto_digitado_confere(atual, esperado):
+    atual = str(atual or '').strip()
+    esperado = str(esperado or '').strip()
+    if _comparavel(atual) == _comparavel(esperado):
+        return True
+    digitos_esperados = _so_digitos(esperado)
+    return bool(
+        len(digitos_esperados) >= 6
+        and _so_digitos(atual) == digitos_esperados
+    )
+
+
 def _preencher_campo_contrato(driver, campo, valor):
+    esperado = _texto_para_o_portal(valor)
     if campo.seletor_tipo == 'id':
-        return _preencher(driver, campo.seletor, _texto_para_o_portal(valor))
+        elemento = _preencher(driver, campo.seletor, esperado)
+        try:
+            atual = elemento.get_attribute('value')
+        except (WebDriverException, AttributeError):
+            atual = None
+        if not _texto_digitado_confere(atual, esperado):
+            raise ContratoNfseIncompativelError(
+                f'O campo "{campo.chave_semantica}" não confirmou o valor digitado.'
+            )
+        return elemento
     elemento = _localizar_campo_contrato(driver, campo)
     try:
         elemento.clear()
-        elemento.send_keys(_texto_para_o_portal(valor))
+        elemento.send_keys(esperado)
         _sair_do_campo(elemento)
+        atual = elemento.get_attribute('value')
     except (WebDriverException, AttributeError) as exc:
         raise ContratoNfseIncompativelError(
             f'O campo "{campo.chave_semantica}" não aceitou preenchimento.'
         ) from exc
+    if not _texto_digitado_confere(atual, esperado):
+        raise ContratoNfseIncompativelError(
+            f'O campo "{campo.chave_semantica}" não confirmou o valor digitado.'
+        )
     return elemento
 
 
@@ -876,6 +935,22 @@ def _valor_busca_contrato(campo, valor):
     return valor, valor
 
 
+def _radios_do_grupo(driver, by, seletor, valor):
+    """Radios do grupo cujo `value` e o pedido. `None` se nem localizar deu."""
+    try:
+        elementos = driver.find_elements(by, seletor)
+    except WebDriverException:
+        return None
+    casam = []
+    for elemento in elementos:
+        try:
+            if str(elemento.get_attribute('value')) == str(valor):
+                casam.append(elemento)
+        except WebDriverException:
+            continue
+    return casam
+
+
 def _marcar_radio_contrato(driver, campo, valor):
     if campo.seletor_tipo == 'name':
         return _marcar_radio(driver, campo.seletor, valor)
@@ -890,24 +965,25 @@ def _marcar_radio_contrato(driver, campo, valor):
         raise ContratoNfseIncompativelError(
             f'O seletor do campo "{campo.chave_semantica}" não é aprovado.'
         )
-    try:
-        elementos = driver.find_elements(by, campo.seletor)
-    except WebDriverException as exc:
+    candidatos = _radios_do_grupo(driver, by, campo.seletor, valor)
+    if candidatos is None:
         raise ContratoNfseIncompativelError(
             f'O grupo "{campo.chave_semantica}" não pôde ser localizado.'
-        ) from exc
-    candidatos = []
-    for elemento in elementos:
-        try:
-            if str(elemento.get_attribute('value')) == str(valor):
-                candidatos.append(elemento)
-        except WebDriverException:
-            continue
+        )
     if len(candidatos) != 1:
         raise ContratoNfseIncompativelError(
             f'O grupo "{campo.chave_semantica}" não possui uma opção inequívoca.'
         )
     driver.execute_script('arguments[0].click();', candidatos[0])
+
+    def _reencontrar():
+        novos = _radios_do_grupo(driver, by, campo.seletor, valor)
+        return novos[0] if novos and len(novos) == 1 else None
+
+    if not _confirmar_marcado(candidatos[0], _reencontrar):
+        raise ContratoNfseIncompativelError(
+            f'O grupo "{campo.chave_semantica}" não confirmou a opção.'
+        )
     return candidatos[0]
 
 
@@ -999,6 +1075,19 @@ def _liberadores_de_etapa(adicionais):
     )
 
 
+def _aplicar_liberadores(driver, liberadores, valores_contrato):
+    """Aplica cada porteira, tolerando a que ainda não está na tela."""
+
+    aplicados = []
+    for campo in liberadores:
+        try:
+            aplicar_campos_adicionais(driver, (campo,), valores_contrato)
+        except (InteracaoPortalError, ContratoNfseIncompativelError):
+            continue
+        aplicados.append(campo)
+    return tuple(aplicados)
+
+
 def _campos_adicionais_etapa(contrato, etapa, chaves_principais):
     return tuple(
         campo
@@ -1037,26 +1126,30 @@ def preencher_etapa_pessoas(
             CHAVE_INSCRICAO_TOMADOR,
         },
     )
+    # Perguntas fixas no topo da etapa podem ser porteiras: o portal deixa a
+    # competência inerte até elas serem respondidas. Aplicá-las antes evita
+    # gastar todo o timeout tentando preencher um campo que sabemos estar
+    # bloqueado. O contrato já fixa a resposta; não há inferência sobre a nota.
+    #
+    # Mas nem todo radio fixo da etapa é porteira: os que o portal só revela
+    # DEPOIS do emitente ou do tomador não estão na tela agora, e exigi-los aqui
+    # reprovaria uma nota correta com "opção não está disponível nesta tela".
+    # Quem não aceitou volta para o fim da etapa — exatamente onde era aplicado
+    # antes, e onde o erro do portal continua subindo se ainda não der.
+    aplicados = _aplicar_liberadores(
+        driver, _liberadores_de_etapa(adicionais), valores_contrato
+    )
+    if aplicados:
+        log_event('nfse_etapa_destravada', etapa='pessoas',
+                  campos=len(aplicados))
+    restantes = tuple(campo for campo in adicionais if campo not in aplicados)
+
     valor_data = _valor_contrato(
         valores_contrato, CHAVE_DATA_COMPETENCIA, data_competencia
     )
     if hasattr(valor_data, 'strftime'):
         valor_data = formatar_data(valor_data)
-    try:
-        _aplicar_campo_contrato(driver, campo_data, valor_data)
-    except InteracaoPortalError:
-        # A competencia e o primeiro campo desta etapa desde sempre; se ela nao
-        # esta disponivel, alguma pergunta nova a mantem inerte. O contrato ja
-        # traz a resposta decidida pelo operador — aplica-la e tenta uma vez
-        # mais. Falhando de novo, o erro original sobe: o desfecho continua
-        # sendo o do portal, nao um chute nosso.
-        liberadores = _liberadores_de_etapa(adicionais)
-        if not liberadores:
-            raise
-        log_event('nfse_etapa_destravada', etapa='pessoas',
-                  campos=len(liberadores))
-        aplicar_campos_adicionais(driver, liberadores, valores_contrato)
-        _aplicar_campo_contrato(driver, campo_data, valor_data)
+    _aplicar_campo_contrato(driver, campo_data, valor_data)
 
     # O portal so carrega o emitente depois que a data sai do foco, e os campos
     # seguintes ficam nao-interagiveis ate la. Esperar o CNPJ do emitente
@@ -1097,7 +1190,7 @@ def preencher_etapa_pessoas(
             'Confira se esta correto e ativo na Receita.')
     if pausa:
         pausa()
-    aplicar_campos_adicionais(driver, adicionais, valores_contrato)
+    aplicar_campos_adicionais(driver, restantes, valores_contrato)
     _observar_fronteira(observar, driver, 'pessoas', 'pre_avancar')
     _avancar(driver)
     _observar_fronteira(observar, driver, 'pessoas', 'pos_avancar')
@@ -1298,6 +1391,17 @@ _XP_SECAO = ("//h4[contains(@class,'emissao-titulo')][normalize-space()='{secao}
              "/following-sibling::div[contains(@class,'emissao-conteudo')][1]")
 
 
+def _elemento_unico_da_revisao(driver, xpath):
+    """Resolve um valor sem escolher silenciosamente entre cópias ambíguas."""
+    try:
+        candidatos = driver.find_elements(By.XPATH, xpath)
+    except WebDriverException:
+        return None
+    visiveis = [elemento for elemento in candidatos if _visivel(elemento)]
+    utilizaveis = visiveis or candidatos
+    return utilizaveis[0] if len(utilizaveis) == 1 else None
+
+
 def _dd_da_secao(driver, secao, condicao_rotulo):
     """Valor do campo cujo <dt> satisfaz `condicao_rotulo`, dentro de `secao`.
 
@@ -1318,20 +1422,17 @@ def _dd_da_secao(driver, secao, condicao_rotulo):
     """
     xpath = (_XP_SECAO.format(secao=secao)
              + f"//dt[{condicao_rotulo}]/following-sibling::dd[1]")
-    elemento = _localizar(driver, By.XPATH, xpath, exigir_visivel=False)
+    elemento = _elemento_unico_da_revisao(driver, xpath)
     if elemento is not None:
         return (elemento.text or '').strip()
 
-    try:
-        candidatos = driver.find_elements(
-            By.XPATH, f"//dt[{condicao_rotulo}]/following-sibling::dd[1]",
-        )
-    except WebDriverException:
-        return None
-    if len(candidatos) != 1:
+    elemento = _elemento_unico_da_revisao(
+        driver, f"//dt[{condicao_rotulo}]/following-sibling::dd[1]",
+    )
+    if elemento is None:
         return None
     log_event('nfse_revisao_secao_ignorada', secao=secao)
-    return (candidatos[0].text or '').strip()
+    return (elemento.text or '').strip()
 
 
 def _dds_da_secao(driver, secao):
@@ -1353,28 +1454,40 @@ def _xpath_literal(texto):
 
 
 def _dd_declarativo(driver, secao, rotulo):
-    """Lê exatamente um par dt/dd de uma seção declarada."""
-    secao_literal = _xpath_literal(secao)
-    rotulo_literal = _xpath_literal(rotulo)
-    xpath = (
-        "//h4[contains(@class,'emissao-titulo')]"
-        f"[normalize-space()={secao_literal}]"
-        "/following-sibling::div[contains(@class,'emissao-conteudo')][1]"
-        f"//dt[normalize-space()={rotulo_literal}]/following-sibling::dd[1]"
+    """Lê um par declarado pelo mesmo núcleo tolerante dos campos essenciais."""
+    texto = _dd_da_secao(
+        driver,
+        secao,
+        f"normalize-space()={_xpath_literal(rotulo)}",
     )
-    try:
-        elementos = driver.find_elements(By.XPATH, xpath)
-    except WebDriverException:
-        return None, 'não foi possível ler a seção ou o rótulo declarados'
-    if len(elementos) != 1:
+    if texto is None:
         return None, 'seção ou rótulo da revisão ausente ou ambíguo'
-    try:
-        texto = (elementos[0].text or '').strip()
-    except WebDriverException:
-        texto = ''
     if not texto:
         return None, 'o valor da revisão está ilegível'
     return texto, None
+
+
+def _descricao_confere_na_revisao(driver, descricao):
+    """Confere a descrição na seção; só usa a página toda se a seção sumiu."""
+    esperada = _comparavel(descricao)
+    textos_secao = _dds_da_secao(driver, SECAO_SERVICO)
+    if textos_secao:
+        return any(_comparavel(texto) == esperada for texto in textos_secao)
+
+    try:
+        candidatos = driver.find_elements(By.XPATH, '//dd')
+    except WebDriverException:
+        return False
+    textos = [
+        (elemento.text or '').strip()
+        for elemento in candidatos
+        if _visivel(elemento)
+    ]
+    casamentos = [texto for texto in textos if _comparavel(texto) == esperada]
+    if len(casamentos) != 1:
+        return False
+    log_event('nfse_revisao_secao_ignorada', secao=SECAO_SERVICO)
+    return True
 
 
 # Era copia byte a byte de `_valor_regra_contrato`, no mesmo arquivo. Duas
@@ -1389,15 +1502,70 @@ def _regra_tem_leitor(regra):
     )
 
 
+def _rotulo_da_revisao(texto):
+    """Identidade de rótulo ignorando pontuação terminal e acentuação."""
+
+    return re.sub(r'[^a-z0-9]+', ' ', _comparavel(texto)).strip()
+
+
+def _indice_de_rotulos_da_revisao(driver):
+    """Rótulo -> valor único da revisão, varrido UMA vez por conferência.
+
+    Rótulo repetido vira `None`: duas seções com o mesmo termo (prestador e
+    tomador têm as duas um CNPJ) continuam sendo recusa, nunca escolha
+    silenciosa. Varrer por regra custava uma ida ao chromedriver por par dt/dd
+    de cada regra — dezenas de round-trips por nota, todos pelo mesmo DOM.
+    """
+
+    indice = {}
+    try:
+        termos = driver.find_elements(
+            By.XPATH, '//dt[following-sibling::dd[1]]'
+        )
+    except WebDriverException:
+        return indice
+    for termo in termos:
+        try:
+            if not _visivel(termo):
+                continue
+            identidade = _rotulo_da_revisao(termo.text)
+            if not identidade:
+                continue
+            valor = termo.find_element(By.XPATH, 'following-sibling::dd[1]')
+            if not _visivel(valor):
+                continue
+            texto = (valor.text or '').strip()
+        except (WebDriverException, AttributeError):
+            continue
+        indice[identidade] = None if identidade in indice else texto
+    return indice
+
+
+def _dd_descoberto_por_rotulo(indice, rotulo):
+    """Descobre um dt/dd único pelo rótulo observado no formulário."""
+
+    identidade = _rotulo_da_revisao(rotulo)
+    if not identidade:
+        return None
+    texto = indice.get(identidade)
+    if not texto:
+        return None
+    log_event('nfse_revisao_leitor_descoberto', rotulo=rotulo)
+    return texto
+
+
 def _regra_fiscal(regra):
-    tipo = str(_valor_regra_revisao(regra, 'tipo', '') or '').lower()
     severidade = str(_valor_regra_revisao(regra, 'severidade', '') or '').lower()
+    origem = _valor_regra_revisao(regra, 'origem')
     return bool(_valor_regra_revisao(regra, 'obrigatorio')) or severidade in {
         'fiscal', 'critica'
-    } or tipo in {'select', 'radio', 'checkbox', 'revisao', 'decimal', 'valor'}
+    } or origem in {'fixo', 'nota', 'derivado', 'configuracao'}
 
 
 def _esperado_regra_revisao(regra):
+    alternativas = _valor_regra_revisao(regra, 'valores_esperados')
+    if alternativas:
+        return alternativas
     for chave in ('valor_esperado', 'esperado', 'revisao_esperada'):
         valor = _valor_regra_revisao(regra, chave)
         if valor is not None:
@@ -1411,6 +1579,14 @@ def _esperado_regra_revisao(regra):
 def _comparar_revisao_declarativa(texto, esperado, tipo):
     if esperado is None:
         return True
+    if isinstance(esperado, (tuple, list, set, frozenset)):
+        return any(
+            _comparar_revisao_declarativa(texto, item, tipo)
+            for item in esperado
+        )
+    if isinstance(esperado, (date, datetime)):
+        data_esperada = esperado.date() if isinstance(esperado, datetime) else esperado
+        return _so_digitos(texto) == data_esperada.strftime('%d%m%Y')
     tipo = str(tipo or 'text').lower()
     if tipo in {'decimal', 'valor', 'number'}:
         esperado_decimal = _decimal_do_portal(esperado)
@@ -1426,6 +1602,13 @@ def _comparar_revisao_declarativa(texto, esperado, tipo):
 
 def _regras_elegiveis_automatico(regras):
     for regra in regras or ():
+        if not _regra_fiscal(regra):
+            # O tipo do controle (select/radio/checkbox) descreve o DOM, não o
+            # impacto fiscal. Campo opcional e intocável sem leitor não pode
+            # bloquear o automático só por sua aparência HTML.
+            continue
+        if bool(_valor_regra_revisao(regra, 'prova_aplicacao', False)):
+            continue
         if not bool(_valor_regra_revisao(regra, 'conferivel_automatico', False)):
             return False
         origem = _valor_regra_revisao(regra, 'origem')
@@ -1447,9 +1630,29 @@ def calcular_elegibilidade_automatica(regras=(), divergencias=()):
 def _conferir_regras_adicionais(driver, regras):
     divergencias = []
     avisos_assistidos = []
+    indice_rotulos = None
     for regra in regras or ():
         chave = _valor_regra_revisao(regra, 'chave_semantica', 'campo sem chave')
         if not _regra_tem_leitor(regra):
+            if indice_rotulos is None:
+                indice_rotulos = _indice_de_rotulos_da_revisao(driver)
+            texto_descoberto = _dd_descoberto_por_rotulo(
+                indice_rotulos,
+                _valor_regra_revisao(regra, 'revisao_rotulo_candidato'),
+            )
+            if texto_descoberto is not None:
+                esperado = _esperado_regra_revisao(regra)
+                if esperado is not None and not _comparar_revisao_declarativa(
+                    texto_descoberto,
+                    esperado,
+                    _valor_regra_revisao(regra, 'tipo'),
+                ):
+                    divergencias.append(
+                        f'O campo contratado "{chave}" diverge na revisão.'
+                    )
+                continue
+            if bool(_valor_regra_revisao(regra, 'prova_aplicacao', False)):
+                continue
             # SEM LEITOR nao existe conferencia automatica possivel, e o
             # `conferivel_automatico` do campo nao muda esse fato — ele so
             # afirmava uma capacidade que o contrato nao declarou. Enquanto a
@@ -1531,8 +1734,7 @@ def conferir_revisao(
 
     # A descricao e conferida contra todos os <dd> da secao (ver o comentario do
     # bloco): o texto que pretendemos emitir precisa estar na tela.
-    esperada = _comparavel(descricao)
-    if not any(_comparavel(dd) == esperada for dd in _dds_da_secao(driver, SECAO_SERVICO)):
+    if not _descricao_confere_na_revisao(driver, descricao):
         divergencias.append(
             f'A descricao na tela nao e a esperada ("{descricao}"). '
             'Confira principalmente a competencia.')

@@ -562,7 +562,16 @@
 
     <div class="nfse-contrato-faixa mt-3" id="nfseContratoStatus"
          data-estado="{{ contrato_estado_visual }}" role="status" aria-live="polite">
-        {% if contrato_estado_visual == 'compativel' %}
+        {# Só refina um estado que JÁ é compatível: a liberação manual sobrevive
+           a um incidente aberto depois dela, e sobrepor a faixa apagaria o
+           "resolva os incidentes" que o servidor continua exigindo. #}
+        {% if contrato_estado_visual == 'compativel' and contrato_estado.ativo.liberacao_automatica_manual %}
+        <div class="estado" id="nfseContratoStatusTitulo">Automático liberado com avisos</div>
+        <div id="nfseContratoStatusTexto">Os avisos conhecidos desta versão foram assumidos pelo operador.</div>
+        {% elif contrato_estado_visual == 'compativel' and contrato_estado.ativo.pode_liberar_automatico %}
+        <div class="estado" id="nfseContratoStatusTitulo">Automação aguardando decisão</div>
+        <div id="nfseContratoStatusTexto">A revisão passou, mas há avisos conhecidos que precisam ser assumidos.</div>
+        {% elif contrato_estado_visual == 'compativel' %}
         <div class="estado" id="nfseContratoStatusTitulo">Contrato compatível</div>
         <div id="nfseContratoStatusTexto">Não há incidentes no contrato ativo.</div>
         {% elif contrato_estado_visual == 'aviso' %}
@@ -591,7 +600,13 @@
 
     <div class="nfse-contrato-historico" id="nfseContratoHistorico">
         <h3 class="h6 mb-2">Histórico de versões</h3>
-        {% if contrato_estado.candidatas %}
+        {% if contrato_estado.versoes %}
+        {% set intermediarias = contrato_estado.versoes | selectattr('intermediaria') | list %}
+        {% if intermediarias %}
+        <p class="nfse-hint mb-2">
+            {% if intermediarias | length == 1 %}1 versão intermediária arquivada.{% else %}{{ intermediarias | length }} versões intermediárias arquivadas.{% endif %}
+        </p>
+        {% endif %}
         <div class="table-responsive">
             <table class="table table-sm align-middle">
                 <thead>
@@ -602,31 +617,59 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for candidata in contrato_estado.candidatas %}
-                    <tr data-contrato-candidato="{{ candidata.id }}">
-                        <td class="nfse-mono">{{ candidata.versao }}</td>
-                        <td>{{ candidata.estado }}</td>
+                    {% for versao in contrato_estado.versoes %}
+                    {% if not versao.intermediaria %}
+                    <tr data-contrato-versao="{{ versao.id }}"
+                        {% if versao.estado in ('candidata', 'validada') %}data-contrato-candidato="{{ versao.id }}"{% endif %}>
+                        <td class="nfse-mono">{{ versao.versao }}</td>
+                        <td>
+                            {{ versao.estado }}
+                            {% if versao.erro_validacao %}
+                            <div class="nfse-hint mb-0">{{ versao.erro_validacao }}</div>
+                            {% endif %}
+                            {% if versao.liberacao_automatica_manual %}
+                            <div class="nfse-hint mb-0">Avisos assumidos para esta versão.</div>
+                            {% endif %}
+                        </td>
                         <td class="text-end">
-                            {% if candidata.estado == 'validada' %}
+                            {% if versao.estado == 'ativa' and (contrato_estado.ativo.pode_liberar_automatico or contrato_estado.ativo.pode_revalidar or versao.liberacao_automatica_manual) %}
+                            {% if contrato_estado.ativo.pode_liberar_automatico or versao.liberacao_automatica_manual %}
+                            <button class="btn {% if versao.liberacao_automatica_manual %}btn-ghost{% else %}btn-soft-primary{% endif %} btn-sm"
+                                    type="button" data-liberar-automatico="{{ versao.id }}"
+                                    data-liberar="{{ 'false' if versao.liberacao_automatica_manual else 'true' }}">
+                                {% if versao.liberacao_automatica_manual %}Revogar liberação automática{% else %}Assumir avisos e liberar automático{% endif %}
+                            </button>
+                            {% endif %}
+                            {% if contrato_estado.ativo.pode_revalidar %}
+                            <button class="btn btn-ghost btn-sm ms-1" type="button"
+                                    data-revalidar-contrato="{{ versao.id }}"
+                                    data-bs-toggle="modal" data-bs-target="#modalValidarContrato">
+                                Revalidar
+                            </button>
+                            {% endif %}
+                            {% elif versao.estado == 'validada' %}
                             <button class="btn btn-primary btn-sm" type="button"
-                                    data-ativar-contrato="{{ candidata.id }}">
+                                    data-ativar-contrato="{{ versao.id }}">
                                 Ativar versão
                             </button>
-                            {% else %}
+                            {% elif versao.estado == 'candidata' %}
                             <button class="btn btn-soft-primary btn-sm" type="button"
-                                    data-validar-contrato="{{ candidata.id }}"
+                                    data-validar-contrato="{{ versao.id }}"
                                     data-bs-toggle="modal" data-bs-target="#modalValidarContrato">
                                 Validar candidata
                             </button>
+                            {% else %}
+                            —
                             {% endif %}
                         </td>
                     </tr>
+                    {% endif %}
                     {% endfor %}
                 </tbody>
             </table>
         </div>
         {% else %}
-        <p class="nfse-hint mb-0">Nenhuma versão candidata foi criada.</p>
+        <p class="nfse-hint mb-0">Nenhuma versão do contrato foi criada.</p>
         {% endif %}
     </div>
     <div class="nfse-hint mt-3" id="nfseReconEstado" role="status" aria-live="polite"></div>

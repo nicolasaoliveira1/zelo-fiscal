@@ -16,7 +16,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from app import db
-from app.automation.nfse import ResultadoAutorrevisao
+from app.automation.nfse import (
+    ResultadoAutorrevisao,
+    calcular_elegibilidade_automatica,
+)
 from app.automation.batch_state import (
     NFSE_BATCH_STATE,
     definir_nfse_batch_opcoes,
@@ -815,6 +818,211 @@ def test_automatico_repassa_regras_do_contrato_para_autorrevisao(
     )
 
 
+def test_regras_adicionais_nao_repetem_os_tres_leitores_essenciais(monkeypatch):
+    def campo(chave, etapa='pessoas'):
+        return SimpleNamespace(
+            chave_semantica=chave,
+            etapa=etapa,
+            revisao_secao=None,
+            revisao_rotulo=None,
+            conferivel_automatico=False,
+            origem='nota',
+            obrigatorio=True,
+        )
+
+    contrato = SimpleNamespace(campos=(
+        campo('Tomador_Inscricao'),
+        campo('Valores_ValorServico', 'tributacao'),
+        campo('ServicoPrestado_Descricao', 'servico'),
+        campo('campo.fiscal.adicional', 'tributacao'),
+    ))
+    monkeypatch.setattr(
+        nfse_lote.nfse_contrato, 'resolver_valor', lambda *_args: 'esperado'
+    )
+
+    regras = nfse_lote._regras_autorrevisao_contrato(
+        contrato, SimpleNamespace(), SimpleNamespace()
+    )
+
+    assert [regra['chave_semantica'] for regra in regras] == [
+        'campo.fiscal.adicional'
+    ]
+    assert regras[0]['prova_aplicacao'] is True
+
+
+def test_regras_adicionais_ignoram_campo_de_condicao_inativa(monkeypatch):
+    def campo(chave, **valores):
+        padrao = {
+            'chave_semantica': chave,
+            'etapa': 'pessoas',
+            'revisao_secao': None,
+            'revisao_rotulo': None,
+            'conferivel_automatico': False,
+            'origem': 'fixo',
+            'obrigatorio': True,
+            'condicao_chave': None,
+            'condicao_valor': None,
+            'valor_fixo': None,
+            'opcoes': (),
+            'rotulo': chave,
+        }
+        padrao.update(valores)
+        return SimpleNamespace(**padrao)
+
+    contrato = SimpleNamespace(campos=(
+        campo('pergunta', valor_fixo='0'),
+        campo(
+            'campo.condicional',
+            condicao_chave='pergunta',
+            condicao_valor='1',
+        ),
+    ))
+
+    def resolver(regra, *_args):
+        return regra.valor_fixo or 'valor sintético'
+
+    monkeypatch.setattr(nfse_lote.nfse_contrato, 'resolver_valor', resolver)
+
+    regras = nfse_lote._regras_autorrevisao_contrato(
+        contrato, SimpleNamespace(), SimpleNamespace()
+    )
+
+    assert [regra['chave_semantica'] for regra in regras] == ['pergunta']
+
+
+def test_regras_adicionais_carregam_o_rotulo_da_opcao_escolhida(monkeypatch):
+    """O formulário guarda o valor ("0"); a revisão exibe o rótulo ("Não").
+
+    Sem levar as duas grafias, a descoberta por rótulo comparava "Não" com "0"
+    e reprovava um campo correto — a mesma classe de falso negativo que já
+    fechava o gate do automático por motivo que não é da nota.
+    """
+
+    campo = SimpleNamespace(
+        chave_semantica='campo.pergunta',
+        etapa='servico',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        conferivel_automatico=False,
+        origem='fixo',
+        obrigatorio=True,
+        condicao_chave=None,
+        condicao_valor=None,
+        rotulo='Pergunta sintética',
+        opcoes=(
+            SimpleNamespace(valor='0', rotulo='Não'),
+            SimpleNamespace(valor='1', rotulo='Sim'),
+        ),
+    )
+    monkeypatch.setattr(
+        nfse_lote.nfse_contrato, 'resolver_valor', lambda *_args: '0'
+    )
+
+    regras = nfse_lote._regras_autorrevisao_contrato(
+        SimpleNamespace(campos=(campo,)), SimpleNamespace(), SimpleNamespace()
+    )
+
+    assert regras[0]['valores_esperados'] == ('0', 'Não')
+    assert regras[0]['revisao_rotulo_candidato'] == 'Pergunta sintética'
+
+
+def test_prova_de_aplicacao_nao_cobre_o_que_o_portal_e_dono(monkeypatch):
+    """`prova_aplicacao` vale para o campo que a automação ESCREVEU e conferiu.
+
+    `padrao_portal` e `intocavel` não foram aplicados por ninguém — não há o que
+    provar. Tratar os dois como provados desligava o gate inteiro do automático
+    (sobrava regra nenhuma para julgar) e, com `erro_validacao` sempre nulo,
+    apagava também o botão de liberar/revalidar da interface.
+    """
+
+    def campo(chave, origem):
+        return SimpleNamespace(
+            chave_semantica=chave, etapa='tributacao', revisao_secao=None,
+            revisao_rotulo=None, conferivel_automatico=False, origem=origem,
+            obrigatorio=True, condicao_chave=None, condicao_valor=None,
+            rotulo=chave, interacao='texto', opcoes=(),
+        )
+
+    contrato = SimpleNamespace(campos=(
+        campo('campo.escrito', 'nota'),
+        campo('campo.do.portal', 'padrao_portal'),
+        campo('campo.intocavel', 'intocavel'),
+    ))
+    monkeypatch.setattr(
+        nfse_lote.nfse_contrato, 'resolver_valores_contrato',
+        lambda *_args: {c.chave_semantica: 'esperado' for c in contrato.campos},
+    )
+
+    provas = {
+        regra['chave_semantica']: regra['prova_aplicacao']
+        for regra in nfse_lote._regras_autorrevisao_contrato(
+            contrato, SimpleNamespace(), SimpleNamespace()
+        )
+    }
+
+    assert provas == {
+        'campo.escrito': True,
+        'campo.do.portal': False,
+        'campo.intocavel': False,
+    }
+    # E o gate volta a fechar por causa deles, que e o ponto.
+    assert calcular_elegibilidade_automatica(
+        regras=[{
+            'chave_semantica': 'campo.do.portal', 'origem': 'padrao_portal',
+            'obrigatorio': True, 'conferivel_automatico': False,
+            'prova_aplicacao': False, 'tipo': 'text',
+        }],
+    ) is False
+
+
+def test_select_por_codigo_nao_oferece_rotulo_para_descoberta(monkeypatch):
+    """A revisão mostra o RÓTULO do select; o contrato guarda o CÓDIGO.
+
+    Oferecer o rótulo do formulário como candidato sem ter uma grafia legível
+    entre os esperados faz a descoberta comparar "17.19.01" com o texto da
+    opção — divergência garantida, em toda nota correta. Só o par
+    `(codigo, rotulo)` autoriza o candidato.
+    """
+
+    def campo(chave, fonte, interacao):
+        return SimpleNamespace(
+            chave_semantica=chave, etapa='servico', revisao_secao=None,
+            revisao_rotulo=None, conferivel_automatico=False,
+            origem='configuracao', obrigatorio=True, condicao_chave=None,
+            condicao_valor=None, rotulo=f'Rótulo de {chave}',
+            interacao=interacao, fonte=fonte, opcoes=(),
+        )
+
+    contrato = SimpleNamespace(campos=(
+        campo('municipio', 'municipio_servico_codigo', 'select_busca'),
+        campo('tributacao', 'codigo_tributacao', 'select_busca'),
+    ))
+    monkeypatch.setattr(
+        nfse_lote.nfse_contrato, 'resolver_valores_contrato',
+        lambda *_args: {
+            # o par que o núcleo compartilhado devolve: código + rótulo legível
+            'municipio': ('4310330', 'Cidade Sintética/RS'),
+            # aqui o "rótulo" é o próprio código: não há grafia legível
+            'tributacao': ('17.19.01', '17.19.01'),
+        },
+    )
+
+    regras = {
+        regra['chave_semantica']: regra
+        for regra in nfse_lote._regras_autorrevisao_contrato(
+            contrato, SimpleNamespace(), SimpleNamespace()
+        )
+    }
+
+    assert regras['municipio']['revisao_rotulo_candidato'] == (
+        'Rótulo de municipio'
+    )
+    assert regras['municipio']['valores_esperados'] == (
+        '4310330', 'Cidade Sintética/RS'
+    )
+    assert regras['tributacao']['revisao_rotulo_candidato'] is None
+
+
 def test_valor_contratado_ilegivel_forca_divergencia(monkeypatch):
     contrato = MagicMock()
     contrato.campo.side_effect = lambda chave: chave
@@ -848,6 +1056,23 @@ def test_conferindo_emite_e_marca(automatico):
     assert (sucesso, grave) == (True, None)
     assert nota.status == StatusNotaNfse.EMITIDA
     assert nota.origem_emissao == 'automacao'
+
+
+def test_aceitacao_persistida_na_versao_cobre_apenas_avisos_sem_leitor(
+    automatico
+):
+    automatico['automacao'].conferir_revisao.return_value = ResultadoAutorrevisao(
+        (),
+        elegivel_automatico=False,
+        avisos_assistidos=('Campo sintético sem leitor.',),
+    )
+
+    sucesso, grave, _mensagem = nfse_lote._emitir_nota(
+        _nota().id, None, 'exec-1'
+    )
+
+    assert (sucesso, grave) == (True, None)
+    assert automatico['automacao'].emitir.called
 
 
 def test_divergencia_nao_emite_e_pausa_o_lote(automatico):

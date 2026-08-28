@@ -75,7 +75,7 @@ function markup() {
     <span id="nfseReconPasses" class="d-none"></span>
     <button id="btnReconDescartar" class="d-none" type="button">Descartar</button>
     <button id="btnDescartarIncidentes" type="button">Descartar incidentes</button>
-    <div id="modalValidarContrato"></div>
+    <div id="modalValidarContrato"><h2 id="modalValidarContratoTitulo"></h2></div>
     <form id="formValidarContrato">
       <select id="nfseNotaValidacao"><option value="" selected disabled>Escolha uma nota…</option></select>
       <div id="nfseValidacaoErro" role="alert"></div>
@@ -324,6 +324,100 @@ test('candidata reprovada mostra POR QUE reprovou no histórico', async () => {
   const linha = document.querySelector('[data-contrato-candidato="9"]');
   assert.ok(linha.textContent.includes('3 divergência(s) na revisão'));
   assert.ok(linha.textContent.includes('A descricao na tela nao e a esperada'));
+});
+
+test('histórico mostra a ativa, as arquivadas e a liberação dos avisos', async () => {
+  const posts = [];
+  let liberada = false;
+  globalThis.confirm = () => true;
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => {
+      if (opcoes) {
+        posts.push({ url, corpo: JSON.parse(opcoes.body) });
+        liberada = true;
+        return resposta({ status: 'ok' });
+      }
+      const ativa = {
+        id: 2,
+        versao: 2,
+        estado: 'ativa',
+        elegivel_automatico: liberada,
+        pode_liberar_automatico: !liberada,
+        liberacao_automatica_manual: liberada,
+        erro_validacao: 'a revisão permite somente modos assistidos: aviso sintético',
+      };
+      return resposta(estadoBase({
+        ativo: ativa,
+        versoes: [
+          ativa,
+          { id: 1, versao: 1, estado: 'arquivada', intermediaria: false },
+          { id: 3, versao: 3, estado: 'arquivada', intermediaria: true },
+        ],
+      }));
+    },
+  });
+
+  assert.ok(document.querySelector('[data-contrato-versao="1"]'));
+  const intermediaria = document.querySelector('[data-contrato-versao="3"]');
+  assert.equal(intermediaria.hidden, true);
+  const mostrar = [...document.querySelectorAll('button')]
+    .find((item) => /Mostrar 1 versão intermediária/.test(item.textContent));
+  mostrar.click();
+  assert.equal(intermediaria.hidden, false);
+  const botao = document.querySelector('[data-liberar-automatico="2"]');
+  assert.match(botao.textContent, /Assumir avisos/);
+  botao.click();
+  await proximoTurno();
+  await proximoTurno();
+  await proximoTurno();
+
+  assert.deepEqual(posts, [{
+    url: '/nfse/contrato/2/liberar-automatico',
+    corpo: { liberar: true },
+  }]);
+  assert.match(document.getElementById('nfseContratoHistorico').textContent, /Avisos assumidos/);
+  assert.match(document.getElementById('nfseContratoStatusTitulo').textContent, /liberado com avisos/);
+});
+
+test('revalidar ativa usa o seletor de nota ao lado da liberação', async () => {
+  const posts = [];
+  const ativa = {
+    id: 2,
+    versao: 2,
+    estado: 'ativa',
+    elegivel_automatico: false,
+    pode_liberar_automatico: true,
+    pode_revalidar: true,
+    erro_validacao: 'a revisão permite somente modos assistidos: aviso sintético',
+  };
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => {
+      if (opcoes) {
+        posts.push({ url, corpo: JSON.parse(opcoes.body) });
+        return resposta({ status: 'ok' });
+      }
+      return resposta(estadoBase({ ativo: ativa, versoes: [ativa] }));
+    },
+  });
+
+  document.querySelector('[data-revalidar-contrato="2"]').click();
+  assert.equal(
+    document.getElementById('modalValidarContratoTitulo').textContent,
+    'Revalidar versão ativa',
+  );
+  document.getElementById('nfseNotaValidacao').value = '10';
+  document.getElementById('formValidarContrato')
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await proximoTurno();
+  await proximoTurno();
+  await proximoTurno();
+
+  assert.deepEqual(posts, [{
+    url: '/nfse/contrato/2/validar',
+    corpo: { nota_id: 10 },
+  }]);
 });
 
 test('Editar na linha chama o reabrir daquele incidente, não o descarte total', async () => {

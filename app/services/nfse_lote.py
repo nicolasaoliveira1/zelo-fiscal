@@ -51,6 +51,12 @@ MODOS_DE_FILA = (MODO_LOTE, MODO_AUTOMATICO)
 
 ORIGEM_AUTOMACAO = 'automacao'
 
+CHAVES_REVISAO_ESSENCIAIS = frozenset({
+    'Tomador_Inscricao',
+    'Valores_ValorServico',
+    'ServicoPrestado_Descricao',
+})
+
 # Quanto esperar o operador conferir e emitir uma nota. Generoso de proposito:
 # quem revisa documento fiscal as vezes sai para confirmar um valor. Estourar
 # nao perde nada — pausa o lote na nota atual, que segue esperando confirmacao.
@@ -129,6 +135,35 @@ def pedir_pular():
             return False
         NFSE_BATCH_STATE['pular_atual'] = True
         return True
+
+
+def pedir_pausa():
+    """Pausa apenas uma fila que ainda está rodando."""
+    return batch_engine.solicitar_pausa_se_rodando(
+        NFSE_BATCH_LOCK, NFSE_BATCH_STATE
+    )
+
+
+def pedir_parada():
+    """Interrompe a fila e fecha a sessão quando o worker já terminou.
+
+    Durante uma execução, o worker vê o pedido e fecha no ``on_teardown``. Em
+    uma pausa estável ele já saiu, portanto não existe mais teardown futuro:
+    a própria ação de Parar precisa encerrar o navegador e liberar a policy.
+    """
+    aceito = batch_engine.solicitar_parada_se_ativa(
+        NFSE_BATCH_LOCK, NFSE_BATCH_STATE
+    )
+    # `adquirir` e nao-bloqueante: so fecha quando ninguem esta dirigindo o
+    # navegador. Perguntar por `ocupada` e agir depois seria decidir sobre um
+    # fato que pode ter mudado no meio — e `quit()` concorrente com o worker
+    # derruba a janela debaixo de uma nota em revisao.
+    if aceito and SESSAO.adquirir():
+        try:
+            SESSAO.encerrar()
+        finally:
+            SESSAO.liberar()
+    return aceito
 
 
 def validar_nota_para_validacao(nota_id):
@@ -258,7 +293,7 @@ def _emitir_nota(nota_id, driver_do_motor, execution_id):
 
 
 def _registrar_validacao_candidata(nota_id, contrato_id, execution_id):
-    """Relê a revisão, registra a candidata e nunca dispara emissão automática."""
+    """Relê a revisão, registra a versão e nunca dispara emissão automática."""
 
     nota = db.session.get(NotaNfse, nota_id)
     contrato = nfse_contrato.carregar_execucao(contrato_id)
@@ -279,6 +314,7 @@ def _registrar_validacao_candidata(nota_id, contrato_id, execution_id):
         # O que a divergencia cita da tela e dado de cliente, e `erro_validacao`
         # vive no CONTRATO, que sobrevive a nota e aparece na Central.
         valores_sensiveis=(documento, str(valor), descricao),
+        revalidacao=contrato.estado == 'ativa',
     )
     _publicar_validacao(contrato_id, nota_id, resultado)
     if resultado:
@@ -366,15 +402,62 @@ def _capturar_revisao_da_validacao(contrato_id, nota_id, execution_id):
         )
 
 
+# Controles cujo valor aplicado e um CODIGO e cuja revisao mostra o ROTULO.
+# Descobrir o leitor pelo rotulo do formulario, nestes, compara "4314902" com
+# "Porto Alegre" e reprova toda nota correta.
+_INTERACOES_POR_CODIGO = ('chosen', 'select_busca', 'select_direto')
+
+
+def _rotulo_candidato(campo, valor_esperado, valores_esperados):
+    """Rótulo do formulário utilizável para descobrir o leitor da revisão.
+
+    Só quando a comparação é justa: num select, o portal mostra o rótulo da
+    opção, então o candidato só serve se algum dos esperados JÁ for esse
+    rótulo legível — senão a descoberta vira divergência garantida.
+    """
+
+    rotulo = getattr(campo, 'rotulo', None)
+    if not rotulo:
+        return None
+    if getattr(campo, 'interacao', '') not in _INTERACOES_POR_CODIGO:
+        return rotulo
+    tem_rotulo_legivel = any(
+        str(alternativa) != str(valor_esperado)
+        for alternativa in valores_esperados
+    )
+    return rotulo if tem_rotulo_legivel else None
+
+
 def _regras_autorrevisao_contrato(contrato, nota, config):
     """Materializa leitores e esperados sem persistir valores da nota."""
 
+    campos = tuple(
+        campo for campo in contrato.campos if campo.etapa != 'revisao'
+    )
+    # Mesmo nucleo que resolve os valores do preenchimento: sem ele a revisao
+    # comparava o codigo do IBGE contra o nome do municipio que a tela mostra.
+    valores = nfse_contrato.resolver_valores_contrato(
+        contrato, nota, config, date.today()
+    )
     regras = []
-    for campo in contrato.campos:
-        if campo.etapa == 'revisao':
+    for campo in campos:
+        if (
+            campo.chave_semantica in CHAVES_REVISAO_ESSENCIAIS
+        ):
             # Documento, valor e descrição já são conferidos pelos leitores
-            # históricos logo antes destas regras adicionais.
+            # históricos logo antes destas regras adicionais. Repetir os
+            # campos de origem aqui os transformava em avisos "sem leitor"
+            # apesar de a mesma informação já ter sido conferida.
             continue
+        condicao_chave = getattr(campo, 'condicao_chave', None)
+        if condicao_chave:
+            valor_condicao = valores.get(condicao_chave)
+            condicao_valor = getattr(campo, 'condicao_valor', None)
+            if (
+                condicao_valor is not None
+                and str(valor_condicao) != str(condicao_valor)
+            ):
+                continue
         if not (
             campo.revisao_secao
             or campo.revisao_rotulo
@@ -382,12 +465,30 @@ def _regras_autorrevisao_contrato(contrato, nota, config):
             or (campo.origem == 'padrao_portal' and campo.obrigatorio)
         ):
             continue
-        valor_esperado = nfse_contrato.resolver_valor(
-            campo, nota, config, date.today()
-        )
+        valor_esperado = valores[campo.chave_semantica]
+        rotulos = []
         if isinstance(valor_esperado, (tuple, list)) and valor_esperado:
-            valor_esperado = valor_esperado[0]
-        regras.append({**campo.__dict__, 'valor_esperado': valor_esperado})
+            valor_esperado, *rotulos = valor_esperado
+        valores_esperados = [valor_esperado, *rotulos]
+        for opcao in getattr(campo, 'opcoes', ()):
+            if str(opcao.valor) == str(valor_esperado):
+                valores_esperados.append(opcao.rotulo)
+        regras.append({
+            **campo.__dict__,
+            'valor_esperado': valor_esperado,
+            'valores_esperados': tuple(valores_esperados),
+            # Chegar a revisao prova que o controle aceitou o valor — mas SO
+            # para o campo que a automacao escreveu e conferiu. `padrao_portal`
+            # e `intocavel` sao do portal: nada foi aplicado, nada foi provado,
+            # e tratar os dois como provados desligava o gate inteiro do
+            # automatico (nenhuma regra sobrava para julgar).
+            'prova_aplicacao': campo.origem not in (
+                'padrao_portal', 'intocavel'
+            ),
+            'revisao_rotulo_candidato': _rotulo_candidato(
+                campo, valor_esperado, valores_esperados
+            ),
+        })
     return tuple(regras)
 
 
@@ -442,7 +543,13 @@ def _emitir_sozinho(nota, execution_id, contrato_id=None):
         descricao,
         regras_adicionais=regras,
     )
-    if getattr(divergencias, 'elegivel_automatico', None) is False:
+    # A revisão continua acusando toda divergência concreta. A elegibilidade
+    # calculada pelo leitor só bloqueia os avisos sem leitor quando a versão
+    # ativa ainda não recebeu a aceitação explícita do operador.
+    if (
+        getattr(divergencias, 'elegivel_automatico', None) is False
+        and not contrato.elegivel_automatico
+    ):
         divergencias.append(
             'O contrato ativo permite somente emissão assistida.'
         )

@@ -78,6 +78,78 @@ def test_fronteira_desconhecida_bloqueia_sem_persistir_incidente(monkeypatch):
     assert driver.execute_script.call_count == 0
 
 
+def test_tela_que_virou_de_etapa_durante_a_observacao_e_descartada(monkeypatch):
+    """Falso positivo real: o "Avançar" navega, e a URL foi lida antes disso.
+
+    `_avancar` clica sem esperar a navegação. A guarda de URL roda ANTES do
+    inventário, então a leitura podia dizer "ainda é Serviço" e o script, um
+    instante depois, percorrer o DOM de Tributação. O inventário da tela nova
+    saía rotulado com a etapa velha e a etapa seguinte inteira — declarada no
+    contrato, só que sob outra etapa — virava `controle_novo`. Duas dessas são
+    obrigatórias: a comparação dava `incompativel` e pausava nota correta.
+
+    O caminho vem de dentro do mesmo turno de script que percorreu o DOM, então
+    ele denuncia a troca que a URL lida por fora não pega.
+    """
+
+    inventario = InventarioEtapa(
+        etapa="servico",
+        controles=(_controle(chave="Valores.ValorServico", obrigatorio=True),),
+        caminho="/EmissorNacional/DPS/Tributacao",
+    )
+    registrar = MagicMock()
+    monkeypatch.setattr(nfse_service.nfse_recon, "inventariar", lambda *_: inventario)
+    monkeypatch.setattr(
+        nfse_service.nfse_contrato, "registrar_incidentes", registrar
+    )
+    comparar = MagicMock()
+    monkeypatch.setattr(
+        nfse_service.nfse_contrato, "comparar_e_registrar", comparar
+    )
+
+    resultado = nfse_service._observar_fronteira_contrato(
+        _driver_na_etapa("servico"),
+        _contrato(contrato_id=170),
+        "servico",
+        "pos_avancar",
+        modo="automatico",
+        execution_id="execucao-sintetica",
+    )
+
+    assert resultado == {
+        "estado": "ignorada", "etapa": "servico", "momento": "pos_avancar",
+    }
+    # Nada foi comparado, então nada virou incidente — e o acumulador não fica
+    # com controle de outra etapa dentro do balde desta.
+    comparar.assert_not_called()
+    registrar.assert_not_called()
+
+
+def test_observacao_da_propria_etapa_segue_valendo_com_caminho(monkeypatch):
+    """A guarda nova não pode recusar a observação legítima: mesmo caminho,
+    mesma etapa, o fluxo continua até a comparação."""
+
+    inventario = InventarioEtapa(
+        etapa="servico",
+        controles=(_controle(obrigatorio=False),),
+        caminho="/EmissorNacional/DPS/Servico",
+    )
+    monkeypatch.setattr(nfse_service.nfse_recon, "inventariar", lambda *_: inventario)
+    monkeypatch.setattr(
+        nfse_service.nfse_contrato, "salvar_artefato_sanitizado", MagicMock()
+    )
+
+    resultado = nfse_service._observar_fronteira_contrato(
+        _driver_na_etapa("servico"),
+        _contrato(),
+        "servico",
+        "pre_avancar",
+        execution_id="execucao-sintetica",
+    )
+
+    assert resultado["estado"] == "aviso"
+
+
 def test_fronteira_opcional_persiste_artefato_e_retorna_aviso(monkeypatch):
     inventario = InventarioEtapa(
         etapa="servico",
