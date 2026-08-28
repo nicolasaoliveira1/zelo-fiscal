@@ -10,6 +10,19 @@ from app.models import (CertificadoEmpresa, ConfiguracaoSistema, DadosReceita,
 from app.services import manifestador_cofre, notificacoes
 
 
+def _hoje_ja_passado(agora=None):
+    """Um instante que e de hoje e ja passou.
+
+    `datetime.now() - timedelta(minutes=5)` parecia servir, mas nos primeiros
+    minutos depois da meia-noite cai no dia anterior: a contagem de dias e por
+    data (`not_after.date() - date.today()`), entao o caso deixava de ser
+    "vence hoje" e o teste falhava com -1 == 0 so nessa faixa do relogio.
+    """
+    agora = agora or datetime.now()
+    return max(agora.replace(hour=0, minute=0, second=0, microsecond=0),
+               agora - timedelta(minutes=5))
+
+
 def _empresa(nome, cnpj, situacao=None):
     empresa = Empresa(nome=nome, cnpj=cnpj, estado='RS', cidade='Imbe')
     if situacao:
@@ -17,6 +30,23 @@ def _empresa(nome, cnpj, situacao=None):
     db.session.add(empresa)
     db.session.flush()
     return empresa
+
+
+@pytest.mark.parametrize('relogio, rotulo', [
+    (datetime(2026, 3, 10, 0, 2, 13), 'dois minutos depois da meia-noite'),
+    (datetime(2026, 3, 10, 0, 0, 0), 'na virada exata'),
+    (datetime(2026, 3, 10, 14, 30, 0), 'no meio da tarde'),
+])
+def test_instante_do_caso_vence_hoje_e_sempre_de_hoje(relogio, rotulo):
+    """O vencimento do caso "vence hoje" precisa ser de hoje em qualquer hora.
+
+    Guarda o defeito que quebrou o job MySQL do CI as 00:02 UTC: subtrair cinco
+    minutos do relogio joga o vencimento no dia anterior, e a contagem por data
+    passa a dizer -1 dia em vez de 0.
+    """
+    vencimento = _hoje_ja_passado(relogio)
+    assert vencimento.date() == relogio.date(), rotulo
+    assert vencimento <= relogio, rotulo
 
 
 def _certificado(empresa, not_after, estado=EstadoCertificado.PRONTO):
@@ -342,7 +372,7 @@ def test_vencendo_hoje_no_limite_do_dia_ja_conta_como_vencido(app, ids):
     providencie a renovacao" para um certificado ja gravado como VENCIDO."""
     with app.app_context():
         empresa = _empresa('EMPRESA VENCE HOJE', '22.222.222/2222-40')
-        _certificado(empresa, datetime.now() - timedelta(minutes=5))
+        _certificado(empresa, _hoje_ja_passado())
         db.session.commit()
 
         item = next(i for i in manifestador_cofre.certificados_a_vencer()
