@@ -438,14 +438,19 @@ def nfse_contrato_validar(contrato_id):
     if isinstance(nota_id, bool) or not isinstance(nota_id, int) or nota_id <= 0:
         return json_error('Escolha uma nota emitível.', 400, campo='nota_id')
 
-    candidato = db.session.get(nfse_contrato.ContratoNfse, contrato_id)
-    if candidato is None:
-        return json_error('A versão candidata não existe.', 404)
-    if candidato.estado != 'candidata':
+    contrato = db.session.get(nfse_contrato.ContratoNfse, contrato_id)
+    if contrato is None:
+        return json_error('A versão do contrato não existe.', 404)
+    if contrato.estado not in {'candidata', 'ativa'}:
         return json_error(
-            'A versão precisa estar no estado candidata para ser validada.',
+            'Somente uma versão candidata ou ativa pode ser validada.',
             409,
         )
+    if contrato.estado == 'ativa':
+        try:
+            nfse_contrato.validar_revalidacao_ativa(contrato.id)
+        except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+            return json_error(str(exc), 409)
     try:
         nfse_lote.validar_nota_para_validacao(nota_id)
     except ValueError as exc:

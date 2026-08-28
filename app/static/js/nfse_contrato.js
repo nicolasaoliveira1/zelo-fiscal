@@ -478,21 +478,36 @@ function renderizarHistorico(estado, root) {
     acao.className = 'text-end';
     if (versaoContrato.estado === 'ativa' && (
       estado?.ativo?.pode_liberar_automatico
+      || estado?.ativo?.pode_revalidar
       || versaoContrato.liberacao_automatica_manual
     )) {
-      const liberar = !versaoContrato.liberacao_automatica_manual;
-      const botao = criarElemento(
-        'button', liberar
-          ? 'Assumir avisos e liberar automático'
-          : 'Revogar liberação automática',
-      );
-      botao.type = 'button';
-      botao.className = liberar
-        ? 'btn btn-soft-primary btn-sm'
-        : 'btn btn-ghost btn-sm';
-      botao.dataset.liberarAutomatico = String(versaoContrato.id ?? '');
-      botao.dataset.liberar = String(liberar);
-      acao.appendChild(botao);
+      if (
+        estado?.ativo?.pode_liberar_automatico
+        || versaoContrato.liberacao_automatica_manual
+      ) {
+        const liberar = !versaoContrato.liberacao_automatica_manual;
+        const botao = criarElemento(
+          'button', liberar
+            ? 'Assumir avisos e liberar automático'
+            : 'Revogar liberação automática',
+        );
+        botao.type = 'button';
+        botao.className = liberar
+          ? 'btn btn-soft-primary btn-sm'
+          : 'btn btn-ghost btn-sm';
+        botao.dataset.liberarAutomatico = String(versaoContrato.id ?? '');
+        botao.dataset.liberar = String(liberar);
+        acao.appendChild(botao);
+      }
+      if (estado?.ativo?.pode_revalidar) {
+        const revalidar = criarElemento('button', 'Revalidar');
+        revalidar.type = 'button';
+        revalidar.className = 'btn btn-ghost btn-sm ms-1';
+        revalidar.dataset.revalidarContrato = String(versaoContrato.id ?? '');
+        revalidar.setAttribute('data-bs-toggle', 'modal');
+        revalidar.setAttribute('data-bs-target', '#modalValidarContrato');
+        acao.appendChild(revalidar);
+      }
     } else if (versaoContrato.estado === 'validada') {
       const botao = criarElemento('button', 'Ativar versão');
       botao.type = 'button';
@@ -741,6 +756,7 @@ export async function inicializarContratoNfse(opcoes = {}) {
   const estadoUrl = opcoes.estadoUrl || '/nfse/contrato';
   let estado = null;
   let candidataAtual = null;
+  let revalidando = false;
 
   const formValidar = porId(root, 'formValidarContrato');
   const notaValidacao = porId(root, 'nfseNotaValidacao');
@@ -962,7 +978,8 @@ export async function inicializarContratoNfse(opcoes = {}) {
     const alvo = evento.target?.closest?.(
       '[data-sugestao-incidente], [data-desfazer-candidata],'
       + ' [data-editar-incidente],'
-      + ' [data-validar-contrato], [data-ativar-contrato],'
+      + ' [data-validar-contrato], [data-revalidar-contrato],'
+      + ' [data-ativar-contrato],'
       + ' [data-liberar-automatico]',
     );
     if (!alvo) return;
@@ -1042,9 +1059,18 @@ export async function inicializarContratoNfse(opcoes = {}) {
           showToast(mensagem, 'error');
         }
       });
-    } else if (alvo.dataset.validarContrato) {
-      candidataAtual = alvo.dataset.validarContrato;
+    } else if (alvo.dataset.validarContrato || alvo.dataset.revalidarContrato) {
+      revalidando = Boolean(alvo.dataset.revalidarContrato);
+      candidataAtual = alvo.dataset.revalidarContrato || alvo.dataset.validarContrato;
       if (notaValidacao) notaValidacao.value = '';
+      const titulo = porId(root, 'modalValidarContratoTitulo');
+      const enviar = porId(root, 'btnValidarContrato');
+      if (titulo) titulo.textContent = revalidando
+        ? 'Revalidar versão ativa'
+        : 'Validar versão candidata';
+      if (enviar) enviar.textContent = revalidando
+        ? 'Iniciar revalidação'
+        : 'Iniciar validação';
       mostrarErro(root, 'nfseValidacaoErro', '');
     } else if (alvo.dataset.ativarContrato) {
       const botao = alvo;
@@ -1073,7 +1099,12 @@ export async function inicializarContratoNfse(opcoes = {}) {
       try {
         await chamar(fetchImpl, `/nfse/contrato/${candidataAtual}/validar`, { nota_id: notaId });
         esconderModal('modalValidarContrato');
-        showToast('Validação iniciada na sessão assistida.', 'success');
+        showToast(
+          revalidando
+            ? 'Revalidação iniciada na sessão assistida.'
+            : 'Validação iniciada na sessão assistida.',
+          'success',
+        );
         await carregar();
       } catch (erro) {
         const mensagem = erro instanceof Error ? erro.message : 'Não foi possível iniciar a validação.';

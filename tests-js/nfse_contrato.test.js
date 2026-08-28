@@ -75,7 +75,7 @@ function markup() {
     <span id="nfseReconPasses" class="d-none"></span>
     <button id="btnReconDescartar" class="d-none" type="button">Descartar</button>
     <button id="btnDescartarIncidentes" type="button">Descartar incidentes</button>
-    <div id="modalValidarContrato"></div>
+    <div id="modalValidarContrato"><h2 id="modalValidarContratoTitulo"></h2></div>
     <form id="formValidarContrato">
       <select id="nfseNotaValidacao"><option value="" selected disabled>Escolha uma nota…</option></select>
       <div id="nfseValidacaoErro" role="alert"></div>
@@ -378,6 +378,46 @@ test('histórico mostra a ativa, as arquivadas e a liberação dos avisos', asyn
   }]);
   assert.match(document.getElementById('nfseContratoHistorico').textContent, /Avisos assumidos/);
   assert.match(document.getElementById('nfseContratoStatusTitulo').textContent, /liberado com avisos/);
+});
+
+test('revalidar ativa usa o seletor de nota ao lado da liberação', async () => {
+  const posts = [];
+  const ativa = {
+    id: 2,
+    versao: 2,
+    estado: 'ativa',
+    elegivel_automatico: false,
+    pode_liberar_automatico: true,
+    pode_revalidar: true,
+    erro_validacao: 'a revisão permite somente modos assistidos: aviso sintético',
+  };
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => {
+      if (opcoes) {
+        posts.push({ url, corpo: JSON.parse(opcoes.body) });
+        return resposta({ status: 'ok' });
+      }
+      return resposta(estadoBase({ ativo: ativa, versoes: [ativa] }));
+    },
+  });
+
+  document.querySelector('[data-revalidar-contrato="2"]').click();
+  assert.equal(
+    document.getElementById('modalValidarContratoTitulo').textContent,
+    'Revalidar versão ativa',
+  );
+  document.getElementById('nfseNotaValidacao').value = '10';
+  document.getElementById('formValidarContrato')
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await proximoTurno();
+  await proximoTurno();
+  await proximoTurno();
+
+  assert.deepEqual(posts, [{
+    url: '/nfse/contrato/2/validar',
+    corpo: { nota_id: 10 },
+  }]);
 });
 
 test('Editar na linha chama o reabrir daquele incidente, não o descarte total', async () => {

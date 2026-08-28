@@ -446,6 +446,56 @@ def test_incidente_novo_impede_liberar_avisos_da_versao_ativa(
             match='incidentes pendentes',
         ):
             nfse_contrato.definir_liberacao_automatica(ativa.id, True)
+        with pytest.raises(
+            nfse_contrato.ContratoNfseTransicaoInvalidaError,
+            match='não possui avisos',
+        ):
+            nfse_contrato.validar_revalidacao_ativa(ativa.id)
+
+
+def test_revalidacao_aprovada_mantem_versao_ativa_e_remove_avisos(
+    app, ids, monkeypatch
+):
+    eventos = []
+    monkeypatch.setattr(
+        nfse_contrato.auditoria,
+        'registrar',
+        lambda evento, **_dados: eventos.append(evento),
+    )
+    with app.app_context():
+        ativa = _ativar_contrato_com_avisos()
+        resultado = automacao_nfse.ResultadoAutorrevisao(
+            (), elegivel_automatico=True
+        )
+
+        revalidada = nfse_contrato.registrar_validacao(
+            ativa.id, None, resultado, revalidacao=True
+        )
+
+        assert revalidada.estado == 'ativa'
+        assert revalidada.elegivel_automatico is True
+        assert revalidada.erro_validacao is None
+        assert eventos[-1] == 'nfse.contrato.revalidar'
+
+
+def test_revalidacao_com_divergencia_mantem_ativa_bloqueada(
+    app, ids, monkeypatch
+):
+    monkeypatch.setattr(nfse_contrato.auditoria, 'registrar', lambda *a, **k: None)
+    with app.app_context():
+        ativa = _ativar_contrato_com_avisos()
+        resultado = automacao_nfse.ResultadoAutorrevisao(
+            ('Campo sintético divergiu.',), elegivel_automatico=False
+        )
+
+        revalidada = nfse_contrato.registrar_validacao(
+            ativa.id, None, resultado, revalidacao=True
+        )
+
+        assert revalidada.estado == 'ativa'
+        assert revalidada.elegivel_automatico is False
+        assert 'divergência(s)' in revalidada.erro_validacao
+        assert nfse_contrato.estado_painel()['ativo']['pode_revalidar'] is True
 
 
 def test_configurar_recusa_opcao_fixa_ausente_sem_criar_candidata(app, ids):

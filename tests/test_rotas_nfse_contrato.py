@@ -12,6 +12,7 @@ from app.automation.batch_state import (
     NFSE_BATCH_LOCK,
     NFSE_BATCH_STATE,
     definir_nfse_batch_opcoes,
+    nfse_batch_opcoes,
 )
 from app.models import (
     Empresa,
@@ -503,6 +504,46 @@ def test_validar_exige_nota_emitivel_e_inicia_modo_individual(
     assert inicializar.called
     emitir.assert_not_called()
     assert sessao.adquirir.called
+
+
+def test_revalidar_ativa_reusa_fluxo_assistido_sem_emitir(
+    login_as, app, monkeypatch
+):
+    _anterior_id, ativo_id = _ativar_com_avisos(app)
+    nota_id = _criar_nota_emitivel(app)
+    sessao = MagicMock()
+    sessao.adquirir.return_value = True
+    inicializar = MagicMock(
+        return_value={'ids': [nota_id], 'total': 1, 'vencidas': 0, 'a_vencer': 0}
+    )
+    monkeypatch.setattr('app.routes.nfse.SESSAO', sessao)
+    monkeypatch.setattr('app.routes.nfse.automacao_em_curso', lambda: None)
+    monkeypatch.setattr(
+        'app.routes.nfse.batch_engine.init_batch_run', inicializar
+    )
+    emitir = MagicMock()
+    monkeypatch.setattr('app.routes.nfse.nfse_lote.automacao.emitir', emitir)
+
+    resposta = login_as('operador').post(
+        f'/nfse/contrato/{ativo_id}/validar', json={'nota_id': nota_id}
+    )
+
+    assert resposta.status_code == 200
+    assert nfse_batch_opcoes()['validacao_contrato_id'] == ativo_id
+    inicializar.assert_called_once()
+    emitir.assert_not_called()
+
+
+def test_revalidar_ativa_sem_aviso_e_recusado(login_as, app):
+    with app.app_context():
+        ativo_id = nfse_contrato.garantir_contrato_inicial().id
+    nota_id = _criar_nota_emitivel(app)
+
+    resposta = login_as('operador').post(
+        f'/nfse/contrato/{ativo_id}/validar', json={'nota_id': nota_id}
+    )
+
+    assert resposta.status_code == 409
 
 
 def test_validar_libera_sessao_se_a_thread_nao_iniciar(login_as, app, monkeypatch):

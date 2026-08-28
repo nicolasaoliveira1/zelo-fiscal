@@ -1997,24 +1997,61 @@ def definir_liberacao_automatica(contrato_id, liberar, usuario_id=None):
     return contrato
 
 
-def registrar_validacao(
-    contrato_id, nota_id, resultado, usuario_id=None, *, agora=None,
-    valores_sensiveis=(),
-) -> ContratoNfse:
-    """Registra a revisão da candidata sem persistir valores da nota."""
+def _pode_revalidar(contrato, incidentes_pendentes):
+    return bool(
+        contrato is not None
+        and contrato.estado == "ativa"
+        and not incidentes_pendentes
+        and not contrato.elegivel_automatico
+        and contrato.erro_validacao
+    )
+
+
+def validar_revalidacao_ativa(contrato_id):
+    """Confirma que a ativa tem aviso e não concorre com uma candidata."""
 
     contrato = db.session.get(ContratoNfse, contrato_id)
     if contrato is None:
         raise ContratoNfseNaoEncontradoError(
-            "a versão candidata da NFS-e não existe"
+            "a versão do contrato da NFS-e não existe"
         )
-    # Só uma candidata se valida. Sem esta guarda, uma validação em curso
+    incidente = (
+        IncidenteContratoNfse.query
+        .filter(
+            IncidenteContratoNfse.contrato_base_id == contrato.id,
+            IncidenteContratoNfse.estado.in_(("aberto", "configurado")),
+        )
+        .first()
+    )
+    if not _pode_revalidar(contrato, incidente is not None):
+        raise ContratoNfseTransicaoInvalidaError(
+            "a versão ativa não possui avisos que possam ser revalidados"
+        )
+    return contrato
+
+
+def registrar_validacao(
+    contrato_id, nota_id, resultado, usuario_id=None, *, agora=None,
+    valores_sensiveis=(), revalidacao=False,
+) -> ContratoNfse:
+    """Registra a revisão de candidata ou ativa sem valores da nota."""
+
+    contrato = db.session.get(ContratoNfse, contrato_id)
+    if contrato is None:
+        raise ContratoNfseNaoEncontradoError(
+            "a versão do contrato da NFS-e não existe"
+        )
+    # Só candidata ou ativa se valida. Sem esta guarda, uma validação em curso
     # ressuscitava a versão que `configurar_incidente` acabara de arquivar
     # (a Central passava a oferecer "Ativar" numa arquivada), e nada impedia
     # a mesma chamada de tirar o contrato ATIVO do estado `ativa`.
-    if contrato.estado != "candidata":
+    estado_anterior = contrato.estado
+    if not (
+        estado_anterior == "candidata"
+        or (estado_anterior == "ativa" and revalidacao)
+    ):
         raise ContratoNfseTransicaoInvalidaError(
-            "somente uma versão candidata pode receber o resultado da validação"
+            "somente uma versão candidata ou ativa pode receber a validação"
         )
     divergencias = tuple(resultado or ())
     avisos = tuple(getattr(resultado, "avisos_assistidos", ()) or ())
@@ -2023,13 +2060,15 @@ def registrar_validacao(
     contrato.nota_validacao_id = nota_id
     contrato.elegivel_automatico = elegivel and not divergencias
     if divergencias:
-        contrato.estado = "candidata"
+        contrato.estado = estado_anterior
         contrato.validado_em = None
         contrato.erro_validacao = resumo_das_divergencias(
             divergencias, valores_sensiveis
         )
     else:
-        contrato.estado = "validada"
+        contrato.estado = (
+            "validada" if estado_anterior == "candidata" else "ativa"
+        )
         contrato.validado_em = agora
         # Os avisos assistidos eram calculados e jogados fora. Sem eles a
         # candidata dizia "permite somente modos assistidos" sem dizer POR
@@ -2048,7 +2087,11 @@ def registrar_validacao(
         _persistencia_falhou("registrar_validacao_nfse", exc)
     try:
         auditoria.registrar(
-            "nfse.contrato.validar",
+            (
+                "nfse.contrato.revalidar"
+                if estado_anterior == "ativa"
+                else "nfse.contrato.validar"
+            ),
             alvo_tipo="contrato_nfse",
             alvo_id=contrato.id,
             detalhe=(
@@ -2296,6 +2339,7 @@ def estado_painel():
         and ativo.erro_validacao
         and ativo.erro_validacao.startswith(_PREFIXO_REVISAO_ASSISTIDA)
     )
+    resumo_ativo["pode_revalidar"] = _pode_revalidar(ativo, incidentes)
     candidatas = [
         item for item in versoes if item.estado in ("candidata", "validada")
     ]
@@ -2377,4 +2421,5 @@ __all__ = [
     "recomendacao_incidente",
     "resolver_valor",
     "validar_contrato_automatico",
+    "validar_revalidacao_ativa",
 ]

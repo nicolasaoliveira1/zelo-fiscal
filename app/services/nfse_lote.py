@@ -286,7 +286,7 @@ def _emitir_nota(nota_id, driver_do_motor, execution_id):
 
 
 def _registrar_validacao_candidata(nota_id, contrato_id, execution_id):
-    """Relê a revisão, registra a candidata e nunca dispara emissão automática."""
+    """Relê a revisão, registra a versão e nunca dispara emissão automática."""
 
     nota = db.session.get(NotaNfse, nota_id)
     contrato = nfse_contrato.carregar_execucao(contrato_id)
@@ -307,6 +307,7 @@ def _registrar_validacao_candidata(nota_id, contrato_id, execution_id):
         # O que a divergencia cita da tela e dado de cliente, e `erro_validacao`
         # vive no CONTRATO, que sobrevive a nota e aparece na Central.
         valores_sensiveis=(documento, str(valor), descricao),
+        revalidacao=contrato.estado == 'ativa',
     )
     _publicar_validacao(contrato_id, nota_id, resultado)
     if resultado:

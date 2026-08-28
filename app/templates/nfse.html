@@ -629,12 +629,21 @@
                             {% endif %}
                         </td>
                         <td class="text-end">
-                            {% if versao.estado == 'ativa' and (contrato_estado.ativo.pode_liberar_automatico or versao.liberacao_automatica_manual) %}
+                            {% if versao.estado == 'ativa' and (contrato_estado.ativo.pode_liberar_automatico or contrato_estado.ativo.pode_revalidar or versao.liberacao_automatica_manual) %}
+                            {% if contrato_estado.ativo.pode_liberar_automatico or versao.liberacao_automatica_manual %}
                             <button class="btn {% if versao.liberacao_automatica_manual %}btn-ghost{% else %}btn-soft-primary{% endif %} btn-sm"
                                     type="button" data-liberar-automatico="{{ versao.id }}"
                                     data-liberar="{{ 'false' if versao.liberacao_automatica_manual else 'true' }}">
                                 {% if versao.liberacao_automatica_manual %}Revogar liberação automática{% else %}Assumir avisos e liberar automático{% endif %}
                             </button>
+                            {% endif %}
+                            {% if contrato_estado.ativo.pode_revalidar %}
+                            <button class="btn btn-ghost btn-sm ms-1" type="button"
+                                    data-revalidar-contrato="{{ versao.id }}"
+                                    data-bs-toggle="modal" data-bs-target="#modalValidarContrato">
+                                Revalidar
+                            </button>
+                            {% endif %}
                             {% elif versao.estado == 'validada' %}
                             <button class="btn btn-primary btn-sm" type="button"
                                     data-ativar-contrato="{{ versao.id }}">
