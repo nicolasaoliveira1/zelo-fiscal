@@ -83,7 +83,13 @@ function preencherStatus(estado, root) {
   const visual = estadoVisual(estado);
   if (faixa) faixa.dataset.estado = visual;
   let rotulo = rotulosEstado[visual];
-  if (estado?.ativo?.liberacao_automatica_manual) {
+  // Só refina o rótulo de um estado que JÁ é compatível. A liberação manual
+  // sobrevive a um incidente aberto depois dela, e sobrepor a faixa ali
+  // apagava da tela o "resolva os incidentes" — o operador via "liberado" num
+  // contrato que o servidor continua recusando.
+  if (visual !== 'compativel') {
+    // mantém o rótulo do estado real
+  } else if (estado?.ativo?.liberacao_automatica_manual) {
     rotulo = {
       titulo: 'Automático liberado com avisos',
       texto: 'Os avisos conhecidos desta versão foram assumidos pelo operador.',
@@ -407,7 +413,6 @@ function renderizarHistorico(estado, root) {
     return;
   }
   const intermediarias = versoes.filter((item) => item?.intermediaria === true);
-  const principais = versoes.filter((item) => item?.intermediaria !== true);
   if (intermediarias.length) {
     const rotuloIntermediarias = intermediarias.length === 1
       ? '1 versão intermediária'
@@ -445,7 +450,9 @@ function renderizarHistorico(estado, root) {
   cabecalho.appendChild(linhaCabecalho);
   tabela.appendChild(cabecalho);
   const corpo = criarElemento('tbody');
-  [...principais, ...intermediarias].forEach((versaoContrato) => {
+  // Ordem do servidor (versão desc), não principais-e-depois-intermediárias:
+  // revelar as escondidas não pode embaralhar a linha do tempo.
+  versoes.forEach((versaoContrato) => {
     const linha = criarElemento('tr');
     if (versaoContrato.intermediaria) {
       linha.className = 'nfse-versao-intermediaria';

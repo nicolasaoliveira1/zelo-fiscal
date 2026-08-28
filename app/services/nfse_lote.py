@@ -154,8 +154,15 @@ def pedir_parada():
     aceito = batch_engine.solicitar_parada_se_ativa(
         NFSE_BATCH_LOCK, NFSE_BATCH_STATE
     )
-    if aceito and not SESSAO.ocupada:
-        SESSAO.encerrar()
+    # `adquirir` e nao-bloqueante: so fecha quando ninguem esta dirigindo o
+    # navegador. Perguntar por `ocupada` e agir depois seria decidir sobre um
+    # fato que pode ter mudado no meio — e `quit()` concorrente com o worker
+    # derruba a janela debaixo de uma nota em revisao.
+    if aceito and SESSAO.adquirir():
+        try:
+            SESSAO.encerrar()
+        finally:
+            SESSAO.liberar()
     return aceito
 
 
@@ -395,18 +402,43 @@ def _capturar_revisao_da_validacao(contrato_id, nota_id, execution_id):
         )
 
 
+# Controles cujo valor aplicado e um CODIGO e cuja revisao mostra o ROTULO.
+# Descobrir o leitor pelo rotulo do formulario, nestes, compara "4314902" com
+# "Porto Alegre" e reprova toda nota correta.
+_INTERACOES_POR_CODIGO = ('chosen', 'select_busca', 'select_direto')
+
+
+def _rotulo_candidato(campo, valor_esperado, valores_esperados):
+    """Rótulo do formulário utilizável para descobrir o leitor da revisão.
+
+    Só quando a comparação é justa: num select, o portal mostra o rótulo da
+    opção, então o candidato só serve se algum dos esperados JÁ for esse
+    rótulo legível — senão a descoberta vira divergência garantida.
+    """
+
+    rotulo = getattr(campo, 'rotulo', None)
+    if not rotulo:
+        return None
+    if getattr(campo, 'interacao', '') not in _INTERACOES_POR_CODIGO:
+        return rotulo
+    tem_rotulo_legivel = any(
+        str(alternativa) != str(valor_esperado)
+        for alternativa in valores_esperados
+    )
+    return rotulo if tem_rotulo_legivel else None
+
+
 def _regras_autorrevisao_contrato(contrato, nota, config):
     """Materializa leitores e esperados sem persistir valores da nota."""
 
     campos = tuple(
         campo for campo in contrato.campos if campo.etapa != 'revisao'
     )
-    valores = {
-        campo.chave_semantica: nfse_contrato.resolver_valor(
-            campo, nota, config, date.today()
-        )
-        for campo in campos
-    }
+    # Mesmo nucleo que resolve os valores do preenchimento: sem ele a revisao
+    # comparava o codigo do IBGE contra o nome do municipio que a tela mostra.
+    valores = nfse_contrato.resolver_valores_contrato(
+        contrato, nota, config, date.today()
+    )
     regras = []
     for campo in campos:
         if (
@@ -434,7 +466,10 @@ def _regras_autorrevisao_contrato(contrato, nota, config):
         ):
             continue
         valor_esperado = valores[campo.chave_semantica]
-        valores_esperados = [valor_esperado]
+        rotulos = []
+        if isinstance(valor_esperado, (tuple, list)) and valor_esperado:
+            valor_esperado, *rotulos = valor_esperado
+        valores_esperados = [valor_esperado, *rotulos]
         for opcao in getattr(campo, 'opcoes', ()):
             if str(opcao.valor) == str(valor_esperado):
                 valores_esperados.append(opcao.rotulo)
@@ -442,10 +477,17 @@ def _regras_autorrevisao_contrato(contrato, nota, config):
             **campo.__dict__,
             'valor_esperado': valor_esperado,
             'valores_esperados': tuple(valores_esperados),
-            # Chegar à revisão prova que o controle aplicável aceitou o valor
-            # ou que o padrão/intocável do portal satisfez a validação da etapa.
-            'prova_aplicacao': True,
-            'revisao_rotulo_candidato': getattr(campo, 'rotulo', None),
+            # Chegar a revisao prova que o controle aceitou o valor — mas SO
+            # para o campo que a automacao escreveu e conferiu. `padrao_portal`
+            # e `intocavel` sao do portal: nada foi aplicado, nada foi provado,
+            # e tratar os dois como provados desligava o gate inteiro do
+            # automatico (nenhuma regra sobrava para julgar).
+            'prova_aplicacao': campo.origem not in (
+                'padrao_portal', 'intocavel'
+            ),
+            'revisao_rotulo_candidato': _rotulo_candidato(
+                campo, valor_esperado, valores_esperados
+            ),
         })
     return tuple(regras)
 

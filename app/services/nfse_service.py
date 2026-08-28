@@ -191,19 +191,13 @@ def _observar_fronteira_contrato(
 
 
 def _resolver_valores_contrato(contrato, nota, config, hoje):
-    """Materializa uma vez o catálogo seguro fixado para toda a nota."""
+    """Materializa uma vez o catálogo seguro fixado para toda a nota.
 
-    valores = {}
-    for campo in contrato.campos:
-        if campo.etapa == 'revisao':
-            continue
-        valor = nfse_contrato.resolver_valor(campo, nota, config, hoje)
-        if campo.fonte == 'municipio_servico_codigo' and valor is not None:
-            valor = (valor, config.municipio_servico_nome)
-        elif campo.fonte == 'codigo_tributacao' and valor is not None:
-            valor = (valor, valor)
-        valores[campo.chave_semantica] = valor
-    return valores
+    O núcleo mora em `nfse_contrato`: a autorrevisão precisa do MESMO esperado
+    por campo, e a cópia que existia aqui já divergia dela.
+    """
+
+    return nfse_contrato.resolver_valores_contrato(contrato, nota, config, hoje)
 
 
 def _registrar_validacao_portal(

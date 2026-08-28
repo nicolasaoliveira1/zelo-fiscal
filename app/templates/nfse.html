@@ -562,10 +562,13 @@
 
     <div class="nfse-contrato-faixa mt-3" id="nfseContratoStatus"
          data-estado="{{ contrato_estado_visual }}" role="status" aria-live="polite">
-        {% if contrato_estado.ativo.liberacao_automatica_manual %}
+        {# Só refina um estado que JÁ é compatível: a liberação manual sobrevive
+           a um incidente aberto depois dela, e sobrepor a faixa apagaria o
+           "resolva os incidentes" que o servidor continua exigindo. #}
+        {% if contrato_estado_visual == 'compativel' and contrato_estado.ativo.liberacao_automatica_manual %}
         <div class="estado" id="nfseContratoStatusTitulo">Automático liberado com avisos</div>
         <div id="nfseContratoStatusTexto">Os avisos conhecidos desta versão foram assumidos pelo operador.</div>
-        {% elif contrato_estado.ativo.pode_liberar_automatico %}
+        {% elif contrato_estado_visual == 'compativel' and contrato_estado.ativo.pode_liberar_automatico %}
         <div class="estado" id="nfseContratoStatusTitulo">Automação aguardando decisão</div>
         <div id="nfseContratoStatusTexto">A revisão passou, mas há avisos conhecidos que precisam ser assumidos.</div>
         {% elif contrato_estado_visual == 'compativel' %}

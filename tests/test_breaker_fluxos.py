@@ -420,6 +420,40 @@ def test_pausa_manual_apaga_a_marca_do_breaker(ctx):
     assert state['index'] == 1
 
 
+def test_pausa_manual_sobre_pausa_do_breaker_troca_o_motivo(ctx):
+    """Pausar um lote que o BREAKER ja pausou nao e pedido redundante.
+
+    Recusar por "nao esta rodando" deixava a marca do breaker no estado, e a
+    pausa do breaker se solta sozinha (`pausa_de_breaker_vencida`): vencida a
+    janela, o tipo era liberado e o proximo lote resetava, em silencio, a fila
+    que o operador tinha mandado parar. Pausa manual nao se solta sozinha.
+    """
+    circuit_breaker.limpar()
+    state = batch_engine.batch_state_defaults()
+    state.update(status='paused', pausado_por_breaker='FGTS',
+                 ids=[1, 2, 3], index=1, total=3)
+
+    assert batch_engine.solicitar_pausa_se_rodando(_LockFake(), state) is True
+
+    assert state['pausado_por_breaker'] is None
+    assert state['status'] == 'paused'
+    assert batch_engine.lote_ocupa_o_tipo(state) is True
+    assert state['index'] == 1
+
+
+def test_pausa_recusada_em_lote_que_nao_esta_em_curso(ctx):
+    """A porta segue fechada para o que nao ha o que pausar — a abertura e so
+    para a pausa do breaker, nao para qualquer status."""
+    circuit_breaker.limpar()
+    for status in ('completed', 'stopped', 'idle'):
+        state = batch_engine.batch_state_defaults()
+        state.update(status=status, ids=[1], total=1)
+        assert batch_engine.solicitar_pausa_se_rodando(
+            _LockFake(), state
+        ) is False
+        assert state['status'] == status
+
+
 def test_parar_tambem_apaga_a_marca_do_breaker(ctx):
     circuit_breaker.limpar()
     state = batch_engine.batch_state_defaults()

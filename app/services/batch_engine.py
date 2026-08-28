@@ -500,9 +500,19 @@ def request_pause(batch_lock, batch_state):
 
 
 def solicitar_pausa_se_rodando(batch_lock, batch_state):
-    """Pede pausa somente a um lote em execução, numa decisão atômica."""
+    """Pede pausa a um lote que ainda pode ser pausado, numa decisão atômica.
+
+    Aceita tambem o lote ja pausado PELO BREAKER: ali a pausa do operador nao e
+    redundante, e o unico jeito de trocar o motivo. Recusar deixaria a marca do
+    breaker no estado, e `pausa_de_breaker_vencida` liberaria o tipo — o proximo
+    lote resetaria, em silencio, a fila que o operador queria parada.
+    """
     with batch_lock:
-        if batch_state.get('status') != 'running':
+        status = batch_state.get('status')
+        pausa_do_breaker = (
+            status == 'paused' and batch_state.get('pausado_por_breaker')
+        )
+        if status != 'running' and not pausa_do_breaker:
             return False
         _registrar_pedido_de_pausa(batch_state)
         return True

@@ -1301,6 +1301,29 @@ def resolver_valor(regra, nota, config, hoje):
     return resolver(nota, config, hoje)
 
 
+def resolver_valores_contrato(contrato, nota, config, hoje):
+    """Materializa uma vez o catálogo seguro fixado para toda a nota.
+
+    Núcleo único do preenchimento e da autorrevisão: as duas precisam do MESMO
+    valor esperado por campo, e duas cópias divergem — a da revisão já estava
+    sem o par `(codigo, rotulo)` dos selects de configuração, e comparava um
+    código do IBGE contra o nome do município que a revisão mostra.
+    """
+
+    valores = {}
+    for campo in contrato.campos:
+        if campo.etapa == "revisao":
+            continue
+        valor = resolver_valor(campo, nota, config, hoje)
+        fonte = getattr(campo, "fonte", None)
+        if fonte == "municipio_servico_codigo" and valor is not None:
+            valor = (valor, config.municipio_servico_nome)
+        elif fonte == "codigo_tributacao" and valor is not None:
+            valor = (valor, valor)
+        valores[campo.chave_semantica] = valor
+    return valores
+
+
 def _copiar_campo(campo):
     copia = CampoContratoNfse(
         chave_semantica=campo.chave_semantica,
@@ -2340,8 +2363,13 @@ def estado_painel():
         and ativo.erro_validacao.startswith(_PREFIXO_REVISAO_ASSISTIDA)
     )
     resumo_ativo["pode_revalidar"] = _pode_revalidar(ativo, incidentes)
+    # Serializa cada versao UMA vez: `candidatas` e um recorte de `versoes`, e
+    # montar os dois em passadas separadas dobrava o trabalho num payload que a
+    # Central consulta em laco.
+    resumos_versoes = [_resumo_contrato(item) for item in versoes]
     candidatas = [
-        item for item in versoes if item.estado in ("candidata", "validada")
+        item for item in resumos_versoes
+        if item["estado"] in ("candidata", "validada")
     ]
     return {
         "ativo": resumo_ativo,
@@ -2352,8 +2380,8 @@ def estado_painel():
         # explicação. Quem decide é `validar_contrato_automatico`; aqui só se
         # traduz o mesmo fato para a tela.
         "estado_visual": _estado_visual(ativo, incidentes),
-        "candidatas": [_resumo_contrato(item) for item in candidatas],
-        "versoes": [_resumo_contrato(item) for item in versoes],
+        "candidatas": candidatas,
+        "versoes": resumos_versoes,
         "incidentes": resumos,
         "fontes": fontes_disponiveis(),
     }
@@ -2420,6 +2448,7 @@ __all__ = [
     "registrar_incidentes",
     "recomendacao_incidente",
     "resolver_valor",
+    "resolver_valores_contrato",
     "validar_contrato_automatico",
     "validar_revalidacao_ativa",
 ]

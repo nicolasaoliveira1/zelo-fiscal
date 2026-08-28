@@ -1733,6 +1733,7 @@ def nfse_lote_retomar():
         return json_error('A emissão não está pausada.', 400)
 
     opcoes = nfse_batch_opcoes()
+    contrato = None
     if opcoes['modo'] == nfse_lote.MODO_AUTOMATICO:
         try:
             # Um desvio pausa o lote sobre a nota atual. Depois que o operador
@@ -1743,15 +1744,18 @@ def nfse_lote_retomar():
             return json_error(
                 str(exc), 409, motivo='contrato_nfse_nao_elegivel'
             )
+
+    if not SESSAO.adquirir():
+        return json_error(
+            'Ja existe uma emissao da NFSe em andamento. Aguarde terminar.', 409)
+    # Só depois de tomar a sessão: uma retomada que morre em 409 não pode ter
+    # trocado o contrato fixado da fila que continua pausada.
+    if contrato is not None:
         definir_nfse_batch_opcoes(
             opcoes['modo'],
             opcoes['ignorar_aliquota'],
             contrato_id=contrato.id,
         )
-
-    if not SESSAO.adquirir():
-        return json_error(
-            'Ja existe uma emissao da NFSe em andamento. Aguarde terminar.', 409)
     nfse_lote.preparar_nova_fila()
     if not batch_engine.resume_batch(NFSE_BATCH_LOCK, NFSE_BATCH_STATE,
                                      nfse_lote.worker,

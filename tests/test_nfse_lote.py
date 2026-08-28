@@ -16,7 +16,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from app import db
-from app.automation.nfse import ResultadoAutorrevisao
+from app.automation.nfse import (
+    ResultadoAutorrevisao,
+    calcular_elegibilidade_automatica,
+)
 from app.automation.batch_state import (
     NFSE_BATCH_STATE,
     definir_nfse_batch_opcoes,
@@ -921,6 +924,103 @@ def test_regras_adicionais_carregam_o_rotulo_da_opcao_escolhida(monkeypatch):
 
     assert regras[0]['valores_esperados'] == ('0', 'Não')
     assert regras[0]['revisao_rotulo_candidato'] == 'Pergunta sintética'
+
+
+def test_prova_de_aplicacao_nao_cobre_o_que_o_portal_e_dono(monkeypatch):
+    """`prova_aplicacao` vale para o campo que a automação ESCREVEU e conferiu.
+
+    `padrao_portal` e `intocavel` não foram aplicados por ninguém — não há o que
+    provar. Tratar os dois como provados desligava o gate inteiro do automático
+    (sobrava regra nenhuma para julgar) e, com `erro_validacao` sempre nulo,
+    apagava também o botão de liberar/revalidar da interface.
+    """
+
+    def campo(chave, origem):
+        return SimpleNamespace(
+            chave_semantica=chave, etapa='tributacao', revisao_secao=None,
+            revisao_rotulo=None, conferivel_automatico=False, origem=origem,
+            obrigatorio=True, condicao_chave=None, condicao_valor=None,
+            rotulo=chave, interacao='texto', opcoes=(),
+        )
+
+    contrato = SimpleNamespace(campos=(
+        campo('campo.escrito', 'nota'),
+        campo('campo.do.portal', 'padrao_portal'),
+        campo('campo.intocavel', 'intocavel'),
+    ))
+    monkeypatch.setattr(
+        nfse_lote.nfse_contrato, 'resolver_valores_contrato',
+        lambda *_args: {c.chave_semantica: 'esperado' for c in contrato.campos},
+    )
+
+    provas = {
+        regra['chave_semantica']: regra['prova_aplicacao']
+        for regra in nfse_lote._regras_autorrevisao_contrato(
+            contrato, SimpleNamespace(), SimpleNamespace()
+        )
+    }
+
+    assert provas == {
+        'campo.escrito': True,
+        'campo.do.portal': False,
+        'campo.intocavel': False,
+    }
+    # E o gate volta a fechar por causa deles, que e o ponto.
+    assert calcular_elegibilidade_automatica(
+        regras=[{
+            'chave_semantica': 'campo.do.portal', 'origem': 'padrao_portal',
+            'obrigatorio': True, 'conferivel_automatico': False,
+            'prova_aplicacao': False, 'tipo': 'text',
+        }],
+    ) is False
+
+
+def test_select_por_codigo_nao_oferece_rotulo_para_descoberta(monkeypatch):
+    """A revisão mostra o RÓTULO do select; o contrato guarda o CÓDIGO.
+
+    Oferecer o rótulo do formulário como candidato sem ter uma grafia legível
+    entre os esperados faz a descoberta comparar "17.19.01" com o texto da
+    opção — divergência garantida, em toda nota correta. Só o par
+    `(codigo, rotulo)` autoriza o candidato.
+    """
+
+    def campo(chave, fonte, interacao):
+        return SimpleNamespace(
+            chave_semantica=chave, etapa='servico', revisao_secao=None,
+            revisao_rotulo=None, conferivel_automatico=False,
+            origem='configuracao', obrigatorio=True, condicao_chave=None,
+            condicao_valor=None, rotulo=f'Rótulo de {chave}',
+            interacao=interacao, fonte=fonte, opcoes=(),
+        )
+
+    contrato = SimpleNamespace(campos=(
+        campo('municipio', 'municipio_servico_codigo', 'select_busca'),
+        campo('tributacao', 'codigo_tributacao', 'select_busca'),
+    ))
+    monkeypatch.setattr(
+        nfse_lote.nfse_contrato, 'resolver_valores_contrato',
+        lambda *_args: {
+            # o par que o núcleo compartilhado devolve: código + rótulo legível
+            'municipio': ('4310330', 'Cidade Sintética/RS'),
+            # aqui o "rótulo" é o próprio código: não há grafia legível
+            'tributacao': ('17.19.01', '17.19.01'),
+        },
+    )
+
+    regras = {
+        regra['chave_semantica']: regra
+        for regra in nfse_lote._regras_autorrevisao_contrato(
+            contrato, SimpleNamespace(), SimpleNamespace()
+        )
+    }
+
+    assert regras['municipio']['revisao_rotulo_candidato'] == (
+        'Rótulo de municipio'
+    )
+    assert regras['municipio']['valores_esperados'] == (
+        '4310330', 'Cidade Sintética/RS'
+    )
+    assert regras['tributacao']['revisao_rotulo_candidato'] is None
 
 
 def test_valor_contratado_ilegivel_forca_divergencia(monkeypatch):
