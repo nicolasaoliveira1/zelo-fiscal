@@ -42,9 +42,33 @@ class Painel:
 
         mono = tkfont.Font(family='Consolas', size=10)
 
-        lateral = tk.Frame(root, bg=FUNDO_LATERAL, width=210)
-        lateral.pack(side='left', fill='y')
-        lateral.pack_propagate(False)
+        root.minsize(820, 380)
+
+        # A lateral rola: numa janela baixa os ultimos botoes ficavam fora da
+        # tela, e so dava para alcanca-los esticando a janela.
+        moldura = tk.Frame(root, bg=FUNDO_LATERAL, width=210)
+        moldura.pack(side='left', fill='y')
+        moldura.pack_propagate(False)
+
+        self.canvas_lateral = tk.Canvas(moldura, bg=FUNDO_LATERAL,
+                                        highlightthickness=0, borderwidth=0)
+        self.barra_lateral = tk.Scrollbar(moldura, orient='vertical',
+                                          command=self.canvas_lateral.yview,
+                                          bg=FUNDO_LATERAL, troughcolor=FUNDO,
+                                          borderwidth=0)
+        self.canvas_lateral.configure(yscrollcommand=self.barra_lateral.set)
+        self.canvas_lateral.pack(side='left', fill='both', expand=True)
+
+        lateral = tk.Frame(self.canvas_lateral, bg=FUNDO_LATERAL)
+        self.janela_lateral = self.canvas_lateral.create_window(
+            (0, 0), window=lateral, anchor='nw')
+        lateral.bind('<Configure>', self._ajustar_lateral)
+        self.canvas_lateral.bind('<Configure>', self._ajustar_lateral)
+        # roda so com o ponteiro sobre a lateral: o log tem a rolagem dele.
+        moldura.bind('<Enter>', lambda _: self.canvas_lateral.bind_all(
+            '<MouseWheel>', self._rolar_lateral))
+        moldura.bind('<Leave>', lambda _: self.canvas_lateral.unbind_all(
+            '<MouseWheel>'))
 
         self.status = tk.Label(lateral, text='parado', bg=FUNDO_LATERAL, fg=SUAVE,
                                font=('Segoe UI', 10, 'bold'), anchor='w', padx=14)
@@ -66,6 +90,15 @@ class Painel:
         self._botao(lateral, 'Reload (gatilho)', self.reload_gatilho)
         self._botao(lateral, 'Reload total', self.reload_total)
         self._botao(lateral, f'Derrubar porta {PORTA}', self.derrubar_porta)
+
+        self.auto_reload = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            lateral, text='reload automatico', variable=self.auto_reload,
+            command=self.trocar_modo, bg=FUNDO_LATERAL, fg=TEXTO,
+            activebackground=FUNDO_LATERAL, activeforeground=TEXTO,
+            selectcolor=FUNDO, font=('Segoe UI', 9), anchor='w', padx=10,
+            highlightthickness=0, borderwidth=0, cursor='hand2',
+        ).pack(fill='x', padx=10, pady=(4, 0))
 
         self._secao(lateral, 'banco')
         self._botao(lateral, 'flask db upgrade', lambda: self.tarefa(
@@ -104,6 +137,8 @@ class Painel:
         self.root.after(80, self.drenar)
         self.escrever(f'painel pronto — raiz {RAIZ}', 'painel')
         self.checar_estado()
+        self.ref_vista = self._ref_atual()
+        self.vigiar_branch()
         # app de um cmd antigo continua de pe e o painel nao o conhece: avisa,
         # senao o Iniciar falha com "porta em uso" sem dizer por que.
         externos = self.pids_na_porta()
@@ -115,6 +150,24 @@ class Painel:
             self.escrever('venv nao encontrado. Crie com: python -m venv venv', 'erro')
 
     # --- widgets -----------------------------------------------------------
+    def _ajustar_lateral(self, _=None):
+        canvas = self.canvas_lateral
+        canvas.configure(scrollregion=canvas.bbox('all'))
+        canvas.itemconfigure(self.janela_lateral, width=canvas.winfo_width())
+        # a barra so aparece quando ha o que rolar.
+        conteudo = canvas.bbox('all')
+        precisa = bool(conteudo) and conteudo[3] > canvas.winfo_height()
+        if precisa and not self.barra_lateral.winfo_ismapped():
+            # antes do canvas: o canvas ocupa a largura toda e, empacotada
+            # depois, a barra ficaria com zero de largura (sem aparecer).
+            self.barra_lateral.pack(side='right', fill='y',
+                                    before=self.canvas_lateral)
+        elif not precisa and self.barra_lateral.winfo_ismapped():
+            self.barra_lateral.pack_forget()
+
+    def _rolar_lateral(self, evento):
+        self.canvas_lateral.yview_scroll(-1 * (evento.delta // 120), 'units')
+
     def _secao(self, pai, titulo):
         tk.Label(pai, text=titulo.upper(), bg=FUNDO_LATERAL, fg=SUAVE,
                  font=('Segoe UI', 8, 'bold'), anchor='w',
@@ -186,8 +239,12 @@ class Painel:
         if self.vivo():
             self.escrever('ja esta rodando', 'atencao')
             return
-        self.escrever('[servidor] subindo run.py (FLASK_DEBUG=1)', 'painel')
-        self.proc = self._popen([PYTHON, 'run.py'], {'FLASK_DEBUG': '1'})
+        modo = 'automatico' if self.auto_reload.get() else 'so pelo gatilho'
+        self.escrever(f'[servidor] subindo run.py — reload {modo}', 'painel')
+        self.proc = self._popen([PYTHON, 'run.py'], {
+            'FLASK_DEBUG': '1',
+            'FLASK_RELOAD_AUTO': '1' if self.auto_reload.get() else '0',
+        })
         threading.Thread(target=self._bombear, args=(self.proc, 'servidor'),
                          daemon=True).start()
 
@@ -214,6 +271,40 @@ class Painel:
             self.root.after(700, self.iniciar)
         else:
             self.iniciar()
+
+    def trocar_modo(self):
+        modo = 'automatico' if self.auto_reload.get() else 'so pelo gatilho'
+        self.escrever(f'[servidor] reload {modo}', 'painel')
+        if self.vivo():
+            # o modo e decidido no app.run: so vale no proximo processo.
+            self.escrever('[servidor] reiniciando para aplicar o modo', 'painel')
+            self.reload_total()
+
+    # --- vigia da branch ---------------------------------------------------
+    def _ref_atual(self):
+        """Le .git/HEAD sem chamar git: e um arquivo, e a troca reescreve ele."""
+        try:
+            caminho = os.path.join(RAIZ, '.git')
+            if os.path.isfile(caminho):  # worktree: .git aponta para o real
+                caminho = open(caminho, encoding='utf-8').read().split(':', 1)[1].strip()
+            return open(os.path.join(caminho, 'HEAD'), encoding='utf-8').read().strip()
+        except OSError:
+            return None
+
+    def vigiar_branch(self):
+        ref = self._ref_atual()
+        if ref and self.ref_vista and ref != self.ref_vista:
+            self.escrever('[git] a branch mudou embaixo do app', 'atencao')
+            if self.vivo() and self.auto_reload.get():
+                # o checkout reescreve muitos .py de uma vez: o reloader
+                # reinicia no meio disso, e o boot migra o banco da branch nova.
+                self.escrever(
+                    '[git] o servidor esta no modo automatico e vai reiniciar '
+                    'sozinho com o codigo da branch nova — confira o banco',
+                    'erro')
+            self.checar_estado()
+        self.ref_vista = ref
+        self.root.after(2000, self.vigiar_branch)
 
     def vivo(self):
         return self.proc is not None and self.proc.poll() is None
@@ -248,9 +339,14 @@ class Painel:
         threading.Thread(target=self._checar_estado, daemon=True).start()
 
     def _checar_estado(self):
-        r = subprocess.run([PYTHON, ESTADO], cwd=RAIZ, capture_output=True,
-                           text=True, encoding='utf-8', errors='replace',
-                           creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            r = subprocess.run([PYTHON, ESTADO], cwd=RAIZ, capture_output=True,
+                               text=True, encoding='utf-8', errors='replace',
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+        except OSError as e:  # venv ausente, por exemplo
+            self.estado = {'branch': '?', 'estado': 'erro', 'mensagem': str(e)}
+            self.root.after(0, self._pintar_estado)
+            return
         try:
             # o boot do app escreve no stdout antes do JSON: pega do 1o '{'.
             self.estado = json.loads(r.stdout[r.stdout.index('{'):])
