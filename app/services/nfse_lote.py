@@ -464,7 +464,13 @@ def _emitir_sozinho(nota, execution_id, contrato_id=None):
         descricao,
         regras_adicionais=regras,
     )
-    if getattr(divergencias, 'elegivel_automatico', None) is False:
+    # A revisão continua acusando toda divergência concreta. A elegibilidade
+    # calculada pelo leitor só bloqueia os avisos sem leitor quando a versão
+    # ativa ainda não recebeu a aceitação explícita do operador.
+    if (
+        getattr(divergencias, 'elegivel_automatico', None) is False
+        and not contrato.elegivel_automatico
+    ):
         divergencias.append(
             'O contrato ativo permite somente emissão assistida.'
         )

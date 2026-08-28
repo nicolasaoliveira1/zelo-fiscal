@@ -1831,6 +1831,7 @@ def configurar_incidente(
 # do seletor: o SQLite ignora largura de VARCHAR e o MySQL levanta DataError
 # (licao 3 do CLAUDE.md).
 _LARGURA_ERRO_VALIDACAO = 500
+_PREFIXO_REVISAO_ASSISTIDA = "a revisão permite somente modos assistidos"
 
 # Corrida de digitos que so pode ser documento, inscricao ou chave. Valor
 # monetario nao chega aqui: `_mascarar` ja apagou o da nota antes.
@@ -1890,7 +1891,7 @@ def resumo_das_divergencias(divergencias, valores_sensiveis=()):
 def _resumo_assistido(avisos, valores_sensiveis=()):
     """Por que a candidata só serve para os modos assistidos."""
 
-    base = "a revisão permite somente modos assistidos"
+    base = _PREFIXO_REVISAO_ASSISTIDA
     partes = [
         limpa for limpa in (
             _mascarar(aviso, valores_sensiveis) for aviso in avisos
@@ -1904,6 +1905,96 @@ def _resumo_assistido(avisos, valores_sensiveis=()):
     if len(corpo) > folga:
         corpo = corpo[: max(folga - 1, 0)] + "…"
     return f"{prefixo}{corpo}"
+
+
+def _liberacao_automatica_manual(contrato):
+    return bool(
+        contrato.elegivel_automatico
+        and contrato.erro_validacao
+        and contrato.erro_validacao.startswith(_PREFIXO_REVISAO_ASSISTIDA)
+    )
+
+
+def definir_liberacao_automatica(contrato_id, liberar, usuario_id=None):
+    """Assume ou revoga os avisos conhecidos da versão ativa.
+
+    Divergências da revisão não chegam ao estado validado e incidentes
+    pendentes continuam fechando o gate. A mensagem original é preservada para
+    deixar explícito quais avisos o operador assumiu nesta versão.
+    """
+
+    contrato = (
+        ContratoNfse.query
+        .filter(ContratoNfse.id == contrato_id)
+        .with_for_update()
+        .first()
+    )
+    if contrato is None:
+        raise ContratoNfseNaoEncontradoError(
+            "a versão de contrato solicitada não existe"
+        )
+    if contrato.estado != "ativa":
+        raise ContratoNfseTransicaoInvalidaError(
+            "somente a versão ativa pode receber a liberação automática"
+        )
+
+    incidentes = (
+        IncidenteContratoNfse.query
+        .filter(
+            IncidenteContratoNfse.contrato_base_id == contrato.id,
+            IncidenteContratoNfse.estado.in_(("aberto", "configurado")),
+        )
+        .with_for_update()
+        .all()
+    )
+    if incidentes:
+        raise ContratoNfseTransicaoInvalidaError(
+            "resolva os incidentes pendentes antes de liberar o modo automático"
+        )
+
+    liberacao_atual = _liberacao_automatica_manual(contrato)
+    if liberar:
+        if contrato.elegivel_automatico and not liberacao_atual:
+            raise ContratoNfseTransicaoInvalidaError(
+                "a versão ativa já é elegível sem liberação manual"
+            )
+        if (
+            contrato.validado_em is None
+            or not contrato.erro_validacao
+            or not contrato.erro_validacao.startswith(_PREFIXO_REVISAO_ASSISTIDA)
+        ):
+            raise ContratoNfseTransicaoInvalidaError(
+                "a versão ativa não possui avisos validados que possam ser assumidos"
+            )
+        contrato.elegivel_automatico = True
+        evento = "nfse.contrato.liberar_automatico"
+    else:
+        if not liberacao_atual:
+            raise ContratoNfseTransicaoInvalidaError(
+                "a versão ativa não possui liberação manual para revogar"
+            )
+        contrato.elegivel_automatico = False
+        evento = "nfse.contrato.revogar_automatico"
+
+    try:
+        db.session.commit()
+    except Exception as exc:
+        _persistencia_falhou("definir_liberacao_automatica_nfse", exc)
+    try:
+        auditoria.registrar(
+            evento,
+            alvo_tipo="contrato_nfse",
+            alvo_id=contrato.id,
+            detalhe=f"contrato_id={contrato.id};usuario_id={usuario_id}",
+        )
+    except Exception as exc:
+        log_event(
+            "nfse_contrato_auditoria_falhou",
+            level="WARNING",
+            contrato_id=contrato.id,
+            error_type=type(exc).__name__,
+        )
+    return contrato
 
 
 def registrar_validacao(
@@ -2089,6 +2180,7 @@ def _resumo_contrato(contrato):
         "versao": contrato.versao,
         "estado": contrato.estado,
         "elegivel_automatico": bool(contrato.elegivel_automatico),
+        "liberacao_automatica_manual": _liberacao_automatica_manual(contrato),
         "criado_em": _data_iso(contrato.criado_em),
         "validado_em": _data_iso(contrato.validado_em),
         "ativado_em": _data_iso(contrato.ativado_em),
@@ -2162,9 +2254,8 @@ def estado_painel():
     """Serializa o estado persistido sem dados da nota ou do DOM."""
 
     ativo = contrato_ativo()
-    candidatos = (
+    versoes = (
         ContratoNfse.query
-        .filter(ContratoNfse.estado.in_(("candidata", "validada")))
         .order_by(ContratoNfse.versao.desc())
         .all()
     )
@@ -2189,8 +2280,19 @@ def estado_painel():
         )
         for item in incidentes
     ]
+    resumo_ativo = _resumo_contrato(ativo)
+    resumo_ativo["pode_liberar_automatico"] = bool(
+        not incidentes
+        and ativo.validado_em is not None
+        and not ativo.elegivel_automatico
+        and ativo.erro_validacao
+        and ativo.erro_validacao.startswith(_PREFIXO_REVISAO_ASSISTIDA)
+    )
+    candidatas = [
+        item for item in versoes if item.estado in ("candidata", "validada")
+    ]
     return {
-        "ativo": _resumo_contrato(ativo),
+        "ativo": resumo_ativo,
         # Fonte única do estado visual. A regra vivia em quatro lugares — este
         # painel, o Jinja da primeira pintura, `estadoVisual` e
         # `contratoPermiteAutomatico` — e as cópias já discordavam: a faixa
@@ -2198,7 +2300,8 @@ def estado_painel():
         # explicação. Quem decide é `validar_contrato_automatico`; aqui só se
         # traduz o mesmo fato para a tela.
         "estado_visual": _estado_visual(ativo, incidentes),
-        "candidatas": [_resumo_contrato(item) for item in candidatos],
+        "candidatas": [_resumo_contrato(item) for item in candidatas],
+        "versoes": [_resumo_contrato(item) for item in versoes],
         "incidentes": resumos,
         "fontes": fontes_disponiveis(),
     }
@@ -2253,6 +2356,7 @@ __all__ = [
     "carregar_execucao",
     "contrato_ativo",
     "configurar_incidente",
+    "definir_liberacao_automatica",
     "contrato_inicial_execucao",
     "ativar",
     "detalhe_contrato",

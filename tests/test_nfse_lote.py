@@ -850,6 +850,23 @@ def test_conferindo_emite_e_marca(automatico):
     assert nota.origem_emissao == 'automacao'
 
 
+def test_aceitacao_persistida_na_versao_cobre_apenas_avisos_sem_leitor(
+    automatico
+):
+    automatico['automacao'].conferir_revisao.return_value = ResultadoAutorrevisao(
+        (),
+        elegivel_automatico=False,
+        avisos_assistidos=('Campo sintético sem leitor.',),
+    )
+
+    sucesso, grave, _mensagem = nfse_lote._emitir_nota(
+        _nota().id, None, 'exec-1'
+    )
+
+    assert (sucesso, grave) == (True, None)
+    assert automatico['automacao'].emitir.called
+
+
 def test_divergencia_nao_emite_e_pausa_o_lote(automatico):
     """O teste independente da spec: qualquer diferenca barra a emissao."""
     automatico['automacao'].conferir_revisao.return_value = [

@@ -552,6 +552,41 @@ def nfse_contrato_ativar(contrato_id):
     }
 
 
+@bp.route(
+    '/nfse/contrato/<int:contrato_id>/liberar-automatico', methods=['POST']
+)
+@requer_papel('operador')
+def nfse_contrato_liberar_automatico(contrato_id):
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return json_error('Envie um objeto JSON para a liberação.', 400, campo='corpo')
+    extras = set(dados) - {'liberar'}
+    if extras:
+        return json_error(
+            'Campo não permitido na liberação.', 400, campo=sorted(extras)[0]
+        )
+    if not isinstance(dados.get('liberar'), bool):
+        return json_error(
+            'Informe se deseja liberar ou revogar o modo automático.',
+            400,
+            campo='liberar',
+        )
+    try:
+        contrato = nfse_contrato.definir_liberacao_automatica(
+            contrato_id, dados['liberar'], usuario_id=current_user.id
+        )
+    except nfse_contrato.ContratoNfseNaoEncontradoError as exc:
+        return json_error(str(exc), 404)
+    except nfse_contrato.ContratoNfseTransicaoInvalidaError as exc:
+        return json_error(str(exc), 409)
+    except nfse_contrato.PersistenciaContratoError as exc:
+        return json_error(str(exc), 500)
+    return {
+        'status': 'ok',
+        'contrato': nfse_contrato.detalhe_contrato(contrato.id),
+    }
+
+
 def _categoria(nota):
     """Como a linha aparece agrupada na tela: honorarios, servico ou indefinida.
 
@@ -1687,6 +1722,28 @@ def nfse_lote_parar():
 @requer_papel('operador')
 def nfse_lote_retomar():
     """Recomeca pela nota onde parou — o motor nao avanca o indice ao pausar."""
+    with NFSE_BATCH_LOCK:
+        pausado = NFSE_BATCH_STATE.get('status') == 'paused'
+    if not pausado:
+        return json_error('A emissão não está pausada.', 400)
+
+    opcoes = nfse_batch_opcoes()
+    if opcoes['modo'] == nfse_lote.MODO_AUTOMATICO:
+        try:
+            # Um desvio pausa o lote sobre a nota atual. Depois que o operador
+            # configura, valida e ativa a nova versão, a retomada precisa usar
+            # essa versão — manter o id fixado no início repetiria o desvio.
+            contrato = nfse_contrato.validar_contrato_automatico()
+        except nfse_contrato.ContratoNfseNaoElegivelError as exc:
+            return json_error(
+                str(exc), 409, motivo='contrato_nfse_nao_elegivel'
+            )
+        definir_nfse_batch_opcoes(
+            opcoes['modo'],
+            opcoes['ignorar_aliquota'],
+            contrato_id=contrato.id,
+        )
+
     if not SESSAO.adquirir():
         return json_error(
             'Ja existe uma emissao da NFSe em andamento. Aguarde terminar.', 409)
@@ -1695,7 +1752,7 @@ def nfse_lote_retomar():
                                      nfse_lote.worker,
                                      app_factory=_current_app_object):
         SESSAO.liberar()
-        return json_error('A emissao nao esta pausada.', 400)
+        return json_error('A emissão não está pausada.', 400)
     return {'status': 'ok'}
 
 

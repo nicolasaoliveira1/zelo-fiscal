@@ -10,7 +10,11 @@ import pytest
 
 from app.models import NotaNfse, StatusNotaNfse
 from app.routes import nfse as rotas_nfse
-from app.automation.batch_state import NFSE_BATCH_STATE, nfse_batch_opcoes
+from app.automation.batch_state import (
+    NFSE_BATCH_STATE,
+    definir_nfse_batch_opcoes,
+    nfse_batch_opcoes,
+)
 from app.services import batch_engine, nfse_lote, nfse_service
 
 LINHA = ('"13/07/2026";"EMPRESA TESTE LTDA";"0001443038";"062623";"05/07/2026";'
@@ -326,6 +330,36 @@ def test_retomar_recomeca_pela_nota_onde_parou(client, sessao_falsa, worker_fals
     assert client.post('/nfse/lote/retomar').status_code == 200
     assert NFSE_BATCH_STATE['index'] == 0, 'retomar nao pode saltar a nota atual'
     assert NFSE_BATCH_STATE['stop_requested'] is False
+
+
+def test_retomar_automatico_fixa_a_versao_ativa_atual(
+    client, app, sessao_falsa, worker_falso
+):
+    from app.services import nfse_contrato
+
+    with app.app_context():
+        ativo_id = nfse_contrato.garantir_contrato_inicial().id
+    definir_nfse_batch_opcoes(
+        nfse_lote.MODO_AUTOMATICO,
+        True,
+        contrato_id=ativo_id + 1,
+    )
+    NFSE_BATCH_STATE.update({
+        'status': 'paused',
+        'ids': [7],
+        'total': 1,
+        'index': 0,
+    })
+
+    resposta = client.post('/nfse/lote/retomar')
+
+    assert resposta.status_code == 200
+    assert nfse_batch_opcoes() == {
+        'modo': nfse_lote.MODO_AUTOMATICO,
+        'ignorar_aliquota': True,
+        'contrato_id': ativo_id,
+        'validacao_contrato_id': None,
+    }
 
 
 def test_pular_sem_emissao_em_andamento_e_recusado(client, sessao_falsa):

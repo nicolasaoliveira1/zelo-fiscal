@@ -51,6 +51,21 @@ def _diferenca_com_chave(chave):
     )
 
 
+def _ativar_contrato_com_avisos():
+    ativo = nfse_contrato.garantir_contrato_inicial()
+    incidente = nfse_contrato.registrar_incidentes(ativo.id, [_diferenca()])[0]
+    candidata = nfse_contrato.configurar_incidente(
+        incidente.id, {'origem': 'fixo', 'valor_fixo': 'A'}
+    )
+    resultado = automacao_nfse.ResultadoAutorrevisao(
+        (),
+        elegivel_automatico=False,
+        avisos_assistidos=('Campo sintético sem leitor.',),
+    )
+    validada = nfse_contrato.registrar_validacao(candidata.id, None, resultado)
+    return nfse_contrato.ativar(validada.id)
+
+
 def test_garantir_contrato_inicial_eh_idempotente_e_nao_abre_portal(app, ids):
     with app.app_context():
         primeiro = nfse_contrato.garantir_contrato_inicial()
@@ -368,31 +383,64 @@ def test_validacao_sem_leitor_ativa_somente_para_modos_assistidos(
 ):
     monkeypatch.setattr(nfse_contrato.auditoria, 'registrar', lambda *a, **k: None)
     with app.app_context():
-        ativo = nfse_contrato.garantir_contrato_inicial()
-        incidente = nfse_contrato.registrar_incidentes(
-            ativo.id, [_diferenca()]
-        )[0]
-        candidata = nfse_contrato.configurar_incidente(
-            incidente.id, {'origem': 'fixo', 'valor_fixo': 'A'}
-        )
-        resultado = automacao_nfse.ResultadoAutorrevisao(
-            (),
-            elegivel_automatico=False,
-            avisos_assistidos=('Campo sintético sem leitor.',),
-        )
-
-        validada = nfse_contrato.registrar_validacao(
-            candidata.id, None, resultado
-        )
-        ativada = nfse_contrato.ativar(validada.id)
+        ativada = _ativar_contrato_com_avisos()
 
         # A frase base continua, agora seguida do MOTIVO: sem nomear a lacuna,
         # "permite somente modos assistidos" não dizia onde consertar.
-        assert validada.erro_validacao.startswith(
+        assert ativada.erro_validacao.startswith(
             'a revisão permite somente modos assistidos')
-        assert 'Campo sintético sem leitor.' in validada.erro_validacao
+        assert 'Campo sintético sem leitor.' in ativada.erro_validacao
         assert ativada.estado == 'ativa'
         assert ativada.elegivel_automatico is False
+
+
+def test_operador_pode_liberar_e_revogar_avisos_da_versao_ativa(
+    app, ids, monkeypatch
+):
+    eventos = []
+    monkeypatch.setattr(
+        nfse_contrato.auditoria,
+        'registrar',
+        lambda evento, **_dados: eventos.append(evento),
+    )
+    with app.app_context():
+        ativa = _ativar_contrato_com_avisos()
+
+        liberada = nfse_contrato.definir_liberacao_automatica(
+            ativa.id, True
+        )
+        assert liberada.elegivel_automatico is True
+        assert 'Campo sintético sem leitor.' in liberada.erro_validacao
+        assert nfse_contrato.validar_contrato_automatico().id == ativa.id
+        assert nfse_contrato.estado_painel()['ativo'][
+            'liberacao_automatica_manual'
+        ] is True
+
+        revogada = nfse_contrato.definir_liberacao_automatica(
+            ativa.id, False
+        )
+        assert revogada.elegivel_automatico is False
+        assert eventos[-2:] == [
+            'nfse.contrato.liberar_automatico',
+            'nfse.contrato.revogar_automatico',
+        ]
+
+
+def test_incidente_novo_impede_liberar_avisos_da_versao_ativa(
+    app, ids, monkeypatch
+):
+    monkeypatch.setattr(nfse_contrato.auditoria, 'registrar', lambda *a, **k: None)
+    with app.app_context():
+        ativa = _ativar_contrato_com_avisos()
+        nfse_contrato.registrar_incidentes(
+            ativa.id, [_diferenca_com_chave('campo.posterior')]
+        )
+
+        with pytest.raises(
+            nfse_contrato.ContratoNfseTransicaoInvalidaError,
+            match='incidentes pendentes',
+        ):
+            nfse_contrato.definir_liberacao_automatica(ativa.id, True)
 
 
 def test_configurar_recusa_opcao_fixa_ausente_sem_criar_candidata(app, ids):

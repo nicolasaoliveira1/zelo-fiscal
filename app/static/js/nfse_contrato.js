@@ -82,8 +82,20 @@ function preencherStatus(estado, root) {
   const texto = porId(root, 'nfseContratoStatusTexto');
   const visual = estadoVisual(estado);
   if (faixa) faixa.dataset.estado = visual;
-  if (titulo) titulo.textContent = rotulosEstado[visual].titulo;
-  if (texto) texto.textContent = rotulosEstado[visual].texto;
+  let rotulo = rotulosEstado[visual];
+  if (estado?.ativo?.liberacao_automatica_manual) {
+    rotulo = {
+      titulo: 'Automático liberado com avisos',
+      texto: 'Os avisos conhecidos desta versão foram assumidos pelo operador.',
+    };
+  } else if (estado?.ativo?.pode_liberar_automatico) {
+    rotulo = {
+      titulo: 'Automação aguardando decisão',
+      texto: 'A revisão passou, mas há avisos conhecidos que precisam ser assumidos.',
+    };
+  }
+  if (titulo) titulo.textContent = rotulo.titulo;
+  if (texto) texto.textContent = rotulo.texto;
   return visual;
 }
 
@@ -385,9 +397,11 @@ function renderizarHistorico(estado, root) {
   if (!historico) return;
   limpar(historico);
   historico.appendChild(criarElemento('h3', 'Histórico de versões'));
-  const candidatas = Array.isArray(estado?.candidatas) ? estado.candidatas : [];
-  if (!candidatas.length) {
-    const vazio = criarElemento('p', 'Nenhuma versão candidata foi criada.');
+  const versoes = Array.isArray(estado?.versoes)
+    ? estado.versoes
+    : (Array.isArray(estado?.candidatas) ? estado.candidatas : []);
+  if (!versoes.length) {
+    const vazio = criarElemento('p', 'Nenhuma versão do contrato foi criada.');
     vazio.className = 'nfse-hint mb-0';
     historico.appendChild(vazio);
     return;
@@ -407,46 +421,73 @@ function renderizarHistorico(estado, root) {
   cabecalho.appendChild(linhaCabecalho);
   tabela.appendChild(cabecalho);
   const corpo = criarElemento('tbody');
-  candidatas.forEach((candidata) => {
+  versoes.forEach((versaoContrato) => {
     const linha = criarElemento('tr');
-    linha.dataset.contratoCandidato = String(candidata.id ?? '');
-    const versao = criarElemento('td', candidata.versao ?? '—');
+    linha.dataset.contratoVersao = String(versaoContrato.id ?? '');
+    if (['candidata', 'validada'].includes(versaoContrato.estado)) {
+      linha.dataset.contratoCandidato = String(versaoContrato.id ?? '');
+    }
+    const versao = criarElemento('td', versaoContrato.versao ?? '—');
     versao.className = 'nfse-mono';
     linha.appendChild(versao);
-    const celulaEstado = criarElemento('td', candidata.estado || 'desconhecida');
+    const celulaEstado = criarElemento('td', versaoContrato.estado || 'desconhecida');
     // Validacao que reprovou tem de PARECER que reprovou. Sem isto a linha fica
     // igual a de uma candidata que nunca foi validada, e o operador que acabou
     // de emitir a nota de validacao conclui que o fluxo nao rodou — quando ele
     // rodou, conferiu e recusou.
-    if (candidata.erro_validacao) {
-      const motivo = criarElemento('div', candidata.erro_validacao);
+    if (versaoContrato.erro_validacao) {
+      const motivo = criarElemento('div', versaoContrato.erro_validacao);
       motivo.className = 'nfse-hint mb-0';
       celulaEstado.appendChild(motivo);
+    }
+    if (versaoContrato.liberacao_automatica_manual) {
+      const assumidos = criarElemento('div', 'Avisos assumidos para esta versão.');
+      assumidos.className = 'nfse-hint mb-0';
+      celulaEstado.appendChild(assumidos);
     }
     linha.appendChild(celulaEstado);
     const acao = criarElemento('td');
     acao.className = 'text-end';
-    const botao = criarElemento(
-      'button',
-      candidata.estado === 'validada' ? 'Ativar versão' : 'Validar candidata',
-    );
-    botao.type = 'button';
-    botao.className = candidata.estado === 'validada'
-      ? 'btn btn-primary btn-sm'
-      : 'btn btn-soft-primary btn-sm';
-    if (candidata.estado === 'validada') {
-      botao.dataset.ativarContrato = String(candidata.id ?? '');
-    } else {
-      botao.dataset.validarContrato = String(candidata.id ?? '');
+    if (versaoContrato.estado === 'ativa' && (
+      estado?.ativo?.pode_liberar_automatico
+      || versaoContrato.liberacao_automatica_manual
+    )) {
+      const liberar = !versaoContrato.liberacao_automatica_manual;
+      const botao = criarElemento(
+        'button', liberar
+          ? 'Assumir avisos e liberar automático'
+          : 'Revogar liberação automática',
+      );
+      botao.type = 'button';
+      botao.className = liberar
+        ? 'btn btn-soft-primary btn-sm'
+        : 'btn btn-ghost btn-sm';
+      botao.dataset.liberarAutomatico = String(versaoContrato.id ?? '');
+      botao.dataset.liberar = String(liberar);
+      acao.appendChild(botao);
+    } else if (versaoContrato.estado === 'validada') {
+      const botao = criarElemento('button', 'Ativar versão');
+      botao.type = 'button';
+      botao.className = 'btn btn-primary btn-sm';
+      botao.dataset.ativarContrato = String(versaoContrato.id ?? '');
+      acao.appendChild(botao);
+    } else if (versaoContrato.estado === 'candidata') {
+      const botao = criarElemento('button', 'Validar candidata');
+      botao.type = 'button';
+      botao.className = 'btn btn-soft-primary btn-sm';
+      botao.dataset.validarContrato = String(versaoContrato.id ?? '');
       botao.setAttribute('data-bs-toggle', 'modal');
       botao.setAttribute('data-bs-target', '#modalValidarContrato');
+      acao.appendChild(botao);
     }
-    const descartar = criarElemento('button', 'Descartar');
-    descartar.type = 'button';
-    descartar.className = 'btn btn-ghost btn-sm ms-1';
-    descartar.dataset.desfazerCandidata = String(candidata.id ?? '');
-    acao.appendChild(botao);
-    acao.appendChild(descartar);
+    if (['candidata', 'validada'].includes(versaoContrato.estado)) {
+      const descartar = criarElemento('button', 'Descartar');
+      descartar.type = 'button';
+      descartar.className = 'btn btn-ghost btn-sm ms-1';
+      descartar.dataset.desfazerCandidata = String(versaoContrato.id ?? '');
+      acao.appendChild(descartar);
+    }
+    if (!acao.childElementCount) acao.textContent = '—';
     linha.appendChild(acao);
     corpo.appendChild(linha);
   });
@@ -893,7 +934,8 @@ export async function inicializarContratoNfse(opcoes = {}) {
     const alvo = evento.target?.closest?.(
       '[data-sugestao-incidente], [data-desfazer-candidata],'
       + ' [data-editar-incidente],'
-      + ' [data-validar-contrato], [data-ativar-contrato]',
+      + ' [data-validar-contrato], [data-ativar-contrato],'
+      + ' [data-liberar-automatico]',
     );
     if (!alvo) return;
     if (alvo.dataset.sugestaoIncidente) {
@@ -929,7 +971,32 @@ export async function inicializarContratoNfse(opcoes = {}) {
       });
       return;
     }
-    if (alvo.dataset.desfazerCandidata) {
+    if (alvo.dataset.liberarAutomatico) {
+      const botao = alvo;
+      const liberar = botao.dataset.liberar === 'true';
+      const pergunta = liberar
+        ? 'Assumir os avisos conhecidos e liberar o modo automático somente para esta versão?'
+        : 'Revogar a liberação automática desta versão?';
+      if (!globalThis.confirm(pergunta)) return;
+      void comCarregamento(botao, async () => {
+        try {
+          await chamar(
+            fetchImpl,
+            `/nfse/contrato/${botao.dataset.liberarAutomatico}/liberar-automatico`,
+            { liberar },
+          );
+          showToast(
+            liberar ? 'Modo automático liberado para esta versão.' : 'Liberação revogada.',
+            'success',
+          );
+          await carregar();
+        } catch (falha) {
+          const mensagem = falha instanceof Error
+            ? falha.message : 'Não foi possível alterar a liberação.';
+          showToast(mensagem, 'error');
+        }
+      });
+    } else if (alvo.dataset.desfazerCandidata) {
       const botao = alvo;
       if (!globalThis.confirm(
         'Descartar a versão candidata? Os incidentes dela voltam a ficar abertos '

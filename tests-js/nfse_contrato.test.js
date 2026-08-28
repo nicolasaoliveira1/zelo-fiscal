@@ -326,6 +326,50 @@ test('candidata reprovada mostra POR QUE reprovou no histórico', async () => {
   assert.ok(linha.textContent.includes('A descricao na tela nao e a esperada'));
 });
 
+test('histórico mostra a ativa, as arquivadas e a liberação dos avisos', async () => {
+  const posts = [];
+  let liberada = false;
+  globalThis.confirm = () => true;
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async (url, opcoes) => {
+      if (opcoes) {
+        posts.push({ url, corpo: JSON.parse(opcoes.body) });
+        liberada = true;
+        return resposta({ status: 'ok' });
+      }
+      const ativa = {
+        id: 2,
+        versao: 2,
+        estado: 'ativa',
+        elegivel_automatico: liberada,
+        pode_liberar_automatico: !liberada,
+        liberacao_automatica_manual: liberada,
+        erro_validacao: 'a revisão permite somente modos assistidos: aviso sintético',
+      };
+      return resposta(estadoBase({
+        ativo: ativa,
+        versoes: [ativa, { id: 1, versao: 1, estado: 'arquivada' }],
+      }));
+    },
+  });
+
+  assert.ok(document.querySelector('[data-contrato-versao="1"]'));
+  const botao = document.querySelector('[data-liberar-automatico="2"]');
+  assert.match(botao.textContent, /Assumir avisos/);
+  botao.click();
+  await proximoTurno();
+  await proximoTurno();
+  await proximoTurno();
+
+  assert.deepEqual(posts, [{
+    url: '/nfse/contrato/2/liberar-automatico',
+    corpo: { liberar: true },
+  }]);
+  assert.match(document.getElementById('nfseContratoHistorico').textContent, /Avisos assumidos/);
+  assert.match(document.getElementById('nfseContratoStatusTitulo').textContent, /liberado com avisos/);
+});
+
 test('Editar na linha chama o reabrir daquele incidente, não o descarte total', async () => {
   const posts = [];
   await inicializarContratoNfse({

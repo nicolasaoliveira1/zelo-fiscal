@@ -129,6 +129,21 @@ def _marcar_validada(app, candidato_id, nota_id):
         db.session.commit()
 
 
+def _ativar_com_avisos(app):
+    ativo_id, candidato_id, _incidente_id = _criar_candidata(app)
+    with app.app_context():
+        candidato = db.session.get(nfse_contrato.ContratoNfse, candidato_id)
+        candidato.estado = 'validada'
+        candidato.validado_em = datetime(2026, 8, 25, 12, 0)
+        candidato.elegivel_automatico = False
+        candidato.erro_validacao = (
+            'a revisão permite somente modos assistidos: Campo sintético sem leitor.'
+        )
+        db.session.commit()
+        nfse_contrato.ativar(candidato_id)
+    return ativo_id, candidato_id
+
+
 class _DriverRecon:
     def __init__(self, url='/EmissorNacional/DPS/Pessoas'):
         self._url = url
@@ -312,6 +327,7 @@ def test_incidente_decidido_retorna_conflito(login_as, app):
     ('/nfse/contrato', 'get'),
     ('/nfse/contrato/1', 'get'),
     ('/nfse/contrato/incidente/1/configurar', 'post'),
+    ('/nfse/contrato/1/liberar-automatico', 'post'),
 ])
 def test_papel_leitura_nao_acessa_contrato(login_as, rota, metodo):
     resposta = getattr(login_as('leitura'), metodo)(rota, json={}
@@ -328,6 +344,53 @@ def test_contrato_inexistente_devolve_404_json(login_as):
     resposta = login_as('operador').get('/nfse/contrato/99999')
     assert resposta.status_code == 404
     assert resposta.get_json()['status'] == 'error'
+
+
+def test_historico_inclui_versao_ativa_e_arquivada(login_as, app):
+    ativo_anterior_id, ativo_id = _ativar_com_avisos(app)
+
+    dados = login_as('operador').get('/nfse/contrato').get_json()
+
+    por_id = {item['id']: item for item in dados['versoes']}
+    assert por_id[ativo_id]['estado'] == 'ativa'
+    assert por_id[ativo_anterior_id]['estado'] == 'arquivada'
+    assert dados['ativo']['pode_liberar_automatico'] is True
+
+
+def test_operador_libera_e_revoga_automatico_por_versao(login_as, app):
+    _anterior_id, ativo_id = _ativar_com_avisos(app)
+    operador = login_as('operador')
+
+    liberada = operador.post(
+        f'/nfse/contrato/{ativo_id}/liberar-automatico',
+        json={'liberar': True},
+    )
+    assert liberada.status_code == 200
+    assert liberada.get_json()['contrato']['liberacao_automatica_manual'] is True
+
+    revogada = operador.post(
+        f'/nfse/contrato/{ativo_id}/liberar-automatico',
+        json={'liberar': False},
+    )
+    assert revogada.status_code == 200
+    assert revogada.get_json()['contrato']['elegivel_automatico'] is False
+
+
+def test_liberacao_automatica_valida_corpo_e_versao(login_as, app):
+    anterior_id, ativo_id = _ativar_com_avisos(app)
+    operador = login_as('operador')
+
+    invalido = operador.post(
+        f'/nfse/contrato/{ativo_id}/liberar-automatico', json={'liberar': 'sim'}
+    )
+    arquivada = operador.post(
+        f'/nfse/contrato/{anterior_id}/liberar-automatico',
+        json={'liberar': True},
+    )
+
+    assert invalido.status_code == 400
+    assert invalido.get_json()['campo'] == 'liberar'
+    assert arquivada.status_code == 409
 
 
 def test_recon_sem_sessao_orienta_preparar(login_as, monkeypatch):
