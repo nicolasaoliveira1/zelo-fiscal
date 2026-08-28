@@ -398,17 +398,34 @@ def _capturar_revisao_da_validacao(contrato_id, nota_id, execution_id):
 def _regras_autorrevisao_contrato(contrato, nota, config):
     """Materializa leitores e esperados sem persistir valores da nota."""
 
+    campos = tuple(
+        campo for campo in contrato.campos if campo.etapa != 'revisao'
+    )
+    valores = {
+        campo.chave_semantica: nfse_contrato.resolver_valor(
+            campo, nota, config, date.today()
+        )
+        for campo in campos
+    }
     regras = []
-    for campo in contrato.campos:
+    for campo in campos:
         if (
-            campo.etapa == 'revisao'
-            or campo.chave_semantica in CHAVES_REVISAO_ESSENCIAIS
+            campo.chave_semantica in CHAVES_REVISAO_ESSENCIAIS
         ):
             # Documento, valor e descrição já são conferidos pelos leitores
             # históricos logo antes destas regras adicionais. Repetir os
             # campos de origem aqui os transformava em avisos "sem leitor"
             # apesar de a mesma informação já ter sido conferida.
             continue
+        condicao_chave = getattr(campo, 'condicao_chave', None)
+        if condicao_chave:
+            valor_condicao = valores.get(condicao_chave)
+            condicao_valor = getattr(campo, 'condicao_valor', None)
+            if (
+                condicao_valor is not None
+                and str(valor_condicao) != str(condicao_valor)
+            ):
+                continue
         if not (
             campo.revisao_secao
             or campo.revisao_rotulo
@@ -416,12 +433,20 @@ def _regras_autorrevisao_contrato(contrato, nota, config):
             or (campo.origem == 'padrao_portal' and campo.obrigatorio)
         ):
             continue
-        valor_esperado = nfse_contrato.resolver_valor(
-            campo, nota, config, date.today()
-        )
-        if isinstance(valor_esperado, (tuple, list)) and valor_esperado:
-            valor_esperado = valor_esperado[0]
-        regras.append({**campo.__dict__, 'valor_esperado': valor_esperado})
+        valor_esperado = valores[campo.chave_semantica]
+        valores_esperados = [valor_esperado]
+        for opcao in getattr(campo, 'opcoes', ()):
+            if str(opcao.valor) == str(valor_esperado):
+                valores_esperados.append(opcao.rotulo)
+        regras.append({
+            **campo.__dict__,
+            'valor_esperado': valor_esperado,
+            'valores_esperados': tuple(valores_esperados),
+            # Chegar à revisão prova que o controle aplicável aceitou o valor
+            # ou que o padrão/intocável do portal satisfez a validação da etapa.
+            'prova_aplicacao': True,
+            'revisao_rotulo_candidato': getattr(campo, 'rotulo', None),
+        })
     return tuple(regras)
 
 

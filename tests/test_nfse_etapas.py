@@ -555,6 +555,54 @@ def test_radio_com_seletor_nao_aprovado_e_recusado(driver):
     assert driver.tocados() == set()
 
 
+def test_texto_que_nao_gruda_no_campo_e_recusado_na_hora(driver):
+    """Confirmar o valor logo apos digitar e o que sustenta `prova_aplicacao`.
+
+    A autorrevisao deixou de exigir leitor na revisao para campos que o resumo
+    nao exibe, aceitando o preenchimento como prova. Essa troca so e honesta se
+    o preenchimento ELE MESMO confirmar o que gravou: um campo mascarado que
+    descarta o texto passaria a nota adiante com o campo em branco."""
+
+    class Surdo(DriverEspiao):
+        def find_element(self, by, valor):
+            elemento = super().find_element(by, valor)
+            if valor == 'campo-texto':
+                elemento.send_keys.side_effect = lambda texto: None
+            return elemento
+
+    surdo = Surdo()
+    regra = _regra_sintetica(chave_semantica='campo.texto', seletor='campo-texto')
+
+    with pytest.raises(nfse.ContratoNfseIncompativelError) as exc:
+        nfse.aplicar_campos_adicionais(
+            surdo, [regra], {'campo.texto': 'texto-sintético'}
+        )
+    assert 'confirmou' in str(exc.value)
+
+
+def test_radio_que_nao_fica_marcado_e_recusado_na_hora(driver):
+    """Mesmo contrato do texto, do lado do radio: clique sem marcacao nao e
+    prova. O portal desabilita opcao por regra de negocio e o clique via JS nao
+    levanta — sem `is_selected` o grupo seguiria com a opcao do portal."""
+
+    class Teimoso(DriverEspiao):
+        def find_element(self, by, valor):
+            elemento = super().find_element(by, valor)
+            if str(valor).startswith('input[name="GrupoSintetico"'):
+                elemento.is_selected.side_effect = lambda: False
+            return elemento
+
+    regra = _regra_sintetica(
+        chave_semantica='campo.radio', seletor_tipo='name',
+        seletor='GrupoSintetico', interacao='radio', origem='fixo',
+        fonte=None, valor_fixo='1',
+    )
+
+    with pytest.raises(nfse.InteracaoPortalError) as exc:
+        nfse.aplicar_campos_adicionais(Teimoso(), [regra], {'campo.radio': '1'})
+    assert 'confirmou' in str(exc.value)
+
+
 def test_espera_o_portal_carregar_o_emitente_antes_de_seguir(driver):
     """O emitente so aparece depois que a data perde o foco; seguir antes disso
     encontra os campos ainda travados."""

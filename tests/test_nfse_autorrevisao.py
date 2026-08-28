@@ -210,6 +210,21 @@ def _driver_com_campo_adicional(valores):
     return driver
 
 
+def _driver_com_rotulo_descoberto(rotulo, valor):
+    driver = _driver_revisao()
+    original = driver.find_elements.side_effect
+    termo = _elemento(rotulo)
+    termo.find_element.return_value = _elemento(valor)
+
+    def _find_elements(by, xpath):
+        if xpath == '//dt[following-sibling::dd[1]]':
+            return [termo]
+        return original(by, xpath)
+
+    driver.find_elements.side_effect = _find_elements
+    return driver
+
+
 def test_revisao_declarativa_confere_valor_e_mantem_elegibilidade():
     regra = _regra_revisao()
     resultado = nfse.conferir_revisao(
@@ -280,6 +295,75 @@ def test_revisao_declarativa_reusa_fallback_de_secao():
     )
 
     assert resultado == []
+    assert resultado.elegivel_automatico is True
+
+
+def test_revisao_descobre_campo_por_rotulo_e_rotulo_da_opcao():
+    regra = _regra_revisao(
+        chave_semantica='campo.pergunta',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        revisao_rotulo_candidato='Preencher as informações IBS/CBS?',
+        valores_esperados=('0', 'Não'),
+        prova_aplicacao=True,
+    )
+
+    resultado = nfse.conferir_revisao(
+        _driver_com_rotulo_descoberto(
+            'Preencher as informações IBS/CBS:', 'Não'
+        ),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert resultado == []
+    assert resultado.avisos_assistidos == ()
+    assert resultado.elegivel_automatico is True
+
+
+def test_revisao_descoberta_continua_bloqueando_valor_divergente():
+    regra = _regra_revisao(
+        chave_semantica='campo.pergunta',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        revisao_rotulo_candidato='Pergunta sintética?',
+        valores_esperados=('0', 'Não'),
+        prova_aplicacao=True,
+    )
+
+    resultado = nfse.conferir_revisao(
+        _driver_com_rotulo_descoberto('Pergunta sintética:', 'Sim'),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert any('campo.pergunta' in item for item in resultado)
+    assert resultado.elegivel_automatico is False
+
+
+def test_campo_ausente_da_revisao_usa_prova_do_preenchimento():
+    regra = _regra_revisao(
+        chave_semantica='campo.ausente.do.resumo',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        revisao_rotulo_candidato='Campo ausente do resumo',
+        prova_aplicacao=True,
+    )
+
+    resultado = nfse.conferir_revisao(
+        _driver_revisao(),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert resultado == []
+    assert resultado.avisos_assistidos == ()
     assert resultado.elegivel_automatico is True
 
 

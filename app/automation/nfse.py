@@ -20,6 +20,7 @@ Duas armadilhas do portal ditam o desenho deste modulo:
 from collections.abc import Mapping
 from datetime import date, datetime
 from decimal import Decimal
+import re
 from types import SimpleNamespace
 
 from selenium.common.exceptions import WebDriverException
@@ -129,6 +130,13 @@ def _marcar_radio(driver, name, valor):
         raise InteracaoPortalError(
             f'Opcao "{valor}" do grupo "{name}" nao esta disponivel nesta tela.')
     driver.execute_script('arguments[0].click();', elemento)
+    try:
+        confirmado = bool(elemento.is_selected())
+    except (WebDriverException, AttributeError):
+        confirmado = False
+    if not confirmado:
+        raise InteracaoPortalError(
+            f'O grupo "{name}" não confirmou a opção selecionada.')
     return elemento
 
 
@@ -834,18 +842,45 @@ def _texto_para_o_portal(valor):
     return str(valor)
 
 
+def _texto_digitado_confere(atual, esperado):
+    atual = str(atual or '').strip()
+    esperado = str(esperado or '').strip()
+    if _comparavel(atual) == _comparavel(esperado):
+        return True
+    digitos_esperados = _so_digitos(esperado)
+    return bool(
+        len(digitos_esperados) >= 6
+        and _so_digitos(atual) == digitos_esperados
+    )
+
+
 def _preencher_campo_contrato(driver, campo, valor):
+    esperado = _texto_para_o_portal(valor)
     if campo.seletor_tipo == 'id':
-        return _preencher(driver, campo.seletor, _texto_para_o_portal(valor))
+        elemento = _preencher(driver, campo.seletor, esperado)
+        try:
+            atual = elemento.get_attribute('value')
+        except (WebDriverException, AttributeError):
+            atual = None
+        if not _texto_digitado_confere(atual, esperado):
+            raise ContratoNfseIncompativelError(
+                f'O campo "{campo.chave_semantica}" não confirmou o valor digitado.'
+            )
+        return elemento
     elemento = _localizar_campo_contrato(driver, campo)
     try:
         elemento.clear()
-        elemento.send_keys(_texto_para_o_portal(valor))
+        elemento.send_keys(esperado)
         _sair_do_campo(elemento)
+        atual = elemento.get_attribute('value')
     except (WebDriverException, AttributeError) as exc:
         raise ContratoNfseIncompativelError(
             f'O campo "{campo.chave_semantica}" não aceitou preenchimento.'
         ) from exc
+    if not _texto_digitado_confere(atual, esperado):
+        raise ContratoNfseIncompativelError(
+            f'O campo "{campo.chave_semantica}" não confirmou o valor digitado.'
+        )
     return elemento
 
 
@@ -908,6 +943,14 @@ def _marcar_radio_contrato(driver, campo, valor):
             f'O grupo "{campo.chave_semantica}" não possui uma opção inequívoca.'
         )
     driver.execute_script('arguments[0].click();', candidatos[0])
+    try:
+        confirmado = bool(candidatos[0].is_selected())
+    except (WebDriverException, AttributeError):
+        confirmado = False
+    if not confirmado:
+        raise ContratoNfseIncompativelError(
+            f'O grupo "{campo.chave_semantica}" não confirmou a opção.'
+        )
     return candidatos[0]
 
 
@@ -1406,6 +1449,40 @@ def _regra_tem_leitor(regra):
     )
 
 
+def _rotulo_da_revisao(texto):
+    """Identidade de rótulo ignorando pontuação terminal e acentuação."""
+
+    return re.sub(r'[^a-z0-9]+', ' ', _comparavel(texto)).strip()
+
+
+def _dd_descoberto_por_rotulo(driver, rotulo):
+    """Descobre um dt/dd único pelo rótulo observado no formulário."""
+
+    identidade = _rotulo_da_revisao(rotulo)
+    if not identidade:
+        return None
+    try:
+        termos = driver.find_elements(
+            By.XPATH, '//dt[following-sibling::dd[1]]'
+        )
+    except WebDriverException:
+        return None
+    encontrados = []
+    for termo in termos:
+        try:
+            if not _visivel(termo) or _rotulo_da_revisao(termo.text) != identidade:
+                continue
+            valor = termo.find_element(By.XPATH, 'following-sibling::dd[1]')
+            if _visivel(valor):
+                encontrados.append((valor.text or '').strip())
+        except (WebDriverException, AttributeError):
+            continue
+    if len(encontrados) != 1 or not encontrados[0]:
+        return None
+    log_event('nfse_revisao_leitor_descoberto', rotulo=rotulo)
+    return encontrados[0]
+
+
 def _regra_fiscal(regra):
     severidade = str(_valor_regra_revisao(regra, 'severidade', '') or '').lower()
     origem = _valor_regra_revisao(regra, 'origem')
@@ -1415,6 +1492,9 @@ def _regra_fiscal(regra):
 
 
 def _esperado_regra_revisao(regra):
+    alternativas = _valor_regra_revisao(regra, 'valores_esperados')
+    if alternativas:
+        return alternativas
     for chave in ('valor_esperado', 'esperado', 'revisao_esperada'):
         valor = _valor_regra_revisao(regra, chave)
         if valor is not None:
@@ -1428,6 +1508,14 @@ def _esperado_regra_revisao(regra):
 def _comparar_revisao_declarativa(texto, esperado, tipo):
     if esperado is None:
         return True
+    if isinstance(esperado, (tuple, list, set, frozenset)):
+        return any(
+            _comparar_revisao_declarativa(texto, item, tipo)
+            for item in esperado
+        )
+    if isinstance(esperado, (date, datetime)):
+        data_esperada = esperado.date() if isinstance(esperado, datetime) else esperado
+        return _so_digitos(texto) == data_esperada.strftime('%d%m%Y')
     tipo = str(tipo or 'text').lower()
     if tipo in {'decimal', 'valor', 'number'}:
         esperado_decimal = _decimal_do_portal(esperado)
@@ -1447,6 +1535,8 @@ def _regras_elegiveis_automatico(regras):
             # O tipo do controle (select/radio/checkbox) descreve o DOM, não o
             # impacto fiscal. Campo opcional e intocável sem leitor não pode
             # bloquear o automático só por sua aparência HTML.
+            continue
+        if bool(_valor_regra_revisao(regra, 'prova_aplicacao', False)):
             continue
         if not bool(_valor_regra_revisao(regra, 'conferivel_automatico', False)):
             return False
@@ -1472,6 +1562,23 @@ def _conferir_regras_adicionais(driver, regras):
     for regra in regras or ():
         chave = _valor_regra_revisao(regra, 'chave_semantica', 'campo sem chave')
         if not _regra_tem_leitor(regra):
+            texto_descoberto = _dd_descoberto_por_rotulo(
+                driver,
+                _valor_regra_revisao(regra, 'revisao_rotulo_candidato'),
+            )
+            if texto_descoberto is not None:
+                esperado = _esperado_regra_revisao(regra)
+                if esperado is not None and not _comparar_revisao_declarativa(
+                    texto_descoberto,
+                    esperado,
+                    _valor_regra_revisao(regra, 'tipo'),
+                ):
+                    divergencias.append(
+                        f'O campo contratado "{chave}" diverge na revisão.'
+                    )
+                continue
+            if bool(_valor_regra_revisao(regra, 'prova_aplicacao', False)):
+                continue
             # SEM LEITOR nao existe conferencia automatica possivel, e o
             # `conferivel_automatico` do campo nao muda esse fato — ele so
             # afirmava uma capacidade que o contrato nao declarou. Enquanto a

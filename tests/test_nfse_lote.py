@@ -844,6 +844,83 @@ def test_regras_adicionais_nao_repetem_os_tres_leitores_essenciais(monkeypatch):
     assert [regra['chave_semantica'] for regra in regras] == [
         'campo.fiscal.adicional'
     ]
+    assert regras[0]['prova_aplicacao'] is True
+
+
+def test_regras_adicionais_ignoram_campo_de_condicao_inativa(monkeypatch):
+    def campo(chave, **valores):
+        padrao = {
+            'chave_semantica': chave,
+            'etapa': 'pessoas',
+            'revisao_secao': None,
+            'revisao_rotulo': None,
+            'conferivel_automatico': False,
+            'origem': 'fixo',
+            'obrigatorio': True,
+            'condicao_chave': None,
+            'condicao_valor': None,
+            'valor_fixo': None,
+            'opcoes': (),
+            'rotulo': chave,
+        }
+        padrao.update(valores)
+        return SimpleNamespace(**padrao)
+
+    contrato = SimpleNamespace(campos=(
+        campo('pergunta', valor_fixo='0'),
+        campo(
+            'campo.condicional',
+            condicao_chave='pergunta',
+            condicao_valor='1',
+        ),
+    ))
+
+    def resolver(regra, *_args):
+        return regra.valor_fixo or 'valor sintético'
+
+    monkeypatch.setattr(nfse_lote.nfse_contrato, 'resolver_valor', resolver)
+
+    regras = nfse_lote._regras_autorrevisao_contrato(
+        contrato, SimpleNamespace(), SimpleNamespace()
+    )
+
+    assert [regra['chave_semantica'] for regra in regras] == ['pergunta']
+
+
+def test_regras_adicionais_carregam_o_rotulo_da_opcao_escolhida(monkeypatch):
+    """O formulário guarda o valor ("0"); a revisão exibe o rótulo ("Não").
+
+    Sem levar as duas grafias, a descoberta por rótulo comparava "Não" com "0"
+    e reprovava um campo correto — a mesma classe de falso negativo que já
+    fechava o gate do automático por motivo que não é da nota.
+    """
+
+    campo = SimpleNamespace(
+        chave_semantica='campo.pergunta',
+        etapa='servico',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        conferivel_automatico=False,
+        origem='fixo',
+        obrigatorio=True,
+        condicao_chave=None,
+        condicao_valor=None,
+        rotulo='Pergunta sintética',
+        opcoes=(
+            SimpleNamespace(valor='0', rotulo='Não'),
+            SimpleNamespace(valor='1', rotulo='Sim'),
+        ),
+    )
+    monkeypatch.setattr(
+        nfse_lote.nfse_contrato, 'resolver_valor', lambda *_args: '0'
+    )
+
+    regras = nfse_lote._regras_autorrevisao_contrato(
+        SimpleNamespace(campos=(campo,)), SimpleNamespace(), SimpleNamespace()
+    )
+
+    assert regras[0]['valores_esperados'] == ('0', 'Não')
+    assert regras[0]['revisao_rotulo_candidato'] == 'Pergunta sintética'
 
 
 def test_valor_contratado_ilegivel_forca_divergencia(monkeypatch):
