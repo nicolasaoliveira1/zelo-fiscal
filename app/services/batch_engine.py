@@ -481,28 +481,54 @@ def lote_ocupa_o_tipo(batch_state):
     return not pausa_de_breaker_vencida(batch_state)
 
 
+def _registrar_pedido_de_pausa(batch_state):
+    batch_state['stop_requested'] = True
+    batch_state['stop_action'] = 'pause'
+    # Pausa pedida pelo operador SUBSTITUI o motivo anterior: sem isto, um
+    # lote que ja tinha sido pausado pelo breaker seguiria marcado e
+    # `liberar_pausa_de_breaker` apagaria, em silencio, um lote que o
+    # operador pausou de proposito (e o "Retomar" dele pararia de funcionar).
+    batch_state['pausado_por_breaker'] = None
+    if batch_state['status'] == 'running':
+        batch_state['status'] = 'paused'
+    return batch_state.get('driver')
+
+
 def request_pause(batch_lock, batch_state):
     with batch_lock:
-        batch_state['stop_requested'] = True
-        batch_state['stop_action'] = 'pause'
-        # Pausa pedida pelo operador SUBSTITUI o motivo anterior: sem isto, um
-        # lote que ja tinha sido pausado pelo breaker seguiria marcado e
-        # `liberar_pausa_de_breaker` apagaria, em silencio, um lote que o
-        # operador pausou de proposito (e o "Retomar" dele pararia de funcionar).
-        batch_state['pausado_por_breaker'] = None
-        if batch_state['status'] == 'running':
-            batch_state['status'] = 'paused'
-        return batch_state.get('driver')
+        return _registrar_pedido_de_pausa(batch_state)
+
+
+def solicitar_pausa_se_rodando(batch_lock, batch_state):
+    """Pede pausa somente a um lote em execução, numa decisão atômica."""
+    with batch_lock:
+        if batch_state.get('status') != 'running':
+            return False
+        _registrar_pedido_de_pausa(batch_state)
+        return True
+
+
+def _registrar_pedido_de_parada(batch_state):
+    batch_state['stop_requested'] = True
+    batch_state['stop_action'] = 'stop'
+    batch_state['status'] = 'stopped'
+    batch_state['pausado_por_breaker'] = None
+    batch_state['finished_at'] = utcnow_naive()
+    return batch_state.get('driver')
 
 
 def request_stop(batch_lock, batch_state):
     with batch_lock:
-        batch_state['stop_requested'] = True
-        batch_state['stop_action'] = 'stop'
-        batch_state['status'] = 'stopped'
-        batch_state['pausado_por_breaker'] = None
-        batch_state['finished_at'] = utcnow_naive()
-        return batch_state.get('driver')
+        return _registrar_pedido_de_parada(batch_state)
+
+
+def solicitar_parada_se_ativa(batch_lock, batch_state):
+    """Para somente um lote em execução ou pausado, numa decisão atômica."""
+    with batch_lock:
+        if batch_state.get('status') not in ('running', 'paused'):
+            return False
+        _registrar_pedido_de_parada(batch_state)
+        return True
 
 
 def resume_batch(batch_lock, batch_state, worker_fn, app_factory):

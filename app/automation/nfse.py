@@ -1037,26 +1037,23 @@ def preencher_etapa_pessoas(
             CHAVE_INSCRICAO_TOMADOR,
         },
     )
+    # Perguntas fixas no topo da etapa podem ser porteiras: o portal deixa a
+    # competência inerte até elas serem respondidas. Aplicá-las antes evita
+    # gastar todo o timeout tentando preencher um campo que sabemos estar
+    # bloqueado. O contrato já fixa a resposta; não há inferência sobre a nota.
+    liberadores = _liberadores_de_etapa(adicionais)
+    if liberadores:
+        aplicar_campos_adicionais(driver, liberadores, valores_contrato)
+        log_event('nfse_etapa_destravada', etapa='pessoas',
+                  campos=len(liberadores))
+    restantes = tuple(campo for campo in adicionais if campo not in liberadores)
+
     valor_data = _valor_contrato(
         valores_contrato, CHAVE_DATA_COMPETENCIA, data_competencia
     )
     if hasattr(valor_data, 'strftime'):
         valor_data = formatar_data(valor_data)
-    try:
-        _aplicar_campo_contrato(driver, campo_data, valor_data)
-    except InteracaoPortalError:
-        # A competencia e o primeiro campo desta etapa desde sempre; se ela nao
-        # esta disponivel, alguma pergunta nova a mantem inerte. O contrato ja
-        # traz a resposta decidida pelo operador — aplica-la e tenta uma vez
-        # mais. Falhando de novo, o erro original sobe: o desfecho continua
-        # sendo o do portal, nao um chute nosso.
-        liberadores = _liberadores_de_etapa(adicionais)
-        if not liberadores:
-            raise
-        log_event('nfse_etapa_destravada', etapa='pessoas',
-                  campos=len(liberadores))
-        aplicar_campos_adicionais(driver, liberadores, valores_contrato)
-        _aplicar_campo_contrato(driver, campo_data, valor_data)
+    _aplicar_campo_contrato(driver, campo_data, valor_data)
 
     # O portal so carrega o emitente depois que a data sai do foco, e os campos
     # seguintes ficam nao-interagiveis ate la. Esperar o CNPJ do emitente
@@ -1097,7 +1094,7 @@ def preencher_etapa_pessoas(
             'Confira se esta correto e ativo na Receita.')
     if pausa:
         pausa()
-    aplicar_campos_adicionais(driver, adicionais, valores_contrato)
+    aplicar_campos_adicionais(driver, restantes, valores_contrato)
     _observar_fronteira(observar, driver, 'pessoas', 'pre_avancar')
     _avancar(driver)
     _observar_fronteira(observar, driver, 'pessoas', 'pos_avancar')

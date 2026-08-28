@@ -131,6 +131,28 @@ def pedir_pular():
         return True
 
 
+def pedir_pausa():
+    """Pausa apenas uma fila que ainda está rodando."""
+    return batch_engine.solicitar_pausa_se_rodando(
+        NFSE_BATCH_LOCK, NFSE_BATCH_STATE
+    )
+
+
+def pedir_parada():
+    """Interrompe a fila e fecha a sessão quando o worker já terminou.
+
+    Durante uma execução, o worker vê o pedido e fecha no ``on_teardown``. Em
+    uma pausa estável ele já saiu, portanto não existe mais teardown futuro:
+    a própria ação de Parar precisa encerrar o navegador e liberar a policy.
+    """
+    aceito = batch_engine.solicitar_parada_se_ativa(
+        NFSE_BATCH_LOCK, NFSE_BATCH_STATE
+    )
+    if aceito and not SESSAO.ocupada:
+        SESSAO.encerrar()
+    return aceito
+
+
 def validar_nota_para_validacao(nota_id):
     """Aceita somente uma nota que a regra única de emissão aprove."""
 

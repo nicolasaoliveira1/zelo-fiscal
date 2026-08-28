@@ -51,6 +51,10 @@ def sessao_falsa(monkeypatch):
             return False
 
         @property
+        def tem_driver(self):
+            return self.encerrada == 0 and not self.livre
+
+        @property
         def ocupada(self):
             return not self.livre
 
@@ -58,6 +62,7 @@ def sessao_falsa(monkeypatch):
     monkeypatch.setattr(rotas_nfse, 'SESSAO', falsa)
     # a rota checa a aliquota pelo servico, que tem a sua propria referencia
     monkeypatch.setattr(nfse_service, 'SESSAO', falsa)
+    monkeypatch.setattr(nfse_lote, 'SESSAO', falsa)
     return falsa
 
 
@@ -283,10 +288,31 @@ def test_pausar_pede_pausa_sem_descartar_a_fila(client, sessao_falsa):
     assert NFSE_BATCH_STATE['ids'] == [1, 2]
 
 
+def test_pausar_sem_lote_rodando_e_recusado(client, sessao_falsa):
+    assert client.post('/nfse/lote/pausar').status_code == 400
+
+
 def test_parar_marca_interrupcao(client, sessao_falsa):
     NFSE_BATCH_STATE.update({'status': 'running', 'ids': [1], 'total': 1})
+    sessao_falsa.livre = False  # o worker ainda é o dono da sessão
     assert client.post('/nfse/lote/parar').status_code == 200
     assert NFSE_BATCH_STATE['stop_action'] == 'stop'
+    assert sessao_falsa.encerrada == 0, 'o teardown do worker fará o fechamento'
+
+
+def test_parar_lote_pausado_fecha_o_navegador(client, sessao_falsa):
+    NFSE_BATCH_STATE.update({'status': 'paused', 'ids': [1], 'total': 1})
+    sessao_falsa.livre = True  # o worker da pausa já executou o teardown
+
+    resposta = client.post('/nfse/lote/parar')
+
+    assert resposta.status_code == 200
+    assert NFSE_BATCH_STATE['status'] == 'stopped'
+    assert sessao_falsa.encerrada == 1
+
+
+def test_parar_sem_lote_ativo_e_recusado(client, sessao_falsa):
+    assert client.post('/nfse/lote/parar').status_code == 400
 
 
 def test_retomar_so_funciona_com_lote_pausado(client, sessao_falsa, worker_falso):

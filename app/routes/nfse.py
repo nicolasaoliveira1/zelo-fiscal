@@ -1670,15 +1670,17 @@ def nfse_lote_pular():
 @bp.route('/nfse/lote/pausar', methods=['POST'])
 @requer_papel('operador')
 def nfse_lote_pausar():
-    batch_engine.request_pause(NFSE_BATCH_LOCK, NFSE_BATCH_STATE)
-    return {'status': 'ok', 'message': 'Emissao pausada.'}
+    if not nfse_lote.pedir_pausa():
+        return json_error('Não há emissão em andamento para pausar.', 400)
+    return {'status': 'ok', 'message': 'Pausa solicitada.'}
 
 
 @bp.route('/nfse/lote/parar', methods=['POST'])
 @requer_papel('operador')
 def nfse_lote_parar():
-    batch_engine.request_stop(NFSE_BATCH_LOCK, NFSE_BATCH_STATE)
-    return {'status': 'ok', 'message': 'Emissao interrompida.'}
+    if not nfse_lote.pedir_parada():
+        return json_error('Não há emissão em andamento para parar.', 400)
+    return {'status': 'ok', 'message': 'Fila interrompida.'}
 
 
 @bp.route('/nfse/lote/retomar', methods=['POST'])

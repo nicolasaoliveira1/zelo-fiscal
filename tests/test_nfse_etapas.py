@@ -603,6 +603,8 @@ def test_pergunta_nova_no_topo_da_etapa_destrava_a_competencia(driver, monkeypat
 
     driver.desabilitados.add('DataCompetencia')
     original = nfse._marcar_radio
+    aplicar_original = nfse._aplicar_campo_contrato
+    tentativas_competencia = []
 
     def marcar(drv, name, valor):
         elemento = original(drv, name, valor)
@@ -612,6 +614,13 @@ def test_pergunta_nova_no_topo_da_etapa_destrava_a_competencia(driver, monkeypat
 
     monkeypatch.setattr(nfse, '_marcar_radio', marcar)
 
+    def aplicar(drv, campo, valor):
+        if campo.chave_semantica == 'DataCompetencia':
+            tentativas_competencia.append(valor)
+        return aplicar_original(drv, campo, valor)
+
+    monkeypatch.setattr(nfse, '_aplicar_campo_contrato', aplicar)
+
     nfse.preencher_etapa_pessoas(
         driver, NOTA, CONFIG, date(2026, 7, 28), contrato=contrato,
         # No fluxo real quem resolve é `_resolver_valores_contrato`.
@@ -620,6 +629,9 @@ def test_pergunta_nova_no_topo_da_etapa_destrava_a_competencia(driver, monkeypat
 
     assert driver.radios['PreencherInfoIBSCBS'] == '0'
     assert driver.preenchidos['DataCompetencia'] == '28/07/2026'
+    assert tentativas_competencia == ['28/07/2026'], (
+        'a porteira deve ser respondida antes, sem esperar a competência falhar'
+    )
 
 
 def test_sem_porteira_no_contrato_o_erro_do_portal_sobe_inalterado(driver):
