@@ -97,6 +97,11 @@ class InventarioEtapa:
     controles: tuple[ControleInventariado, ...] = ()
     estado: str = "ok"
     motivo: str | None = None
+    # Caminho lido DENTRO da mesma execucao de script que percorreu o DOM. E o
+    # unico jeito de saber de qual tela vieram estes controles: perguntar a URL
+    # ao driver antes ou depois e outra ida ao navegador, e entre uma e outra a
+    # navegacao do "Avancar" pode ter trocado o documento.
+    caminho: str | None = None
 
     @classmethod
     def desconhecido(cls, etapa: str, motivo: str = "observação inconclusiva"):
@@ -124,6 +129,12 @@ def etapa_da_url(url: str) -> str | None:
 # `option` lê somente a declaração do markup, que é diferente da seleção atual.
 JS_INVENTARIO_SEGURO = r"""
 return (function () {
+  // Primeira linha de proposito: dentro de um turno de script o navegador nao
+  // troca o documento, entao este caminho e o DOM percorrido abaixo sao da
+  // MESMA tela, por construcao.
+  var caminho = '';
+  try { caminho = String(document.location.pathname || ''); } catch (e) { caminho = ''; }
+
   var classesPermitidas = {
     'select2-hidden-accessible': true,
     'form-chosen': true
@@ -266,7 +277,7 @@ return (function () {
   // Overlay de loader costuma existir no markup o tempo todo, oculto. So o
   // marcador visivel indica que a tela ainda esta carregando.
   for (var m = 0; m < marcadores.length; m += 1) {
-    if (visivel(marcadores[m])) { return {estado: 'carregando'}; }
+    if (visivel(marcadores[m])) { return {estado: 'carregando', caminho: caminho}; }
   }
 
   var controles = [];
@@ -317,7 +328,7 @@ return (function () {
       opcoes: opcoes
     });
   }
-  return {estado: 'ok', controles: controles};
+  return {estado: 'ok', controles: controles, caminho: caminho};
 }())
 """
 
@@ -517,7 +528,12 @@ def _inventario_do_payload(payload: dict[str, Any], etapa: str) -> InventarioEta
         for ordem, raw in enumerate(raws)
         if isinstance(raw, dict)
     ]
-    return InventarioEtapa(etapa=etapa, controles=tuple(_agrupar_radios(controles)))
+    caminho = payload.get("caminho")
+    return InventarioEtapa(
+        etapa=etapa,
+        controles=tuple(_agrupar_radios(controles)),
+        caminho=str(caminho) if isinstance(caminho, str) else None,
+    )
 
 
 def inventariar(
@@ -725,7 +741,11 @@ def unir(anterior: InventarioEtapa | None, atual: InventarioEtapa | None) -> Inv
             posicoes[identidade] = posicao
     if len(resultado) > MAX_CONTROLES_ETAPA:
         raise InventarioExcedidoError("inventário excede o limite de controles da etapa")
-    return InventarioEtapa(etapa=anterior.etapa, controles=tuple(resultado))
+    return InventarioEtapa(
+        etapa=anterior.etapa,
+        controles=tuple(resultado),
+        caminho=atual.caminho or anterior.caminho,
+    )
 
 
 @dataclass(frozen=True)

@@ -167,6 +167,39 @@ def test_timeout_de_carregamento_retorna_estado_desconhecido():
     assert inventario.controles == ()
 
 
+def test_inventario_carrega_o_caminho_observado_pelo_proprio_script():
+    """De qual tela vieram estes controles é pergunta que só o script responde.
+
+    Perguntar a URL ao driver antes ou depois do inventário é outra ida ao
+    navegador, e o clique em "Avançar" não espera a navegação: entre uma
+    chamada e a outra o documento troca. O caminho vem no mesmo payload que
+    trouxe os controles.
+    """
+
+    payload = {
+        "estado": "ok",
+        "controles": [_controle()],
+        "caminho": "/EmissorNacional/DPS/Tributacao",
+    }
+
+    inventario = inventariar(DriverFalso([payload]), "servico")
+
+    assert inventario.conhecida
+    assert inventario.caminho == "/EmissorNacional/DPS/Tributacao"
+    assert etapa_da_url(inventario.caminho) == "tributacao"
+
+
+def test_payload_sem_caminho_nao_inventa_procedencia():
+    """Ausente, o caminho fica `None` — e quem decide política trata `None` como
+    "sem evidência", nunca como confirmação da etapa esperada."""
+
+    inventario = inventariar(
+        DriverFalso([{"estado": "ok", "controles": [_controle()]}]), "servico"
+    )
+
+    assert inventario.caminho is None
+
+
 def test_limite_de_controles_levanta_sem_inventario_parcial():
     payload = {"estado": "ok", "controles": [_controle(id=f"id-{i}") for i in range(501)]}
 
