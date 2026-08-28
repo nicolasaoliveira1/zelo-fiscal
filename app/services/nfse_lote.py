@@ -51,6 +51,12 @@ MODOS_DE_FILA = (MODO_LOTE, MODO_AUTOMATICO)
 
 ORIGEM_AUTOMACAO = 'automacao'
 
+CHAVES_REVISAO_ESSENCIAIS = frozenset({
+    'Tomador_Inscricao',
+    'Valores_ValorServico',
+    'ServicoPrestado_Descricao',
+})
+
 # Quanto esperar o operador conferir e emitir uma nota. Generoso de proposito:
 # quem revisa documento fiscal as vezes sai para confirmar um valor. Estourar
 # nao perde nada — pausa o lote na nota atual, que segue esperando confirmacao.
@@ -393,9 +399,14 @@ def _regras_autorrevisao_contrato(contrato, nota, config):
 
     regras = []
     for campo in contrato.campos:
-        if campo.etapa == 'revisao':
+        if (
+            campo.etapa == 'revisao'
+            or campo.chave_semantica in CHAVES_REVISAO_ESSENCIAIS
+        ):
             # Documento, valor e descrição já são conferidos pelos leitores
-            # históricos logo antes destas regras adicionais.
+            # históricos logo antes destas regras adicionais. Repetir os
+            # campos de origem aqui os transformava em avisos "sem leitor"
+            # apesar de a mesma informação já ter sido conferida.
             continue
         if not (
             campo.revisao_secao

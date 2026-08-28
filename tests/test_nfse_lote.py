@@ -815,6 +815,37 @@ def test_automatico_repassa_regras_do_contrato_para_autorrevisao(
     )
 
 
+def test_regras_adicionais_nao_repetem_os_tres_leitores_essenciais(monkeypatch):
+    def campo(chave, etapa='pessoas'):
+        return SimpleNamespace(
+            chave_semantica=chave,
+            etapa=etapa,
+            revisao_secao=None,
+            revisao_rotulo=None,
+            conferivel_automatico=False,
+            origem='nota',
+            obrigatorio=True,
+        )
+
+    contrato = SimpleNamespace(campos=(
+        campo('Tomador_Inscricao'),
+        campo('Valores_ValorServico', 'tributacao'),
+        campo('ServicoPrestado_Descricao', 'servico'),
+        campo('campo.fiscal.adicional', 'tributacao'),
+    ))
+    monkeypatch.setattr(
+        nfse_lote.nfse_contrato, 'resolver_valor', lambda *_args: 'esperado'
+    )
+
+    regras = nfse_lote._regras_autorrevisao_contrato(
+        contrato, SimpleNamespace(), SimpleNamespace()
+    )
+
+    assert [regra['chave_semantica'] for regra in regras] == [
+        'campo.fiscal.adicional'
+    ]
+
+
 def test_valor_contratado_ilegivel_forca_divergencia(monkeypatch):
     contrato = MagicMock()
     contrato.campo.side_effect = lambda chave: chave

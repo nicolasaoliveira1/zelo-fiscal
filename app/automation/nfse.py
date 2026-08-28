@@ -1407,11 +1407,11 @@ def _regra_tem_leitor(regra):
 
 
 def _regra_fiscal(regra):
-    tipo = str(_valor_regra_revisao(regra, 'tipo', '') or '').lower()
     severidade = str(_valor_regra_revisao(regra, 'severidade', '') or '').lower()
+    origem = _valor_regra_revisao(regra, 'origem')
     return bool(_valor_regra_revisao(regra, 'obrigatorio')) or severidade in {
         'fiscal', 'critica'
-    } or tipo in {'select', 'radio', 'checkbox', 'revisao', 'decimal', 'valor'}
+    } or origem in {'fixo', 'nota', 'derivado', 'configuracao'}
 
 
 def _esperado_regra_revisao(regra):
@@ -1443,6 +1443,11 @@ def _comparar_revisao_declarativa(texto, esperado, tipo):
 
 def _regras_elegiveis_automatico(regras):
     for regra in regras or ():
+        if not _regra_fiscal(regra):
+            # O tipo do controle (select/radio/checkbox) descreve o DOM, não o
+            # impacto fiscal. Campo opcional e intocável sem leitor não pode
+            # bloquear o automático só por sua aparência HTML.
+            continue
         if not bool(_valor_regra_revisao(regra, 'conferivel_automatico', False)):
             return False
         origem = _valor_regra_revisao(regra, 'origem')

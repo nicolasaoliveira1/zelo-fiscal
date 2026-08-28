@@ -337,3 +337,51 @@ def test_campo_nao_conferivel_aprova_somente_fluxo_assistido():
     assert resultado == []
     assert resultado.avisos_assistidos
     assert resultado.elegivel_automatico is False
+
+
+def test_controle_opcional_sem_efeito_fiscal_nao_bloqueia_por_ser_select():
+    regra = _regra_revisao(
+        chave_semantica='campo.opcional.intocavel',
+        tipo='select',
+        obrigatorio=False,
+        origem='intocavel',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        conferivel_automatico=False,
+    )
+
+    resultado = nfse.conferir_revisao(
+        _driver_revisao(),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert resultado == []
+    assert resultado.avisos_assistidos == ()
+    assert resultado.elegivel_automatico is True
+
+
+def test_controle_opcional_preenchido_continua_exigindo_leitor():
+    regra = _regra_revisao(
+        chave_semantica='campo.opcional.preenchido',
+        tipo='select',
+        obrigatorio=False,
+        origem='configuracao',
+        revisao_secao=None,
+        revisao_rotulo=None,
+        conferivel_automatico=False,
+    )
+
+    resultado = nfse.conferir_revisao(
+        _driver_revisao(),
+        DOCUMENTO,
+        VALOR,
+        DESCRICAO,
+        regras_adicionais=[regra],
+    )
+
+    assert resultado == []
+    assert any('opcional.preenchido' in item for item in resultado.avisos_assistidos)
+    assert resultado.elegivel_automatico is False

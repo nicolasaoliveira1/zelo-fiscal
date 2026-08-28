@@ -349,12 +349,22 @@ test('histórico mostra a ativa, as arquivadas e a liberação dos avisos', asyn
       };
       return resposta(estadoBase({
         ativo: ativa,
-        versoes: [ativa, { id: 1, versao: 1, estado: 'arquivada' }],
+        versoes: [
+          ativa,
+          { id: 1, versao: 1, estado: 'arquivada', intermediaria: false },
+          { id: 3, versao: 3, estado: 'arquivada', intermediaria: true },
+        ],
       }));
     },
   });
 
   assert.ok(document.querySelector('[data-contrato-versao="1"]'));
+  const intermediaria = document.querySelector('[data-contrato-versao="3"]');
+  assert.equal(intermediaria.hidden, true);
+  const mostrar = [...document.querySelectorAll('button')]
+    .find((item) => /Mostrar 1 versão intermediária/.test(item.textContent));
+  mostrar.click();
+  assert.equal(intermediaria.hidden, false);
   const botao = document.querySelector('[data-liberar-automatico="2"]');
   assert.match(botao.textContent, /Assumir avisos/);
   botao.click();

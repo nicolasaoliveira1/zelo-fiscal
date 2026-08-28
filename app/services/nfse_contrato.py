@@ -2175,12 +2175,20 @@ def _data_iso(valor):
 
 
 def _resumo_contrato(contrato):
+    intermediaria = bool(
+        contrato.estado == "arquivada"
+        and contrato.versao != 1
+        and contrato.validado_em is None
+        and contrato.ativado_em is None
+        and contrato.nota_validacao_id is None
+    )
     return {
         "id": contrato.id,
         "versao": contrato.versao,
         "estado": contrato.estado,
         "elegivel_automatico": bool(contrato.elegivel_automatico),
         "liberacao_automatica_manual": _liberacao_automatica_manual(contrato),
+        "intermediaria": intermediaria,
         "criado_em": _data_iso(contrato.criado_em),
         "validado_em": _data_iso(contrato.validado_em),
         "ativado_em": _data_iso(contrato.ativado_em),

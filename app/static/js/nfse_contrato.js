@@ -406,6 +406,30 @@ function renderizarHistorico(estado, root) {
     historico.appendChild(vazio);
     return;
   }
+  const intermediarias = versoes.filter((item) => item?.intermediaria === true);
+  const principais = versoes.filter((item) => item?.intermediaria !== true);
+  if (intermediarias.length) {
+    const rotuloIntermediarias = intermediarias.length === 1
+      ? '1 versão intermediária'
+      : `${intermediarias.length} versões intermediárias`;
+    const alternar = criarElemento(
+      'button', `Mostrar ${rotuloIntermediarias}`,
+    );
+    alternar.type = 'button';
+    alternar.className = 'btn btn-ghost btn-sm mb-2';
+    alternar.setAttribute('aria-expanded', 'false');
+    alternar.addEventListener('click', () => {
+      const expandido = alternar.getAttribute('aria-expanded') === 'true';
+      alternar.setAttribute('aria-expanded', String(!expandido));
+      alternar.textContent = expandido
+        ? `Mostrar ${rotuloIntermediarias}`
+        : `Ocultar ${rotuloIntermediarias}`;
+      historico.querySelectorAll('.nfse-versao-intermediaria').forEach((linha) => {
+        linha.hidden = expandido;
+      });
+    });
+    historico.appendChild(alternar);
+  }
   const envoltorio = criarElemento('div');
   envoltorio.className = 'table-responsive';
   const tabela = criarElemento('table');
@@ -421,8 +445,12 @@ function renderizarHistorico(estado, root) {
   cabecalho.appendChild(linhaCabecalho);
   tabela.appendChild(cabecalho);
   const corpo = criarElemento('tbody');
-  versoes.forEach((versaoContrato) => {
+  [...principais, ...intermediarias].forEach((versaoContrato) => {
     const linha = criarElemento('tr');
+    if (versaoContrato.intermediaria) {
+      linha.className = 'nfse-versao-intermediaria';
+      linha.hidden = true;
+    }
     linha.dataset.contratoVersao = String(versaoContrato.id ?? '');
     if (['candidata', 'validada'].includes(versaoContrato.estado)) {
       linha.dataset.contratoCandidato = String(versaoContrato.id ?? '');

@@ -598,6 +598,12 @@
     <div class="nfse-contrato-historico" id="nfseContratoHistorico">
         <h3 class="h6 mb-2">Histórico de versões</h3>
         {% if contrato_estado.versoes %}
+        {% set intermediarias = contrato_estado.versoes | selectattr('intermediaria') | list %}
+        {% if intermediarias %}
+        <p class="nfse-hint mb-2">
+            {% if intermediarias | length == 1 %}1 versão intermediária arquivada.{% else %}{{ intermediarias | length }} versões intermediárias arquivadas.{% endif %}
+        </p>
+        {% endif %}
         <div class="table-responsive">
             <table class="table table-sm align-middle">
                 <thead>
@@ -609,6 +615,7 @@
                 </thead>
                 <tbody>
                     {% for versao in contrato_estado.versoes %}
+                    {% if not versao.intermediaria %}
                     <tr data-contrato-versao="{{ versao.id }}"
                         {% if versao.estado in ('candidata', 'validada') %}data-contrato-candidato="{{ versao.id }}"{% endif %}>
                         <td class="nfse-mono">{{ versao.versao }}</td>
@@ -644,6 +651,7 @@
                             {% endif %}
                         </td>
                     </tr>
+                    {% endif %}
                     {% endfor %}
                 </tbody>
             </table>

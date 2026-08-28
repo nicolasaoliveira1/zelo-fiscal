@@ -280,6 +280,11 @@ def test_configuracoes_sucessivas_formam_candidata_cumulativa(app, ids, monkeypa
         assert {'campo.novo.a', 'campo.novo.b'} <= {
             campo.chave_semantica for campo in candidata_b.campos
         }
+        historico = {
+            item['id']: item for item in nfse_contrato.estado_painel()['versoes']
+        }
+        assert historico[candidata_a.id]['intermediaria'] is True
+        assert historico[ativo.id]['intermediaria'] is False
         with pytest.raises(nfse_contrato.ContratoNfseNaoElegivelError):
             nfse_contrato.validar_contrato_automatico(ativo.id)
 
