@@ -11,6 +11,20 @@ app = create_app()
 def make_shell_context():
     return {'db': db, 'Empresa': Empresa, 'Certidao': Certidao}
 
+
+def _processo_que_serve(debug):
+    """Distingue o servidor real do processo pai do reloader do Werkzeug."""
+    return not debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
+
+
+def _garantir_servicos_recorrentes(debug):
+    """Recusa subir o servidor sem os jobs recorrentes configurados."""
+    if not _processo_que_serve(debug):
+        return None
+
+    from app.services import agendador
+    return agendador.garantir_iniciado_no_processo_servidor(app)
+
 if __name__ == '__main__':
     # Fail-fast acionavel: nao sobe meio quebrado se faltar dependencia critica.
     faltando = dependencias_faltantes()
@@ -22,6 +36,11 @@ if __name__ == '__main__':
     # debug desligado por padrao (esta ferramenta escreve em disco de rede e no
     # registro do Windows); habilite localmente com FLASK_DEBUG=1 quando precisar.
     debug = os.environ.get('FLASK_DEBUG', '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+    # O create_app faz o primeiro init, mas o reloader possui um processo pai e
+    # outro que serve. Confirma no segundo, antes de abrir a porta, que todos os
+    # jobs recorrentes realmente estão registrados e com o scheduler rodando.
+    _garantir_servicos_recorrentes(debug)
 
     if debug:
         # Dois modos de reload, escolhidos por FLASK_RELOAD_AUTO (o painel seta;
