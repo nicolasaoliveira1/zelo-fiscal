@@ -78,6 +78,7 @@ def create_app(config_class=Config):
         # qualquer processo que atende HTTP, seguir deixaria a aplicação com
         # aparência saudável, mas sem executar nenhum fluxo recorrente.
         if (app.config.get('AGENDADOR_ENABLED', True)
+                and not agendador.comando_cli_sem_servidor()
                 and not agendador.deve_adiar_para_reloader(app)):
             raise
 

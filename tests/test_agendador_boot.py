@@ -80,6 +80,18 @@ def test_create_app_recusa_servir_quando_agendador_falha(monkeypatch):
         create_app(ConfigAgendadorLigado)
 
 
+def test_init_ignora_comando_de_migration(app, monkeypatch):
+    monkeypatch.setenv('FLASK_RUN_FROM_CLI', 'true')
+    monkeypatch.setattr(agendador.sys, 'argv', [
+        'flask', '--app', 'run.py', 'db', 'upgrade', 'head',
+    ])
+    monkeypatch.setitem(app.config, 'AGENDADOR_ENABLED', True)
+    agendador.shutdown()
+
+    assert agendador.init(app) is None
+    assert agendador._scheduler is None
+
+
 def test_init_liga_no_processo_que_serve(app, ids, monkeypatch):
     monkeypatch.setitem(app.config, 'AGENDADOR_ENABLED', True)
     monkeypatch.setenv('WERKZEUG_RUN_MAIN', 'true')

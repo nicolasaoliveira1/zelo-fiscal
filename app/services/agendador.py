@@ -149,6 +149,9 @@ def init(app):
     global _scheduler
     if not app.config.get('AGENDADOR_ENABLED', True):
         return None
+    if comando_cli_sem_servidor():
+        log_event('agendador_ignorado_comando_cli')
+        return None
     if deve_adiar_para_reloader(app):
         # processo pai do reloader: não agenda (o filho o fará)
         log_event('agendador_init_adiado_reloader')
@@ -172,6 +175,19 @@ def deve_adiar_para_reloader(app):
     if os.environ.get('FLASK_RUN_FROM_CLI') == 'true' and '--no-reload' in sys.argv:
         return False
     return True
+
+
+def comando_cli_sem_servidor():
+    """True para `flask db`, `flask shell` e outros comandos administrativos.
+
+    Esses comandos importam `run.py` para obter a aplicação, mas não atendem
+    HTTP e podem operar justamente sobre um schema vazio ou em transição. O
+    scheduler não deve consultar tabelas nem transformar uma migration válida
+    em falha de boot.
+    """
+    if os.environ.get('FLASK_RUN_FROM_CLI') != 'true':
+        return False
+    return 'run' not in sys.argv[1:]
 
 
 def garantir_iniciado_no_processo_servidor(app):
