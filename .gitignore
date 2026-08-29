@@ -82,6 +82,17 @@ tools/ui-harness/*
 # Skill instalada localmente (uso pessoal, não versionada)
 .claude/skills/tlc-spec-driven/
 
+# Skills locais com material operacional (uso pessoal, não versionadas).
+# Mesma regra de CLAUDE.md, AGENTS.md e .specs/: procedimento de ambiente e
+# detalhe de operação ficam só na máquina.
+.claude/skills/gate-mysql/
+.claude/skills/pr-zelo/
+.claude/skills/migration-segura/
+.claude/skills/nfse-invariantes/
+.claude/skills/portal-recon/
+.claude/skills/triagem-log/
+.claude/skills/sync-contexto/
+
 # Specs de trabalho da skill spec-driven (uso local, não versionadas)
 .specs/
 
