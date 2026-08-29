@@ -36,6 +36,39 @@ def test_init_inicia_e_agenda_snapshot(app, ids, sched_limpo):
     assert sched.get_job(agendador._JOB_SNAPSHOT) is not None
 
 
+def test_processo_servidor_forca_init_mesmo_sem_marcador_do_reloader(
+        app, ids, sched_limpo, monkeypatch):
+    """Regressão: o painel ficou servindo sem scheduler durante a madrugada.
+
+    O guard do factory pode adiar o init por enxergar o processo pai. Quando o
+    entrypoint confirma que este é o processo servidor, a inicialização não pode
+    continuar dependendo do marcador interno do Werkzeug.
+    """
+    monkeypatch.delenv('WERKZEUG_RUN_MAIN', raising=False)
+    monkeypatch.setitem(app.config, 'DEBUG', True)
+
+    assert agendador.init(app) is None
+    sched = agendador.garantir_iniciado_no_processo_servidor(app)
+
+    assert sched.running
+    assert {job.id for job in sched.get_jobs()} == {
+        agendador._JOB_SNAPSHOT,
+        agendador._JOB_RENOVACAO,
+        agendador._JOB_VERIF_MUNICIPIOS,
+        agendador._JOB_RECHECK_RECEITA,
+        agendador._JOB_INVENTARIO_COFRE,
+        agendador._JOB_RESUMO_DIARIO,
+    }
+
+
+def test_processo_servidor_recusa_scheduler_sem_job_obrigatorio(
+        app, ids, sched_limpo, monkeypatch):
+    monkeypatch.setattr(agendador, '_agendar_jobs', lambda _app: None)
+
+    with pytest.raises(RuntimeError, match='Jobs obrigatórios ausentes'):
+        agendador.garantir_iniciado_no_processo_servidor(app)
+
+
 def test_init_idempotente_nao_duplica(app, ids, sched_limpo):
     s1 = agendador.init(app)
     s2 = agendador.init(app)

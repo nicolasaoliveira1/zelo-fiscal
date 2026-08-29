@@ -74,6 +74,13 @@ def create_app(config_class=Config):
         agendador.init(app)
     except Exception as e:
         log_event('agendador_init_falhou', level='ERROR', error=str(e))
+        # No pai verdadeiro do reloader haverá outro processo para tentar. Em
+        # qualquer processo que atende HTTP, seguir deixaria a aplicação com
+        # aparência saudável, mas sem executar nenhum fluxo recorrente.
+        if (app.config.get('AGENDADOR_ENABLED', True)
+                and not agendador.comando_cli_sem_servidor()
+                and not agendador.deve_adiar_para_reloader(app)):
+            raise
 
     # persistencia do historico de diagnostico (thread escritora + prune inicial)
     if app.config.get('DIAGNOSTICO_PERSISTIR', True):

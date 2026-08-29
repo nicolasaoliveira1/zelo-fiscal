@@ -10,6 +10,7 @@ Este módulo NÃO importa `routes`: os fluxos automatizáveis (FGTS/RS/Municipal
 são injetados por `routes` via `registrar_fluxo` no import, evitando ciclo.
 """
 import os
+import sys
 from datetime import datetime, timedelta
 from threading import Lock
 
@@ -148,9 +149,98 @@ def init(app):
     global _scheduler
     if not app.config.get('AGENDADOR_ENABLED', True):
         return None
-    if app.debug and not os.environ.get('WERKZEUG_RUN_MAIN'):
-        # processo pai do reloader: não agenda (o filho o fará)
+    if comando_cli_sem_servidor():
+        log_event('agendador_ignorado_comando_cli')
         return None
+    if deve_adiar_para_reloader(app):
+        # processo pai do reloader: não agenda (o filho o fará)
+        log_event('agendador_init_adiado_reloader')
+        return None
+    scheduler = _iniciar(app)
+    _confirmar_jobs_obrigatorios(app, scheduler)
+    return scheduler
+
+
+def deve_adiar_para_reloader(app):
+    """True somente quando haverá outro processo para atender HTTP.
+
+    `flask run --debug --no-reload` tem debug ligado e não define
+    `WERKZEUG_RUN_MAIN`, mas o próprio processo atende as requisições. Tratá-lo
+    como pai do reloader deixa o servidor vivo sem scheduler. O argumento
+    explícito `--no-reload` discrimina esse fluxo sem iniciar duas cópias quando
+    o reloader realmente está habilitado.
+    """
+    if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN'):
+        return False
+    if os.environ.get('FLASK_RUN_FROM_CLI') == 'true' and '--no-reload' in sys.argv:
+        return False
+    return True
+
+
+def comando_cli_sem_servidor():
+    """True para `flask db`, `flask shell` e outros comandos administrativos.
+
+    Esses comandos importam `run.py` para obter a aplicação, mas não atendem
+    HTTP e podem operar justamente sobre um schema vazio ou em transição. O
+    scheduler não deve consultar tabelas nem transformar uma migration válida
+    em falha de boot.
+    """
+    if os.environ.get('FLASK_RUN_FROM_CLI') != 'true':
+        return False
+    return 'run' not in sys.argv[1:]
+
+
+def garantir_iniciado_no_processo_servidor(app):
+    """Confirma o scheduler no processo que efetivamente atende HTTP.
+
+    O factory continua guardado contra o processo pai do reloader. O entrypoint,
+    porém, conhece o processo que vai servir e chama esta função antes de abrir
+    a porta. Assim uma divergência no lifecycle do Werkzeug não deixa a UI no ar
+    sem os jobs recorrentes — exatamente o tipo de falha silenciosa que faria a
+    renovação da madrugada não acontecer.
+
+    `AGENDADOR_ENABLED=false` permanece um desligamento explícito e válido.
+    Com a flag ligada, scheduler parado ou job ausente aborta o boot.
+    """
+    if not app.config.get('AGENDADOR_ENABLED', True):
+        log_event('agendador_desligado_configuracao', level='WARNING')
+        return None
+
+    scheduler = _iniciar(app)
+    _confirmar_jobs_obrigatorios(app, scheduler)
+    return scheduler
+
+
+def _confirmar_jobs_obrigatorios(app, scheduler):
+    """Valida o scheduler e os jobs que a configuração manda executar."""
+    if scheduler is None or not scheduler.running:
+        raise RuntimeError('O agendador não iniciou no processo servidor.')
+
+    with app.app_context():
+        _hora, renovacao_ativa = _ler_config()
+    esperados = {
+        _JOB_SNAPSHOT,
+        _JOB_VERIF_MUNICIPIOS,
+        _JOB_RECHECK_RECEITA,
+        _JOB_INVENTARIO_COFRE,
+        _JOB_RESUMO_DIARIO,
+    }
+    if renovacao_ativa:
+        esperados.add(_JOB_RENOVACAO)
+
+    registrados = {job.id for job in scheduler.get_jobs()}
+    ausentes = sorted(esperados - registrados)
+    if ausentes:
+        raise RuntimeError(
+            'Jobs obrigatórios ausentes no agendador: ' + ', '.join(ausentes))
+
+    log_event('agendador_processo_servidor_confirmado',
+              jobs=sorted(registrados), renovacao_ativa=renovacao_ativa)
+
+
+def _iniciar(app):
+    """Cria o scheduler sem aplicar o guard do processo pai do reloader."""
+    global _scheduler
     with _scheduler_lock:
         if _scheduler is not None:
             return _scheduler
