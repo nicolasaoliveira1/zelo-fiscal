@@ -303,6 +303,58 @@ def test_confirmar_duas_vezes_e_recusado(client, app):
     assert client.post(f'/nfse/grupo/{token}/confirmar').status_code == 400
 
 
+def test_falha_no_recalculo_do_grupo_nao_vira_sucesso(client, monkeypatch):
+    def falhar(*_args, **_kwargs):
+        raise RuntimeError('falha sintética no recálculo')
+
+    monkeypatch.setattr('app.routes.nfse.nfse_grupos.confirmar', falhar)
+
+    resposta = client.post('/nfse/grupo/grupo-sintetico/confirmar')
+
+    assert resposta.status_code == 500
+    assert resposta.get_json()['status'] == 'error'
+
+
+def test_falha_no_recalculo_desfaz_confirmacao_do_grupo(client, app, monkeypatch):
+    _empresa(app, 'GAMA SAUDE', '22.222.222/0001-22')
+    notas = _notas(_importar_pdf(client))
+    grupo = next(n['grupo'] for n in notas if n['grupo'] and n['grupo']['lider'])
+
+    def falhar(*_args, **_kwargs):
+        raise RuntimeError('falha sintética no recálculo')
+
+    monkeypatch.setattr('app.services.nfse_emitidas.conciliar', falhar)
+    resposta = client.post(
+        f'/nfse/grupo/{grupo["token"]}/confirmar')
+
+    assert resposta.status_code == 500
+    with app.app_context():
+        atuais = NotaNfse.query.filter_by(grupo_sugerido=grupo['token']).all()
+        assert all(n.grupo_confirmado is False for n in atuais)
+        assert all(n.status != StatusNotaNfse.AGRUPADA for n in atuais)
+        assert all(n.agrupada_em_id is None for n in atuais)
+
+
+def test_falha_no_recalculo_desfaz_mantem_grupo_aplicado(client, app, monkeypatch):
+    _empresa(app, 'GAMA SAUDE', '22.222.222/0001-22')
+    notas = _notas(_importar_pdf(client))
+    grupo = next(n['grupo'] for n in notas if n['grupo'] and n['grupo']['lider'])
+    token = grupo['token']
+    assert client.post(f'/nfse/grupo/{token}/confirmar').status_code == 200
+
+    def falhar(*_args, **_kwargs):
+        raise RuntimeError('falha sintética no recálculo')
+
+    monkeypatch.setattr('app.services.nfse_emitidas.conciliar', falhar)
+    resposta = client.post(f'/nfse/grupo/{token}/desfazer')
+
+    assert resposta.status_code == 500
+    with app.app_context():
+        atuais = NotaNfse.query.filter_by(grupo_sugerido=token).all()
+        assert any(n.grupo_confirmado is True for n in atuais)
+        assert any(n.status == StatusNotaNfse.AGRUPADA for n in atuais)
+
+
 def _notas_de(client):
     return client.get('/nfse/notas').get_json()['notas']
 
