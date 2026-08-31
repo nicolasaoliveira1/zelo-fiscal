@@ -169,79 +169,112 @@ def _distancia(nota, emitida):
 JANELA_DIAS = 75
 
 
-def conciliar(competencia=None):
-    """Liga cada nota emitida a linha do extrato que a originou.
+def _nota_elegivel(nota):
+    """Diz se a linha ainda representa uma obrigação ativa de emissão.
 
-    **A chave NAO e a competencia** (ND-027). `NotaNfse.competencia` e o mes de
-    REFERENCIA do honorario; `NotaEmitidaNfse.competencia_dps` e o mes da
-    EMISSAO. O cliente paga em julho o honorario de junho, entao os dois
-    divergem no caso normal — casa-los acusava "sem nota" para quase tudo.
-
-    O que de fato identifica a mesma nota nos dois lados e **documento +
-    valor**. Duas passadas:
-
-    1. documento + valor EXATO — o caso comum, e discrimina bem: um cliente com
-       tres notas no mes tem tres valores distintos;
-    2. o que sobrou, por documento dentro de uma janela de dias — e assim que
-       "mesma nota, valor diferente" continua detectavel. Sem a segunda passada,
-       um valor divergente apareceria como duas coisas (linha sem nota E nota
-       sem linha) em vez de uma.
-
-    Em ambas, so liga quando o par e INEQUIVOCO; havendo mais de um candidato,
-    vence o mais proximo no tempo, e havendo empate de proximidade nao liga
-    nenhum — inventar correspondencia que ninguem conferiu e pior que deixar
-    aparecer como divergencia.
-
-    `competencia` restringe o lado do EXTRATO (mes de referencia); as notas
-    emitidas sao consideradas todas, sempre, porque a nota de junho pode ter
-    saido em julho — que e justamente o caso que quebrava antes.
+    A líder de um agrupamento confirmado continua elegível e já carrega o
+    `valor_final` líquido. A irmã absorvida é excluída pelo status e pelo
+    ponteiro, o que também protege contra dados antigos que tenham apenas um
+    dos dois campos preenchido.
     """
-    from app import db
+    from app.models import StatusNotaNfse
+
+    ignorados = (StatusNotaNfse.CANCELADA, StatusNotaNfse.AGRUPADA,
+                 StatusNotaNfse.INVALIDA, StatusNotaNfse.DUPLICATA)
+    return (bool(nota.documento)
+            and nota.status not in ignorados
+            and nota.agrupada_em_id is None)
+
+
+def _candidatas(emitida, notas, tomadas, por_valor):
+    """Retorna candidatas livres para uma das duas passadas do avaliador."""
+    candidatas = [n for n in notas if n.id not in tomadas
+                  and n.documento == emitida.documento]
+    if por_valor:
+        candidatas = [n for n in candidatas
+                      if n.valor_final is not None and emitida.valor is not None
+                      and Decimal(n.valor_final) == Decimal(emitida.valor)]
+    else:
+        candidatas = [n for n in candidatas
+                      if _distancia(n, emitida) <= JANELA_DIAS]
+    return candidatas
+
+
+def _avaliar_conciliacao():
+    """Avalia todos os pares e devolve vínculos, empates e alterações.
+
+    O resultado é único para persistência e para o painel. A ordem por id torna
+    a escolha reproduzível quando há vários tomadores iguais; um empate de
+    distância continua sem vínculo e vira uma ocorrência de `ambigua`.
+    """
     from app.models import NotaEmitidaNfse, NotaNfse, SituacaoNotaEmitida
 
-    emitidas = [e for e in NotaEmitidaNfse.query.all()
+    todas_emitidas = NotaEmitidaNfse.query.order_by(NotaEmitidaNfse.id).all()
+    emitidas = [e for e in todas_emitidas
                 if e.situacao == SituacaoNotaEmitida.GERADA and e.documento]
-    if not emitidas:
-        return 0
+    notas = [n for n in NotaNfse.query.order_by(NotaNfse.id).all()
+             if _nota_elegivel(n)]
 
-    consulta = NotaNfse.query
-    if competencia:
-        consulta = consulta.filter_by(competencia=competencia)
-    notas = [n for n in consulta.all() if n.documento]
-
-    anterior = {e.id: e.nota_id for e in emitidas}
-    for emitida in emitidas:
+    anterior = {e.id: e.nota_id for e in todas_emitidas}
+    # Limpa também vínculos de situações que deixaram de ser elegíveis.
+    for emitida in todas_emitidas:
         emitida.nota_id = None
 
     tomadas = set()
+    ambiguas = {}
 
-    def _casar(candidatas_de):
+    for por_valor in (True, False):
         for emitida in emitidas:
-            if emitida.nota_id is not None:
+            if emitida.nota_id is not None or emitida.id in ambiguas:
                 continue
-            candidatas = [n for n in candidatas_de(emitida) if n.id not in tomadas]
+            candidatas = _candidatas(emitida, notas, tomadas, por_valor)
             if not candidatas:
                 continue
-            if len(candidatas) > 1:
-                candidatas.sort(key=lambda n: _distancia(n, emitida))
-                # empate de proximidade: nao ha como escolher com honestidade
-                if _distancia(candidatas[0], emitida) == _distancia(candidatas[1], emitida):
-                    continue
-            emitida.nota_id = candidatas[0].id
-            tomadas.add(candidatas[0].id)
 
-    _casar(lambda e: [n for n in notas
-                      if n.documento == e.documento
-                      and n.valor_final is not None and e.valor is not None
-                      and Decimal(n.valor_final) == Decimal(e.valor)])
+            candidatas.sort(key=lambda n: (_distancia(n, emitida), n.id))
+            menor_distancia = _distancia(candidatas[0], emitida)
+            empatadas = [n for n in candidatas
+                         if _distancia(n, emitida) == menor_distancia]
+            if len(empatadas) > 1:
+                ambiguas[emitida.id] = {
+                    'emitida': emitida,
+                    'candidatas': empatadas,
+                }
+                continue
 
-    _casar(lambda e: [n for n in notas
-                      if n.documento == e.documento
-                      and _distancia(n, e) <= JANELA_DIAS])
+            escolhida = candidatas[0]
+            emitida.nota_id = escolhida.id
+            tomadas.add(escolhida.id)
 
-    mudou = sum(1 for e in emitidas if anterior.get(e.id) != e.nota_id)
+    mudou = sum(1 for e in todas_emitidas if anterior.get(e.id) != e.nota_id)
+    return {
+        'emitidas': emitidas,
+        'notas': notas,
+        'ambiguas': list(ambiguas.values()),
+        'mudou': mudou,
+    }
+
+
+def conciliar():
+    """Liga notas emitidas e extrato sem consultar competência de referência.
+
+    O casamento usa documento, valor, data e a janela de 75 dias. Estados que
+    não representam uma obrigação ativa ficam fora, e empates não recebem
+    `nota_id`.
+    """
+    from app import db
+    from app.services.execution_logger import log_event
+
+    resultado = _avaliar_conciliacao()
     db.session.commit()
-    return mudou
+    log_event(
+        'nfse_emitidas_conciliacao',
+        emitidas=len(resultado['emitidas']),
+        vinculadas=sum(1 for e in resultado['emitidas'] if e.nota_id),
+        ambiguas=len(resultado['ambiguas']),
+        alteradas=resultado['mudou'],
+    )
+    return resultado['mudou']
 
 
 def resumo(mes_geracao):
@@ -278,60 +311,83 @@ def resumo(mes_geracao):
     }
 
 
-def divergencias(competencia):
-    """O que nao bate, nos dois sentidos, para um mes de REFERENCIA.
+def divergencias(inicio, fim=None):
+    """Classifica a conferência pelo intervalo exato da consulta.
 
-    `competencia` e o mes do honorario (o lado do extrato), nao o da emissao: a
-    pergunta e "das linhas de junho, quais ficaram sem nota?", e a nota de junho
-    pode ter saido em julho.
+    `sem_nota` usa pagamentos dentro do intervalo; `sem_extrato` usa emissões
+    dentro dele. O casamento continua global para permitir emissão tardia: uma
+    nota de julho pode encontrar pagamento de junho dentro da janela vigente.
 
-    - `sem_nota`: linha do extrato que devia virar nota e nao achou par em nota
-      emitida NENHUMA — cliente pagou e ficou sem nota;
-    - `sem_extrato`: nota emitida cuja linha nao foi identificada, entre as
-      GERADAS no periodo coberto por essa competencia;
-    - `valor_diferente`: par encontrado pela segunda passada, valores distintos.
+    A forma antiga `divergencias('MM/AAAA')` permanece somente para não quebrar
+    integrações legadas enquanto os consumidores migram para
+    `divergencias(inicio, fim)`. O painel não a utiliza mais.
     """
-    from app.models import NotaEmitidaNfse, NotaNfse, SituacaoNotaEmitida, StatusNotaNfse
+    if fim is None:
+        return _divergencias_competencia_legada(inicio)
+    return _divergencias_intervalo(inicio, fim)
 
-    notas = NotaNfse.query.filter_by(competencia=competencia).all()
 
-    # Status que significam "esta linha nao deveria virar nota": cobrar por ela
-    # seria falso alarme.
-    ignorados = (StatusNotaNfse.CANCELADA, StatusNotaNfse.AGRUPADA,
-                 StatusNotaNfse.INVALIDA, StatusNotaNfse.DUPLICATA)
-    esperadas = [n for n in notas if n.status not in ignorados]
-    por_id = {n.id: n for n in notas}
-
-    emitidas = [e for e in NotaEmitidaNfse.query.all()
-                if e.situacao == SituacaoNotaEmitida.GERADA]
+def _resultado_divergencias(resultado, notas, emitidas, janela):
+    """Monta as categorias a partir da avaliação já persistida."""
+    ambiguas = resultado['ambiguas']
+    ids_ambigua = {item['emitida'].id for item in ambiguas}
+    ids_candidatas_ambiguas = {
+        nota.id for item in ambiguas for nota in item['candidatas']}
     ligadas = {e.nota_id for e in emitidas if e.nota_id}
 
     valor_diferente = []
     for emitida in emitidas:
-        nota = por_id.get(emitida.nota_id)
-        if nota is None or nota.valor_final is None or emitida.valor is None:
+        if emitida.id in ids_ambigua or not emitida.nota_id:
             continue
-        if Decimal(nota.valor_final) != Decimal(emitida.valor):
+        nota = next((n for n in notas if n.id == emitida.nota_id), None)
+        if (nota is not None and nota.valor_final is not None
+                and emitida.valor is not None
+                and Decimal(nota.valor_final) != Decimal(emitida.valor)):
             valor_diferente.append((nota, emitida))
 
-    # "Nota sem linha" so pode ser afirmada onde HA extrato importado.
-    #
-    # Sem este recorte a lista fica inutil: nos dados reais ela acusou 104
-    # orfas, quase todas notas de periodos cujo extrato nunca foi importado — o
-    # sistema chamava de "sem pagamento identificado" o que era, na verdade,
-    # "nao tenho como saber". Uma lista assim ensina o operador a ignora-la, que
-    # e o pior desfecho possivel para um painel de conferencia.
-    janela = _janela_coberta()
-    sem_extrato = [e for e in emitidas
-                   if not e.nota_id and _coberta(janela, e.data_geracao)]
-
     return {
-        'sem_nota': [n for n in esperadas if n.id not in ligadas],
-        'sem_extrato': sem_extrato,
+        'sem_nota': [n for n in notas
+                     if n.id not in ligadas
+                     and n.id not in ids_candidatas_ambiguas],
+        'sem_extrato': [e for e in emitidas
+                        if not e.nota_id
+                        and e.id not in ids_ambigua
+                        and _coberta(janela, e.data_geracao)],
         'nao_conferiveis': sum(1 for e in emitidas
-                               if not e.nota_id and not _coberta(janela, e.data_geracao)),
+                               if not e.nota_id
+                               and e.id not in ids_ambigua
+                               and not _coberta(janela, e.data_geracao)),
         'valor_diferente': valor_diferente,
+        'ambigua': ambiguas,
     }
+
+
+def _divergencias_intervalo(inicio, fim):
+    from app import db
+
+    resultado = _avaliar_conciliacao()
+    db.session.commit()
+    notas = [n for n in resultado['notas']
+             if n.data_pagamento is not None
+             and inicio <= n.data_pagamento <= fim]
+    emitidas = [e for e in resultado['emitidas']
+                if e.data_geracao is not None
+                and inicio <= e.data_geracao <= fim]
+    # A cobertura é calculada sobre todas as linhas importadas, mas as
+    # classificações continuam limitadas às datas desta consulta.
+    janela = _janela_coberta()
+    return _resultado_divergencias(resultado, notas, emitidas, janela)
+
+
+def _divergencias_competencia_legada(competencia):
+    """Compatibilidade temporária para chamadas antigas da aplicação."""
+    from app import db
+
+    resultado = _avaliar_conciliacao()
+    db.session.commit()
+    notas = [n for n in resultado['notas'] if n.competencia == competencia]
+    emitidas = resultado['emitidas']
+    return _resultado_divergencias(resultado, notas, emitidas, _janela_coberta())
 
 
 def _janela_coberta():
