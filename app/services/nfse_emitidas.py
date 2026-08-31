@@ -216,7 +216,7 @@ def _avaliar_conciliacao():
 
     todas_emitidas = NotaEmitidaNfse.query.order_by(NotaEmitidaNfse.id).all()
     emitidas = [e for e in todas_emitidas
-                if e.situacao == SituacaoNotaEmitida.GERADA and e.documento]
+                if e.situacao == SituacaoNotaEmitida.GERADA]
     notas = [n for n in NotaNfse.query.order_by(NotaNfse.id).all()
              if _nota_elegivel(n)]
 
