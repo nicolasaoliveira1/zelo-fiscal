@@ -74,7 +74,9 @@ def test_resumo_recusa_mes_invalido(client):
     resposta = client.get('/nfse/emitidas/resumo?mes=13/2026')
 
     assert resposta.status_code == 400
-    assert 'MM/AAAA' in resposta.get_json()['message']
+    assert resposta.content_type.startswith('text/html')
+    assert resposta.get_json(silent=True) is None
+    assert 'MM/AAAA' in resposta.get_data(as_text=True)
 
 
 def test_resumo_exige_papel_de_operador(login_as):

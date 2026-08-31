@@ -8,7 +8,7 @@ import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
-from flask import render_template, request
+from flask import abort, render_template, request
 from flask_login import current_user
 
 from app import db
@@ -1528,7 +1528,7 @@ def nfse_resumo_emitidas():
     """Resumo mensal A4 do espelho persistido, sem consultar o portal."""
     mes = (request.args.get('mes') or '').strip()
     if not _COMPETENCIA_VALIDA.match(mes):
-        return json_error('Informe o mês no formato MM/AAAA.', 400)
+        abort(400, description='Informe o mês no formato MM/AAAA.')
 
     inicio, fim = nfse_emitidas.periodo_do_mes(mes)
     resumo = nfse_emitidas.resumo(mes)
