@@ -260,18 +260,21 @@ def _avaliar_conciliacao():
     }
 
 
-def conciliar():
+def conciliar(*, persistir=True):
     """Liga notas emitidas e extrato sem consultar competência de referência.
 
     O casamento usa documento, valor, data e a janela de 75 dias. Estados que
     não representam uma obrigação ativa ficam fora, e empates não recebem
-    `nota_id`.
+    `nota_id`. Quando ``persistir`` é falso, as alterações ficam na transação
+    corrente para que uma operação de agrupamento possa confirmar a mudança e
+    a conciliação juntas.
     """
     from app import db
     from app.services.execution_logger import log_event
 
     resultado = _avaliar_conciliacao()
-    db.session.commit()
+    if persistir:
+        db.session.commit()
     log_event(
         'nfse_emitidas_conciliacao',
         emitidas=len(resultado['emitidas']),
@@ -283,7 +286,11 @@ def conciliar():
 
 
 def resumo(mes_geracao):
-    """Total EMITIDO no mes — as notas GERADAS nele.
+    """Total mensal para relatórios que ainda usam ``MM/AAAA``.
+
+    O painel de conferência usa ``resumo_periodo`` para preservar o intervalo
+    exato da consulta. Esta função continua disponível como API legada para
+    relatórios e integrações que usam o contrato mensal.
 
     O mes sai da `data_geracao`, que e o fato, e nao da competencia do DPS: sao
     quase sempre iguais (a automacao preenche o DPS com hoje), mas uma nota

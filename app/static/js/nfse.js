@@ -589,7 +589,6 @@ export function pintarEmitidas(painel) {
   // Nunca consultado não é o mesmo que consultado e sem resultado: mostrar as
   // divergências aqui acusaria "pagou e ficou sem nota" para o mês inteiro só
   // porque ninguém leu o portal ainda.
-  alvo.dataset.consultaId = painel.consulta_id || '';
   if (painel.nunca_consultado) {
     alvo.innerHTML = '<p class="nfse-hint mb-0">Escolha o período e consulte o portal.</p>';
     return;

@@ -65,7 +65,6 @@ test('mostra o intervalo e a seção de correspondência ambígua', () => {
   assert.match(texto, /Correspondência ambígua \(1\)/);
   assert.match(texto, /valor final comparado/);
   assert.match(texto, /CANDIDATA UM/);
-  assert.equal(document.getElementById('emitidasPainel').dataset.consultaId, '7');
 });
 
 test('consulta envia somente o intervalo, sem competência', async () => {

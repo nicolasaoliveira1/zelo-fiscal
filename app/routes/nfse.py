@@ -1394,9 +1394,6 @@ def _painel_vazio(mes=None):
 
 def _painel_emitidas(consulta=None, mes=None):
     """Total e divergências da consulta completa indicada pelo identificador."""
-    if isinstance(consulta, str) and mes is None:
-        mes = consulta
-        consulta = None
     if consulta is None and mes:
         consulta = nfse_emitidas.ultima_consulta(mes=mes)
     if consulta is None:

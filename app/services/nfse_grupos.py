@@ -259,12 +259,12 @@ def confirmar(token, valor=None, descricao=None):
         lider.descricao_pendente = False
     lider.status = _status_apos_grupo(lider)
 
-    db.session.commit()
-    # O agrupamento altera quais linhas e valores podem representar uma nota.
-    # Recalcular depois do commit evita que a conferência observe o estado
-    # intermediário e deixa qualquer falha chegar à rota como erro acionável.
+    # O agrupamento e a conciliação precisam ser confirmados juntos. O avaliador
+    # consulta o estado novo na transação corrente; se falhar, a rota desfaz
+    # tudo com rollback e não publica um agrupamento sem conferência atualizada.
     from app.services import nfse_emitidas
-    nfse_emitidas.conciliar()
+    nfse_emitidas.conciliar(persistir=False)
+    db.session.commit()
     return lider
 
 
@@ -307,9 +307,10 @@ def desfazer(token):
     lider.grupo_pendente_anterior = None
     lider.status = _status_ao_sair_do_grupo(lider)
 
-    db.session.commit()
     from app.services import nfse_emitidas
-    nfse_emitidas.conciliar()
+    # Mantém a alteração do grupo e a conciliação na mesma transação lógica.
+    nfse_emitidas.conciliar(persistir=False)
+    db.session.commit()
     return lider
 
 
