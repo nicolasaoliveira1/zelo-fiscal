@@ -382,7 +382,12 @@ def _resultado_divergencias(resultado, notas, emitidas, janela):
     ids_ambigua = {item['emitida'].id for item in ambiguas}
     ids_candidatas_ambiguas = {
         nota.id for item in ambiguas for nota in item['candidatas']}
-    ligadas = {e.nota_id for e in emitidas if e.nota_id}
+    # O escopo das categorias é o intervalo consultado, mas o vínculo é
+    # global: um pagamento interno pode já estar conciliado com uma emissão
+    # posterior (ou anterior) fora do intervalo. Nesse caso não é correto
+    # acusá-lo como "pagou e ficou sem nota" só porque a nota vinculada não
+    # aparece na lista de emissões deste recorte.
+    ligadas = {e.nota_id for e in resultado['emitidas'] if e.nota_id}
 
     valor_diferente = []
     for emitida in emitidas:

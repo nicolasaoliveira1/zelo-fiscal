@@ -371,6 +371,19 @@ def test_pagamento_fora_do_intervalo_ainda_concilia_emissao_tardia(banco):
     assert divergentes['sem_extrato'] == []
 
 
+def test_pagamento_no_intervalo_nao_e_orfao_se_nota_saiu_depois(banco):
+    """Um pagamento pode já estar ligado a emissão posterior ao recorte."""
+    nota = _nota(CNPJ_A, '400.00', pagamento=date(2026, 7, 30))
+    emitida = _emitida('1' * 50, CNPJ_A, '400.00',
+                       geracao=date(2026, 8, 2))
+    db.session.commit()
+
+    divergentes = emit.divergencias(date(2026, 7, 1), date(2026, 7, 31))
+
+    assert emitida.nota_id == nota.id
+    assert divergentes['sem_nota'] == []
+
+
 def test_empate_de_candidatas_vira_ambiguidade_sem_vinculo(banco):
     primeira = _nota(CNPJ_A, '400.00', pagamento=date(2026, 7, 10))
     segunda = _nota(CNPJ_A, '400.00', pagamento=date(2026, 7, 10))
