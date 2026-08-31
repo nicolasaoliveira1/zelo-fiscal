@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+const elementos = new Map();
+
 globalThis.document = {
   addEventListener() {},
-  getElementById() { return null; },
+  getElementById(id) { return elementos.get(id) || null; },
   createElement() {
     let texto = '';
     return {
@@ -18,7 +20,7 @@ globalThis.document = {
   },
 };
 
-const { celulaDescricao } = await import('../app/static/js/nfse.js');
+const { celulaDescricao, pintarEmitidas } = await import('../app/static/js/nfse.js');
 
 test('permite editar a descrição quando a categoria está a definir', () => {
   const html = celulaDescricao({
@@ -44,4 +46,34 @@ test('mantém a descrição bloqueada depois do preenchimento', () => {
 
     assert.doesNotMatch(html, /data-editar-descricao/);
   });
+});
+
+test('oferece o resumo imprimível somente depois de consultar o mês', () => {
+  const painel = { dataset: {}, innerHTML: '' };
+  elementos.set('emitidasPainel', painel);
+
+  pintarEmitidas({
+    mes_geracao: '08/2026',
+    competencia: '07/2026',
+    nunca_consultado: false,
+    quantidade: 3,
+    total: '1.234,56',
+    outras_situacoes: {},
+    consultado_em: '31/08/2026 10:30',
+    sem_nota: [],
+    sem_extrato: [],
+    nao_conferiveis: 0,
+    valor_diferente: [],
+  });
+
+  assert.match(painel.innerHTML, /Imprimir \/ salvar PDF/);
+  assert.match(painel.innerHTML, /\/nfse\/emitidas\/resumo\?mes=08%2F2026/);
+
+  pintarEmitidas({
+    mes_geracao: '09/2026',
+    competencia: '08/2026',
+    nunca_consultado: true,
+  });
+  assert.doesNotMatch(painel.innerHTML, /Imprimir \/ salvar PDF/);
+  elementos.delete('emitidasPainel');
 });

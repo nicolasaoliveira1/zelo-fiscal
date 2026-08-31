@@ -578,7 +578,7 @@ async function desfazerGrupo(token) {
 
 // --- conferencia com o portal (notas emitidas) ----------------------------
 
-function pintarEmitidas(painel) {
+export function pintarEmitidas(painel) {
   const alvo = document.getElementById('emitidasPainel');
   if (!alvo) return;
   if (!painel) {
@@ -608,11 +608,15 @@ function pintarEmitidas(painel) {
       + outras.map(([s, n]) => `${n} em ${esc(s)}`).join(' · ') + '</div>'
     : '';
 
+  const urlResumo = `/nfse/emitidas/resumo?mes=${encodeURIComponent(painel.mes_geracao)}`;
+
   const blocos = [
     `<div class="nfse-total">
        <span class="valor">R$ ${esc(painel.total || '0,00')}</span>
        <span class="rotulo">emitido em ${esc(painel.mes_geracao)}</span>
        <span class="nfse-hint">${painel.quantidade} nota(s)</span>${quando}
+       <a class="btn btn-soft-primary btn-sm ms-auto" href="${urlResumo}"
+          target="_blank" rel="noopener">Imprimir / salvar PDF</a>
      </div>${aviso}`,
   ];
 

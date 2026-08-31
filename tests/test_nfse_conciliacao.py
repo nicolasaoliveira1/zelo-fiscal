@@ -147,6 +147,11 @@ def test_total_de_mes_sem_nota_e_zero_e_nao_erro(banco):
     assert resumo['consultado_em'] is None
 
 
+def test_periodo_do_mes_cobre_mes_civil_inclusive():
+    assert emit.periodo_do_mes('02/2028') == (
+        date(2028, 2, 1), date(2028, 2, 29))
+
+
 # --- conciliacao por documento + valor --------------------------------------
 
 def test_par_encontrado_liga_a_nota(banco):

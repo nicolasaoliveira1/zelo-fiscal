@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="pt-br" data-bs-theme="light">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Resumo mensal de NFS-e · {{ mes }} · Zelo</title>
+    <link rel="stylesheet" href="{{ static_versionado('vendor/bootstrap/css/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ static_versionado('vendor/fonts/ibm-plex.css') }}">
+    <link rel="stylesheet" href="{{ static_versionado('css/style.css') }}">
+    <style>
+        @page { size: A4 portrait; margin: 16mm; }
+        body {
+            margin: 0;
+            background: var(--bs-body-bg);
+            color: var(--zelo-ink);
+            font-family: var(--zelo-font-body);
+        }
+        .resumo-acoes {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+            max-width: 178mm;
+            margin: 1rem auto;
+        }
+        .resumo-folha {
+            box-sizing: border-box;
+            width: min(178mm, calc(100% - 2rem));
+            min-height: 250mm;
+            margin: 0 auto 1rem;
+            padding: 16mm;
+            background: var(--bs-card-bg);
+            border: 1px solid var(--zelo-line);
+            border-radius: 0.5rem;
+        }
+        .resumo-cabecalho {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            padding-bottom: 8mm;
+            border-bottom: 2px solid var(--zelo-ink);
+        }
+        .resumo-marca {
+            margin: 0 0 0.35rem;
+            color: var(--zelo-slate);
+            font-size: 0.78rem;
+            font-weight: 600;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+        h1 {
+            margin: 0;
+            font-family: var(--zelo-font-display);
+            font-size: 2rem;
+            font-weight: 600;
+        }
+        .resumo-mes {
+            font-family: var(--zelo-font-mono);
+            font-size: 1rem;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        .resumo-periodo {
+            margin: 7mm 0;
+            color: var(--zelo-slate);
+            font-size: 0.9rem;
+        }
+        .resumo-periodo strong {
+            color: var(--zelo-ink);
+            font-family: var(--zelo-font-mono);
+            font-weight: 500;
+        }
+        .resumo-numeros {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 6mm;
+            margin-bottom: 8mm;
+        }
+        .resumo-numero {
+            padding: 7mm;
+            background: var(--bs-tertiary-bg);
+            border: 1px solid var(--zelo-line);
+            border-radius: 0.5rem;
+        }
+        .resumo-numero span {
+            display: block;
+            margin-bottom: 0.35rem;
+            color: var(--zelo-slate);
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        .resumo-numero strong {
+            display: block;
+            font-family: var(--zelo-font-mono);
+            font-size: 2rem;
+            font-weight: 500;
+            line-height: 1.15;
+        }
+        .resumo-numero.is-total strong { font-size: 2.4rem; }
+        .resumo-observacoes {
+            margin-bottom: 8mm;
+            padding: 5mm 6mm;
+            border: 1px solid var(--zelo-line);
+            border-radius: 0.5rem;
+        }
+        .resumo-observacoes h2 {
+            margin: 0 0 0.5rem;
+            font-family: var(--zelo-font-display);
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+        .resumo-observacoes ul { margin: 0; padding-left: 1.2rem; }
+        .resumo-observacoes li + li { margin-top: 0.25rem; }
+        .resumo-fonte {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4mm 8mm;
+            margin: 0;
+            padding-top: 7mm;
+            border-top: 1px solid var(--zelo-line);
+        }
+        .resumo-fonte div { min-width: 0; }
+        .resumo-fonte dt {
+            color: var(--zelo-slate);
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+        .resumo-fonte dd { margin: 0.2rem 0 0; font-size: 0.85rem; }
+        .resumo-fonte time { font-family: var(--zelo-font-mono); }
+        .resumo-rodape {
+            margin: 9mm 0 0;
+            color: var(--zelo-slate);
+            font-size: 0.76rem;
+            line-height: 1.45;
+        }
+        @media (max-width: 600px) {
+            .resumo-acoes { margin-inline: 1rem; }
+            .resumo-folha { padding: 8mm; }
+            .resumo-numeros, .resumo-fonte { grid-template-columns: 1fr; }
+            .resumo-cabecalho { display: block; }
+            .resumo-mes { margin-top: 0.75rem; }
+        }
+        @media print {
+            .resumo-acoes { display: none; }
+            .resumo-folha {
+                width: auto;
+                min-height: 0;
+                margin: 0;
+                padding: 0;
+                border: 0;
+                border-radius: 0;
+                background: transparent;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav class="resumo-acoes" aria-label="Ações do relatório">
+        <a class="btn btn-ghost" href="{{ url_for('main.nfse_painel') }}">Voltar</a>
+        <button class="btn btn-primary" type="button" id="btnImprimirResumo">
+            Imprimir / salvar PDF
+        </button>
+    </nav>
+
+    <main class="resumo-folha">
+        <header class="resumo-cabecalho">
+            <div>
+                <p class="resumo-marca">Zelo</p>
+                <h1>Resumo mensal de NFS-e</h1>
+            </div>
+            <div class="resumo-mes">{{ mes }}</div>
+        </header>
+
+        <p class="resumo-periodo">
+            Período somado: <strong>{{ periodo_inicio }}</strong> a
+            <strong>{{ periodo_fim }}</strong>, pela data de geração no portal.
+        </p>
+
+        {% if consultado_em %}
+        <section class="resumo-numeros" aria-label="Totais do mês">
+            <div class="resumo-numero is-total">
+                <span>Total emitido</span>
+                <strong>R$ {{ total }}</strong>
+            </div>
+            <div class="resumo-numero">
+                <span>Notas emitidas</span>
+                <strong>{{ quantidade }}</strong>
+            </div>
+        </section>
+
+        {% if sem_valor or outras_situacoes %}
+        <section class="resumo-observacoes">
+            <h2>Itens que exigem conferência</h2>
+            <ul>
+                {% if sem_valor %}
+                <li>
+                    {{ sem_valor }} {{ 'nota emitida está' if sem_valor == 1 else 'notas emitidas estão' }}
+                    sem valor e {{ 'não compõe' if sem_valor == 1 else 'não compõem' }} a soma.
+                </li>
+                {% endif %}
+                {% for situacao, total_situacao in outras_situacoes.items() %}
+                <li>
+                    {{ total_situacao }} {{ 'nota' if total_situacao == 1 else 'notas' }} em
+                    “{{ situacao }}” {{ 'ficou' if total_situacao == 1 else 'ficaram' }} fora da
+                    quantidade e do total.
+                </li>
+                {% endfor %}
+            </ul>
+        </section>
+        {% endif %}
+
+        <dl class="resumo-fonte">
+            <div>
+                <dt>Fonte</dt>
+                <dd>Espelho das NFS-e lidas no Emissor Nacional</dd>
+            </div>
+            <div>
+                <dt>Última leitura do portal</dt>
+                <dd><time>{{ consultado_em }}</time></dd>
+            </div>
+            <div>
+                <dt>Critério da quantidade</dt>
+                <dd>Situação confirmada como emitida no portal</dd>
+            </div>
+            <div>
+                <dt>Relatório gerado em</dt>
+                <dd><time>{{ gerado_em }}</time></dd>
+            </div>
+        </dl>
+        {% else %}
+        <section class="resumo-observacoes">
+            <h2>Ainda não há dados deste mês</h2>
+            <p class="mb-0">Consulte o período no painel da NFS-e antes de gerar o resumo.</p>
+        </section>
+        {% endif %}
+
+        <p class="resumo-rodape">
+            Este resumo usa o espelho acumulado no Zelo e não consulta o portal ao ser aberto.
+            Apenas notas com situação confirmada como emitida entram na quantidade; a soma considera
+            essas notas quando o valor está disponível.
+        </p>
+    </main>
+
+    <script type="module" src="{{ static_versionado('js/nfse_resumo.js') }}"></script>
+</body>
+</html>
