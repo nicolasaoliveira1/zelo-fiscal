@@ -92,7 +92,7 @@ def consultar(inicio, fim, execution_id=None):
     """
     from app import db
     from app.automation import nfse_emitidas as automacao
-    from app.models import NotaEmitidaNfse
+    from app.models import ConsultaEmitidaNfse, NotaEmitidaNfse
     from app.services.execution_logger import log_event
     from app.services.nfse_session import SESSAO
 
@@ -131,15 +131,20 @@ def consultar(inicio, fim, execution_id=None):
 
     db.session.commit()
     conciliar()
+    consulta = ConsultaEmitidaNfse(inicio=inicio, fim=fim)
+    db.session.add(consulta)
+    db.session.commit()
 
     log_event('nfse_emitidas_consulta_ok', lidas=len(lidas), novas=novas,
-              atualizadas=atualizadas, execution_id=execution_id)
+              atualizadas=atualizadas, consulta_id=consulta.id,
+              execution_id=execution_id)
     return {
         'periodo': (inicio, fim),
         'blocos': len(blocos),
         'lidas': len(lidas),
         'novas': novas,
         'atualizadas': atualizadas,
+        'consulta_id': consulta.id,
     }
 
 
@@ -309,6 +314,50 @@ def resumo(mes_geracao):
         'outras_situacoes': contagem,
         'consultado_em': max((n.consultado_em for n in emitidas), default=None),
     }
+
+
+def resumo_periodo(inicio, fim):
+    """Total das notas GERADAS dentro do intervalo consultado, inclusive."""
+    from app.models import NotaEmitidaNfse, SituacaoNotaEmitida
+
+    emitidas = [e for e in NotaEmitidaNfse.query.all()
+                if e.data_geracao is not None
+                and inicio <= e.data_geracao <= fim]
+    geradas = [e for e in emitidas if e.situacao == SituacaoNotaEmitida.GERADA]
+    contagem = {}
+    for nota in emitidas:
+        if nota.situacao == SituacaoNotaEmitida.GERADA:
+            continue
+        chave = nota.situacao or '(sem situação)'
+        contagem[chave] = contagem.get(chave, 0) + 1
+
+    return {
+        'inicio': inicio,
+        'fim': fim,
+        'quantidade': len(geradas),
+        'total': sum((n.valor for n in geradas if n.valor is not None), Decimal(0)),
+        'outras_situacoes': contagem,
+        'consultado_em': max((n.consultado_em for n in emitidas), default=None),
+    }
+
+
+def ultima_consulta(mes=None, consulta_id=None):
+    """Busca uma leitura completa persistida, sem inferir competência."""
+    from app import db
+    from app.models import ConsultaEmitidaNfse
+
+    consulta = ConsultaEmitidaNfse.query
+    if consulta_id is not None:
+        return consulta.filter_by(id=consulta_id).first()
+    if mes:
+        mes_numero, ano = mes.split('/')
+        consulta = consulta.filter(
+            db.extract('month', ConsultaEmitidaNfse.inicio) == int(mes_numero),
+            db.extract('year', ConsultaEmitidaNfse.inicio) == int(ano),
+        )
+    return consulta.order_by(
+        ConsultaEmitidaNfse.consultado_em.desc(),
+        ConsultaEmitidaNfse.id.desc()).first()
 
 
 def divergencias(inicio, fim=None):
