@@ -384,6 +384,33 @@ def test_pagamento_no_intervalo_nao_e_orfao_se_nota_saiu_depois(banco):
     assert divergentes['sem_nota'] == []
 
 
+def test_ambiguidade_fora_do_intervalo_nao_contamina_a_consulta(banco):
+    primeira = _nota(CNPJ_A, '400.00', pagamento=date(2026, 8, 10))
+    segunda = _nota(CNPJ_A, '400.00', pagamento=date(2026, 8, 10))
+    # A emissão está fora do recorte, mas ainda dentro da janela de conciliação.
+    _emitida('1' * 50, CNPJ_A, '400.00', geracao=date(2026, 9, 2))
+    db.session.commit()
+
+    divergentes = emit.divergencias(date(2026, 8, 1), date(2026, 8, 31))
+
+    assert divergentes['ambigua'] == []
+    assert [n.id for n in divergentes['sem_nota']] == [primeira.id, segunda.id]
+
+
+def test_valor_diferente_considera_pagamento_fora_do_intervalo(banco):
+    nota = _nota(CNPJ_A, '400.00', pagamento=date(2026, 7, 31))
+    emitida = _emitida('1' * 50, CNPJ_A, '450.00',
+                       geracao=date(2026, 8, 2))
+    db.session.commit()
+
+    divergentes = emit.divergencias(date(2026, 8, 1), date(2026, 8, 31))
+
+    assert emitida.nota_id == nota.id
+    assert divergentes['sem_nota'] == []
+    assert divergentes['sem_extrato'] == []
+    assert divergentes['valor_diferente'] == [(nota, emitida)]
+
+
 def test_empate_de_candidatas_vira_ambiguidade_sem_vinculo(banco):
     primeira = _nota(CNPJ_A, '400.00', pagamento=date(2026, 7, 10))
     segunda = _nota(CNPJ_A, '400.00', pagamento=date(2026, 7, 10))

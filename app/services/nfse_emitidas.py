@@ -378,7 +378,9 @@ def divergencias(inicio, fim=None):
 
 def _resultado_divergencias(resultado, notas, emitidas, janela):
     """Monta as categorias a partir da avaliação já persistida."""
-    ambiguas = resultado['ambiguas']
+    ids_emitidas = {emitida.id for emitida in emitidas}
+    ambiguas = [item for item in resultado['ambiguas']
+                if item['emitida'].id in ids_emitidas]
     ids_ambigua = {item['emitida'].id for item in ambiguas}
     ids_candidatas_ambiguas = {
         nota.id for item in ambiguas for nota in item['candidatas']}
@@ -389,11 +391,16 @@ def _resultado_divergencias(resultado, notas, emitidas, janela):
     # aparece na lista de emissões deste recorte.
     ligadas = {e.nota_id for e in resultado['emitidas'] if e.nota_id}
 
+    notas_por_id = {nota.id: nota for nota in resultado['notas']}
     valor_diferente = []
     for emitida in emitidas:
         if emitida.id in ids_ambigua or not emitida.nota_id:
             continue
-        nota = next((n for n in notas if n.id == emitida.nota_id), None)
+        # A emissão pode estar no intervalo enquanto o pagamento elegível que
+        # a conciliou está fora dele. O par continua sendo válido para detectar
+        # valor diferente; somente ``sem_nota`` é limitado aos pagamentos do
+        # intervalo consultado.
+        nota = notas_por_id.get(emitida.nota_id)
         if (nota is not None and nota.valor_final is not None
                 and emitida.valor is not None
                 and Decimal(nota.valor_final) != Decimal(emitida.valor)):
