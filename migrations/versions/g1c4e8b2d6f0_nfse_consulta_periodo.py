@@ -1,14 +1,14 @@
 """nfse: persiste o intervalo de consultas completas do portal
 
 Revision ID: g1c4e8b2d6f0
-Revises: f8b4c2d6e9a1, c5d81f37ab29
+Revises: c5d81f37ab29
 """
 from alembic import op
 import sqlalchemy as sa
 
 
 revision = 'g1c4e8b2d6f0'
-down_revision = ('f8b4c2d6e9a1', 'c5d81f37ab29')
+down_revision = 'c5d81f37ab29'
 branch_labels = None
 depends_on = None
 
