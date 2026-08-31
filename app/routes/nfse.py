@@ -1050,6 +1050,9 @@ def nfse_confirmar_grupo(token):
                                      (dados.get('descricao') or '').strip() or None)
     except ValueError as exc:
         return json_error(str(exc), 400)
+    except Exception as exc:
+        db.session.rollback()
+        return json_error(exc=exc, code=500)
     if nota is None:
         return json_error('Proposta de agrupamento nao encontrada.', 404)
 
@@ -1080,6 +1083,9 @@ def nfse_desfazer_grupo(token):
         nota = nfse_grupos.desfazer(token)
     except ValueError as exc:
         return json_error(str(exc), 409)
+    except Exception as exc:
+        db.session.rollback()
+        return json_error(exc=exc, code=500)
     if nota is None:
         return json_error('Agrupamento nao encontrado.', 404)
 

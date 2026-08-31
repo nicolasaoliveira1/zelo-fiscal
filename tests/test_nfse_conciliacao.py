@@ -27,7 +27,7 @@ from app.models import (
     SituacaoNotaEmitida,
     StatusNotaNfse,
 )
-from app.services import nfse_emitidas as emit
+from app.services import nfse_emitidas as emit, nfse_grupos
 
 CNPJ_A = '11.111.111/0001-11'
 CNPJ_B = '22.222.222/0001-22'
@@ -403,3 +403,47 @@ def test_vinculo_obsoleto_de_linha_inelegivel_e_removido(banco):
     emit.conciliar()
 
     assert emitida.nota_id is None
+
+
+def test_confirmar_e_desfazer_grupo_recalculam_com_valor_liquido(banco):
+    token = 'grupo-teste-900'
+    lider = _nota(CNPJ_A, '684.00', pagamento=date(2026, 7, 10))
+    absorvida = _nota(CNPJ_B, '2000.00', pagamento=date(2026, 7, 10))
+    for nota in (lider, absorvida):
+        nota.grupo_sugerido = token
+        nota.grupo_confirmado = False
+        nota.valor_extrato = nota.valor_final
+    lider.grupo_valor_liquido = Decimal('900.00')
+    lider.grupo_detalhe = '684,00 + 2.000,00 = 900,00'
+    portal_lider = _emitida('1' * 50, CNPJ_A, '900.00')
+    portal_absorvida = _emitida('2' * 50, CNPJ_B, '2000.00')
+    db.session.commit()
+
+    emit.conciliar()
+    assert portal_lider.nota_id == lider.id
+    assert portal_absorvida.nota_id == absorvida.id
+
+    nfse_grupos.confirmar(token)
+    db.session.expire_all()
+    lider = db.session.get(NotaNfse, lider.id)
+    absorvida = db.session.get(NotaNfse, absorvida.id)
+    portal_lider = db.session.get(NotaEmitidaNfse, portal_lider.id)
+    portal_absorvida = db.session.get(NotaEmitidaNfse, portal_absorvida.id)
+    assert lider.valor_final == Decimal('900.00')
+    assert portal_lider.nota_id == lider.id
+    assert absorvida.status == StatusNotaNfse.AGRUPADA
+    assert portal_absorvida.nota_id is None
+    assert emit.divergencias(date(2026, 7, 1), date(2026, 7, 31))['valor_diferente'] == []
+
+    nfse_grupos.desfazer(token)
+    db.session.expire_all()
+    lider = db.session.get(NotaNfse, lider.id)
+    absorvida = db.session.get(NotaNfse, absorvida.id)
+    portal_lider = db.session.get(NotaEmitidaNfse, portal_lider.id)
+    portal_absorvida = db.session.get(NotaEmitidaNfse, portal_absorvida.id)
+    assert lider.valor_final == Decimal('684.00')
+    assert absorvida.status != StatusNotaNfse.AGRUPADA
+    assert portal_lider.nota_id == lider.id
+    assert portal_absorvida.nota_id == absorvida.id
+    divergentes = emit.divergencias(date(2026, 7, 1), date(2026, 7, 31))
+    assert len(divergentes['valor_diferente']) == 1

@@ -260,6 +260,11 @@ def confirmar(token, valor=None, descricao=None):
     lider.status = _status_apos_grupo(lider)
 
     db.session.commit()
+    # O agrupamento altera quais linhas e valores podem representar uma nota.
+    # Recalcular depois do commit evita que a conferência observe o estado
+    # intermediário e deixa qualquer falha chegar à rota como erro acionável.
+    from app.services import nfse_emitidas
+    nfse_emitidas.conciliar()
     return lider
 
 
@@ -303,6 +308,8 @@ def desfazer(token):
     lider.status = _status_ao_sair_do_grupo(lider)
 
     db.session.commit()
+    from app.services import nfse_emitidas
+    nfse_emitidas.conciliar()
     return lider
 
 

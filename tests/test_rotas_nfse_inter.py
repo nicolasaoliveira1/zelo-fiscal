@@ -303,6 +303,18 @@ def test_confirmar_duas_vezes_e_recusado(client, app):
     assert client.post(f'/nfse/grupo/{token}/confirmar').status_code == 400
 
 
+def test_falha_no_recalculo_do_grupo_nao_vira_sucesso(client, monkeypatch):
+    def falhar(*_args, **_kwargs):
+        raise RuntimeError('falha sintética no recálculo')
+
+    monkeypatch.setattr('app.routes.nfse.nfse_grupos.confirmar', falhar)
+
+    resposta = client.post('/nfse/grupo/grupo-sintetico/confirmar')
+
+    assert resposta.status_code == 500
+    assert resposta.get_json()['status'] == 'error'
+
+
 def _notas_de(client):
     return client.get('/nfse/notas').get_json()['notas']
 
