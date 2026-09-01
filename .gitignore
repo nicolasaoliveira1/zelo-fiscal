@@ -111,3 +111,6 @@ logs/app.jsonl
 
 # gatilho de reload do servidor de desenvolvimento
 reload.trigger
+
+# Estado vivo de handoff entre agentes (local, não versionado)
+.handoff/
