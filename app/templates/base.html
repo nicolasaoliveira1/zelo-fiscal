@@ -296,19 +296,19 @@
                 </span>
                 <span class="sidebar-acoes">
                     <button class="sidebar-mini" type="button" onclick="toggleTheme()"
-                            title="Alternar tema" aria-label="Alternar tema">
+                            aria-label="Alternar tema">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
                              class="bi" viewBox="0 0 16 16" id="theme-icon"></svg>
                     </button>
                     <form method="post" action="{{ url_for('auth.logout') }}" class="d-inline m-0">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button class="sidebar-mini" type="submit" title="Sair" aria-label="Sair">
+                        <button class="sidebar-mini" type="submit" aria-label="Sair">
                             <i class="bi bi-box-arrow-right" aria-hidden="true"></i>
                         </button>
                     </form>
                     <button class="sidebar-mini sidebar-recolher" type="button" id="sidebarToggleMenu"
                             aria-controls="appSidebar" aria-expanded="true"
-                            title="Recolher ou expandir o menu" aria-label="Recolher ou expandir o menu">
+                            aria-label="Recolher ou expandir o menu">
                         <i class="bi bi-chevron-double-left" aria-hidden="true"></i>
                     </button>
                 </span>
