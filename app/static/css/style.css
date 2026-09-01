@@ -818,6 +818,29 @@ main {
 .sidebar-mini:hover { background: var(--bs-body-bg); color: var(--zelo-ink); }
 .sidebar-mini:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 1px; }
 
+/* ---- dica flutuante dos controles do rail ----
+   O Tooltip é inserido no body pelo módulo sidebar_dica.js. Assim a pílula não
+   fica dentro do overflow-y da barra e pode sair pelo eixo horizontal. */
+.sidebar-dica {
+    --bs-tooltip-opacity: 1;
+}
+
+.sidebar-dica .tooltip-inner {
+    max-width: 16rem;
+    padding: var(--zl-space-2) var(--zl-space-3);
+    border: 1px solid var(--zelo-line);
+    border-radius: var(--zl-radius-sm);
+    background-color: var(--bs-card-bg);
+    box-shadow: var(--zl-elev-2);
+    color: var(--zelo-ink);
+    font-family: var(--zelo-font-body);
+    font-size: var(--zl-fs-2);
+    font-weight: 400;
+    text-align: left;
+}
+
+.sidebar-dica .tooltip-arrow { display: none; }
+
 /* ---- navbar: só no mobile ---- */
 .navbar-movel {
     display: none;
