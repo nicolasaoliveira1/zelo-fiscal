@@ -27,7 +27,7 @@ from app.models import (
     SituacaoNotaEmitida,
     StatusNotaNfse,
 )
-from app.services import nfse_emitidas as emit
+from app.services import nfse_emitidas as emit, nfse_grupos
 
 CNPJ_A = '11.111.111/0001-11'
 CNPJ_B = '22.222.222/0001-22'
@@ -341,3 +341,154 @@ def test_documento_vazio_nao_casa_com_documento_vazio(banco):
 
     emit.conciliar()
     assert emitida.nota_id is None
+
+
+# --- conferencia pelo intervalo da consulta --------------------------------
+
+def test_divergencias_respeitam_as_datas_consultadas(banco):
+    julho = _nota(CNPJ_A, '400.00', pagamento=date(2026, 7, 10))
+    agosto = _nota(CNPJ_B, '500.00', pagamento=date(2026, 8, 10))
+    emissao_julho = _emitida('1' * 50, CNPJ_C, '250.00',
+                             geracao=date(2026, 7, 15))
+    emissao_agosto = _emitida('2' * 50, CNPJ_C, '250.00',
+                              geracao=date(2026, 8, 15))
+    db.session.commit()
+
+    divergentes = emit.divergencias(date(2026, 7, 1), date(2026, 7, 31))
+
+    assert [n.id for n in divergentes['sem_nota']] == [julho.id]
+    assert [e.id for e in divergentes['sem_extrato']] == [emissao_julho.id]
+    assert emissao_agosto not in divergentes['sem_extrato']
+    assert julho.id in [n.id for n in divergentes['sem_nota']]
+    assert agosto.id not in [n.id for n in divergentes['sem_nota']]
+
+
+def test_pagamento_fora_do_intervalo_ainda_concilia_emissao_tardia(banco):
+    nota = _nota(CNPJ_A, '400.00', pagamento=date(2026, 6, 30))
+    emitida = _emitida('1' * 50, CNPJ_A, '400.00',
+                       geracao=date(2026, 7, 2))
+    db.session.commit()
+
+    divergentes = emit.divergencias(date(2026, 7, 1), date(2026, 7, 31))
+
+    assert emitida.nota_id == nota.id
+    assert divergentes['sem_nota'] == []
+    assert divergentes['sem_extrato'] == []
+
+
+def test_pagamento_no_intervalo_nao_e_orfao_se_nota_saiu_depois(banco):
+    """Um pagamento pode já estar ligado a emissão posterior ao recorte."""
+    nota = _nota(CNPJ_A, '400.00', pagamento=date(2026, 7, 30))
+    emitida = _emitida('1' * 50, CNPJ_A, '400.00',
+                       geracao=date(2026, 8, 2))
+    db.session.commit()
+
+    divergentes = emit.divergencias(date(2026, 7, 1), date(2026, 7, 31))
+
+    assert emitida.nota_id == nota.id
+    assert divergentes['sem_nota'] == []
+
+
+def test_ambiguidade_fora_do_intervalo_nao_contamina_a_consulta(banco):
+    primeira = _nota(CNPJ_A, '400.00', pagamento=date(2026, 8, 10))
+    segunda = _nota(CNPJ_A, '400.00', pagamento=date(2026, 8, 10))
+    # A emissão está fora do recorte, mas ainda dentro da janela de conciliação.
+    _emitida('1' * 50, CNPJ_A, '400.00', geracao=date(2026, 9, 2))
+    db.session.commit()
+
+    divergentes = emit.divergencias(date(2026, 8, 1), date(2026, 8, 31))
+
+    assert divergentes['ambigua'] == []
+    assert [n.id for n in divergentes['sem_nota']] == [primeira.id, segunda.id]
+
+
+def test_valor_diferente_considera_pagamento_fora_do_intervalo(banco):
+    nota = _nota(CNPJ_A, '400.00', pagamento=date(2026, 7, 31))
+    emitida = _emitida('1' * 50, CNPJ_A, '450.00',
+                       geracao=date(2026, 8, 2))
+    db.session.commit()
+
+    divergentes = emit.divergencias(date(2026, 8, 1), date(2026, 8, 31))
+
+    assert emitida.nota_id == nota.id
+    assert divergentes['sem_nota'] == []
+    assert divergentes['sem_extrato'] == []
+    assert divergentes['valor_diferente'] == [(nota, emitida)]
+
+
+def test_empate_de_candidatas_vira_ambiguidade_sem_vinculo(banco):
+    primeira = _nota(CNPJ_A, '400.00', pagamento=date(2026, 7, 10))
+    segunda = _nota(CNPJ_A, '400.00', pagamento=date(2026, 7, 10))
+    emitida = _emitida('1' * 50, CNPJ_A, '400.00',
+                       geracao=date(2026, 7, 15))
+    db.session.commit()
+
+    divergentes = emit.divergencias(date(2026, 7, 1), date(2026, 7, 31))
+
+    assert emitida.nota_id is None
+    assert len(divergentes['ambigua']) == 1
+    assert divergentes['ambigua'][0]['emitida'].id == emitida.id
+    assert {n.id for n in divergentes['ambigua'][0]['candidatas']} == {
+        primeira.id, segunda.id}
+    assert divergentes['sem_nota'] == []
+    assert divergentes['sem_extrato'] == []
+    assert divergentes['valor_diferente'] == []
+
+
+def test_vinculo_obsoleto_de_linha_inelegivel_e_removido(banco):
+    nota = _nota(CNPJ_A, '400.00', pagamento=date(2026, 7, 10),
+                 status=StatusNotaNfse.PRONTA)
+    emitida = _emitida('1' * 50, CNPJ_A, '400.00')
+    db.session.commit()
+    emit.conciliar()
+    assert emitida.nota_id == nota.id
+
+    nota.status = StatusNotaNfse.AGRUPADA
+    db.session.commit()
+    emit.conciliar()
+
+    assert emitida.nota_id is None
+
+
+def test_confirmar_e_desfazer_grupo_recalculam_com_valor_liquido(banco):
+    token = 'grupo-teste-900'
+    lider = _nota(CNPJ_A, '684.00', pagamento=date(2026, 7, 10))
+    absorvida = _nota(CNPJ_B, '2000.00', pagamento=date(2026, 7, 10))
+    for nota in (lider, absorvida):
+        nota.grupo_sugerido = token
+        nota.grupo_confirmado = False
+        nota.valor_extrato = nota.valor_final
+    lider.grupo_valor_liquido = Decimal('900.00')
+    lider.grupo_detalhe = '684,00 + 2.000,00 = 900,00'
+    portal_lider = _emitida('1' * 50, CNPJ_A, '900.00')
+    portal_absorvida = _emitida('2' * 50, CNPJ_B, '2000.00')
+    db.session.commit()
+
+    emit.conciliar()
+    assert portal_lider.nota_id == lider.id
+    assert portal_absorvida.nota_id == absorvida.id
+
+    nfse_grupos.confirmar(token)
+    db.session.expire_all()
+    lider = db.session.get(NotaNfse, lider.id)
+    absorvida = db.session.get(NotaNfse, absorvida.id)
+    portal_lider = db.session.get(NotaEmitidaNfse, portal_lider.id)
+    portal_absorvida = db.session.get(NotaEmitidaNfse, portal_absorvida.id)
+    assert lider.valor_final == Decimal('900.00')
+    assert portal_lider.nota_id == lider.id
+    assert absorvida.status == StatusNotaNfse.AGRUPADA
+    assert portal_absorvida.nota_id is None
+    assert emit.divergencias(date(2026, 7, 1), date(2026, 7, 31))['valor_diferente'] == []
+
+    nfse_grupos.desfazer(token)
+    db.session.expire_all()
+    lider = db.session.get(NotaNfse, lider.id)
+    absorvida = db.session.get(NotaNfse, absorvida.id)
+    portal_lider = db.session.get(NotaEmitidaNfse, portal_lider.id)
+    portal_absorvida = db.session.get(NotaEmitidaNfse, portal_absorvida.id)
+    assert lider.valor_final == Decimal('684.00')
+    assert absorvida.status != StatusNotaNfse.AGRUPADA
+    assert portal_lider.nota_id == lider.id
+    assert portal_absorvida.nota_id == absorvida.id
+    divergentes = emit.divergencias(date(2026, 7, 1), date(2026, 7, 31))
+    assert len(divergentes['valor_diferente']) == 1

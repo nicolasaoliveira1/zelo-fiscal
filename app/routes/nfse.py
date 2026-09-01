@@ -780,14 +780,10 @@ def nfse_painel():
         empresas=[{'id': e.id, 'nome': e.nome, 'cnpj': e.cnpj}
                   for e in Empresa.query.order_by(Empresa.nome).all()],
         contrato_estado=nfse_contrato.estado_painel(),
-        # Sem filtro de competencia o painel usa o MES CORRENTE — o mesmo que
-        # o JS poe nos campos de data. Painel e campos sempre concordam: o que
-        # esta na tela e o que uma consulta traria.
-        # O total segue o MESMO mes que os campos de data do bloco 5 mostram
-        # (o filtro da pagina, ou o mes corrente). Antes o total abria sempre no
-        # mes corrente enquanto os campos mostravam outro — dois numeros na
-        # mesma tela discordando sobre de que mes estavam falando.
-        emitidas=_painel_emitidas(competencia or _competencia_corrente()),
+        # A competência escolhida para a fila de honorários não interfere no
+        # painel do portal. O formulário de datas é preenchido com o mês atual
+        # apenas como ponto de partida para uma nova consulta.
+        emitidas=_painel_emitidas(mes=_competencia_corrente()),
     )
 
 
@@ -1054,6 +1050,9 @@ def nfse_confirmar_grupo(token):
                                      (dados.get('descricao') or '').strip() or None)
     except ValueError as exc:
         return json_error(str(exc), 400)
+    except Exception as exc:
+        db.session.rollback()
+        return json_error(exc=exc, code=500)
     if nota is None:
         return json_error('Proposta de agrupamento nao encontrada.', 404)
 
@@ -1084,6 +1083,9 @@ def nfse_desfazer_grupo(token):
         nota = nfse_grupos.desfazer(token)
     except ValueError as exc:
         return json_error(str(exc), 409)
+    except Exception as exc:
+        db.session.rollback()
+        return json_error(exc=exc, code=500)
     if nota is None:
         return json_error('Agrupamento nao encontrado.', 404)
 
@@ -1370,87 +1372,56 @@ def _competencia_corrente():
     return f'{hoje.month:02d}/{hoje.year}'
 
 
-def _competencia_anterior(mes):
-    """Mes anterior a 'MM/AAAA'. O honorario de junho e emitido em julho."""
-    numero, _, ano = (mes or '').partition('/')
-    try:
-        numero, ano = int(numero), int(ano)
-    except ValueError:
-        return mes
-    return f'12/{ano - 1}' if numero == 1 else f'{numero - 1:02d}/{ano}'
-
-
-def _competencia_conferida(bruto):
-    """Competencia escolhida no bloco de conferencia.
-
-    Aceita qualquer MM/AAAA valido, e nao so as que ja tem nota importada
-    (`_competencia_pedida`): conferir um mes SEM linha nenhuma e uma pergunta
-    legitima — a resposta e "nao importei o extrato desse mes"."""
-    bruto = (bruto or '').strip()
-    return bruto if _COMPETENCIA_VALIDA.match(bruto) else None
-
-
-def _painel_emitidas(mes_geracao, competencia=None):
-    """Total do mes + o que nao fecha, no formato que a tela desenha.
-
-    DOIS meses, e eles quase nunca sao o mesmo (ND-027):
-
-    - `mes_geracao` responde "quanto emiti em julho" — as notas GERADAS no mes;
-    - `competencia` responde "das linhas de junho, quais ficaram sem nota" — o
-      mes de REFERENCIA do honorario.
-
-    O cliente paga em julho o honorario de junho, entao o default da
-    competencia e o mes anterior ao da geracao. A conciliacao atravessa lotes e
-    meses de emissao: a nota de junho pode ter saido em julho, e foi exatamente
-    isso que a versao anterior nao enxergava.
-    """
-    if not mes_geracao:
-        return None
-    # Default explicito e mostrado na tela: o honorario de junho e emitido em
-    # julho, entao a conferencia natural do mes emitido e a competencia
-    # anterior. O operador troca no proprio bloco — antes isto vinha, calado,
-    # do seletor "Mostrar" do passo 4, e mudar o periodo aqui nao mexia na
-    # conferencia, sem nada explicando por que.
-    competencia = competencia or _competencia_anterior(mes_geracao)
-
-    resumo = nfse_emitidas.resumo(mes_geracao)
-
-    # Nunca consultado != consultado e nao achou nada. Sem esta distincao, uma
-    # pagina recem-aberta acusaria "Pagou e ficou sem nota" para o mes inteiro
-    # so porque ninguem leu o portal ainda — alarme falso, e do tipo que ensina
-    # o operador a ignorar o painel.
-    if resumo['consultado_em'] is None:
-        return {
-            'mes_geracao': mes_geracao,
-            'competencia': competencia,
-            'nunca_consultado': True,
-            'quantidade': 0,
-            'total': None,
-            'outras_situacoes': {},
-            'consultado_em': None,
-            'sem_nota': [],
-            'sem_extrato': [],
-            'nao_conferiveis': 0,
-            'valor_diferente': [],
-        }
-
-    divergentes = nfse_emitidas.divergencias(competencia)
+def _painel_vazio(mes=None):
+    """Estado honesto quando ainda não há uma consulta completa persistida."""
     return {
-        'mes_geracao': mes_geracao,
-        'competencia': competencia,
+        'consulta_id': None,
+        'inicio': None,
+        'fim': None,
+        'mes_geracao': mes,
+        'nunca_consultado': True,
+        'quantidade': 0,
+        'total': None,
+        'outras_situacoes': {},
+        'consultado_em': None,
+        'sem_nota': [],
+        'sem_extrato': [],
+        'nao_conferiveis': 0,
+        'valor_diferente': [],
+        'ambigua': [],
+    }
+
+
+def _painel_emitidas(consulta=None, mes=None):
+    """Total e divergências da consulta completa indicada pelo identificador."""
+    if consulta is None and mes:
+        consulta = nfse_emitidas.ultima_consulta(mes=mes)
+    if consulta is None:
+        return _painel_vazio(mes)
+
+    resumo = nfse_emitidas.resumo_periodo(consulta.inicio, consulta.fim)
+    divergentes = nfse_emitidas.divergencias(consulta.inicio, consulta.fim)
+    return {
+        'consulta_id': consulta.id,
+        'inicio': consulta.inicio.isoformat(),
+        'fim': consulta.fim.isoformat(),
+        'mes_geracao': nfse_emitidas.competencia_do_bloco(consulta.inicio),
         'nunca_consultado': False,
         'quantidade': resumo['quantidade'],
         'total': _valor_extenso(resumo['total']),
         'outras_situacoes': resumo['outras_situacoes'],
-        'consultado_em': resumo['consultado_em'].strftime('%d/%m/%Y %H:%M'),
+        'consultado_em': (consulta.consultado_em.strftime('%d/%m/%Y %H:%M')
+                          if consulta.consultado_em else None),
         'sem_nota': [_nota_para_json(n) for n in divergentes['sem_nota']],
         'sem_extrato': [_emitida_para_json(e) for e in divergentes['sem_extrato']],
-        # notas fora do periodo com extrato importado: nao da para afirmar nada
-        # sobre elas, e some-las na lista acima seria acusar sem base
         'nao_conferiveis': divergentes['nao_conferiveis'],
         'valor_diferente': [
             {'nota': _nota_para_json(n), 'emitida': _emitida_para_json(e)}
             for n, e in divergentes['valor_diferente']],
+        'ambigua': [
+            {'emitida': _emitida_para_json(item['emitida']),
+             'candidatas': [_nota_para_json(n) for n in item['candidatas']]}
+            for item in divergentes['ambigua']],
     }
 
 
@@ -1496,17 +1467,16 @@ def nfse_consultar_emitidas():
         # novo na proxima nota. Quem fecha e o "Encerrar sessão".
         SESSAO.liberar()
 
-    # O mes do total e o do PERIODO CONSULTADO (onde as notas foram geradas).
-    mes_geracao = nfse_emitidas.competencia_do_bloco(inicio)
+    consulta = nfse_emitidas.ultima_consulta(
+        consulta_id=resultado['consulta_id'])
     return {
         'status': 'ok',
         'blocos': resultado['blocos'],
         'lidas': resultado['lidas'],
         'novas': resultado['novas'],
         'atualizadas': resultado['atualizadas'],
-        'painel': _painel_emitidas(mes_geracao, _competencia_conferida(
-            dados.get('competencia'))),
-        'mes_geracao': mes_geracao,
+        'consulta_id': resultado['consulta_id'],
+        'painel': _painel_emitidas(consulta=consulta),
     }
 
 
@@ -1514,12 +1484,21 @@ def nfse_consultar_emitidas():
 @requer_papel('operador')
 def nfse_painel_emitidas():
     """Estado atual do espelho, para a tela atualizar sem reconsultar o portal."""
+    bruto_id = (request.args.get('consulta_id') or '').strip()
+    if bruto_id:
+        try:
+            consulta_id = int(bruto_id)
+        except ValueError:
+            return json_error('O identificador da consulta é inválido.', 400)
+        consulta = nfse_emitidas.ultima_consulta(consulta_id=consulta_id)
+        if consulta is None:
+            return json_error('A consulta solicitada não foi encontrada.', 404)
+        return {'status': 'ok', 'painel': _painel_emitidas(consulta=consulta)}
+
     mes = (request.args.get('mes') or '').strip()
     if not _COMPETENCIA_VALIDA.match(mes):
         return json_error('Informe o mês no formato MM/AAAA.', 400)
-    return {'status': 'ok',
-            'painel': _painel_emitidas(
-                mes, _competencia_conferida(request.args.get('competencia')))}
+    return {'status': 'ok', 'painel': _painel_emitidas(mes=mes)}
 
 
 @bp.route('/nfse/emitidas/resumo')

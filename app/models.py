@@ -841,6 +841,24 @@ class NotaEmitidaNfse(db.Model):
         return f'<NotaEmitidaNfse {self.chave} {self.competencia} {self.valor}>'
 
 
+class ConsultaEmitidaNfse(db.Model):
+    """Intervalo de uma leitura completa do portal de NFS-e.
+
+    O registro representa a consulta, não congela o espelho das notas. Ele
+    existe para que o painel possa reconstruir exatamente uma consulta parcial
+    depois de recarregar a página, sem voltar a uma competência implícita.
+    """
+    __tablename__ = 'consulta_emitida_nfse'
+
+    id = db.Column(db.Integer, primary_key=True)
+    inicio = db.Column(db.Date, nullable=False, index=True)
+    fim = db.Column(db.Date, nullable=False, index=True)
+    consultado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+    def __repr__(self):
+        return f'<ConsultaEmitidaNfse {self.inicio} a {self.fim}>'
+
+
 class ContratoNfse(db.Model):
     """Versão imutável da estrutura e das decisões do formulário da NFS-e."""
     __tablename__ = 'contrato_nfse'

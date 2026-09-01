@@ -589,13 +589,14 @@ export function pintarEmitidas(painel) {
   // Nunca consultado não é o mesmo que consultado e sem resultado: mostrar as
   // divergências aqui acusaria "pagou e ficou sem nota" para o mês inteiro só
   // porque ninguém leu o portal ainda.
-  alvo.dataset.mes = painel.mes_geracao || '';
-  sincronizarCompetencia(painel.competencia);
   if (painel.nunca_consultado) {
-    alvo.innerHTML = `<p class="nfse-hint mb-0">Nada lido do portal para `
-      + `${esc(painel.mes_geracao)} ainda.</p>`;
+    alvo.innerHTML = '<p class="nfse-hint mb-0">Escolha o período e consulte o portal.</p>';
     return;
   }
+
+  const periodo = painel.inicio && painel.fim
+    ? `${dataVisivel(painel.inicio)} a ${dataVisivel(painel.fim)}`
+    : painel.mes_geracao;
 
   const quando = painel.consultado_em
     ? ` <span class="nfse-hint">· lido do portal em ${esc(painel.consultado_em)}</span>` : '';
@@ -613,17 +614,15 @@ export function pintarEmitidas(painel) {
   const blocos = [
     `<div class="nfse-total">
        <span class="valor">R$ ${esc(painel.total || '0,00')}</span>
-       <span class="rotulo">emitido em ${esc(painel.mes_geracao)}</span>
+       <span class="rotulo">período consultado: ${esc(periodo)}</span>
        <span class="nfse-hint">${painel.quantidade} nota(s)</span>${quando}
        <a class="btn btn-soft-primary btn-sm ms-auto" href="${urlResumo}"
           target="_blank" rel="noopener">Imprimir / salvar PDF</a>
      </div>${aviso}`,
   ];
 
-  // As divergencias sao de OUTRO mes (o de referencia). Dizer qual, senao o
-  // operador le tudo como se fosse do mes do total logo acima.
-  blocos.push(`<p class="nfse-hint mt-3 mb-1">Conferência da competência `
-    + `<strong>${esc(painel.competencia)}</strong>, o mês de referência.</p>`);
+  blocos.push(`<p class="nfse-hint mt-3 mb-1">Conferência do período `
+    + `<strong>${esc(periodo)}</strong>.</p>`);
 
   blocos.push(listaDivergencia(
     'Pagou e ficou sem nota', painel.sem_nota,
@@ -640,9 +639,20 @@ export function pintarEmitidas(painel) {
 
   blocos.push(listaDivergencia(
     'Valor diferente do extrato', painel.valor_diferente,
-    (d) => `${esc(d.emitida.nome_tomador || d.nota.nome_csv || '—')}: extrato `
-      + `R$ ${esc(d.nota.valor || '—')} · portal R$ ${esc(d.emitida.valor || '—')}`,
+    (d) => `${esc(d.emitida.nome_tomador || d.nota.nome_csv || '—')}: `
+      + `extrato (valor final comparado) R$ ${esc(d.nota.valor || '—')} · `
+      + `portal R$ ${esc(d.emitida.valor || '—')}`,
     'Todos os valores batem.'));
+
+  blocos.push(listaDivergencia(
+    'Correspondência ambígua', painel.ambigua,
+    (d) => {
+      const candidatas = (d.candidatas || []).map((n) =>
+        `${esc(n.nome_csv || n.documento || '—')} · R$ ${esc(n.valor || '—')}`);
+      return `${esc(d.emitida.nome_tomador || d.emitida.documento || '—')} · `
+        + `R$ ${esc(d.emitida.valor || '—')} — candidatas: ${candidatas.join('; ')}`;
+    },
+    'Nenhuma correspondência ambígua.'));
 
   alvo.innerHTML = blocos.join('');
 }
@@ -655,33 +665,9 @@ function listaDivergencia(titulo, itens, formatar, vazio, nota = '') {
   return `<div class="nfse-diverg"><h3>${titulo} (${lista.length})${nota}</h3>${corpo}</div>`;
 }
 
-// Reflete no campo a competencia que o painel de fato conferiu — mas so quando
-// difere, para nao apagar o que o operador esta digitando.
-function sincronizarCompetencia(competencia) {
-  const campo = document.getElementById('emitidasCompetencia');
-  if (campo && competencia && campo.value.trim() !== competencia) {
-    campo.value = competencia;
-  }
-}
-
-function competenciaConferida() {
-  const valor = document.getElementById('emitidasCompetencia')?.value.trim() || '';
-  return /^\d{2}\/\d{4}$/.test(valor) ? valor : null;
-}
-
-// Trocar a competencia nao precisa reconsultar o portal: o espelho ja esta no
-// banco, e so a comparacao muda.
-async function recarregarPainelEmitidas() {
-  const mes = document.getElementById('emitidasPainel')?.dataset.mes;
-  if (!mes) return;
-  const competencia = competenciaConferida();
-  const url = `/nfse/emitidas?mes=${encodeURIComponent(mes)}`
-    + (competencia ? `&competencia=${encodeURIComponent(competencia)}` : '');
-  try {
-    const resposta = await fetch(url);
-    if (!resposta.ok) return;
-    pintarEmitidas((await resposta.json()).painel);
-  } catch { /* a tela continua util com o que ja tem */ }
+function dataVisivel(iso) {
+  const partes = String(iso).split('-');
+  return partes.length === 3 ? `${partes[2]}/${partes[1]}/${partes[0]}` : iso;
 }
 
 function preencherPeriodoPadrao() {
@@ -689,7 +675,7 @@ function preencherPeriodoPadrao() {
   const campoFim = document.getElementById('emitidasFim');
   if (!campoInicio || !campoFim || campoInicio.value) return;
 
-  // Mês da competência que a página está mostrando; sem filtro, o mês corrente.
+  // Mês do escopo que a página está mostrando; sem filtro, o mês corrente.
   // É quase sempre "o mês que estou fechando", e digitar as duas datas toda vez
   // seria trabalho repetido.
   const escopo = escopoAtual();
@@ -711,7 +697,7 @@ function preencherPeriodoPadrao() {
   campoFim.value = `${ano}-${dois(mes)}-${dois(ultimo)}`;
 }
 
-async function consultarEmitidas(botao) {
+export async function consultarEmitidas(botao) {
   const inicio = document.getElementById('emitidasInicio')?.value;
   const fim = document.getElementById('emitidasFim')?.value;
   const estado = document.getElementById('emitidasEstado');
@@ -726,7 +712,7 @@ async function consultarEmitidas(botao) {
   if (estado) estado.textContent = 'Abrindo o portal e lendo as páginas…';
   try {
     const dados = await chamar('/nfse/emitidas/consultar',
-      { body: JSON.stringify({ inicio, fim, competencia: competenciaConferida() }) });
+      { body: JSON.stringify({ inicio, fim }) });
     pintarEmitidas(dados.painel);
     if (estado) {
       estado.textContent = `${dados.lidas} nota(s) lida(s) em `
@@ -1107,10 +1093,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // mes corrente. Digitar as duas datas toda vez seria trabalho repetido para o
   // caso que e quase sempre "o mes que estou fechando".
   preencherPeriodoPadrao();
-
-  document.getElementById('emitidasCompetencia')?.addEventListener('change', () => {
-    recarregarPainelEmitidas();
-  });
 
   document.getElementById('formEmitidas')?.addEventListener('submit', (ev) => {
     ev.preventDefault();
