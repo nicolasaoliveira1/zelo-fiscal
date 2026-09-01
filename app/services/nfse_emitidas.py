@@ -75,6 +75,13 @@ def competencia_do_bloco(inicio):
     return f'{inicio.month:02d}/{inicio.year}'
 
 
+def periodo_do_mes(mes_geracao):
+    """Datas inicial e final do mês civil informado em ``MM/AAAA``."""
+    numero, ano = mes_geracao.split('/')
+    inicio = date(int(ano), int(numero), 1)
+    return inicio, _fim_do_mes(inicio)
+
+
 # --- consulta ao portal ----------------------------------------------------
 
 def consultar(inicio, fim, execution_id=None):
@@ -297,10 +304,12 @@ def resumo(mes_geracao):
     emitida a mao pode ter data de competencia diferente, e o que o operador
     quer somar e "o que saiu neste mes".
 
-    `total` conta apenas o que e comprovadamente `GERADA`. Notas em qualquer
-    outra situacao entram em `outras_situacoes`, separadas e visiveis: os
-    codigos de cancelada/substituida nao apareceram na recon, e somar ou
-    descartar por adivinhacao erraria um total fiscal nos dois sentidos."""
+    `quantidade` conta o que e comprovadamente `GERADA`; `total` soma essas
+    notas quando o valor está disponível. Uma GERADA sem valor fica explícita
+    em `sem_valor`, porque escondê-la faria o total parecer completo. Notas em
+    qualquer outra situação entram em `outras_situacoes`, separadas e visíveis:
+    os códigos de cancelada/substituída não apareceram na recon, e somar ou
+    descartar por adivinhação erraria um total fiscal nos dois sentidos."""
     from app.models import NotaEmitidaNfse, SituacaoNotaEmitida
 
     emitidas = [e for e in NotaEmitidaNfse.query.all()
@@ -318,6 +327,7 @@ def resumo(mes_geracao):
         'mes': mes_geracao,
         'quantidade': len(geradas),
         'total': sum((n.valor for n in geradas if n.valor is not None), Decimal(0)),
+        'sem_valor': sum(1 for n in geradas if n.valor is None),
         'outras_situacoes': contagem,
         'consultado_em': max((n.consultado_em for n in emitidas), default=None),
     }

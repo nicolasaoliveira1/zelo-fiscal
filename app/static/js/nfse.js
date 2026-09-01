@@ -216,24 +216,24 @@ function botaoCancelar(nota) {
            title="Tirar da lista">Cancelar</button>`;
 }
 
-function celulaDescricao(nota) {
+export function celulaDescricao(nota) {
   // Editor aberto: o operador pediu para dizer o que a nota descreve.
   if (editandoDescricao.has(nota.id)) return editorDescricao(nota);
 
   const rotulo = ROTULO_CATEGORIA[nota.categoria] || nota.categoria || '—';
   const chip = `<span class="nfse-categoria cat-${nota.categoria}">${esc(rotulo)}</span>`;
-
-  if (nota.categoria === 'indefinida') {
-    // Sem descricao nao ha nota: o texto cru do Pix e o unico dado que ajuda o
-    // operador a decidir, entao ele fica visivel em vez de escondido num title.
-    return `${chip}
-      <div class="nfse-descricao-prevista">${esc(nota.descricao_extrato || '')}</div>`;
-  }
-
   const editar = nota.status === 'emitida' || nota.status === 'aguardando_confirmacao'
     ? ''
     : ` <button class="btn btn-ghost btn-sm py-0 px-1" data-editar-descricao="${nota.id}"
                title="Mudar a descrição">Editar</button>`;
+
+  if (nota.categoria === 'indefinida') {
+    // Sem descricao nao ha nota: o texto cru do Pix e o unico dado que ajuda o
+    // operador a decidir, entao ele fica visivel em vez de escondido num title.
+    return `${chip}${editar}
+      <div class="nfse-descricao-prevista">${esc(nota.descricao_extrato || '')}</div>`;
+  }
+
   const prevista = nota.descricao_prevista
     ? `<div class="nfse-descricao-prevista" title="${esc(nota.descricao_prevista)}">${esc(nota.descricao_prevista)}</div>`
     : '';
@@ -609,11 +609,15 @@ export function pintarEmitidas(painel) {
       + outras.map(([s, n]) => `${n} em ${esc(s)}`).join(' · ') + '</div>'
     : '';
 
+  const urlResumo = `/nfse/emitidas/resumo?mes=${encodeURIComponent(painel.mes_geracao)}`;
+
   const blocos = [
     `<div class="nfse-total">
        <span class="valor">R$ ${esc(painel.total || '0,00')}</span>
        <span class="rotulo">período consultado: ${esc(periodo)}</span>
        <span class="nfse-hint">${painel.quantidade} nota(s)</span>${quando}
+       <a class="btn btn-soft-primary btn-sm ms-auto" href="${urlResumo}"
+          target="_blank" rel="noopener">Imprimir / salvar PDF</a>
      </div>${aviso}`,
   ];
 

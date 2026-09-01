@@ -8,7 +8,7 @@ import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
-from flask import render_template, request
+from flask import abort, render_template, request
 from flask_login import current_user
 
 from app import db
@@ -1499,6 +1499,31 @@ def nfse_painel_emitidas():
     if not _COMPETENCIA_VALIDA.match(mes):
         return json_error('Informe o mês no formato MM/AAAA.', 400)
     return {'status': 'ok', 'painel': _painel_emitidas(mes=mes)}
+
+
+@bp.route('/nfse/emitidas/resumo')
+@requer_papel('operador')
+def nfse_resumo_emitidas():
+    """Resumo mensal A4 do espelho persistido, sem consultar o portal."""
+    mes = (request.args.get('mes') or '').strip()
+    if not _COMPETENCIA_VALIDA.match(mes):
+        abort(400, description='Informe o mês no formato MM/AAAA.')
+
+    inicio, fim = nfse_emitidas.periodo_do_mes(mes)
+    resumo = nfse_emitidas.resumo(mes)
+    return render_template(
+        'nfse_resumo_mensal.html',
+        mes=mes,
+        periodo_inicio=inicio.strftime('%d/%m/%Y'),
+        periodo_fim=fim.strftime('%d/%m/%Y'),
+        quantidade=resumo['quantidade'],
+        total=_valor_extenso(resumo['total']),
+        sem_valor=resumo['sem_valor'],
+        outras_situacoes=resumo['outras_situacoes'],
+        consultado_em=(resumo['consultado_em'].strftime('%d/%m/%Y %H:%M')
+                       if resumo['consultado_em'] else None),
+        gerado_em=datetime.now().strftime('%d/%m/%Y %H:%M'),
+    )
 
 
 def _data_pedida(bruto):
