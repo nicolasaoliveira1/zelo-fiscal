@@ -100,8 +100,13 @@
         {%- endif %}
     </section>
 
-    {#- O MOSAICO: cada cartão na forma que lhe cabe (ver .vg-mosaico no CSS). -#}
-    <div class="vg-mosaico">
+    {#- O MOSAICO: cada cartão na forma que lhe cabe (ver .vg-mosaico no CSS).
+        Com até três itens, o cartão de certificados não precisa ocupar todas
+        as linhas da grade — manter o rowspan nesse estado cria vazio visível. -#}
+    {% set certificados = blocos.certificados %}
+    {% set mosaico_a1_curto = certificados.erro or
+                              ((certificados.itens | default([], true) | length) <= 3) %}
+    <div class="vg-mosaico{{ ' is-a1-curto' if mosaico_a1_curto }}">
 
         {#- CERTIDÕES: componente A — os números somam a carteira. -#}
         {% set bloco = blocos.certidoes %}
@@ -135,7 +140,7 @@
         {#- CERTIFICADOS A1: componente B — fatos independentes. A lista rola
             dentro da caixa para uma safra grande de vencimentos não empurrar o
             cartão vizinho para fora da tela. -#}
-        {% set bloco = blocos.certificados %}
+        {% set bloco = certificados %}
         {#- O `extra` do cabeçalho existe porque esta lista ROLA POR DENTRO: com 23
             vencendo o cartão mostra ~5 e esconde o resto atrás de uma barra que
             pode nem aparecer. "23 de 47" é a pista de que há mais — e é a mesma

@@ -404,6 +404,7 @@ def test_cartao_a1_cheio_diz_quantos_de_quantos(app, ids, client, monkeypatch):
 
     assert 'vg-card-h-extra' in corpo
     assert '23 de 47' in corpo
+    assert 'vg-mosaico is-a1-curto' not in corpo
 
 
 def test_cartao_a1_vazio_nao_ganha_contagem_no_cabecalho(app, ids, client,
@@ -416,6 +417,7 @@ def test_cartao_a1_vazio_nao_ganha_contagem_no_cabecalho(app, ids, client,
 
     assert '0 de 47' not in corpo
     assert 'Nenhum dos 47 certificados vence' in corpo
+    assert 'vg-mosaico is-a1-curto' in corpo
 
 
 def test_noite_sem_falha_nao_poe_o_zero_em_destaque(app, ids, client, monkeypatch):
