@@ -1716,6 +1716,15 @@ body.topo-visivel .zl-dock {
     flex: 1 1 auto;
 }
 
+/* O cartão de Certidões é a exceção à régua: ele tem altura própria e curta
+   (número, barra e legenda numa linha), e nada dentro dele cresce para ocupar
+   sobra. Esticado até a altura do cartão alto — o que acontecia quando o A1
+   tinha poucos itens e dividia a linha com ele —, a barra e os marcadores
+   descolavam do número e o cartão virava um vão com dados nas pontas. */
+.vg-mosaico > .vg-a-cert {
+    align-self: start;
+}
+
 /* No cartão alto, a lista é o conteúdo que pode ceder espaço. Com uma carteira
    grande ela cresce até o corpo disponível e rola dentro dele, em vez de deixar
    um vão entre a última linha e o rodapé. O estado compacto conserva a altura
@@ -1872,10 +1881,13 @@ body.topo-visivel .zl-dock {
             "nfse nfse fila a1";
     }
 
+    /* Com o cartao alto curto, ele desce para a segunda linha e o de Certidoes
+       toma a largura inteira: o rowspan aqui so produziria um vao ao lado dele,
+       e a barra com a legenda e o conteudo que mais ganha com a horizontal. */
     .vg-mosaico.is-a1-curto {
         grid-template-areas:
-            "cert cert cert a1"
-            "nfse nfse fila fila";
+            "cert cert cert cert"
+            "nfse nfse fila a1";
     }
 }
 

@@ -36,6 +36,29 @@ def test_mosaico_muda_de_duas_para_quatro_colunas_com_espaco():
     assert 'grid-template-columns: minmax(0, 1fr)' in css
 
 
+def test_cartao_de_certidoes_nao_estica_ate_a_regua_do_cartao_alto():
+    """A barra e a legenda so funcionam na horizontal: o cartao largo tem altura
+    propria e nao acompanha o vizinho alto quando divide a linha com ele."""
+    css = _css()
+
+    regra = re.search(
+        r'^\.vg-mosaico > \.vg-a-cert\s*\{([^}]*)\}',
+        css,
+        re.MULTILINE,
+    )
+
+    assert regra and 'align-self: start' in regra.group(1)
+
+
+def test_estado_curto_desce_o_cartao_alto_em_vez_de_abrir_vao():
+    """Em quatro colunas, o cartao alto curto vai para a segunda linha e o de
+    Certidoes ocupa a largura inteira — nenhum dos dois estica para casar."""
+    css = _css()
+
+    assert '"cert cert cert cert"' in css
+    assert '"nfse nfse fila a1"' in css
+
+
 def test_nfse_mantem_seu_teto_de_largura():
     template = (RAIZ / 'app/templates/nfse.html').read_text(encoding='utf-8')
 
