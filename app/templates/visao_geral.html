@@ -263,7 +263,7 @@
                 {%- if bloco.situacao == 'desligado' -%}
                 Renovação automática desligada
                 {%- else -%}
-                Últimas emissões automáticas de certidões
+                Últimas emissões automáticas
                 {%- endif -%}
             </span>
             {%- if bloco.situacao == 'desligado' %}
@@ -302,7 +302,7 @@
                     7 dias: nenhuma emissão de certidão registrada
                     {%- else -%}
                     7 dias: <strong class="vg-producao-n">{{ bloco.semana.emitidas }}</strong>
-                    certidões emitidas, {{ bloco.semana.pct_agendador }}% sem ninguém clicar
+                    certidões emitidas
                     {%- endif -%}
                 </span>
             </span>

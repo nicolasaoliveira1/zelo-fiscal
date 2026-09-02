@@ -312,7 +312,8 @@ def test_faixa_mostra_o_resultado_da_passagem(app, ids, client, monkeypatch):
 
     corpo = client.get('/').get_data(as_text=True)
 
-    assert 'Últimas emissões automáticas de certidões' in corpo
+    assert 'Últimas emissões automáticas' in corpo
+    assert 'Últimas emissões automáticas de certidões' not in corpo
     assert '>38</strong> certidões emitidas' in corpo
     assert '>3</strong>' in corpo and 'falharam' in corpo
     assert 'FGTS, Municipal' in corpo
@@ -364,17 +365,18 @@ def test_faixa_leva_para_produtividade(app, ids, client, monkeypatch):
     assert '/produtividade' in corpo
 
 
-def test_linha_de_sete_dias_mostra_a_fracao_automatica(app, ids, client,
-                                                       monkeypatch):
+def test_linha_de_sete_dias_mostra_total_de_certidoes(app, ids, client,
+                                                      monkeypatch):
     _com_producao(monkeypatch, semana={'emitidas': 214, 'pct_agendador': 88})
 
     corpo = client.get('/').get_data(as_text=True)
 
     assert '>214</strong>' in corpo
-    assert '88% sem ninguém clicar' in corpo
+    assert '214</strong>\n                    certidões emitidas' in corpo
+    assert 'sem ninguém clicar' not in corpo
 
 
-def test_semana_sem_emissao_nao_mostra_porcentagem(app, ids, client, monkeypatch):
+def test_semana_sem_emissao_mostra_estado_vazio(app, ids, client, monkeypatch):
     _com_producao(monkeypatch, semana={'emitidas': 0, 'pct_agendador': None})
 
     corpo = client.get('/').get_data(as_text=True)
@@ -392,7 +394,7 @@ def test_visualizador_tambem_ve_a_faixa(app, ids, login_as, monkeypatch):
     resposta = login_as('leitura').get('/')
 
     assert resposta.status_code == 200
-    assert 'Últimas emissões automáticas de certidões' in resposta.get_data(as_text=True)
+    assert 'Últimas emissões automáticas' in resposta.get_data(as_text=True)
 
 
 def test_falha_da_faixa_nao_derruba_o_mosaico(app, ids, client, monkeypatch):
