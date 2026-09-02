@@ -39,3 +39,10 @@ def test_nfse_mantem_seu_teto_de_largura():
     template = (RAIZ / 'app/templates/nfse.html').read_text(encoding='utf-8')
 
     assert '.app-main { --app-main-max-width: 1680px; }' in template
+
+
+def test_ficha_da_fila_nao_repete_a_borda_superior():
+    css = _css()
+
+    assert '.vg-mosaico > .vg-a-fila .zl-ficha' in css
+    assert 'border-top: 0' in css

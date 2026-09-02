@@ -1924,6 +1924,12 @@ body.topo-visivel .zl-dock {
     font-size: var(--zl-fs-2);
 }
 
+/* A ficha da Fila já começa no corpo do cartão; o fio superior genérico do
+   componente duplica essa separação e pesa no início da informação. */
+.vg-mosaico > .vg-a-fila .zl-ficha {
+    border-top: 0;
+}
+
 .vg-card-f a {
     color: var(--bs-emphasis-color);
     font-weight: 500;
