@@ -64,6 +64,25 @@ def test_saudacao_segue_a_hora_do_servidor(app, ids, client, monkeypatch):
     assert _saudacao(datetime(2026, 8, 20, 21, 0)) == 'Boa noite'
 
 
+def test_saudacao_formata_nome_e_dia_da_semana(app, ids, client):
+    from datetime import date
+
+    from app.routes import _data_extenso, _nome_exibicao
+
+    assert _nome_exibicao(' nICOLAS ') == 'Nicolas'
+    assert _data_extenso(date(2026, 8, 20)) == 'Quinta-feira, 20/08/2026'
+
+
+def test_saudacao_renderiza_o_usuario_capitalizado(app, ids, client):
+    from datetime import date
+
+    from app.routes import _data_extenso
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert f'Admin_test · {_data_extenso(date.today())}' in corpo
+
+
 def test_dia_da_semana_sai_acentuado(app, ids, client):
     """`strftime('%A')` volta em ingles no Windows do escritorio, entao os nomes
     sao escritos a mao — e escritos a mao e onde o acento se perde."""
@@ -293,10 +312,12 @@ def test_faixa_mostra_o_resultado_da_passagem(app, ids, client, monkeypatch):
 
     corpo = client.get('/').get_data(as_text=True)
 
-    assert 'Passagem de 22/08, 03h' in corpo
-    assert '>38</strong> emitidas' in corpo
+    assert 'Últimas emissões automáticas de certidões' in corpo
+    assert '>38</strong> certidões emitidas' in corpo
     assert '>3</strong>' in corpo and 'falharam' in corpo
     assert 'FGTS, Municipal' in corpo
+    assert 'Passagem de' not in corpo
+    assert 'Roda de novo' not in corpo
 
 
 def test_faixa_sem_registro_nao_diz_zero_emitidas(app, ids, client, monkeypatch):
@@ -306,9 +327,9 @@ def test_faixa_sem_registro_nao_diz_zero_emitidas(app, ids, client, monkeypatch)
 
     corpo = client.get('/').get_data(as_text=True)
 
-    assert 'Nenhum lote registrado desde as 03h' in corpo
+    assert 'Nenhuma execução automática registrada recentemente' in corpo
     # nenhuma contagem da passagem — nem "0 emitidas", nem "0 falharam"
-    assert '</strong> emitidas\n' not in corpo
+    assert '</strong> certidões emitidas\n' not in corpo
     assert 'falharam' not in corpo
 
 
@@ -358,7 +379,7 @@ def test_semana_sem_emissao_nao_mostra_porcentagem(app, ids, client, monkeypatch
 
     corpo = client.get('/').get_data(as_text=True)
 
-    assert '7 dias: nenhuma emissão registrada' in corpo
+    assert '7 dias: nenhuma emissão de certidão registrada' in corpo
     assert '0% sem ninguém clicar' not in corpo
 
 
@@ -371,7 +392,7 @@ def test_visualizador_tambem_ve_a_faixa(app, ids, login_as, monkeypatch):
     resposta = login_as('leitura').get('/')
 
     assert resposta.status_code == 200
-    assert 'Passagem de 22/08, 03h' in resposta.get_data(as_text=True)
+    assert 'Últimas emissões automáticas de certidões' in resposta.get_data(as_text=True)
 
 
 def test_falha_da_faixa_nao_derruba_o_mosaico(app, ids, client, monkeypatch):

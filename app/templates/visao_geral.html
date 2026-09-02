@@ -47,7 +47,7 @@
         identificação da tela. E o nome é o MESMO do menu lateral — havia dois
         nomes para esta tela ("Início" no menu, "Visão geral" no título, na rota
         e no design language). -#}
-    {{ zl_page('Visão geral', saudacao ~ ', ' ~ current_user.username ~ ' · ' ~ hoje_extenso) }}
+    {{ zl_page('Visão geral', saudacao ~ ', ' ~ nome_usuario ~ ' · ' ~ hoje_extenso) }}
 
     {#- A FAIXA: UM componente que muda de estado, não dois blocos alternativos.
         É a diferença entre a página dizer "está tudo bem" e a página apenas
@@ -263,16 +263,14 @@
                 {%- if bloco.situacao == 'desligado' -%}
                 Renovação automática desligada
                 {%- else -%}
-                Passagem de {{ bloco.inicio_local.strftime('%d/%m, %Hh') }}
+                Últimas emissões automáticas de certidões
                 {%- endif -%}
             </span>
-            <span class="vg-producao-quando">
-                {%- if bloco.situacao == 'desligado' -%}
+            {%- if bloco.situacao == 'desligado' %}
+            <span class="vg-producao-acao">
                 <a href="{{ url_for('main.configuracoes') }}">Ligar em Configurações</a>
-                {%- else -%}
-                Roda de novo em {{ bloco.proxima.strftime('%d/%m, %Hh') }}
-                {%- endif -%}
             </span>
+            {%- endif %}
         </div>
         <a class="vg-producao-item" href="{{ url_for('main.produtividade') }}">
             <span class="vg-producao-txt">
@@ -282,9 +280,9 @@
                     {%- elif bloco.situacao == 'sem_registro' -%}
                     {#- Zero não: não se sabe se a máquina ficou desligada ou se
                         não havia o que renovar, e desconhecido não vira zero. -#}
-                    Nenhum lote registrado desde as {{ bloco.inicio_local.strftime('%Hh') }}.
+                    Nenhuma execução automática registrada recentemente.
                     {%- else -%}
-                    <strong class="vg-producao-n">{{ bloco.emitidas }}</strong> emitidas
+                    <strong class="vg-producao-n">{{ bloco.emitidas }}</strong> certidões emitidas
                     {#- Zero não é notícia (design language): numa noite limpa,
                         "0 falharam" não pode competir com o número que importa.
                         O fecho deste comentário NÃO leva hífen de propósito: com
@@ -301,10 +299,10 @@
                 </span>
                 <span class="vg-producao-s">
                     {%- if bloco.semana.pct_agendador is none -%}
-                    7 dias: nenhuma emissão registrada
+                    7 dias: nenhuma emissão de certidão registrada
                     {%- else -%}
                     7 dias: <strong class="vg-producao-n">{{ bloco.semana.emitidas }}</strong>
-                    emitidas, {{ bloco.semana.pct_agendador }}% sem ninguém clicar
+                    certidões emitidas, {{ bloco.semana.pct_agendador }}% sem ninguém clicar
                     {%- endif -%}
                 </span>
             </span>

@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 RAIZ = Path(__file__).resolve().parents[1]
@@ -44,5 +45,14 @@ def test_nfse_mantem_seu_teto_de_largura():
 def test_ficha_da_fila_nao_repete_a_borda_superior():
     css = _css()
 
-    assert '.vg-mosaico > .vg-a-fila .zl-ficha' in css
-    assert 'border-top: 0' in css
+    ficha = re.search(
+        r'^\.vg-mosaico > \.vg-a-fila \.zl-ficha\s*\{([^}]*)\}',
+        css,
+        re.MULTILINE,
+    )
+    ficha_base = re.search(r'^\.zl-ficha\s*\{([^}]*)\}', css, re.MULTILINE)
+    linha = re.search(r'^\.zl-ficha-row\s*\{([^}]*)\}', css, re.MULTILINE)
+
+    assert ficha and 'border-top: 0' in ficha.group(1)
+    assert ficha_base and 'border-top: 1px solid var(--zelo-line)' in ficha_base.group(1)
+    assert linha and 'border-bottom: 1px solid var(--zelo-line)' in linha.group(1)

@@ -301,6 +301,17 @@ _DIAS_SEMANA = ('segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira',
                 'sexta-feira', 'sábado', 'domingo')
 
 
+def _nome_exibicao(nome):
+    """Normaliza o primeiro nome exibido na saudação sem alterar o cadastro."""
+    return (nome or '').strip().capitalize()
+
+
+def _data_extenso(hoje=None):
+    """Data da Visão Geral com dia da semana independente do locale do SO."""
+    hoje = hoje or date.today()
+    return f'{_DIAS_SEMANA[hoje.weekday()].capitalize()}, {hoje:%d/%m/%Y}'
+
+
 def _saudacao(agora=None):
     """Bom dia / Boa tarde / Boa noite pela hora LOCAL do servidor (AD-004)."""
     hora = (agora or datetime.now()).hour
@@ -324,7 +335,8 @@ def visao_geral_painel():
         blocos=blocos,
         travas=visao_geral.itens_que_travam(blocos),
         saudacao=_saudacao(),
-        hoje_extenso=f'{_DIAS_SEMANA[hoje.weekday()]}, {hoje:%d/%m/%Y}',
+        nome_usuario=_nome_exibicao(current_user.username),
+        hoje_extenso=_data_extenso(hoje),
     )
 
 

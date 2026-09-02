@@ -1633,9 +1633,9 @@ body.topo-visivel .zl-dock {
     font-size: var(--zl-fs-2);
 }
 
-/* Quando roda de novo: empurrado para a direita do cabeçalho, em peso normal —
-   é contexto, não manchete. */
-.vg-producao-quando {
+/* Ação para ligar o agendador: empurrada para a direita do cabeçalho, em peso
+   normal — é contexto, não manchete. */
+.vg-producao-acao {
     margin-left: auto;
     font-weight: 400;
 }
@@ -1687,13 +1687,13 @@ body.topo-visivel .zl-dock {
     color: var(--bs-secondary-color);
 }
 
-/* Em tela estreita o "roda de novo" desce em vez de espremer o cabeçalho. */
+/* Em tela estreita a ação de configuração desce em vez de espremer o cabeçalho. */
 @media (max-width: 575.98px) {
     .vg-producao-h {
         flex-wrap: wrap;
     }
 
-    .vg-producao-quando {
+    .vg-producao-acao {
         margin-left: 0;
         flex-basis: 100%;
     }
