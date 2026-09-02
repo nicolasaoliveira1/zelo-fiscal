@@ -600,6 +600,18 @@ main {
     transition: margin-left var(--sidebar-transition), width var(--sidebar-transition);
 }
 
+/* O conteúdo das páginas não deve disputar espaço com a barra lateral nem
+   encostar nas bordas da janela. O teto evita linhas excessivamente longas em
+   monitores grandes; o gutter cresce até 48px sem comprimir telas menores. */
+.app-main {
+    --app-main-max-width: 1600px;
+    width: 100%;
+    max-width: var(--app-main-max-width);
+    margin-inline: auto;
+    padding-inline: clamp(var(--zl-space-4), 3vw, var(--zl-space-7));
+    padding-bottom: var(--zl-space-7);
+}
+
 .sidebar-backdrop {
     position: fixed;
     inset: 0;
