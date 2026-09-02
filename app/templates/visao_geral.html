@@ -47,7 +47,7 @@
         identificação da tela. E o nome é o MESMO do menu lateral — havia dois
         nomes para esta tela ("Início" no menu, "Visão geral" no título, na rota
         e no design language). -#}
-    {{ zl_page('Visão geral', saudacao ~ ', ' ~ current_user.username ~ ' · ' ~ hoje_extenso) }}
+    {{ zl_page('Visão geral', saudacao ~ ', ' ~ nome_usuario ~ ' · ' ~ hoje_extenso) }}
 
     {#- A FAIXA: UM componente que muda de estado, não dois blocos alternativos.
         É a diferença entre a página dizer "está tudo bem" e a página apenas
@@ -100,8 +100,13 @@
         {%- endif %}
     </section>
 
-    {#- O MOSAICO: cada cartão na forma que lhe cabe (ver .vg-mosaico no CSS). -#}
-    <div class="vg-mosaico">
+    {#- O MOSAICO: cada cartão na forma que lhe cabe (ver .vg-mosaico no CSS).
+        Com até três itens, o cartão de certificados não precisa ocupar todas
+        as linhas da grade — manter o rowspan nesse estado cria vazio visível. -#}
+    {% set certificados = blocos.certificados %}
+    {% set mosaico_a1_curto = certificados.erro or
+                              ((certificados.itens | default([], true) | length) <= 3) %}
+    <div class="vg-mosaico{{ ' is-a1-curto' if mosaico_a1_curto }}">
 
         {#- CERTIDÕES: componente A — os números somam a carteira. -#}
         {% set bloco = blocos.certidoes %}
@@ -135,7 +140,7 @@
         {#- CERTIFICADOS A1: componente B — fatos independentes. A lista rola
             dentro da caixa para uma safra grande de vencimentos não empurrar o
             cartão vizinho para fora da tela. -#}
-        {% set bloco = blocos.certificados %}
+        {% set bloco = certificados %}
         {#- O `extra` do cabeçalho existe porque esta lista ROLA POR DENTRO: com 23
             vencendo o cartão mostra ~5 e esconde o resto atrás de uma barra que
             pode nem aparecer. "23 de 47" é a pista de que há mais — e é a mesma
@@ -258,16 +263,14 @@
                 {%- if bloco.situacao == 'desligado' -%}
                 Renovação automática desligada
                 {%- else -%}
-                Passagem de {{ bloco.inicio_local.strftime('%d/%m, %Hh') }}
+                Últimas emissões automáticas
                 {%- endif -%}
             </span>
-            <span class="vg-producao-quando">
-                {%- if bloco.situacao == 'desligado' -%}
+            {%- if bloco.situacao == 'desligado' %}
+            <span class="vg-producao-acao">
                 <a href="{{ url_for('main.configuracoes') }}">Ligar em Configurações</a>
-                {%- else -%}
-                Roda de novo em {{ bloco.proxima.strftime('%d/%m, %Hh') }}
-                {%- endif -%}
             </span>
+            {%- endif %}
         </div>
         <a class="vg-producao-item" href="{{ url_for('main.produtividade') }}">
             <span class="vg-producao-txt">
@@ -277,9 +280,9 @@
                     {%- elif bloco.situacao == 'sem_registro' -%}
                     {#- Zero não: não se sabe se a máquina ficou desligada ou se
                         não havia o que renovar, e desconhecido não vira zero. -#}
-                    Nenhum lote registrado desde as {{ bloco.inicio_local.strftime('%Hh') }}.
+                    Nenhuma execução automática registrada recentemente.
                     {%- else -%}
-                    <strong class="vg-producao-n">{{ bloco.emitidas }}</strong> emitidas
+                    <strong class="vg-producao-n">{{ bloco.emitidas }}</strong> certidões emitidas
                     {#- Zero não é notícia (design language): numa noite limpa,
                         "0 falharam" não pode competir com o número que importa.
                         O fecho deste comentário NÃO leva hífen de propósito: com
@@ -296,10 +299,10 @@
                 </span>
                 <span class="vg-producao-s">
                     {%- if bloco.semana.pct_agendador is none -%}
-                    7 dias: nenhuma emissão registrada
+                    7 dias: nenhuma emissão de certidão registrada
                     {%- else -%}
                     7 dias: <strong class="vg-producao-n">{{ bloco.semana.emitidas }}</strong>
-                    emitidas, {{ bloco.semana.pct_agendador }}% sem ninguém clicar
+                    certidões emitidas
                     {%- endif -%}
                 </span>
             </span>

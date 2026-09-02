@@ -7,6 +7,8 @@ pior que nao mostrar.
 """
 from datetime import datetime
 
+import pytest
+
 from app.services import visao_geral
 
 # A faixa de produção precisa existir em TODO render: o template a lê sempre.
@@ -62,6 +64,25 @@ def test_saudacao_segue_a_hora_do_servidor(app, ids, client, monkeypatch):
     assert _saudacao(datetime(2026, 8, 20, 21, 0)) == 'Boa noite'
 
 
+def test_saudacao_formata_nome_e_dia_da_semana(app, ids, client):
+    from datetime import date
+
+    from app.routes import _data_extenso, _nome_exibicao
+
+    assert _nome_exibicao(' nICOLAS ') == 'Nicolas'
+    assert _data_extenso(date(2026, 8, 20)) == 'Quinta-feira, 20/08/2026'
+
+
+def test_saudacao_renderiza_o_usuario_capitalizado(app, ids, client):
+    from datetime import date
+
+    from app.routes import _data_extenso
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert f'Admin_test · {_data_extenso(date.today())}' in corpo
+
+
 def test_dia_da_semana_sai_acentuado(app, ids, client):
     """`strftime('%A')` volta em ingles no Windows do escritorio, entao os nomes
     sao escritos a mao — e escritos a mao e onde o acento se perde."""
@@ -112,6 +133,7 @@ def test_bloco_com_erro_nao_derruba_a_pagina(app, ids, client, monkeypatch):
 
     assert resposta.status_code == 200
     assert 'Não consegui ler este bloco agora' in corpo
+    assert 'vg-mosaico is-a1-curto' in corpo
     assert '>4<' in corpo or '4' in corpo
 
 
@@ -290,10 +312,13 @@ def test_faixa_mostra_o_resultado_da_passagem(app, ids, client, monkeypatch):
 
     corpo = client.get('/').get_data(as_text=True)
 
-    assert 'Passagem de 22/08, 03h' in corpo
-    assert '>38</strong> emitidas' in corpo
+    assert 'Últimas emissões automáticas' in corpo
+    assert 'Últimas emissões automáticas de certidões' not in corpo
+    assert '>38</strong> certidões emitidas' in corpo
     assert '>3</strong>' in corpo and 'falharam' in corpo
     assert 'FGTS, Municipal' in corpo
+    assert 'Passagem de' not in corpo
+    assert 'Roda de novo' not in corpo
 
 
 def test_faixa_sem_registro_nao_diz_zero_emitidas(app, ids, client, monkeypatch):
@@ -303,9 +328,9 @@ def test_faixa_sem_registro_nao_diz_zero_emitidas(app, ids, client, monkeypatch)
 
     corpo = client.get('/').get_data(as_text=True)
 
-    assert 'Nenhum lote registrado desde as 03h' in corpo
+    assert 'Nenhuma execução automática registrada recentemente' in corpo
     # nenhuma contagem da passagem — nem "0 emitidas", nem "0 falharam"
-    assert '</strong> emitidas\n' not in corpo
+    assert '</strong> certidões emitidas\n' not in corpo
     assert 'falharam' not in corpo
 
 
@@ -340,22 +365,23 @@ def test_faixa_leva_para_produtividade(app, ids, client, monkeypatch):
     assert '/produtividade' in corpo
 
 
-def test_linha_de_sete_dias_mostra_a_fracao_automatica(app, ids, client,
-                                                       monkeypatch):
+def test_linha_de_sete_dias_mostra_total_de_certidoes(app, ids, client,
+                                                      monkeypatch):
     _com_producao(monkeypatch, semana={'emitidas': 214, 'pct_agendador': 88})
 
     corpo = client.get('/').get_data(as_text=True)
 
     assert '>214</strong>' in corpo
-    assert '88% sem ninguém clicar' in corpo
+    assert '214</strong>\n                    certidões emitidas' in corpo
+    assert 'sem ninguém clicar' not in corpo
 
 
-def test_semana_sem_emissao_nao_mostra_porcentagem(app, ids, client, monkeypatch):
+def test_semana_sem_emissao_mostra_estado_vazio(app, ids, client, monkeypatch):
     _com_producao(monkeypatch, semana={'emitidas': 0, 'pct_agendador': None})
 
     corpo = client.get('/').get_data(as_text=True)
 
-    assert '7 dias: nenhuma emissão registrada' in corpo
+    assert '7 dias: nenhuma emissão de certidão registrada' in corpo
     assert '0% sem ninguém clicar' not in corpo
 
 
@@ -368,7 +394,7 @@ def test_visualizador_tambem_ve_a_faixa(app, ids, login_as, monkeypatch):
     resposta = login_as('leitura').get('/')
 
     assert resposta.status_code == 200
-    assert 'Passagem de 22/08, 03h' in resposta.get_data(as_text=True)
+    assert 'Últimas emissões automáticas' in resposta.get_data(as_text=True)
 
 
 def test_falha_da_faixa_nao_derruba_o_mosaico(app, ids, client, monkeypatch):
@@ -404,6 +430,7 @@ def test_cartao_a1_cheio_diz_quantos_de_quantos(app, ids, client, monkeypatch):
 
     assert 'vg-card-h-extra' in corpo
     assert '23 de 47' in corpo
+    assert 'vg-mosaico is-a1-curto' not in corpo
 
 
 def test_cartao_a1_vazio_nao_ganha_contagem_no_cabecalho(app, ids, client,
@@ -416,6 +443,23 @@ def test_cartao_a1_vazio_nao_ganha_contagem_no_cabecalho(app, ids, client,
 
     assert '0 de 47' not in corpo
     assert 'Nenhum dos 47 certificados vence' in corpo
+    assert 'vg-mosaico is-a1-curto' in corpo
+
+
+@pytest.mark.parametrize('quantidade', [1, 2, 3])
+def test_cartao_a1_curto_nao_reserva_linhas_vazias(app, ids, client, monkeypatch,
+                                                   quantidade):
+    from datetime import datetime
+
+    itens = [{'empresa_nome': f'TESTE {i}', 'causa': 'vencendo',
+              'dias_restantes': i, 'not_after': datetime(2026, 9, 1)}
+             for i in range(quantidade)]
+    _cofre(monkeypatch, itens=itens, vazio=False,
+           com_vencimento=quantidade)
+
+    corpo = client.get('/').get_data(as_text=True)
+
+    assert 'vg-mosaico is-a1-curto' in corpo
 
 
 def test_noite_sem_falha_nao_poe_o_zero_em_destaque(app, ids, client, monkeypatch):

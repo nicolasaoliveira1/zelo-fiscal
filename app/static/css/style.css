@@ -600,6 +600,18 @@ main {
     transition: margin-left var(--sidebar-transition), width var(--sidebar-transition);
 }
 
+/* O conteúdo das páginas não deve disputar espaço com a barra lateral nem
+   encostar nas bordas da janela. O teto evita linhas excessivamente longas em
+   monitores grandes; o gutter cresce até 48px sem comprimir telas menores. */
+.app-main {
+    --app-main-max-width: 1600px;
+    width: 100%;
+    max-width: var(--app-main-max-width);
+    margin-inline: auto;
+    padding-inline: clamp(var(--zl-space-4), 3vw, var(--zl-space-7));
+    padding-bottom: var(--zl-space-7);
+}
+
 .sidebar-backdrop {
     position: fixed;
     inset: 0;
@@ -1621,9 +1633,9 @@ body.topo-visivel .zl-dock {
     font-size: var(--zl-fs-2);
 }
 
-/* Quando roda de novo: empurrado para a direita do cabeçalho, em peso normal —
-   é contexto, não manchete. */
-.vg-producao-quando {
+/* Ação para ligar o agendador: empurrada para a direita do cabeçalho, em peso
+   normal — é contexto, não manchete. */
+.vg-producao-acao {
     margin-left: auto;
     font-weight: 400;
 }
@@ -1675,13 +1687,13 @@ body.topo-visivel .zl-dock {
     color: var(--bs-secondary-color);
 }
 
-/* Em tela estreita o "roda de novo" desce em vez de espremer o cabeçalho. */
+/* Em tela estreita a ação de configuração desce em vez de espremer o cabeçalho. */
 @media (max-width: 575.98px) {
     .vg-producao-h {
         flex-wrap: wrap;
     }
 
-    .vg-producao-quando {
+    .vg-producao-acao {
         margin-left: 0;
         flex-basis: 100%;
     }
@@ -1690,11 +1702,42 @@ body.topo-visivel .zl-dock {
 .vg-mosaico {
     display: grid;
     gap: var(--zl-space-4);
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-areas:
-        "cert cert cert a1"
-        "nfse nfse fila a1";
-    align-items: start;
+        "cert a1"
+        "nfse a1"
+        "fila a1";
+    align-items: stretch;
+}
+
+/* Cartões irmãos terminam na mesma régua. O corpo cresce junto com a faixa e
+   mantém o rodapé ancorado, sem esticar o cartão para além do espaço da grade. */
+.vg-mosaico .vg-card-b {
+    flex: 1 1 auto;
+}
+
+/* No cartão alto, a lista é o conteúdo que pode ceder espaço. Com uma carteira
+   grande ela cresce até o corpo disponível e rola dentro dele, em vez de deixar
+   um vão entre a última linha e o rodapé. O estado compacto conserva a altura
+   natural curta para não reintroduzir o vazio que a classe removeu. */
+.vg-mosaico:not(.is-a1-curto) > .vg-a-a1 .vg-card-b {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.vg-mosaico:not(.is-a1-curto) > .vg-a-a1 .vg-lista {
+    flex: 1 1 15rem;
+    min-height: 0;
+    max-height: none;
+}
+
+/* Quando o cartão alto está curto, os outros cartões ocupam a segunda linha
+   em vez de deixá-la vazia sob um único item que ainda teria rowspan. */
+.vg-mosaico.is-a1-curto {
+    grid-template-areas:
+        "cert a1"
+        "nfse fila";
 }
 
 .vg-mosaico > .vg-a-cert { grid-area: cert; }
@@ -1821,18 +1864,24 @@ body.topo-visivel .zl-dock {
     white-space: nowrap;
 }
 
-@media (max-width: 1199px) {
+@media (min-width: 1440px) {
     .vg-mosaico {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         grid-template-areas:
-            "cert a1"
-            "nfse a1"
-            "fila a1";
+            "cert cert cert a1"
+            "nfse nfse fila a1";
+    }
+
+    .vg-mosaico.is-a1-curto {
+        grid-template-areas:
+            "cert cert cert a1"
+            "nfse nfse fila fila";
     }
 }
 
 @media (max-width: 767px) {
-    .vg-mosaico {
+    .vg-mosaico,
+    .vg-mosaico.is-a1-curto {
         grid-template-columns: minmax(0, 1fr);
         grid-template-areas: "cert" "a1" "nfse" "fila";
     }
@@ -1873,6 +1922,12 @@ body.topo-visivel .zl-dock {
     border-top: 1px solid var(--zelo-line);
     background: var(--bs-tertiary-bg);
     font-size: var(--zl-fs-2);
+}
+
+/* A ficha da Fila já começa no corpo do cartão; o fio superior genérico do
+   componente duplica essa separação e pesa no início da informação. */
+.vg-mosaico > .vg-a-fila .zl-ficha {
+    border-top: 0;
 }
 
 .vg-card-f a {

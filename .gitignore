@@ -42,7 +42,7 @@ chrome-profile-federal-real/
 build/
 dist/
 *.egg-info/
-node_modules/
+node_modules
 
 # Comandos do flask que serao sempre rodados
 .flaskenv
@@ -111,3 +111,6 @@ logs/app.jsonl
 
 # gatilho de reload do servidor de desenvolvimento
 reload.trigger
+
+# Estado vivo de handoff entre agentes (local, não versionado)
+.handoff/
