@@ -1716,6 +1716,22 @@ body.topo-visivel .zl-dock {
     flex: 1 1 auto;
 }
 
+/* No cartão alto, a lista é o conteúdo que pode ceder espaço. Com uma carteira
+   grande ela cresce até o corpo disponível e rola dentro dele, em vez de deixar
+   um vão entre a última linha e o rodapé. O estado compacto conserva a altura
+   natural curta para não reintroduzir o vazio que a classe removeu. */
+.vg-mosaico:not(.is-a1-curto) > .vg-a-a1 .vg-card-b {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.vg-mosaico:not(.is-a1-curto) > .vg-a-a1 .vg-lista {
+    flex: 1 1 15rem;
+    min-height: 0;
+    max-height: none;
+}
+
 /* Quando o cartão alto está curto, os outros cartões ocupam a segunda linha
    em vez de deixá-la vazia sob um único item que ainda teria rowspan. */
 .vg-mosaico.is-a1-curto {
