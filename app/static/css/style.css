@@ -1707,7 +1707,13 @@ body.topo-visivel .zl-dock {
         "cert a1"
         "nfse a1"
         "fila a1";
-    align-items: start;
+    align-items: stretch;
+}
+
+/* Cartões irmãos terminam na mesma régua. O corpo cresce junto com a faixa e
+   mantém o rodapé ancorado, sem esticar o cartão para além do espaço da grade. */
+.vg-mosaico .vg-card-b {
+    flex: 1 1 auto;
 }
 
 /* Quando o cartão alto está curto, os outros cartões ocupam a segunda linha

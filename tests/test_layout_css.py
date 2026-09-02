@@ -22,6 +22,9 @@ def test_conteudo_principal_tem_teto_gutter_e_respiro():
 def test_mosaico_muda_de_duas_para_quatro_colunas_com_espaco():
     css = _css()
 
+    assert 'align-items: stretch' in css
+    assert '.vg-mosaico .vg-card-b' in css
+    assert 'flex: 1 1 auto' in css
     assert 'grid-template-columns: repeat(2, minmax(0, 1fr))' in css
     assert '@media (min-width: 1440px)' in css
     assert 'grid-template-columns: repeat(4, minmax(0, 1fr))' in css
