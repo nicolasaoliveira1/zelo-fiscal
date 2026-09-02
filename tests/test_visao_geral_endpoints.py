@@ -7,6 +7,8 @@ pior que nao mostrar.
 """
 from datetime import datetime
 
+import pytest
+
 from app.services import visao_geral
 
 # A faixa de produção precisa existir em TODO render: o template a lê sempre.
@@ -112,6 +114,7 @@ def test_bloco_com_erro_nao_derruba_a_pagina(app, ids, client, monkeypatch):
 
     assert resposta.status_code == 200
     assert 'Não consegui ler este bloco agora' in corpo
+    assert 'vg-mosaico is-a1-curto' in corpo
     assert '>4<' in corpo or '4' in corpo
 
 
@@ -417,6 +420,22 @@ def test_cartao_a1_vazio_nao_ganha_contagem_no_cabecalho(app, ids, client,
 
     assert '0 de 47' not in corpo
     assert 'Nenhum dos 47 certificados vence' in corpo
+    assert 'vg-mosaico is-a1-curto' in corpo
+
+
+@pytest.mark.parametrize('quantidade', [1, 2, 3])
+def test_cartao_a1_curto_nao_reserva_linhas_vazias(app, ids, client, monkeypatch,
+                                                   quantidade):
+    from datetime import datetime
+
+    itens = [{'empresa_nome': f'TESTE {i}', 'causa': 'vencendo',
+              'dias_restantes': i, 'not_after': datetime(2026, 9, 1)}
+             for i in range(quantidade)]
+    _cofre(monkeypatch, itens=itens, vazio=False,
+           com_vencimento=quantidade)
+
+    corpo = client.get('/').get_data(as_text=True)
+
     assert 'vg-mosaico is-a1-curto' in corpo
 
 

@@ -1842,8 +1842,6 @@ body.topo-visivel .zl-dock {
     white-space: nowrap;
 }
 
-/* SPEC_DEVIATION: quatro colunas só entram a partir de 1440px para que a
-   sidebar aberta e o novo respiro do contêiner não comprimam os cartões. */
 @media (min-width: 1440px) {
     .vg-mosaico {
         grid-template-columns: repeat(4, minmax(0, 1fr));
