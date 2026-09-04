@@ -629,7 +629,8 @@ def _nota_para_json(nota):
         'documento': nota.documento,
         'tipo_documento': nota.tipo_documento,
         'competencia': nota.competencia,
-        'valor': f'{nota.valor_final:.2f}'.replace('.', ',') if nota.valor_final else None,
+        'valor': _valor_json(nota.valor_final),
+        'emitida_em': nota.emitida_em.isoformat() if nota.emitida_em else None,
         'vencimento': nota.vencimento.strftime('%d/%m/%Y') if nota.vencimento else None,
         'status': nota.status,
         # A regra de "esta nota pode ser preenchida" mora em
