@@ -76,6 +76,37 @@ function estadoVisual(estado) {
   return 'compativel';
 }
 
+/**
+ * Abre ou recolhe o corpo da Central de alterações.
+ *
+ * @param {Document|HTMLElement} root
+ * @param {boolean} aberta
+ */
+export function definirCentralAberta(root, aberta) {
+  const corpo = porId(root, 'nfseContratoCorpo');
+  if (!corpo) return;
+  corpo.hidden = !aberta;
+  const botao = porId(root, 'btnCentralAlteracoes');
+  if (!botao) return;
+  botao.setAttribute('aria-expanded', aberta ? 'true' : 'false');
+  botao.textContent = aberta ? 'Ocultar' : 'Mostrar';
+}
+
+/**
+ * Diz se a Central tem algo que o operador precisa decidir agora.
+ *
+ * Mesmo criterio do template (que decide se a secao ja nasce aberta): estado
+ * que nao e `compativel`, ou incidente pendente. Estado nulo — a rota falhou —
+ * cai em `desconhecido` e tambem abre, porque a mensagem do erro esta la
+ * dentro.
+ *
+ * @param {object|null} estado
+ * @returns {boolean}
+ */
+export function centralPedeAtencao(estado) {
+  return estadoVisual(estado) !== 'compativel' || incidentesPendentes(estado).length > 0;
+}
+
 function preencherStatus(estado, root) {
   const faixa = porId(root, 'nfseContratoStatus');
   const titulo = porId(root, 'nfseContratoStatusTitulo');
@@ -839,12 +870,16 @@ export async function inicializarContratoNfse(opcoes = {}) {
       const dados = await lerResposta(resposta);
       estado = dadosEstado(dados);
       renderizarEstadoContrato(estado, root);
+      // A secao vem recolhida, entao divergencia detectada tem de abri-la
+      // sozinha: incidente que ninguem ve e incidente que ninguem resolve.
+      if (centralPedeAtencao(estado)) definirCentralAberta(root, true);
       if (typeof opcoes.onEstado === 'function') opcoes.onEstado(estado);
       preencherNotasValidacao(root);
       mostrarErro(root, 'nfseReconEstado', '');
     } catch (erro) {
       estado = null;
       renderizarEstadoContrato(null, root);
+      definirCentralAberta(root, true);
       if (typeof opcoes.onEstado === 'function') opcoes.onEstado(null);
       const mensagem = erro instanceof Error ? erro.message : 'Não foi possível carregar o contrato.';
       mostrarErro(root, 'nfseReconEstado', mensagem);
@@ -861,6 +896,9 @@ export async function inicializarContratoNfse(opcoes = {}) {
       await carregar();
       mostrarPasses(dados.passe, dados.controles_acumulados);
       mostrarSugestoes(dados.sugestoes);
+      // Sugestao nao e incidente e nao entra no `centralPedeAtencao`, mas
+      // tambem pede decisao: se veio alguma, a secao fica aberta.
+      if ((dados.sugestoes || []).length) definirCentralAberta(root, true);
       const observacao = dados.observacao || {};
       // A evidencia carrega o motivo tecnico: sem ela, 'desconhecida' nao
       // diz ao operador o que conferir na tela.
@@ -886,6 +924,10 @@ export async function inicializarContratoNfse(opcoes = {}) {
       mostrarErro(root, 'nfseReconEstado', mensagem);
       showToast(mensagem, 'error');
     }
+  });
+
+  porId(root, 'btnCentralAlteracoes')?.addEventListener('click', () => {
+    definirCentralAberta(root, porId(root, 'nfseContratoCorpo')?.hidden === true);
   });
 
   botaoRecon?.addEventListener('click', () => {

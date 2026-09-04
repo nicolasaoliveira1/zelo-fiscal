@@ -247,6 +247,47 @@
         letter-spacing: 0.05em;
         color: var(--zelo-slate);
     }
+    /* Campos alinhados pelo topo, nao pela base: o campo de valor reserva a
+       linha da mensagem de erro (para o layout nao pular quando ela aparece), e
+       alinhar pela base jogaria esse input acima dos demais. Com o topo, os
+       rotulos casam e a mensagem pende embaixo sem mover ninguem. */
+    .nfse-filtros {
+        border-top: 1px solid var(--zelo-line);
+        padding-top: 0.75rem;
+        align-items: flex-start;
+    }
+    .nfse-filtro-campo {
+        min-width: 12rem;
+    }
+    .nfse-filtro-campo.busca {
+        flex: 1 1 19rem;
+    }
+    .nfse-filtro-campo.valor {
+        flex: 0 1 12rem;
+    }
+    .nfse-filtro-campo.situacao {
+        flex: 0 1 13rem;
+    }
+    .nfse-filtro-campo.ordenacao {
+        flex: 0 1 16rem;
+    }
+    .nfse-filtro-erro {
+        color: var(--zelo-danger);
+        font-size: 0.76rem;
+        margin-top: 0.2rem;
+        min-height: 1.1em;
+    }
+    .nfse-filtro-contagem {
+        color: var(--zelo-slate);
+        font-size: 0.82rem;
+        white-space: nowrap;
+    }
+    /* Some sem devolver o espaco: com display:none a contagem ao lado pulava
+       para a direita na primeira tecla digitada. Oculto assim tambem sai da
+       ordem de tabulacao. */
+    .nfse-filtro-limpar.esta-oculto {
+        visibility: hidden;
+    }
     /* Esta tabela tem 8 colunas, duas com editor embutido (empresa e
        descricao), e ganha com espaco: no limite global de 1394px as celulas
        quebram texto sem necessidade em telas largas. Alargar so aqui — o
@@ -530,6 +571,13 @@
    aqui ja produziu divergencia: a faixa dizia "aviso" ao lado do radio do
    automatico desabilitado, sem explicar por que. #}
 {% set contrato_estado_visual = contrato_estado.estado_visual or 'desconhecido' %}
+{# A Central vem RECOLHIDA: no dia a dia o contrato esta compativel e a secao
+   inteira (faixa, incidentes, historico) so empurra a fila para baixo. Ela ja
+   nasce aberta quando ha o que decidir — incidente pendente, ou estado que nao
+   e `compativel` —, porque divergencia escondida atras de um clique e
+   divergencia que ninguem ve. O mesmo criterio vive no `nfse_contrato.js`,
+   para a recon reabrir a secao quando ela detecta algo. #}
+{% set contrato_central_aberta = contrato_estado_visual != 'compativel' or contrato_abertos %}
 
 <!-- Central de alterações do contrato adaptativo da NFS-e -->
 <section class="nfse-card mb-3" id="nfseContratoCentral"
@@ -542,24 +590,16 @@
                 Contrato ativo · versão <span class="nfse-mono">{{ contrato_estado.ativo.versao }}</span>
             </p>
         </div>
-        <div class="d-flex gap-2 flex-wrap align-items-center">
-            <span class="nfse-hint nfse-mono d-none" id="nfseReconPasses"></span>
-            <button class="btn btn-soft-primary btn-sm" type="button" id="btnReconContrato">
-                Recon da tela atual
-            </button>
-            <button class="btn btn-soft-primary btn-sm d-none" type="button"
-                    id="btnReconConcluir">
-                Concluir etapa
-            </button>
-            <button class="btn btn-ghost btn-sm d-none" type="button" id="btnReconDescartar">
-                Descartar acumulado
-            </button>
-            <button class="btn btn-ghost btn-sm" type="button" id="btnDescartarIncidentes">
-                Descartar incidentes
-            </button>
-        </div>
+        <button class="btn btn-ghost btn-sm nfse-contrato-toggle" type="button"
+                id="btnCentralAlteracoes" aria-controls="nfseContratoCorpo"
+                aria-expanded="{{ 'true' if contrato_central_aberta else 'false' }}">
+            {% if contrato_central_aberta %}Ocultar{% else %}Mostrar{% endif %}
+        </button>
     </div>
 
+    {# A faixa de estado fica FORA do recolhimento: ela e a linha que diz se a
+       automacao esta liberada ou bloqueada, e recolhe-la esconderia justamente
+       o que o operador precisa ver de relance. #}
     <div class="nfse-contrato-faixa mt-3" id="nfseContratoStatus"
          data-estado="{{ contrato_estado_visual }}" role="status" aria-live="polite">
         {# Só refina um estado que JÁ é compatível: a liberação manual sobrevive
@@ -584,6 +624,24 @@
         <div class="estado" id="nfseContratoStatusTitulo">Estado desconhecido</div>
         <div id="nfseContratoStatusTexto">Não foi possível confirmar o estado do contrato.</div>
         {% endif %}
+    </div>
+
+    <div id="nfseContratoCorpo"{% if not contrato_central_aberta %} hidden{% endif %}>
+    <div class="d-flex gap-2 flex-wrap align-items-center mt-3">
+        <span class="nfse-hint nfse-mono d-none" id="nfseReconPasses"></span>
+        <button class="btn btn-soft-primary btn-sm" type="button" id="btnReconContrato">
+            Recon da tela atual
+        </button>
+        <button class="btn btn-soft-primary btn-sm d-none" type="button"
+                id="btnReconConcluir">
+            Concluir etapa
+        </button>
+        <button class="btn btn-ghost btn-sm d-none" type="button" id="btnReconDescartar">
+            Descartar acumulado
+        </button>
+        <button class="btn btn-ghost btn-sm" type="button" id="btnDescartarIncidentes">
+            Descartar incidentes
+        </button>
     </div>
 
     {# A lista e montada por `nfse_contrato.js` a partir de /nfse/contrato: a
@@ -673,6 +731,7 @@
         {% endif %}
     </div>
     <div class="nfse-hint mt-3" id="nfseReconEstado" role="status" aria-live="polite"></div>
+    </div>
 </section>
 
 <div class="modal fade" id="modalValidarContrato" tabindex="-1"
@@ -857,12 +916,65 @@
                 <option value="ultima"{% if competencia_atual == 'ultima' %} selected{% endif %}>
                     Última importação{% if lote %} ({{ lote.criado_em.strftime('%d/%m às %H:%M') }}){% endif %}
                 </option>
+                <option value="todas"{% if competencia_atual == 'todas' %} selected{% endif %}>
+                    Todas as competências
+                </option>
                 {% for competencia in competencias %}
                 <option value="{{ competencia }}"{% if competencia_atual == competencia %} selected{% endif %}>
                     Competência {{ competencia }}
                 </option>
                 {% endfor %}
             </select>
+        </div>
+    </div>
+    <div class="nfse-filtros d-flex gap-2 flex-wrap mb-3" id="nfseFiltros">
+        <div class="nfse-filtro-campo busca">
+            <label class="form-label nfse-hint mb-1" for="filtroTexto">Buscar na fila</label>
+            <input class="form-control form-control-sm" type="search" id="filtroTexto"
+                   placeholder="Nome, empresa ou CPF/CNPJ" autocomplete="off">
+        </div>
+        <div class="nfse-filtro-campo valor">
+            <label class="form-label nfse-hint mb-1" for="filtroValor">Valor exato</label>
+            <input class="form-control form-control-sm nfse-mono" type="text" id="filtroValor"
+                   inputmode="decimal" placeholder="R$ 0,00" aria-describedby="filtroValorErro">
+            <div class="nfse-filtro-erro" id="filtroValorErro" aria-live="polite"></div>
+        </div>
+        <div class="nfse-filtro-campo situacao">
+            <label class="form-label nfse-hint mb-1" for="filtroSituacao">Situação</label>
+            <select class="form-select form-select-sm" id="filtroSituacao">
+                <option value="todas" selected>Todas</option>
+                <option value="atencao">Precisam de atenção</option>
+                <option value="prontas">Prontas para preencher</option>
+                <option value="andamento">Em andamento</option>
+                <option value="resolvidas">Resolvidas</option>
+            </select>
+        </div>
+        <div class="nfse-filtro-campo ordenacao">
+            <label class="form-label nfse-hint mb-1" for="filtroOrdenacao">Ordenar por</label>
+            <select class="form-select form-select-sm" id="filtroOrdenacao">
+                <option value="prioridade" selected>Prioridade</option>
+                <option value="nome_asc">Nome — A a Z</option>
+                <option value="nome_desc">Nome — Z a A</option>
+                <option value="valor_asc">Valor — menor primeiro</option>
+                <option value="valor_desc">Valor — maior primeiro</option>
+                <option value="emissao_desc">Emissão — mais recente</option>
+                <option value="emissao_asc">Emissão — mais antiga</option>
+                <option value="importacao">Ordem de importação</option>
+            </select>
+        </div>
+        <div class="nfse-filtro-campo acoes ms-auto">
+            <!-- Rotulo vazio so para descer o bloco ate a linha dos campos, ja
+                 que a barra alinha pelo topo. -->
+            <span class="form-label nfse-hint mb-1 d-block" aria-hidden="true">&nbsp;</span>
+            <div class="d-flex align-items-center gap-2">
+                <span class="nfse-filtro-contagem" id="nfseContagemVisivel">
+                    {{ resumo.total }} notas
+                </span>
+                <button class="btn btn-ghost btn-sm nfse-filtro-limpar esta-oculto"
+                        type="button" id="btnLimparFiltros">
+                    Limpar filtros
+                </button>
+            </div>
         </div>
     </div>
     <!-- Acao em massa: so aparece com alguma linha marcada -->
@@ -908,7 +1020,7 @@
             <tbody id="corpoNotas"></tbody>
         </table>
     </div>
-    <p class="nfse-hint mt-3 mb-0" id="nfseVazio">
+    <p class="nfse-hint mt-3 mb-0" id="nfseVazio" role="status" aria-live="polite">
         Nenhuma nota importada.
     </p>
 </div>

@@ -11,7 +11,7 @@ globalThis.requestAnimationFrame = (callback) => setTimeout(callback, 0);
 dom.window.HTMLElement.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
 
-const { celulaDescricao, pintarEmitidas, consultarEmitidas } =
+const { celulaDescricao, pintarEmitidas, consultarEmitidas, iniciarEmissao } =
   await import('../app/static/js/nfse.js');
 
 after(() => dom.window.close());
@@ -150,4 +150,64 @@ test('o campo e os recálculos manuais de competência não existem mais', () =>
   assert.equal(script.includes('emitidasCompetencia'), false);
   assert.equal(script.includes('competenciaConferida'), false);
   assert.equal(script.includes('recarregarPainelEmitidas'), false);
+});
+
+test('a conferência oferece os filtros locais e todas as ordenações da spec', () => {
+  const template = readFileSync('app/templates/nfse.html', 'utf8');
+  const script = readFileSync('app/static/js/nfse.js', 'utf8');
+
+  assert.match(template, /id="filtroTexto"[^>]*placeholder="Nome, empresa ou CPF\/CNPJ"/);
+  assert.match(template, /id="filtroValor"[^>]*inputmode="decimal"/);
+  assert.match(template, /id="filtroSituacao"/);
+  assert.match(template, /Precisam de atenção/);
+  assert.match(template, /Prontas para preencher/);
+  assert.match(template, /Em andamento/);
+  assert.match(template, /Resolvidas/);
+  assert.match(template, /id="filtroOrdenacao"/);
+  assert.match(template, /Nome — A a Z/);
+  assert.match(template, /Nome — Z a A/);
+  assert.match(template, /Valor — menor primeiro/);
+  assert.match(template, /Valor — maior primeiro/);
+  assert.match(template, /Emissão — mais recente/);
+  assert.match(template, /Emissão — mais antiga/);
+  assert.match(template, /Ordem de importação/);
+  assert.match(template, /id="btnLimparFiltros"/);
+  assert.match(template, /id="nfseContagemVisivel"/);
+  assert.match(script, /filtrarOrdenarNotas\(notas, filtros\)/);
+  assert.match(script, /Nenhum resultado corresponde aos filtros/);
+  assert.match(script, /idsSelecionadosVisiveis\(selecionadas, notasVisiveis\)/);
+  // A regra de "linha visível que aceita ação em massa" tem UM lugar: o núcleo
+  // puro. A tela lê de lá em vez de repetir o predicado.
+  const nucleo = readFileSync('app/static/js/nfse_filtros.js', 'utf8');
+  assert.match(nucleo, /selecionavel !== false/);
+  assert.match(script, /idsVisiveis\(notasVisiveis\)/);
+  assert.equal(script.includes('selecionavel'), false);
+  assert.match(script, /encodeURIComponent\(escopoAtual\(\)\)/);
+});
+
+test('o escopo "todas as competências" procura, mas não emite a lista inteira', async () => {
+  // A fila do lote é exatamente o que a página mostra, e aqui ela mostra meses
+  // já fechados. Documento fiscal não tem rollback: a lista inteira pede escopo
+  // fechado, a nota a nota continua valendo.
+  const template = readFileSync('app/templates/nfse.html', 'utf8');
+  assert.match(template, /<option value="todas"/);
+  assert.match(template, /Todas as competências/);
+
+  document.body.innerHTML += `
+    <select id="filtroCompetencia"><option value="todas" selected>Todas</option></select>
+    <input type="radio" name="nfseModo" value="lote" checked>`;
+
+  const chamadas = [];
+  globalThis.fetch = async (url) => {
+    chamadas.push(url);
+    return { ok: true, json: async () => ({ status: 'ok' }) };
+  };
+
+  await iniciarEmissao();
+
+  // nao chegou a pedir emissao nenhuma: o guarda barrou antes do fetch
+  assert.deepEqual(chamadas, []);
+  const script = readFileSync('app/static/js/nfse.js', 'utf8');
+  assert.match(script, /!notaId && escopoAmplo\(\)/);
+  assert.match(script, /serve para procurar/);
 });

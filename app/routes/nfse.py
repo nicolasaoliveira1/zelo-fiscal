@@ -629,7 +629,8 @@ def _nota_para_json(nota):
         'documento': nota.documento,
         'tipo_documento': nota.tipo_documento,
         'competencia': nota.competencia,
-        'valor': f'{nota.valor_final:.2f}'.replace('.', ',') if nota.valor_final else None,
+        'valor': _valor_json(nota.valor_final),
+        'emitida_em': nota.emitida_em.isoformat() if nota.emitida_em else None,
         'vencimento': nota.vencimento.strftime('%d/%m/%Y') if nota.vencimento else None,
         'status': nota.status,
         # A regra de "esta nota pode ser preenchida" mora em
@@ -714,6 +715,7 @@ def _valor_extenso(valor):
 # --- pagina ----------------------------------------------------------------
 
 ESCOPO_ULTIMA = 'ultima'
+ESCOPO_TODAS = 'todas'
 
 
 def _competencias_disponiveis():
@@ -731,16 +733,21 @@ def _competencias_disponiveis():
     return sorted(valores, key=_chave, reverse=True)
 
 
-def _notas_do_escopo(competencia=None):
+def _notas_do_escopo(escopo=ESCOPO_ULTIMA):
     """Notas a mostrar, e o lote a que elas pertencem.
 
-    Sem competencia, mostra a ULTIMA importacao — o que o operador acabou de
-    trazer do banco. Com competencia, mostra o mes inteiro atravessando lotes:
+    Tres escopos. `ultima` mostra a ULTIMA importacao — o que o operador acabou
+    de trazer do banco. Uma competencia mostra o mes inteiro atravessando lotes:
     quem emite antes do fim do mes importa o extrato duas ou tres vezes, e as
-    notas do mesmo mes ficam espalhadas por varias importacoes.
+    notas do mesmo mes ficam espalhadas por varias importacoes. `todas` mostra a
+    carteira inteira, para procurar o historico de um tomador sem saber de qual
+    mes ele veio — e so para procurar: emitir em lote pede um escopo fechado.
     """
-    if competencia:
-        notas = (NotaNfse.query.filter_by(competencia=competencia)
+    if escopo == ESCOPO_TODAS:
+        return NotaNfse.query.order_by(NotaNfse.id).all(), None
+
+    if escopo and escopo != ESCOPO_ULTIMA:
+        notas = (NotaNfse.query.filter_by(competencia=escopo)
                  .order_by(NotaNfse.id).all())
         return notas, None
 
@@ -751,30 +758,40 @@ def _notas_do_escopo(competencia=None):
             .order_by(NotaNfse.id).all()), lote
 
 
-def _competencia_pedida(bruto):
-    """Valida contra as competencias existentes: so aceita o que ha no banco,
-    entao nao ha o que injetar pela querystring."""
+def _escopo_pedido(bruto):
+    """Escopo pedido na querystring, normalizado para um dos tres valores.
+
+    A competencia e validada contra o que existe no banco: so aceita o que ha,
+    entao nao ha o que injetar pela querystring. Qualquer coisa fora disso cai
+    na ultima importacao."""
     bruto = (bruto or '').strip()
+    if bruto == ESCOPO_TODAS:
+        return ESCOPO_TODAS
     if not bruto or bruto == ESCOPO_ULTIMA:
-        return None
-    return bruto if bruto in _competencias_disponiveis() else None
+        return ESCOPO_ULTIMA
+    return bruto if bruto in _competencias_disponiveis() else ESCOPO_ULTIMA
+
+
+def _competencia_do_escopo(escopo):
+    """A competencia de um escopo, ou None quando ele nao e um mes."""
+    return None if escopo in (ESCOPO_ULTIMA, ESCOPO_TODAS) else escopo
 
 
 @bp.route('/nfse')
 @requer_papel('operador')
 def nfse_painel():
-    competencia = _competencia_pedida(request.args.get('competencia'))
-    notas, lote = _notas_do_escopo(competencia)
+    escopo = _escopo_pedido(request.args.get('competencia'))
+    notas, lote = _notas_do_escopo(escopo)
     # o operador pode ter acabado de usar o atalho "Cadastrar": liga as linhas
     # cuja Empresa passou a existir, para a volta a pagina refletir o cadastro
     if nfse_import.reconciliar_com_cadastro(notas):
-        notas, lote = _notas_do_escopo(competencia)
+        notas, lote = _notas_do_escopo(escopo)
     return render_template(
         'nfse.html',
         lote=lote,
         notas=[_nota_para_json(n) for n in notas],
         resumo=_resumo(notas),
-        competencia_atual=competencia or ESCOPO_ULTIMA,
+        competencia_atual=escopo,
         competencias=_competencias_disponiveis(),
         config=nfse_config.get_config_nfse(),
         empresas=[{'id': e.id, 'nome': e.nome, 'cnpj': e.cnpj}
@@ -795,7 +812,7 @@ def nfse_listar_notas():
     A fila roda no servidor, entao o que a tabela mostra envelhece enquanto a
     emissao anda; e por aqui que ela volta a bater com o banco."""
     notas, _lote = _notas_do_escopo(
-        _competencia_pedida(request.args.get('competencia')))
+        _escopo_pedido(request.args.get('competencia')))
     return {
         'status': 'ok',
         'notas': [_nota_para_json(n) for n in notas],
@@ -1631,6 +1648,19 @@ def nfse_lote_iniciar():
     if modo == nfse_lote.MODO_INDIVIDUAL and not nota_id:
         return json_error('Escolha a linha que deve ser preenchida.', 400)
 
+    # "Todas as competencias" e escopo de PROCURA: a fila do lote tem de ser
+    # exatamente o que a pagina mostra, e o que ela mostra aqui e a carteira
+    # inteira, de todos os meses. Emitir a partir dai poria na fila nota de mes
+    # ja fechado sem o operador ter olhado — e documento fiscal nao tem
+    # rollback. A nota a nota (individual, com `nota_id`) continua valendo:
+    # ali o operador aponta a linha.
+    escopo = _escopo_pedido(dados.get('competencia'))
+    if escopo == ESCOPO_TODAS and not nota_id:
+        return json_error(
+            'Escolha uma competência ou a última importação antes de emitir a '
+            'lista: "Todas as competências" serve para procurar, não para '
+            'emitir em lote.', 400, motivo='escopo_amplo_demais')
+
     ignorar_aliquota = bool(dados.get('ignorar_aliquota'))
     try:
         nfse_service.checar_aliquota(ignorar_aliquota)
@@ -1674,7 +1704,7 @@ def nfse_lote_iniciar():
 
     # a fila e o que a pagina mostra, nao "o ultimo lote": com um mes filtrado
     # na tela, enfileirar o ultimo lote emitiria notas que nao estao a vista
-    competencia = _competencia_pedida(dados.get('competencia'))
+    competencia = _competencia_do_escopo(escopo)
     lote = None if competencia else LoteNfse.query.order_by(LoteNfse.id.desc()).first()
 
     try:
