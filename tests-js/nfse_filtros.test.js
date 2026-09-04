@@ -5,6 +5,7 @@ import {
   ORDENACOES_NFSE,
   SITUACOES_NFSE,
   filtrarOrdenarNotas,
+  idsSelecionadosVisiveis,
   interpretarValorBrasileiro,
   prioridadeNota,
   situacaoOperacional,
@@ -157,4 +158,33 @@ test('situação de grupo inclui o bloco quando só uma linha corresponde', () =
   assert.deepEqual(ids(filtrarOrdenarNotas(notas, {
     situacao: SITUACOES_NFSE.RESOLVIDAS,
   })), [1, 2]);
+});
+
+test('ações em massa descartam ids ocultos ou não selecionáveis', () => {
+  const resultado = idsSelecionadosVisiveis(new Set([1, 2, 4]), [
+    nota(2),
+    nota(4, { selecionavel: false }),
+  ]);
+
+  assert.deepEqual([...resultado], [2]);
+});
+
+test('polling reaplica o mesmo recorte ao novo retrato da fila', () => {
+  const filtros = {
+    busca: 'Tomador',
+    valor: '1500,00',
+    situacao: SITUACOES_NFSE.PRONTAS,
+    ordem: ORDENACOES_NFSE.VALOR_DESC,
+  };
+  const inicial = [
+    nota(1, { nome_csv: 'Tomador A', valor: '1.500,00' }),
+    nota(2, { nome_csv: 'Outro', valor: '1.500,00', status: 'emitida', emitivel: false }),
+  ];
+  const atualizado = [
+    nota(1, { nome_csv: 'Tomador A', valor: '1.500,00', status: 'emitida', emitivel: false }),
+    nota(2, { nome_csv: 'Tomador B', valor: '1.500,00' }),
+  ];
+
+  assert.deepEqual(ids(filtrarOrdenarNotas(inicial, filtros)), [1]);
+  assert.deepEqual(ids(filtrarOrdenarNotas(atualizado, filtros)), [2]);
 });

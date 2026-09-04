@@ -175,4 +175,7 @@ test('a conferência oferece os filtros locais e todas as ordenações da spec',
   assert.match(template, /id="nfseContagemVisivel"/);
   assert.match(script, /filtrarOrdenarNotas\(notas, filtros\)/);
   assert.match(script, /Nenhum resultado corresponde aos filtros/);
+  assert.match(script, /idsSelecionadosVisiveis\(selecionadas, notasVisiveis\)/);
+  assert.match(script, /notasVisiveis[\s\S]*selecionavel/);
+  assert.match(script, /encodeURIComponent\(escopoAtual\(\)\)/);
 });

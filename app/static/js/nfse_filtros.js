@@ -288,3 +288,17 @@ export function filtrarOrdenarNotas(notas, filtros = {}) {
 export function idsVisiveis(notas) {
   return new Set((Array.isArray(notas) ? notas : []).map((nota) => nota.id));
 }
+
+/**
+ * Retorna somente ids que podem receber a ação em massa no retrato visível.
+ *
+ * @param {Iterable<number>} selecionadas
+ * @param {NotaConferencia[]} notas
+ * @returns {Set<number>}
+ */
+export function idsSelecionadosVisiveis(selecionadas, notas) {
+  const visiveis = new Set((Array.isArray(notas) ? notas : [])
+    .filter((nota) => nota?.selecionavel !== false)
+    .map((nota) => nota.id));
+  return new Set([...selecionadas].filter((id) => visiveis.has(id)));
+}

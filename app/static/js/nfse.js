@@ -9,6 +9,7 @@ import {
   inicializarContratoNfse,
 } from './nfse_contrato.js';
 import {
+  idsSelecionadosVisiveis,
   ORDENACOES_NFSE,
   SITUACOES_NFSE,
   filtrarOrdenarNotas,
@@ -405,7 +406,7 @@ function renderizar() {
     // A ultima linha de um grupo fecha o bloco com a borda inferior; sem isso
     // o fundo do grupo vaza para a linha seguinte e o operador nao ve onde ele
     // termina. "Ultima" = a proxima nota nao esta no mesmo grupo.
-    const proxima = notas[i + 1];
+    const proxima = notasVisiveis[i + 1];
     const ultimaDoGrupo = !!nota.grupo
       && (!proxima || !proxima.grupo || proxima.grupo.token !== nota.grupo.token);
     return faixaDoGrupo(nota, colunas) + linha(nota, ultimaDoGrupo);
@@ -787,6 +788,13 @@ function pintarSelecao() {
   const todas = document.getElementById('checkTodas');
   if (!barra) return;
 
+  const idsVisiveisSelecionaveis = new Set(notasVisiveis
+    .filter((nota) => nota?.selecionavel !== false)
+    .map((nota) => nota.id));
+  [...selecionadas].forEach((id) => {
+    if (!idsVisiveisSelecionaveis.has(id)) selecionadas.delete(id);
+  });
+
   barra.classList.toggle('d-none', selecionadas.size === 0);
   if (total) {
     total.textContent = selecionadas.size === 1
@@ -794,9 +802,11 @@ function pintarSelecao() {
       : `${selecionadas.size} linhas selecionadas`;
   }
   if (todas) {
-    todas.checked = notas.length > 0 && selecionadas.size === notas.length;
+    todas.checked = idsVisiveisSelecionaveis.size > 0
+      && selecionadas.size === idsVisiveisSelecionaveis.size;
     // estado intermediario: nem todas, nem nenhuma
-    todas.indeterminate = selecionadas.size > 0 && selecionadas.size < notas.length;
+    todas.indeterminate = selecionadas.size > 0
+      && selecionadas.size < idsVisiveisSelecionaveis.size;
   }
 }
 
@@ -807,12 +817,16 @@ function alternarSelecao(id, marcada) {
 
 function selecionarTodas(marcada) {
   selecionadas.clear();
-  if (marcada) notas.forEach((n) => selecionadas.add(n.id));
+  if (marcada) {
+    notasVisiveis
+      .filter((nota) => nota?.selecionavel !== false)
+      .forEach((nota) => selecionadas.add(nota.id));
+  }
   renderizar();
 }
 
 async function acaoEmMassa(acao) {
-  const ids = [...selecionadas];
+  const ids = [...idsSelecionadosVisiveis(selecionadas, notasVisiveis)];
   if (!ids.length) return;
   try {
     const dados = await chamar('/nfse/notas/acao',
