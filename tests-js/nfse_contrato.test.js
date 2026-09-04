@@ -14,6 +14,8 @@ const {
   montarDadosCandidato,
   opcoesDaOrigem,
   renderizarEstadoContrato,
+  centralPedeAtencao,
+  definirCentralAberta,
 } = await import('../app/static/js/nfse_contrato.js');
 const {
   aplicarGateContrato,
@@ -66,15 +68,20 @@ function markup() {
         <div id="nfseContratoStatusTitulo"></div>
         <div id="nfseContratoStatusTexto"></div>
       </div>
-      <div id="nfseReconSugestoes" class="d-none"></div>
-      <div id="nfseContratoIncidentes"></div>
-      <div id="nfseContratoHistorico"></div>
-      <div id="nfseReconEstado" role="status" aria-live="polite"></div>
+      <button id="btnCentralAlteracoes" type="button" aria-controls="nfseContratoCorpo"
+              aria-expanded="false">Mostrar</button>
+      <div id="nfseContratoCorpo" hidden>
+        <div id="nfseReconSugestoes" class="d-none"></div>
+        <div id="nfseContratoIncidentes"></div>
+        <div id="nfseContratoHistorico"></div>
+        <div id="nfseReconEstado" role="status" aria-live="polite"></div>
+        <button id="btnReconContrato" type="button">Recon</button>
+        <span id="nfseReconPasses" class="d-none"></span>
+        <button id="btnReconConcluir" class="d-none" type="button">Concluir etapa</button>
+        <button id="btnReconDescartar" class="d-none" type="button">Descartar</button>
+        <button id="btnDescartarIncidentes" type="button">Descartar incidentes</button>
+      </div>
     </section>
-    <button id="btnReconContrato" type="button">Recon</button>
-    <span id="nfseReconPasses" class="d-none"></span>
-    <button id="btnReconDescartar" class="d-none" type="button">Descartar</button>
-    <button id="btnDescartarIncidentes" type="button">Descartar incidentes</button>
     <div id="modalValidarContrato"><h2 id="modalValidarContratoTitulo"></h2></div>
     <form id="formValidarContrato">
       <select id="nfseNotaValidacao"><option value="" selected disabled>Escolha uma nota…</option></select>
@@ -753,4 +760,61 @@ test('a fila de validação segue o veredito do servidor, não o status', async 
   const ids = [...select.options].map((o) => o.value).filter(Boolean);
 
   assert.deepEqual(ids, ['10']);
+});
+
+test('a Central fica recolhida quando o contrato está compatível', async () => {
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async () => resposta(estadoBase({ estado_visual: 'compativel' })),
+  });
+
+  assert.equal(document.getElementById('nfseContratoCorpo').hidden, true);
+  assert.equal(
+    document.getElementById('btnCentralAlteracoes').getAttribute('aria-expanded'),
+    'false',
+  );
+  // A faixa de estado fica fora do recolhimento.
+  assert.equal(document.getElementById('nfseContratoStatus').hidden, false);
+});
+
+test('a Central se abre sozinha quando a recon detecta divergência', async () => {
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async () => resposta(estadoBase({
+      estado_visual: 'bloqueado',
+      incidentes: [incidente],
+    })),
+  });
+
+  assert.equal(document.getElementById('nfseContratoCorpo').hidden, false);
+  assert.equal(
+    document.getElementById('btnCentralAlteracoes').getAttribute('aria-expanded'),
+    'true',
+  );
+});
+
+test('o botão da Central alterna aberto e recolhido', async () => {
+  await inicializarContratoNfse({
+    root: document,
+    fetchImpl: async () => resposta(estadoBase({ estado_visual: 'compativel' })),
+  });
+
+  const botao = document.getElementById('btnCentralAlteracoes');
+  const corpo = document.getElementById('nfseContratoCorpo');
+  botao.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  assert.equal(corpo.hidden, false);
+  assert.equal(botao.textContent, 'Ocultar');
+  botao.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  assert.equal(corpo.hidden, true);
+  assert.equal(botao.textContent, 'Mostrar');
+});
+
+test('centralPedeAtencao segue o mesmo critério do template', () => {
+  assert.equal(centralPedeAtencao(estadoBase({ estado_visual: 'compativel' })), false);
+  assert.equal(centralPedeAtencao(estadoBase({ estado_visual: 'aviso' })), true);
+  assert.equal(centralPedeAtencao(estadoBase({ incidentes: [incidente] })), true);
+  // Rota que falhou: a mensagem do erro mora dentro do corpo recolhido.
+  assert.equal(centralPedeAtencao(null), true);
+  definirCentralAberta(document, false);
+  assert.equal(document.getElementById('nfseContratoCorpo').hidden, true);
 });

@@ -204,6 +204,29 @@ def test_pagina_exibe_central_com_aria_e_estado_vazio(login_as):
     assert '<option value="" selected disabled>Escolha uma nota…</option>' in corpo
 
 
+def test_central_vem_recolhida_sem_incidente(login_as):
+    """A Central ocupa a tela inteira e no dia a dia nao ha o que decidir nela:
+    vem recolhida, com a faixa de estado ainda visivel do lado de fora."""
+
+    corpo = login_as('operador').get('/nfse').get_data(as_text=True)
+
+    assert 'id="nfseContratoCorpo" hidden' in corpo
+    assert 'aria-expanded="false"' in corpo
+    assert 'id="nfseContratoStatus"' in corpo
+
+
+def test_central_ja_abre_quando_ha_incidente(login_as, app):
+    """Divergencia escondida atras de um clique e divergencia que ninguem ve."""
+
+    _criar_incidente(app)
+
+    corpo = login_as('operador').get('/nfse').get_data(as_text=True)
+
+    assert 'id="nfseContratoCorpo">' in corpo
+    assert 'id="nfseContratoCorpo" hidden' not in corpo
+    assert 'aria-expanded="true"' in corpo
+
+
 def test_pagina_nao_carrega_incidente_no_html_e_a_rota_o_entrega_sanitizado(
     login_as, app
 ):

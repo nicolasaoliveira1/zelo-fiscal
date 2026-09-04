@@ -571,6 +571,13 @@
    aqui ja produziu divergencia: a faixa dizia "aviso" ao lado do radio do
    automatico desabilitado, sem explicar por que. #}
 {% set contrato_estado_visual = contrato_estado.estado_visual or 'desconhecido' %}
+{# A Central vem RECOLHIDA: no dia a dia o contrato esta compativel e a secao
+   inteira (faixa, incidentes, historico) so empurra a fila para baixo. Ela ja
+   nasce aberta quando ha o que decidir — incidente pendente, ou estado que nao
+   e `compativel` —, porque divergencia escondida atras de um clique e
+   divergencia que ninguem ve. O mesmo criterio vive no `nfse_contrato.js`,
+   para a recon reabrir a secao quando ela detecta algo. #}
+{% set contrato_central_aberta = contrato_estado_visual != 'compativel' or contrato_abertos %}
 
 <!-- Central de alterações do contrato adaptativo da NFS-e -->
 <section class="nfse-card mb-3" id="nfseContratoCentral"
@@ -583,24 +590,16 @@
                 Contrato ativo · versão <span class="nfse-mono">{{ contrato_estado.ativo.versao }}</span>
             </p>
         </div>
-        <div class="d-flex gap-2 flex-wrap align-items-center">
-            <span class="nfse-hint nfse-mono d-none" id="nfseReconPasses"></span>
-            <button class="btn btn-soft-primary btn-sm" type="button" id="btnReconContrato">
-                Recon da tela atual
-            </button>
-            <button class="btn btn-soft-primary btn-sm d-none" type="button"
-                    id="btnReconConcluir">
-                Concluir etapa
-            </button>
-            <button class="btn btn-ghost btn-sm d-none" type="button" id="btnReconDescartar">
-                Descartar acumulado
-            </button>
-            <button class="btn btn-ghost btn-sm" type="button" id="btnDescartarIncidentes">
-                Descartar incidentes
-            </button>
-        </div>
+        <button class="btn btn-ghost btn-sm nfse-contrato-toggle" type="button"
+                id="btnCentralAlteracoes" aria-controls="nfseContratoCorpo"
+                aria-expanded="{{ 'true' if contrato_central_aberta else 'false' }}">
+            {% if contrato_central_aberta %}Ocultar{% else %}Mostrar{% endif %}
+        </button>
     </div>
 
+    {# A faixa de estado fica FORA do recolhimento: ela e a linha que diz se a
+       automacao esta liberada ou bloqueada, e recolhe-la esconderia justamente
+       o que o operador precisa ver de relance. #}
     <div class="nfse-contrato-faixa mt-3" id="nfseContratoStatus"
          data-estado="{{ contrato_estado_visual }}" role="status" aria-live="polite">
         {# Só refina um estado que JÁ é compatível: a liberação manual sobrevive
@@ -625,6 +624,24 @@
         <div class="estado" id="nfseContratoStatusTitulo">Estado desconhecido</div>
         <div id="nfseContratoStatusTexto">Não foi possível confirmar o estado do contrato.</div>
         {% endif %}
+    </div>
+
+    <div id="nfseContratoCorpo"{% if not contrato_central_aberta %} hidden{% endif %}>
+    <div class="d-flex gap-2 flex-wrap align-items-center mt-3">
+        <span class="nfse-hint nfse-mono d-none" id="nfseReconPasses"></span>
+        <button class="btn btn-soft-primary btn-sm" type="button" id="btnReconContrato">
+            Recon da tela atual
+        </button>
+        <button class="btn btn-soft-primary btn-sm d-none" type="button"
+                id="btnReconConcluir">
+            Concluir etapa
+        </button>
+        <button class="btn btn-ghost btn-sm d-none" type="button" id="btnReconDescartar">
+            Descartar acumulado
+        </button>
+        <button class="btn btn-ghost btn-sm" type="button" id="btnDescartarIncidentes">
+            Descartar incidentes
+        </button>
     </div>
 
     {# A lista e montada por `nfse_contrato.js` a partir de /nfse/contrato: a
@@ -714,6 +731,7 @@
         {% endif %}
     </div>
     <div class="nfse-hint mt-3" id="nfseReconEstado" role="status" aria-live="polite"></div>
+    </div>
 </section>
 
 <div class="modal fade" id="modalValidarContrato" tabindex="-1"
