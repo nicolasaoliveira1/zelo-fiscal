@@ -312,6 +312,43 @@ def test_competencia_inexistente_cai_na_ultima_importacao(client, app):
     assert dados['notas'][0]['competencia'] == '06/2026'
 
 
+def test_escopo_todas_atravessa_as_competencias(client, app):
+    """O caso que motivou: procurar um tomador sem saber de qual mes ele veio."""
+    _importar_venc(client, 'EMPRESA TESTE LTDA', '05/07/2026')   # -> 06/2026
+    _importar_venc(client, 'OUTRA COISA LTDA', '05/08/2026')     # -> 07/2026
+    _importar_venc(client, 'MAIS UMA LTDA', '05/09/2026')        # -> 08/2026
+
+    dados = client.get('/nfse/notas?competencia=todas').get_json()
+
+    assert len(dados['notas']) == 3
+    assert {n['competencia'] for n in dados['notas']} == {'06/2026', '07/2026',
+                                                          '08/2026'}
+    assert dados['resumo']['total'] == 3
+
+
+def test_pagina_oferece_o_escopo_todas_e_mantem_a_escolha(client, app):
+    _importar_venc(client, 'EMPRESA TESTE LTDA', '05/07/2026')
+
+    corpo = client.get('/nfse?competencia=todas').get_data(as_text=True)
+
+    assert 'Todas as competências' in corpo
+    assert 'value="todas" selected' in corpo
+
+
+def test_escopo_todas_nao_emite_a_lista_inteira(client, app):
+    """A fila do lote e o que a pagina mostra, e aqui ela mostra meses ja
+    fechados. Documento fiscal nao tem rollback: emitir pede escopo fechado."""
+    _importar_venc(client, 'EMPRESA TESTE LTDA', '05/07/2026')
+
+    resposta = client.post('/nfse/lote/iniciar',
+                           json={'modo': 'lote', 'competencia': 'todas'})
+
+    assert resposta.status_code == 400
+    dados = resposta.get_json()
+    assert dados['motivo'] == 'escopo_amplo_demais'
+    assert 'procurar' in dados['message']
+
+
 def test_notas_sem_lote_algum_nao_quebram_a_pagina(client, app):
     assert client.get('/nfse').status_code == 200
     assert client.get('/nfse/notas').get_json()['notas'] == []

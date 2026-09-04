@@ -11,7 +11,7 @@ globalThis.requestAnimationFrame = (callback) => setTimeout(callback, 0);
 dom.window.HTMLElement.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
 
-const { celulaDescricao, pintarEmitidas, consultarEmitidas } =
+const { celulaDescricao, pintarEmitidas, consultarEmitidas, iniciarEmissao } =
   await import('../app/static/js/nfse.js');
 
 after(() => dom.window.close());
@@ -183,4 +183,31 @@ test('a conferência oferece os filtros locais e todas as ordenações da spec',
   assert.match(script, /idsVisiveis\(notasVisiveis\)/);
   assert.equal(script.includes('selecionavel'), false);
   assert.match(script, /encodeURIComponent\(escopoAtual\(\)\)/);
+});
+
+test('o escopo "todas as competências" procura, mas não emite a lista inteira', async () => {
+  // A fila do lote é exatamente o que a página mostra, e aqui ela mostra meses
+  // já fechados. Documento fiscal não tem rollback: a lista inteira pede escopo
+  // fechado, a nota a nota continua valendo.
+  const template = readFileSync('app/templates/nfse.html', 'utf8');
+  assert.match(template, /<option value="todas"/);
+  assert.match(template, /Todas as competências/);
+
+  document.body.innerHTML += `
+    <select id="filtroCompetencia"><option value="todas" selected>Todas</option></select>
+    <input type="radio" name="nfseModo" value="lote" checked>`;
+
+  const chamadas = [];
+  globalThis.fetch = async (url) => {
+    chamadas.push(url);
+    return { ok: true, json: async () => ({ status: 'ok' }) };
+  };
+
+  await iniciarEmissao();
+
+  // nao chegou a pedir emissao nenhuma: o guarda barrou antes do fetch
+  assert.deepEqual(chamadas, []);
+  const script = readFileSync('app/static/js/nfse.js', 'utf8');
+  assert.match(script, /!notaId && escopoAmplo\(\)/);
+  assert.match(script, /serve para procurar/);
 });

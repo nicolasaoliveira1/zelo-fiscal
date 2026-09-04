@@ -898,6 +898,9 @@
                 <option value="ultima"{% if competencia_atual == 'ultima' %} selected{% endif %}>
                     Última importação{% if lote %} ({{ lote.criado_em.strftime('%d/%m às %H:%M') }}){% endif %}
                 </option>
+                <option value="todas"{% if competencia_atual == 'todas' %} selected{% endif %}>
+                    Todas as competências
+                </option>
                 {% for competencia in competencias %}
                 <option value="{{ competencia }}"{% if competencia_atual == competencia %} selected{% endif %}>
                     Competência {{ competencia }}

@@ -928,15 +928,28 @@ const DESCRICAO_MODO = {
     + 'descrição antes de cada emissão.',
 };
 
+// "Todas as competências" mostra a carteira inteira para PROCURAR o histórico
+// de um tomador. A lista inteira ali atravessa meses já fechados, e a fila do
+// lote é exatamente o que a página mostra — por isso emitir a lista pede um
+// escopo fechado. Nota a nota continua valendo: ali o operador aponta a linha.
+const AVISO_ESCOPO_AMPLO = 'Escolha uma competência ou a última importação para '
+  + 'emitir a lista. "Todas as competências" serve para procurar.';
+
+function escopoAmplo() {
+  return escopoAtual() === 'todas';
+}
+
 function pintarModo() {
   const modo = modoAtual();
   const desc = document.getElementById('nfseModoDesc');
-  const bloqueado = modo === 'automatico' && !contratoAutomaticoElegivel;
+  const semContrato = modo === 'automatico' && !contratoAutomaticoElegivel;
+  const semEscopo = escopoAmplo() && modo !== 'individual';
+  const bloqueado = semContrato || semEscopo;
   const descricao = DESCRICAO_MODO[modo] || '';
   if (desc) {
-    desc.textContent = bloqueado
-      ? `${descricao} Indisponível: resolva os incidentes do contrato.`
-      : descricao;
+    if (semContrato) desc.textContent = `${descricao} Indisponível: resolva os incidentes do contrato.`;
+    else if (semEscopo) desc.textContent = `${descricao} ${AVISO_ESCOPO_AMPLO}`;
+    else desc.textContent = descricao;
   }
 
   const iniciar = document.getElementById('btnIniciarLote');
@@ -945,13 +958,18 @@ function pintarModo() {
     iniciar.textContent = modo === 'automatico'
       ? 'Emitir a lista inteira sozinho' : 'Emitir a lista inteira';
     iniciar.disabled = bloqueado;
-    if (bloqueado) iniciar.title = 'Resolva os incidentes do contrato antes de iniciar.';
+    if (semContrato) iniciar.title = 'Resolva os incidentes do contrato antes de iniciar.';
+    else if (semEscopo) iniciar.title = AVISO_ESCOPO_AMPLO;
     else iniciar.removeAttribute('title');
   }
 }
 
 export async function iniciarEmissao({ notaId = null, ignorarAliquota = false } = {}) {
   const modo = notaId ? 'individual' : modoAtual();
+  if (!notaId && escopoAmplo()) {
+    showToast(AVISO_ESCOPO_AMPLO, 'error');
+    return;
+  }
   if (modo === 'automatico' && !contratoAutomaticoElegivel) {
     const mensagem = document.getElementById('nfseContratoStatusTexto')?.textContent
       || 'O contrato da NFS-e não está elegível para o modo automático.';
