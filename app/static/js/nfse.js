@@ -10,6 +10,7 @@ import {
 } from './nfse_contrato.js';
 import {
   idsSelecionadosVisiveis,
+  idsVisiveis,
   ORDENACOES_NFSE,
   SITUACOES_NFSE,
   filtrarOrdenarNotas,
@@ -391,6 +392,15 @@ function pintarEstadoDosFiltros(resultado, filtros) {
   }
   document.getElementById('btnLimparFiltros')?.classList.toggle(
     'd-none', !haRefinamento(filtros));
+}
+
+// Cada tecla na busca refaz filtro, ordenacao e o innerHTML inteiro da tabela.
+// Um respiro curto junta a rajada da digitacao numa passada so, sem que o
+// operador perceba a espera.
+let timerFiltro = null;
+function renderizarEmBreve() {
+  clearTimeout(timerFiltro);
+  timerFiltro = setTimeout(renderizar, 120);
 }
 
 function renderizar() {
@@ -788,25 +798,24 @@ function pintarSelecao() {
   const todas = document.getElementById('checkTodas');
   if (!barra) return;
 
-  const idsVisiveisSelecionaveis = new Set(notasVisiveis
-    .filter((nota) => nota?.selecionavel !== false)
-    .map((nota) => nota.id));
-  [...selecionadas].forEach((id) => {
-    if (!idsVisiveisSelecionaveis.has(id)) selecionadas.delete(id);
-  });
+  // Filtrar e recorte de VISTA, nao desfazer o que o operador marcou: apagar
+  // aqui as linhas ocultas perderia calado uma selecao de dezenas de linhas na
+  // primeira tecla digitada na busca, e voltar o filtro nao a traria de volta.
+  // O recorte que importa e o da ACAO, e ele acontece no disparo (NFSE-FILTRO-18).
+  const disponiveis = idsVisiveis(notasVisiveis);
+  const alvo = idsSelecionadosVisiveis(selecionadas, notasVisiveis);
+  const ocultas = selecionadas.size - alvo.size;
 
-  barra.classList.toggle('d-none', selecionadas.size === 0);
+  barra.classList.toggle('d-none', alvo.size === 0);
   if (total) {
-    total.textContent = selecionadas.size === 1
-      ? '1 linha selecionada'
-      : `${selecionadas.size} linhas selecionadas`;
+    const rotulo = alvo.size === 1 ? '1 linha selecionada' : `${alvo.size} linhas selecionadas`;
+    // dizer so o numero visivel esconderia que ha marcacao fora do recorte
+    total.textContent = ocultas > 0 ? `${rotulo} (${ocultas} fora do filtro)` : rotulo;
   }
   if (todas) {
-    todas.checked = idsVisiveisSelecionaveis.size > 0
-      && selecionadas.size === idsVisiveisSelecionaveis.size;
+    todas.checked = disponiveis.size > 0 && alvo.size === disponiveis.size;
     // estado intermediario: nem todas, nem nenhuma
-    todas.indeterminate = selecionadas.size > 0
-      && selecionadas.size < idsVisiveisSelecionaveis.size;
+    todas.indeterminate = alvo.size > 0 && alvo.size < disponiveis.size;
   }
 }
 
@@ -817,11 +826,7 @@ function alternarSelecao(id, marcada) {
 
 function selecionarTodas(marcada) {
   selecionadas.clear();
-  if (marcada) {
-    notasVisiveis
-      .filter((nota) => nota?.selecionavel !== false)
-      .forEach((nota) => selecionadas.add(nota.id));
-  }
+  if (marcada) idsVisiveis(notasVisiveis).forEach((id) => selecionadas.add(id));
   renderizar();
 }
 
@@ -832,7 +837,10 @@ async function acaoEmMassa(acao) {
     const dados = await chamar('/nfse/notas/acao',
       { body: JSON.stringify({ acao, ids }) });
     selecionadas.clear();
-    await recarregarNotas({ forcar: true });
+    // o poll pula o redesenho quando o payload nao mudou (o caso de TUDO
+    // recusado); sem este redesenho a barra continuaria dizendo "N linhas
+    // selecionadas" com o conjunto ja vazio
+    if (!await recarregarNotas({ forcar: true })) renderizar();
 
     // o rotulo vem do servidor, onde a lista de acoes ja vive
     const rotulo = dados.rotulo || 'aplicadas';
@@ -1112,19 +1120,21 @@ async function recarregarNotas({ forcar = false } = {}) {
   // `forcar` e para a acao EXPLICITA do operador (confirmar/descartar um
   // agrupamento), que muda varias linhas de uma vez: ali o redesenho e o
   // resultado que ele pediu, e pular calado deixaria a tela mentindo.
-  if (!forcar && (editando.size > 0 || editandoDescricao.size > 0)) return;
+  if (!forcar && (editando.size > 0 || editandoDescricao.size > 0)) return false;
   // digitar valor/descricao na faixa do grupo tambem precisa sobreviver ao poll
-  if (!forcar && document.activeElement?.closest?.('.nfse-grupo')) return;
+  if (!forcar && document.activeElement?.closest?.('.nfse-grupo')) return false;
   try {
     const resposta = await fetch(
       `/nfse/notas?competencia=${encodeURIComponent(escopoAtual())}`);
-    if (!resposta.ok) return;
+    if (!resposta.ok) return false;
     const dados = await resposta.json();
     const novo = JSON.stringify(dados.notas);
-    if (novo === JSON.stringify(notas)) return;
+    if (novo === JSON.stringify(notas)) return false;
     notas = dados.notas;
     renderizar();
+    return true;
   } catch { /* a pagina continua util com o que ja tem na tela */ }
+  return false;
 }
 
 async function comandoLote(url, rotulo) {
@@ -1321,8 +1331,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   pintarModo();
 
-  document.getElementById('filtroTexto')?.addEventListener('input', renderizar);
-  document.getElementById('filtroValor')?.addEventListener('input', renderizar);
+  document.getElementById('filtroTexto')?.addEventListener('input', renderizarEmBreve);
+  document.getElementById('filtroValor')?.addEventListener('input', renderizarEmBreve);
   document.getElementById('filtroSituacao')?.addEventListener('change', renderizar);
   document.getElementById('filtroOrdenacao')?.addEventListener('change', renderizar);
   document.getElementById('btnLimparFiltros')?.addEventListener('click', () => {

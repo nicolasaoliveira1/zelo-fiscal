@@ -176,6 +176,11 @@ test('a conferência oferece os filtros locais e todas as ordenações da spec',
   assert.match(script, /filtrarOrdenarNotas\(notas, filtros\)/);
   assert.match(script, /Nenhum resultado corresponde aos filtros/);
   assert.match(script, /idsSelecionadosVisiveis\(selecionadas, notasVisiveis\)/);
-  assert.match(script, /notasVisiveis[\s\S]*selecionavel/);
+  // A regra de "linha visível que aceita ação em massa" tem UM lugar: o núcleo
+  // puro. A tela lê de lá em vez de repetir o predicado.
+  const nucleo = readFileSync('app/static/js/nfse_filtros.js', 'utf8');
+  assert.match(nucleo, /selecionavel !== false/);
+  assert.match(script, /idsVisiveis\(notasVisiveis\)/);
+  assert.equal(script.includes('selecionavel'), false);
   assert.match(script, /encodeURIComponent\(escopoAtual\(\)\)/);
 });

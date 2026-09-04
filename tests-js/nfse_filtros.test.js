@@ -188,3 +188,36 @@ test('polling reaplica o mesmo recorte ao novo retrato da fila', () => {
   assert.deepEqual(ids(filtrarOrdenarNotas(inicial, filtros)), [1]);
   assert.deepEqual(ids(filtrarOrdenarNotas(atualizado, filtros)), [2]);
 });
+
+test('duplicata liberada pelo operador conta como pronta, não como atenção', () => {
+  // O servidor já disse emitivel: o rótulo "Possível duplicata" sobrevive à
+  // liberação e não pode esconder a linha de "Prontas para preencher".
+  const liberada = nota(1, { status: 'duplicata', emitivel: true, duplicata_liberada: true });
+
+  assert.equal(situacaoOperacional(liberada), SITUACOES_NFSE.PRONTAS);
+  assert.equal(prioridadeNota(liberada), 3);
+  assert.deepEqual(ids(filtrarOrdenarNotas([liberada], {
+    situacao: SITUACOES_NFSE.PRONTAS,
+  })), [1]);
+});
+
+test('nota resolvida não sobe na fila por divergência antiga da importação', () => {
+  // `divergencia_valor` é marca da importação e a emissão não a apaga.
+  const emitida = nota(1, { status: 'emitida', emitivel: false, divergencia_valor: true });
+  const pronta = nota(2, { status: 'pronta', emitivel: true });
+
+  assert.equal(situacaoOperacional(emitida), SITUACOES_NFSE.RESOLVIDAS);
+  assert.equal(prioridadeNota(emitida), 4);
+  assert.deepEqual(ids(filtrarOrdenarNotas([emitida, pronta])), [2, 1]);
+});
+
+test('dígito dentro de um nome não vira consulta de documento', () => {
+  const notas = [
+    nota(1, { nome_csv: 'Loja 3 Comercio', documento: '11222333000181' }),
+    nota(2, { nome_csv: 'Padaria Central', documento: '99333777000100' }),
+  ];
+
+  assert.deepEqual(ids(filtrarOrdenarNotas(notas, { busca: 'Loja 3' })), [1]);
+  // termo sem letra nenhuma continua sendo busca por documento
+  assert.deepEqual(ids(filtrarOrdenarNotas(notas, { busca: '112.223' })), [1]);
+});
