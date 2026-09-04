@@ -391,7 +391,7 @@ function pintarEstadoDosFiltros(resultado, filtros) {
       : `${notas.length} notas`;
   }
   document.getElementById('btnLimparFiltros')?.classList.toggle(
-    'd-none', !haRefinamento(filtros));
+    'esta-oculto', !haRefinamento(filtros));
 }
 
 // Cada tecla na busca refaz filtro, ordenacao e o innerHTML inteiro da tabela.

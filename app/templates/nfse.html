@@ -247,9 +247,14 @@
         letter-spacing: 0.05em;
         color: var(--zelo-slate);
     }
+    /* Campos alinhados pelo topo, nao pela base: o campo de valor reserva a
+       linha da mensagem de erro (para o layout nao pular quando ela aparece), e
+       alinhar pela base jogaria esse input acima dos demais. Com o topo, os
+       rotulos casam e a mensagem pende embaixo sem mover ninguem. */
     .nfse-filtros {
         border-top: 1px solid var(--zelo-line);
         padding-top: 0.75rem;
+        align-items: flex-start;
     }
     .nfse-filtro-campo {
         min-width: 12rem;
@@ -276,6 +281,12 @@
         color: var(--zelo-slate);
         font-size: 0.82rem;
         white-space: nowrap;
+    }
+    /* Some sem devolver o espaco: com display:none a contagem ao lado pulava
+       para a direita na primeira tecla digitada. Oculto assim tambem sai da
+       ordem de tabulacao. */
+    .nfse-filtro-limpar.esta-oculto {
+        visibility: hidden;
     }
     /* Esta tabela tem 8 colunas, duas com editor embutido (empresa e
        descricao), e ganha com espaco: no limite global de 1394px as celulas
@@ -895,9 +906,9 @@
             </select>
         </div>
     </div>
-    <div class="nfse-filtros d-flex align-items-end gap-2 flex-wrap mb-3" id="nfseFiltros">
+    <div class="nfse-filtros d-flex gap-2 flex-wrap mb-3" id="nfseFiltros">
         <div class="nfse-filtro-campo busca">
-            <label class="form-label nfse-hint mb-1" for="filtroTexto">Buscar tomador</label>
+            <label class="form-label nfse-hint mb-1" for="filtroTexto">Buscar na fila</label>
             <input class="form-control form-control-sm" type="search" id="filtroTexto"
                    placeholder="Nome, empresa ou CPF/CNPJ" autocomplete="off">
         </div>
@@ -905,7 +916,7 @@
             <label class="form-label nfse-hint mb-1" for="filtroValor">Valor exato</label>
             <input class="form-control form-control-sm nfse-mono" type="text" id="filtroValor"
                    inputmode="decimal" placeholder="R$ 0,00" aria-describedby="filtroValorErro">
-            <div class="nfse-filtro-erro" id="filtroValorErro" role="alert" aria-live="polite"></div>
+            <div class="nfse-filtro-erro" id="filtroValorErro" aria-live="polite"></div>
         </div>
         <div class="nfse-filtro-campo situacao">
             <label class="form-label nfse-hint mb-1" for="filtroSituacao">Situação</label>
@@ -930,13 +941,19 @@
                 <option value="importacao">Ordem de importação</option>
             </select>
         </div>
-        <div class="d-flex align-items-center gap-2 ms-auto">
-            <span class="nfse-filtro-contagem" id="nfseContagemVisivel" aria-live="polite">
-                {{ resumo.total }} notas
-            </span>
-            <button class="btn btn-ghost btn-sm d-none" type="button" id="btnLimparFiltros">
-                Limpar filtros
-            </button>
+        <div class="nfse-filtro-campo acoes ms-auto">
+            <!-- Rotulo vazio so para descer o bloco ate a linha dos campos, ja
+                 que a barra alinha pelo topo. -->
+            <span class="form-label nfse-hint mb-1 d-block" aria-hidden="true">&nbsp;</span>
+            <div class="d-flex align-items-center gap-2">
+                <span class="nfse-filtro-contagem" id="nfseContagemVisivel">
+                    {{ resumo.total }} notas
+                </span>
+                <button class="btn btn-ghost btn-sm nfse-filtro-limpar esta-oculto"
+                        type="button" id="btnLimparFiltros">
+                    Limpar filtros
+                </button>
+            </div>
         </div>
     </div>
     <!-- Acao em massa: so aparece com alguma linha marcada -->
