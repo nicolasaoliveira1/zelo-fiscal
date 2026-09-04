@@ -8,6 +8,11 @@ import { showToast } from './toasts.js';
 import {
   inicializarContratoNfse,
 } from './nfse_contrato.js';
+import {
+  ORDENACOES_NFSE,
+  SITUACOES_NFSE,
+  filtrarOrdenarNotas,
+} from './nfse_filtros.js';
 
 /**
  * Resposta JSON das rotas da NFSe. Os campos adicionais variam conforme a
@@ -55,6 +60,7 @@ const lerJsonObjeto = (id) => {
 };
 
 let notas = lerJson('dadosNotas');
+let notasVisiveis = notas;
 const empresas = lerJson('dadosEmpresas');
 let aliquotaConfirmada = false;
 // linhas cujo vinculo o operador reabriu para corrigir
@@ -349,12 +355,53 @@ function linha(nota, ultimaDoGrupo) {
     </tr>`;
 }
 
+function lerFiltros() {
+  return {
+    busca: document.getElementById('filtroTexto')?.value || '',
+    valor: document.getElementById('filtroValor')?.value || '',
+    situacao: document.getElementById('filtroSituacao')?.value || SITUACOES_NFSE.TODAS,
+    ordem: document.getElementById('filtroOrdenacao')?.value || ORDENACOES_NFSE.PRIORIDADE,
+  };
+}
+
+function haRefinamento(filtros) {
+  return Boolean(filtros.busca.trim() || filtros.valor.trim()
+    || filtros.situacao !== SITUACOES_NFSE.TODAS);
+}
+
+function pintarEstadoDosFiltros(resultado, filtros) {
+  const campoValor = document.getElementById('filtroValor');
+  const erroValor = document.getElementById('filtroValorErro');
+  if (campoValor) {
+    campoValor.classList.toggle('is-invalid', resultado.valor_invalido);
+    if (resultado.valor_invalido) campoValor.setAttribute('aria-invalid', 'true');
+    else campoValor.removeAttribute('aria-invalid');
+  }
+  if (erroValor) {
+    erroValor.textContent = resultado.valor_invalido
+      ? 'Informe um valor brasileiro não negativo, como 1500,00.' : '';
+  }
+
+  const contagem = document.getElementById('nfseContagemVisivel');
+  if (contagem) {
+    contagem.textContent = haRefinamento(filtros)
+      ? `${resultado.notas.length} de ${notas.length} notas`
+      : `${notas.length} notas`;
+  }
+  document.getElementById('btnLimparFiltros')?.classList.toggle(
+    'd-none', !haRefinamento(filtros));
+}
+
 function renderizar() {
   const corpo = document.getElementById('corpoNotas');
   const vazio = document.getElementById('nfseVazio');
   if (!corpo) return;
+  const filtros = lerFiltros();
+  const resultado = filtrarOrdenarNotas(notas, filtros);
+  notasVisiveis = resultado.notas;
+  pintarEstadoDosFiltros(resultado, filtros);
   const colunas = document.querySelectorAll('#tabelaNotas thead th').length;
-  corpo.innerHTML = notas.map((nota, i) => {
+  corpo.innerHTML = notasVisiveis.map((nota, i) => {
     // A ultima linha de um grupo fecha o bloco com a borda inferior; sem isso
     // o fundo do grupo vaza para a linha seguinte e o operador nao ve onde ele
     // termina. "Ultima" = a proxima nota nao esta no mesmo grupo.
@@ -363,7 +410,11 @@ function renderizar() {
       && (!proxima || !proxima.grupo || proxima.grupo.token !== nota.grupo.token);
     return faixaDoGrupo(nota, colunas) + linha(nota, ultimaDoGrupo);
   }).join('');
-  if (vazio) vazio.classList.toggle('d-none', notas.length > 0);
+  if (vazio) {
+    vazio.textContent = notas.length
+      ? 'Nenhum resultado corresponde aos filtros.' : 'Nenhuma nota importada.';
+    vazio.classList.toggle('d-none', notasVisiveis.length > 0);
+  }
   atualizarContadores();
   pintarSelecao();
 }
@@ -1255,6 +1306,20 @@ document.addEventListener('DOMContentLoaded', () => {
     radio.addEventListener('change', pintarModo);
   });
   pintarModo();
+
+  document.getElementById('filtroTexto')?.addEventListener('input', renderizar);
+  document.getElementById('filtroValor')?.addEventListener('input', renderizar);
+  document.getElementById('filtroSituacao')?.addEventListener('change', renderizar);
+  document.getElementById('filtroOrdenacao')?.addEventListener('change', renderizar);
+  document.getElementById('btnLimparFiltros')?.addEventListener('click', () => {
+    const texto = document.getElementById('filtroTexto');
+    const valor = document.getElementById('filtroValor');
+    const situacao = document.getElementById('filtroSituacao');
+    if (texto) texto.value = '';
+    if (valor) valor.value = '';
+    if (situacao) situacao.value = SITUACOES_NFSE.TODAS;
+    renderizar();
+  });
 
   document.getElementById('filtroCompetencia')?.addEventListener('change', (ev) => {
     // recarrega pelo servidor: o escopo decide contadores, lista e o proprio

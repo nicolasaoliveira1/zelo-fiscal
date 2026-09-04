@@ -151,3 +151,28 @@ test('o campo e os recálculos manuais de competência não existem mais', () =>
   assert.equal(script.includes('competenciaConferida'), false);
   assert.equal(script.includes('recarregarPainelEmitidas'), false);
 });
+
+test('a conferência oferece os filtros locais e todas as ordenações da spec', () => {
+  const template = readFileSync('app/templates/nfse.html', 'utf8');
+  const script = readFileSync('app/static/js/nfse.js', 'utf8');
+
+  assert.match(template, /id="filtroTexto"[^>]*placeholder="Nome, empresa ou CPF\/CNPJ"/);
+  assert.match(template, /id="filtroValor"[^>]*inputmode="decimal"/);
+  assert.match(template, /id="filtroSituacao"/);
+  assert.match(template, /Precisam de atenção/);
+  assert.match(template, /Prontas para preencher/);
+  assert.match(template, /Em andamento/);
+  assert.match(template, /Resolvidas/);
+  assert.match(template, /id="filtroOrdenacao"/);
+  assert.match(template, /Nome — A a Z/);
+  assert.match(template, /Nome — Z a A/);
+  assert.match(template, /Valor — menor primeiro/);
+  assert.match(template, /Valor — maior primeiro/);
+  assert.match(template, /Emissão — mais recente/);
+  assert.match(template, /Emissão — mais antiga/);
+  assert.match(template, /Ordem de importação/);
+  assert.match(template, /id="btnLimparFiltros"/);
+  assert.match(template, /id="nfseContagemVisivel"/);
+  assert.match(script, /filtrarOrdenarNotas\(notas, filtros\)/);
+  assert.match(script, /Nenhum resultado corresponde aos filtros/);
+});

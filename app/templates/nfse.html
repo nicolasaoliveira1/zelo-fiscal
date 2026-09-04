@@ -247,6 +247,36 @@
         letter-spacing: 0.05em;
         color: var(--zelo-slate);
     }
+    .nfse-filtros {
+        border-top: 1px solid var(--zelo-line);
+        padding-top: 0.75rem;
+    }
+    .nfse-filtro-campo {
+        min-width: 12rem;
+    }
+    .nfse-filtro-campo.busca {
+        flex: 1 1 19rem;
+    }
+    .nfse-filtro-campo.valor {
+        flex: 0 1 12rem;
+    }
+    .nfse-filtro-campo.situacao {
+        flex: 0 1 13rem;
+    }
+    .nfse-filtro-campo.ordenacao {
+        flex: 0 1 16rem;
+    }
+    .nfse-filtro-erro {
+        color: var(--zelo-danger);
+        font-size: 0.76rem;
+        margin-top: 0.2rem;
+        min-height: 1.1em;
+    }
+    .nfse-filtro-contagem {
+        color: var(--zelo-slate);
+        font-size: 0.82rem;
+        white-space: nowrap;
+    }
     /* Esta tabela tem 8 colunas, duas com editor embutido (empresa e
        descricao), e ganha com espaco: no limite global de 1394px as celulas
        quebram texto sem necessidade em telas largas. Alargar so aqui — o
@@ -865,6 +895,50 @@
             </select>
         </div>
     </div>
+    <div class="nfse-filtros d-flex align-items-end gap-2 flex-wrap mb-3" id="nfseFiltros">
+        <div class="nfse-filtro-campo busca">
+            <label class="form-label nfse-hint mb-1" for="filtroTexto">Buscar tomador</label>
+            <input class="form-control form-control-sm" type="search" id="filtroTexto"
+                   placeholder="Nome, empresa ou CPF/CNPJ" autocomplete="off">
+        </div>
+        <div class="nfse-filtro-campo valor">
+            <label class="form-label nfse-hint mb-1" for="filtroValor">Valor exato</label>
+            <input class="form-control form-control-sm nfse-mono" type="text" id="filtroValor"
+                   inputmode="decimal" placeholder="R$ 0,00" aria-describedby="filtroValorErro">
+            <div class="nfse-filtro-erro" id="filtroValorErro" role="alert" aria-live="polite"></div>
+        </div>
+        <div class="nfse-filtro-campo situacao">
+            <label class="form-label nfse-hint mb-1" for="filtroSituacao">Situação</label>
+            <select class="form-select form-select-sm" id="filtroSituacao">
+                <option value="todas" selected>Todas</option>
+                <option value="atencao">Precisam de atenção</option>
+                <option value="prontas">Prontas para preencher</option>
+                <option value="andamento">Em andamento</option>
+                <option value="resolvidas">Resolvidas</option>
+            </select>
+        </div>
+        <div class="nfse-filtro-campo ordenacao">
+            <label class="form-label nfse-hint mb-1" for="filtroOrdenacao">Ordenar por</label>
+            <select class="form-select form-select-sm" id="filtroOrdenacao">
+                <option value="prioridade" selected>Prioridade</option>
+                <option value="nome_asc">Nome — A a Z</option>
+                <option value="nome_desc">Nome — Z a A</option>
+                <option value="valor_asc">Valor — menor primeiro</option>
+                <option value="valor_desc">Valor — maior primeiro</option>
+                <option value="emissao_desc">Emissão — mais recente</option>
+                <option value="emissao_asc">Emissão — mais antiga</option>
+                <option value="importacao">Ordem de importação</option>
+            </select>
+        </div>
+        <div class="d-flex align-items-center gap-2 ms-auto">
+            <span class="nfse-filtro-contagem" id="nfseContagemVisivel" aria-live="polite">
+                {{ resumo.total }} notas
+            </span>
+            <button class="btn btn-ghost btn-sm d-none" type="button" id="btnLimparFiltros">
+                Limpar filtros
+            </button>
+        </div>
+    </div>
     <!-- Acao em massa: so aparece com alguma linha marcada -->
     <div class="nfse-selecao d-none" id="nfseSelecao">
         <span id="nfseSelecaoTotal"></span>
@@ -908,7 +982,7 @@
             <tbody id="corpoNotas"></tbody>
         </table>
     </div>
-    <p class="nfse-hint mt-3 mb-0" id="nfseVazio">
+    <p class="nfse-hint mt-3 mb-0" id="nfseVazio" role="status" aria-live="polite">
         Nenhuma nota importada.
     </p>
 </div>
