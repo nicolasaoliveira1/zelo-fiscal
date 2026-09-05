@@ -104,6 +104,50 @@ def test_fila_respeita_o_filtro_de_competencia(app, ids):
         assert alvos['ids'] == [julho.id]
 
 
+def test_fila_explicita_ignora_filtros_e_mantem_so_as_selecionadas(app, ids):
+    """A seleção é a autorização; `empresa_id` e competência não a ampliam."""
+    with app.app_context():
+        emp_a = _empresa('A', '11.222.333/0001-81')
+        emp_b = _empresa('B', '22.333.444/0001-92')
+        a_selecionada = _chave(emp_a, CHAVES[0], competencia='2017-07')
+        _chave(emp_a, CHAVES[1], competencia='2017-08')
+        b_selecionada = _chave(emp_b, CHAVES[2], competencia='2017-08')
+
+        alvos = lote.calcular_alvos(
+            modo='empresa', empresa_id=emp_a.id, competencia='2017-08',
+            chave_ids=[b_selecionada.id, a_selecionada.id])
+
+        assert alvos['ids'] == [a_selecionada.id, b_selecionada.id]
+        assert alvos['total'] == 2
+
+
+def test_fila_explicita_revalida_elegibilidade_sem_adicionar_chave_nova(app, ids):
+    """A lista pode mudar depois da renderização; o servidor decide de novo."""
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81')
+        selecionada = _chave(emp, CHAVES[0])
+        ficou_inelegivel = _chave(emp, CHAVES[1])
+        _chave(emp, CHAVES[2])
+        ficou_inelegivel.status = StatusManifestacao.MANIFESTADA
+        db.session.commit()
+
+        alvos = lote.calcular_alvos(
+            modo='carteira', chave_ids=[selecionada.id, ficou_inelegivel.id])
+
+        assert alvos['ids'] == [selecionada.id]
+
+
+def test_fila_explicita_vazia_nao_cai_no_escopo_amplo(app, ids):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81')
+        _chave(emp, CHAVES[0])
+
+        alvos = lote.calcular_alvos(modo='carteira', chave_ids=[])
+
+        assert alvos['ids'] == []
+        assert alvos['total'] == 0
+
+
 def test_fila_usa_a_regra_unica_de_manifestavel(app, ids):
     """Se a fila divergisse de `manifestavel`, o lote enfileiraria o que o
     servico recusa — e travaria sem explicacao."""
