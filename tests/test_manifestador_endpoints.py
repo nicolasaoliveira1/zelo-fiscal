@@ -558,6 +558,7 @@ def test_inicios_concorrentes_preservam_opcoes_do_vencedor(
         with app.app_context():
             assert batch_state.manif_batch_opcoes()['tipo_evento'] == (
                 vencedor['tipo_evento'])
+            assert MANIF_BATCH_STATE['scope'] == vencedor['modo']
             ids_aceitos = list(MANIF_BATCH_STATE['ids'])
             esperado = ([chave_a_id, chave_b_id]
                         if vencedor['modo'] == 'carteira'
