@@ -15,7 +15,6 @@ from app.auth import requer_papel
 from app.automation.batch_state import (
     MANIF_BATCH_LOCK,
     MANIF_BATCH_STATE,
-    definir_manif_opcoes,
 )
 from app.models import ChaveManifestacao, Empresa, EstadoCertificado
 from app.routes import _current_app_object, bp
@@ -337,15 +336,14 @@ def manifestador_lote_iniciar():
             'O cofre de certificados ainda nao foi inventariado. Rode o '
             'inventario antes de manifestar.', 409, motivo='cofre_vazio')
 
-    with MANIF_BATCH_LOCK:
-        em_andamento = MANIF_BATCH_STATE.get('status') in ('running', 'paused')
-    if em_andamento:
-        return json_error('Ja existe uma manifestacao em andamento.', 409)
-
     competencia = (dados.get('competencia') or '').strip() or None
-    definir_manif_opcoes(modo=modo, tipo_evento=tipo_evento,
-                         empresa_id=empresa_id, competencia=competencia,
-                         chave_id=chave_id)
+    opcoes_execucao = {
+        'modo': modo,
+        'tipo_evento': tipo_evento,
+        'empresa_id': empresa_id,
+        'competencia': competencia,
+        'chave_id': chave_id,
+    }
 
     try:
         dados_lote = batch_engine.init_batch_run(
@@ -354,6 +352,7 @@ def manifestador_lote_iniciar():
                 modo=modo, chave_id=chave_id, empresa_id=empresa_id,
                 competencia=competencia),
             manifestador_lote.worker, app_factory=_current_app_object,
+            state_values={'opcoes_execucao': opcoes_execucao},
         )
     except Exception as exc:
         return json_error(exc=exc, code=500)

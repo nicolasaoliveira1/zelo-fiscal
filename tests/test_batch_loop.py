@@ -385,6 +385,41 @@ def test_init_batch_run_recusa_ocupado_sem_calcular_nem_iniciar_worker():
     assert state['opcoes_execucao'] is None
 
 
+def test_init_batch_run_cria_snapshot_para_nova_execucao():
+    state = batch_state_defaults()
+    observados = []
+    original_run_worker = batch_engine.run_worker
+
+    def calc_targets(_start_id):
+        return {
+            'ids': [11],
+            'total': 1,
+            'scope': 'carteira',
+            'vencidas': 0,
+            'a_vencer': 0,
+            'pendentes': 0,
+        }
+
+    def worker(_app):
+        observados.append(state['opcoes_execucao']['tipo_evento'])
+        state['status'] = 'completed'
+
+    batch_engine.run_worker = lambda worker_fn, app_factory: worker_fn(app_factory())
+    try:
+        for tipo_evento in ('210220', '210200'):
+            resultado = batch_engine.init_batch_run(
+                FakeLock(), state, None, calc_targets, worker, FakeApp,
+                state_values={'opcoes_execucao': {
+                    'modo': 'carteira',
+                    'tipo_evento': tipo_evento,
+                }})
+            assert resultado['ids'] == [11]
+    finally:
+        batch_engine.run_worker = original_run_worker
+
+    assert observados == ['210220', '210200']
+
+
 # --- circuit breaker por portal (spec 09, RESOP-02) ------------------------
 
 def _breaker_com(abertos):
