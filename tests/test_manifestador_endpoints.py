@@ -15,7 +15,11 @@ from app.models import (
     EstadoCertificado,
     StatusManifestacao,
 )
-from app.automation.batch_state import MANIF_BATCH_STATE
+from app.automation.batch_state import (
+    MANIF_BATCH_STATE,
+    definir_manif_opcoes,
+    manif_batch_opcoes,
+)
 from app.services import batch_engine, manifestador_lote
 
 CHAVE_A = '43170122333444000181650010000045391000045393'
@@ -470,6 +474,30 @@ def test_iniciar_enfileira_somente_a_selecao_explicita(app, ids, client,
         assert MANIF_BATCH_STATE['ids'] == ids_esperados
     finally:
         batch_engine.reset_batch_state(MANIF_BATCH_STATE)
+
+
+def test_selecao_unica_em_carteira_nao_grava_chave_individual(
+        app, ids, client, monkeypatch):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81', EstadoCertificado.PRONTO)
+        selecionada = _chave(emp, CHAVE_A)
+        chave_id = selecionada.id
+
+    monkeypatch.setattr(manifestador_lote, 'worker', lambda app_obj: None)
+    try:
+        resposta = client.post('/manifestador/lote/iniciar', json={
+            'modo': 'carteira', 'tipo_evento': '210200',
+            'chave_ids': [chave_id],
+        })
+
+        assert resposta.status_code == 200
+        assert MANIF_BATCH_STATE['ids'] == [chave_id]
+        assert manif_batch_opcoes()['modo'] == 'carteira'
+        assert manif_batch_opcoes()['chave_id'] is None
+    finally:
+        batch_engine.reset_batch_state(MANIF_BATCH_STATE)
+        definir_manif_opcoes(modo='empresa', tipo_evento='210200',
+                             empresa_id=None, competencia=None, chave_id=None)
 
 
 def test_iniciar_revalida_selecao_que_mudou_antes_da_admissao(

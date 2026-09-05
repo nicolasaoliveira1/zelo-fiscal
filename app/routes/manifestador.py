@@ -338,13 +338,18 @@ def manifestador_lote_iniciar():
         if modo == manifestador_lote.MODO_INDIVIDUAL and len(chave_ids) != 1:
             return json_error(
                 'O modo individual exige exatamente uma chave selecionada.', 400)
-        chave_id = chave_ids[0] if len(chave_ids) == 1 else None
+        # `chave_id` é opção do lote individual; a seleção explícita inteira
+        # continua sendo a fonte dos alvos, inclusive no modo carteira.
+        chave_id = (chave_ids[0]
+                    if modo == manifestador_lote.MODO_INDIVIDUAL else None)
     else:
         chave_id = dados.get('chave_id')
         if modo == manifestador_lote.MODO_INDIVIDUAL and not chave_id:
             return json_error('Escolha a chave que deve ser manifestada.', 400)
 
     empresa_id = dados.get('empresa_id')
+    # A combinação é aceita para chamadas diretas à API: com seleção explícita,
+    # `empresa_id` é compatível, mas não pode restringir nem ampliar os alvos.
     if (modo == manifestador_lote.MODO_EMPRESA and chave_ids is None
             and not empresa_id):
         return json_error('Escolha a empresa.', 400)
