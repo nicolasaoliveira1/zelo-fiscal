@@ -20,6 +20,14 @@ de uma branch própria, a partir de `main` atualizada, e chega por PR.
 - **Decisões registradas**: <!-- ex.: AD-027 em `.specs/STATE.md`, ou "nenhuma" -->
 - **O que deliberadamente NÃO entrou**: <!-- o corte de escopo e a razão -->
 
+## Arquivos alterados
+
+<!-- Liste todos os arquivos versionados que aparecem em
+     `git diff --name-only <base>...HEAD`, um por linha. Mantenha esta lista
+     sincronizada com o diff do PR, incluindo documentação e testes. -->
+
+- `caminho/do/arquivo`
+
 ## Como foi verificado
 
 <!-- Evidência, não promessa. Cole os números. -->
