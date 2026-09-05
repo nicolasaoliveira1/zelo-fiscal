@@ -146,11 +146,11 @@ def trabalhista_batch_stop_requested():
     return TRABALHISTA_BATCH_STATE.get('stop_requested')
 
 
-# Opcoes de preparacao do lote de manifestacao. O snapshot da execucao aceita
+# Opções de preparação do lote de manifestação. O snapshot da execução aceita
 # vive em `MANIF_BATCH_STATE['opcoes_execucao']`, aplicado por
 # `batch_engine.init_batch_run` depois do reset e dentro do mesmo lock. Este
-# dicionario permanece apenas como fallback para chamadas internas/testes que
-# exercitam `_manifestar_item` fora de uma execucao.
+# dicionário permanece apenas como fallback para chamadas internas/testes que
+# exercitam `_manifestar_item` fora de uma execução.
 #
 # `tipo_evento` nao tem valor "esperto" de default: ele e escolhido a cada lote
 # na tela, porque Confirmacao da Operacao e irreversivel e nao deve sair por
@@ -162,8 +162,8 @@ _MANIF_BATCH_OPCOES = {'modo': 'empresa', 'tipo_evento': '210200',
 
 
 def manif_batch_opcoes():
-    # A rota nao grava mais neste dicionario antes de admitir o lote. Se ha uma
-    # execucao ativa, o snapshot aceito e a unica fonte — um pedido recusado nao
+    # A rota não grava mais neste dicionário antes de admitir o lote. Se há uma
+    # execução ativa, o snapshot aceito é a única fonte — um pedido recusado não
     # pode trocar o evento que os itens seguintes usam.
     with MANIF_BATCH_LOCK:
         opcoes_execucao = MANIF_BATCH_STATE.get('opcoes_execucao')

@@ -28,7 +28,7 @@ def test_estado_nasce_com_as_chaves_do_motor():
 
 
 def test_opcoes_de_preparacao_nao_sao_campos_soltos_do_estado():
-    """O snapshot aceito tem chave propria e o modo nao e duplicado na raiz."""
+    """O snapshot aceito tem chave própria e o modo não é duplicado na raiz."""
     opcoes = batch_state.manif_batch_opcoes()
 
     assert 'modo' in opcoes
@@ -69,8 +69,8 @@ def test_snapshot_da_execucao_toma_precedencia_sobre_preparacao():
                 'chave_id': None,
             }
 
-        # Uma escrita posterior no dicionario de preparacao representa o pedido
-        # perdedor; ela nao pode alterar o snapshot que ja foi aceito.
+        # Uma escrita posterior no dicionário de preparação representa o pedido
+        # perdedor; ela não pode alterar o snapshot que já foi aceito.
         batch_state.definir_manif_opcoes(modo='individual', tipo_evento='210240')
         opcoes = batch_state.manif_batch_opcoes()
 
