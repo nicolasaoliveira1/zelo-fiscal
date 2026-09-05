@@ -27,15 +27,14 @@ def test_estado_nasce_com_as_chaves_do_motor():
         batch_engine.batch_state_defaults())
 
 
-def test_opcoes_ficam_fora_do_estado_do_lote():
-    """Mesma razao do NFSe: `init_batch_run` chama `reset_batch_state` dentro do
-    lock, entao opcao escrita no estado antes de iniciar seria apagada, e
-    escrever depois correria com o worker ja lendo."""
+def test_opcoes_de_preparacao_nao_sao_campos_soltos_do_estado():
+    """O snapshot aceito tem chave propria e o modo nao e duplicado na raiz."""
     opcoes = batch_state.manif_batch_opcoes()
 
     assert 'modo' in opcoes
     assert 'tipo_evento' in opcoes
     assert 'modo' not in batch_state.MANIF_BATCH_STATE
+    assert batch_state.MANIF_BATCH_STATE['opcoes_execucao'] is None
 
 
 def test_opcoes_devolvem_copia_e_nao_o_dicionario_vivo():
@@ -53,6 +52,32 @@ def test_definir_opcoes_altera_o_que_o_worker_le():
         assert opcoes['modo'] == 'carteira'
         assert opcoes['tipo_evento'] == '210220'
     finally:
+        batch_state.definir_manif_opcoes(modo='empresa', tipo_evento='210200')
+
+
+def test_snapshot_da_execucao_toma_precedencia_sobre_preparacao():
+    from app.services import batch_engine
+
+    try:
+        batch_state.definir_manif_opcoes(modo='empresa', tipo_evento='210200')
+        with batch_state.MANIF_BATCH_LOCK:
+            batch_state.MANIF_BATCH_STATE['opcoes_execucao'] = {
+                'modo': 'carteira',
+                'tipo_evento': '210220',
+                'empresa_id': None,
+                'competencia': None,
+                'chave_id': None,
+            }
+
+        # Uma escrita posterior no dicionario de preparacao representa o pedido
+        # perdedor; ela nao pode alterar o snapshot que ja foi aceito.
+        batch_state.definir_manif_opcoes(modo='individual', tipo_evento='210240')
+        opcoes = batch_state.manif_batch_opcoes()
+
+        assert opcoes['modo'] == 'carteira'
+        assert opcoes['tipo_evento'] == '210220'
+    finally:
+        batch_engine.reset_batch_state(batch_state.MANIF_BATCH_STATE)
         batch_state.definir_manif_opcoes(modo='empresa', tipo_evento='210200')
 
 

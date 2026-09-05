@@ -146,10 +146,11 @@ def trabalhista_batch_stop_requested():
     return TRABALHISTA_BATCH_STATE.get('stop_requested')
 
 
-# Opcoes do lote de manifestacao. Ficam FORA de MANIF_BATCH_STATE pela mesma
-# razao das opcoes da NFSe: `init_batch_run` chama `reset_batch_state` e dispara
-# o worker dentro do mesmo lock, entao qualquer chave escrita no estado antes de
-# iniciar seria apagada, e escrever depois correria com o worker ja lendo.
+# Opcoes de preparacao do lote de manifestacao. O snapshot da execucao aceita
+# vive em `MANIF_BATCH_STATE['opcoes_execucao']`, aplicado por
+# `batch_engine.init_batch_run` depois do reset e dentro do mesmo lock. Este
+# dicionario permanece apenas como fallback para chamadas internas/testes que
+# exercitam `_manifestar_item` fora de uma execucao.
 #
 # `tipo_evento` nao tem valor "esperto" de default: ele e escolhido a cada lote
 # na tela, porque Confirmacao da Operacao e irreversivel e nao deve sair por
@@ -161,8 +162,16 @@ _MANIF_BATCH_OPCOES = {'modo': 'empresa', 'tipo_evento': '210200',
 
 
 def manif_batch_opcoes():
-    with MANIF_OPCOES_LOCK:
-        return dict(_MANIF_BATCH_OPCOES)
+    # A rota nao grava mais neste dicionario antes de admitir o lote. Se ha uma
+    # execucao ativa, o snapshot aceito e a unica fonte — um pedido recusado nao
+    # pode trocar o evento que os itens seguintes usam.
+    with MANIF_BATCH_LOCK:
+        opcoes_execucao = MANIF_BATCH_STATE.get('opcoes_execucao')
+        if opcoes_execucao is not None:
+            return dict(opcoes_execucao)
+
+        with MANIF_OPCOES_LOCK:
+            return dict(_MANIF_BATCH_OPCOES)
 
 
 def definir_manif_opcoes(**valores):
