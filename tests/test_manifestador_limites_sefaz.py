@@ -114,16 +114,16 @@ def test_656_PARA_o_lote_em_vez_de_seguir_para_a_proxima(app, ids, tmp_path,
                                 False, 'bloqueado', _resposta_656()))
         batch_engine.reset_batch_state(MANIF_BATCH_STATE)
         with MANIF_BATCH_LOCK:
-            MANIF_BATCH_STATE['status'] = 'running'
+            MANIF_BATCH_STATE.update(status='running', worker_active=True)
         try:
             lote._manifestar_item(linha.id, None, 'exec-1')
 
-            # `request_pause` marca a parada e ja vira o status para
-            # `paused` quando o lote estava rodando — retomavel, com a fila
-            # intacta para depois do bloqueio de 1 hora.
+            # `request_pause` marca a parada e deixa `pausing` ate o worker
+            # concluir o item corrente — retomavel, com a fila intacta para
+            # depois do bloqueio de 1 hora.
             assert MANIF_BATCH_STATE['stop_requested'] is True
             assert MANIF_BATCH_STATE['stop_action'] == 'pause'
-            assert MANIF_BATCH_STATE['status'] == 'paused'
+            assert MANIF_BATCH_STATE['status'] == 'pausing'
         finally:
             batch_engine.reset_batch_state(MANIF_BATCH_STATE)
             circuit_breaker.limpar()

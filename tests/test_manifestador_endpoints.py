@@ -475,6 +475,6 @@ def test_retomar_sem_lote_pausado_devolve_409(client):
     assert client.post('/manifestador/lote/retomar').status_code == 409
 
 
-def test_pausar_e_parar_respondem_ok(client):
-    assert client.post('/manifestador/lote/pausar').status_code == 200
-    assert client.post('/manifestador/lote/parar').status_code == 200
+def test_pausar_e_parar_sem_lote_sao_recusados(client):
+    assert client.post('/manifestador/lote/pausar').status_code == 409
+    assert client.post('/manifestador/lote/parar').status_code == 409

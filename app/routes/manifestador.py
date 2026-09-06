@@ -338,7 +338,7 @@ def manifestador_lote_iniciar():
             'inventario antes de manifestar.', 409, motivo='cofre_vazio')
 
     with MANIF_BATCH_LOCK:
-        em_andamento = MANIF_BATCH_STATE.get('status') in ('running', 'paused')
+        em_andamento = batch_engine.lote_ocupa_o_tipo(MANIF_BATCH_STATE)
     if em_andamento:
         return json_error('Ja existe uma manifestacao em andamento.', 409)
 
@@ -389,15 +389,29 @@ def manifestador_lote_status():
 @bp.route('/manifestador/lote/pausar', methods=['POST'])
 @requer_papel('operador')
 def manifestador_lote_pausar():
-    batch_engine.request_pause(MANIF_BATCH_LOCK, MANIF_BATCH_STATE)
-    return {'status': 'ok', 'message': 'Manifestacao pausada.'}
+    if not batch_engine.solicitar_pausa_se_rodando(
+        MANIF_BATCH_LOCK, MANIF_BATCH_STATE
+    ):
+        return json_error('Não há manifestação em andamento para pausar.', 409)
+    return {
+        'status': 'ok',
+        'message': 'Pausa solicitada; a chave em andamento será concluída '
+                   'antes de pausar.',
+    }
 
 
 @bp.route('/manifestador/lote/parar', methods=['POST'])
 @requer_papel('operador')
 def manifestador_lote_parar():
-    batch_engine.request_stop(MANIF_BATCH_LOCK, MANIF_BATCH_STATE)
-    return {'status': 'ok', 'message': 'Manifestacao interrompida.'}
+    if not batch_engine.solicitar_parada_se_ativa(
+        MANIF_BATCH_LOCK, MANIF_BATCH_STATE
+    ):
+        return json_error('Não há manifestação em andamento para interromper.', 409)
+    return {
+        'status': 'ok',
+        'message': 'Interrupção solicitada; a chave em andamento será concluída '
+                   'antes de parar.',
+    }
 
 
 @bp.route('/manifestador/lote/retomar', methods=['POST'])

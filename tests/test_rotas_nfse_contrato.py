@@ -489,6 +489,7 @@ def test_validar_exige_nota_emitivel_e_inicia_modo_individual(
     monkeypatch.setattr('app.routes.nfse.automacao_em_curso', lambda: None)
     monkeypatch.setattr('app.routes.nfse.batch_engine', MagicMock(
         init_batch_run=inicializar,
+        lote_ocupa_o_tipo=lambda _state: False,
     ))
     emitir = MagicMock()
     monkeypatch.setattr('app.routes.nfse.nfse_lote.automacao.emitir', emitir)
@@ -743,7 +744,8 @@ def test_validacao_nao_exige_aliquota_conferida(login_as, app, monkeypatch):
     monkeypatch.setattr('app.routes.nfse.SESSAO', sessao)
     monkeypatch.setattr('app.routes.nfse.automacao_em_curso', lambda: None)
     monkeypatch.setattr(
-        'app.services.batch_engine.run_worker', lambda worker_fn, app_factory: None
+        'app.services.batch_engine.run_worker',
+        lambda worker_fn, app_factory, on_finished=None: None,
     )
 
     resposta = login_as('operador').post(

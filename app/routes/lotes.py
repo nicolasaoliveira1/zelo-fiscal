@@ -35,7 +35,6 @@ from app.automation.emissao import (
     _emitir_fgts_certidao,
     _emitir_municipal_certidao_lote,
     _emitir_trabalhista_certidao,
-    _fgts_quit_driver_async,
     _fgts_status_por_data,
     _municipal_batch_suportado,
 )
@@ -515,22 +514,42 @@ def _register_batch_routes(prefix, endpoint_base, cfg):
         return jsonify({'status': 'ok', 'total': dados_lote['total']})
 
     def pausar():
-        driver = batch_engine.request_pause(lock, state)
+        if not batch_engine.solicitar_pausa_se_rodando(lock, state):
+            return _json_error('Não há lote em andamento para pausar.', 409)
         log_event('batch_paused', level='WARNING', lote=nome, tag=tag)
         with lock:
             batch_engine.append_batch_message(
-                state, f"Lote {nome} pausado por solicitação.", level='warning')
-        _fgts_quit_driver_async(driver)
-        return jsonify({'status': 'ok', 'message': cfg['msg_pausado']})
+                state,
+                'Pausa solicitada; o item em andamento será concluído antes '
+                'de pausar.',
+                level='warning',
+            )
+        return jsonify({
+            'status': 'ok',
+            'message': 'Pausa solicitada; o item em andamento será concluído '
+                       'antes de pausar.',
+        })
 
     def parar():
-        driver = batch_engine.request_stop(lock, state)
+        if not batch_engine.solicitar_parada_se_ativa(lock, state):
+            return _json_error('Não há lote em andamento para interromper.', 409)
         log_event('batch_stopped', level='WARNING', lote=nome, tag=tag)
         with lock:
+            worker_active = state.get('worker_active', False)
             batch_engine.append_batch_message(
-                state, f"Lote {nome} interrompido por solicitação.", level='warning')
-        _fgts_quit_driver_async(driver)
-        return jsonify({'status': 'ok', 'message': cfg['msg_interrompido']})
+                state,
+                'Interrupção solicitada; o item em andamento será concluído '
+                'antes de parar.' if worker_active else cfg['msg_interrompido'],
+                level='warning',
+            )
+        if not worker_active:
+            _registrar_desfecho_lote(state)
+        return jsonify({
+            'status': 'ok',
+            'message': 'Interrupção solicitada; o item em andamento será '
+                       'concluído antes de parar.'
+                       if worker_active else cfg['msg_interrompido'],
+        })
 
     def retomar():
         if not batch_engine.resume_batch(lock, state, worker, app_factory=_current_app_object):
@@ -637,7 +656,8 @@ def _rodar_lote_agendado(app, ids, *, wrap_emit, execution_id, lock, state,
             return
         batch_engine.reset_batch_state(state)
         state.update(status='running', ids=list(ids), total=len(ids),
-                     started_at=utcnow_naive(), execution_id=execution_id)
+                     started_at=utcnow_naive(), execution_id=execution_id,
+                     worker_active=True)
     _registrar_execucao_lote(nome_lote, 'default', len(ids), execution_id,
                              origem='agendador')
     # Caminho do agendador: tolerante a grave por-item (RESIL-01). Um grave
@@ -645,9 +665,12 @@ def _rodar_lote_agendado(app, ids, *, wrap_emit, execution_id, lock, state,
     # (fila TarefaEmissao / retry) e o loop segue. GRAVE_FATAL (driver morto)
     # ainda para o lote. O lote manual (chamadas diretas em routes) mantem o
     # default parar_em_grave=True.
-    batch_engine.run_batch_loop(
-        app, lock=lock, state=state, emit_fn=wrap_emit(real_emit),
-        nome_lote=nome_lote, parar_em_grave=False, **loop_kwargs)
+    try:
+        batch_engine.run_batch_loop(
+            app, lock=lock, state=state, emit_fn=wrap_emit(real_emit),
+            nome_lote=nome_lote, parar_em_grave=False, **loop_kwargs)
+    finally:
+        batch_engine._marcar_worker_inativo(lock, state, execution_id)
 
 
 def _fluxo_fgts_calc_ids(app):

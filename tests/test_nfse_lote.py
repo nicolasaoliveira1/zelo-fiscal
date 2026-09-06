@@ -221,6 +221,8 @@ def fila(banco, monkeypatch, sessao):
 
 def _rodar(monkeypatch, nota, desfecho, modo=nfse_lote.MODO_LOTE):
     definir_nfse_batch_opcoes(modo, False)
+    NFSE_BATCH_STATE['status'] = 'running'
+    NFSE_BATCH_STATE['worker_active'] = True
     monkeypatch.setattr(nfse_lote, 'aguardar_confirmacao', lambda _d: desfecho)
     resultado = nfse_lote._emitir_nota(nota.id, None, 'exec-1')
     db.session.refresh(nota)
@@ -367,6 +369,7 @@ def test_mudanca_do_ativo_nao_altera_ids_durante_o_lote(fila, monkeypatch):
 
 def test_drift_critico_pausa_automatico_antes_de_qualquer_revisao(fila, monkeypatch):
     definir_nfse_batch_opcoes(nfse_lote.MODO_AUTOMATICO, contrato_id=17)
+    NFSE_BATCH_STATE.update(status='running', worker_active=True)
     fila['preencher'].retorno = {
         'status': 'error',
         'message': 'Contrato sintético divergente.',
@@ -713,7 +716,7 @@ def test_nota_pronta_continua_sendo_preenchida(fila, monkeypatch):
 
 # --- fim do lote fecha o navegador -----------------------------------------
 
-@pytest.mark.parametrize('status', ['stopped', 'completed', 'error'])
+@pytest.mark.parametrize('status', ['stopping', 'stopped', 'completed', 'error'])
 def test_fim_do_lote_fecha_o_navegador(monkeypatch, status):
     """Parar e um "chega por hoje" explicito: deixar o Chrome aberto obriga o
     operador a fechar na mao e mantem a policy do certificado ativa."""
@@ -768,6 +771,7 @@ def test_competencia_tem_precedencia_sobre_o_lote(banco):
 def automatico(fila, monkeypatch):
     """Modo automatico com a auto-revisao e o clique de emitir dublados."""
     definir_nfse_batch_opcoes(nfse_lote.MODO_AUTOMATICO, False)
+    NFSE_BATCH_STATE.update(status='running', worker_active=True)
     automacao = MagicMock()
     automacao.conferir_revisao.return_value = []
     automacao.emitir.return_value = True

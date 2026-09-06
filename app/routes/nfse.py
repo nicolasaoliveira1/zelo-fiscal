@@ -272,7 +272,7 @@ def nfse_contrato_recon():
 
     sessao_adquirida = False
     try:
-        if NFSE_BATCH_STATE.get('status') in ('running', 'paused'):
+        if batch_engine.lote_ocupa_o_tipo(NFSE_BATCH_STATE):
             return json_error(
                 'Há um lote de NFS-e em andamento. Aguarde ou pare o lote antes da recon.',
                 409,
@@ -480,7 +480,7 @@ def nfse_contrato_validar(contrato_id):
             409,
         )
     with NFSE_BATCH_LOCK:
-        em_andamento = NFSE_BATCH_STATE.get('status') in ('running', 'paused')
+        em_andamento = batch_engine.lote_ocupa_o_tipo(NFSE_BATCH_STATE)
     if em_andamento:
         SESSAO.liberar()
         return json_error('Já existe um lote de NFS-e em andamento.', 409)
@@ -1660,7 +1660,7 @@ def nfse_lote_iniciar():
     # fecharia o navegador depois da primeira nota. As duas checagens sao
     # seguras juntas porque a sessao ja esta tomada acima.
     with NFSE_BATCH_LOCK:
-        em_andamento = NFSE_BATCH_STATE.get('status') in ('running', 'paused')
+        em_andamento = batch_engine.lote_ocupa_o_tipo(NFSE_BATCH_STATE)
     if em_andamento:
         SESSAO.liberar()
         return json_error('Ja existe um lote de NFSe em andamento.', 409)
