@@ -20,6 +20,15 @@ de uma branch própria, a partir de `main` atualizada, e chega por PR.
 - **Decisões registradas**: <!-- ex.: AD-027 em `.specs/STATE.md`, ou "nenhuma" -->
 - **O que deliberadamente NÃO entrou**: <!-- o corte de escopo e a razão -->
 
+## Arquivos mudados
+
+<!-- Liste todos os arquivos versionados alterados neste PR, um por linha, com
+     uma descrição curta do efeito. Inclua também arquivos de teste e
+     documentação; não inclua arquivos ignorados, credenciais ou dados de
+     cliente. -->
+
+- `caminho/do/arquivo`: <!-- efeito da mudança -->
+
 ## Como foi verificado
 
 <!-- Evidência, não promessa. Cole os números. -->
