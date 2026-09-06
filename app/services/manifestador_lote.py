@@ -23,6 +23,7 @@ from app.automation.batch_state import (
     MANIF_BATCH_LOCK,
     MANIF_BATCH_STATE,
     manif_batch_opcoes,
+    manif_batch_opcoes_locked,
 )
 from app.models import ChaveManifestacao, Empresa, EstadoCertificado
 from app.services import batch_engine, circuit_breaker
@@ -188,7 +189,7 @@ def status():
     with MANIF_BATCH_LOCK:
         dados = batch_engine.build_batch_status_payload(MANIF_BATCH_STATE)
         dados['chave_id'] = MANIF_BATCH_STATE.get('current_id')
-    opcoes = manif_batch_opcoes()
+        opcoes = manif_batch_opcoes_locked()
     dados['modo'] = opcoes['modo']
     dados['tipo_evento'] = opcoes['tipo_evento']
     return dados

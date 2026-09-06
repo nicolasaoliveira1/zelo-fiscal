@@ -5,6 +5,7 @@ que rotas/workers e os módulos de emissão por tipo (automation/*) compartilhem
 o mesmo objeto sem dependência circular.
 """
 from threading import Lock
+from types import MappingProxyType
 
 from app.services import batch_engine
 
@@ -156,9 +157,23 @@ def trabalhista_batch_stop_requested():
 # na tela, porque Confirmacao da Operacao e irreversivel e nao deve sair por
 # omissao.
 MANIF_OPCOES_LOCK = Lock()
-_MANIF_BATCH_OPCOES = {'modo': 'empresa', 'tipo_evento': '210200',
-                       'empresa_id': None, 'competencia': None,
-                       'chave_id': None}
+_MANIF_BATCH_OPCOES = MappingProxyType({
+    'modo': 'empresa',
+    'tipo_evento': '210200',
+    'empresa_id': None,
+    'competencia': None,
+    'chave_id': None,
+})
+
+
+def manif_batch_opcoes_locked():
+    """Lê as opções com `MANIF_BATCH_LOCK` já adquirido pelo chamador."""
+    opcoes_execucao = MANIF_BATCH_STATE.get('opcoes_execucao')
+    if opcoes_execucao is not None:
+        return dict(opcoes_execucao)
+
+    with MANIF_OPCOES_LOCK:
+        return dict(_MANIF_BATCH_OPCOES)
 
 
 def manif_batch_opcoes():
@@ -166,18 +181,17 @@ def manif_batch_opcoes():
     # execução ativa, o snapshot aceito é a única fonte — um pedido recusado não
     # pode trocar o evento que os itens seguintes usam.
     with MANIF_BATCH_LOCK:
-        opcoes_execucao = MANIF_BATCH_STATE.get('opcoes_execucao')
-        if opcoes_execucao is not None:
-            return dict(opcoes_execucao)
-
-        with MANIF_OPCOES_LOCK:
-            return dict(_MANIF_BATCH_OPCOES)
+        return manif_batch_opcoes_locked()
 
 
 def definir_manif_opcoes(**valores):
-    """Grava as opcoes do proximo lote. Chaves desconhecidas sao ignoradas."""
+    """Atualiza a preparação legada fora de uma execução ativa."""
+    global _MANIF_BATCH_OPCOES
+
     with MANIF_OPCOES_LOCK:
+        opcoes = dict(_MANIF_BATCH_OPCOES)
         for chave, valor in valores.items():
-            if chave in _MANIF_BATCH_OPCOES:
-                _MANIF_BATCH_OPCOES[chave] = valor
-        return dict(_MANIF_BATCH_OPCOES)
+            if chave in opcoes:
+                opcoes[chave] = valor
+        _MANIF_BATCH_OPCOES = MappingProxyType(opcoes)
+        return dict(opcoes)

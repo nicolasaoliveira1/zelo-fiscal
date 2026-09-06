@@ -329,6 +329,36 @@ def test_status_traz_o_modo_e_a_chave_corrente(app, ids):
         assert dados['tipo_evento'] == svc.DESCONHECIMENTO
 
 
+def test_status_le_opcoes_dentro_do_lock(app, monkeypatch):
+    class LockObservado:
+        def __init__(self):
+            self.ativo = False
+
+        def __enter__(self):
+            self.ativo = True
+
+        def __exit__(self, *_args):
+            self.ativo = False
+
+    lock = LockObservado()
+    observado = {}
+
+    def ler_opcoes_com_lock():
+        observado['lock_ativo'] = lock.ativo
+        return {'modo': 'carteira', 'tipo_evento': svc.DESCONHECIMENTO}
+
+    monkeypatch.setattr(lote, 'MANIF_BATCH_LOCK', lock)
+    monkeypatch.setattr(lote, 'manif_batch_opcoes_locked',
+                        ler_opcoes_com_lock)
+
+    with app.app_context():
+        dados = lote.status()
+
+    assert observado['lock_ativo'] is True
+    assert dados['modo'] == 'carteira'
+    assert dados['tipo_evento'] == svc.DESCONHECIMENTO
+
+
 def test_lote_nao_cria_driver(app, ids):
     """Sem navegador: se o motor recebesse um `create_driver`, abriria um Chrome
     para nada e ainda brigaria com o lote de certidao pelo perfil."""
