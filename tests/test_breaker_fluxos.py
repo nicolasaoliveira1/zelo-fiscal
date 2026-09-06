@@ -479,3 +479,48 @@ def test_pausar_sozinho_ja_apaga_a_marca_do_breaker(ctx):
     assert state['pausado_por_breaker'] is None
     assert batch_engine.lote_ocupa_o_tipo(state) is True
     assert state['index'] == 1
+
+
+def test_pedido_de_interrupcao_tem_estado_transitorio_com_worker_ativo():
+    state = batch_engine.batch_state_defaults()
+    state.update(status='running', worker_active=True, execution_id='exec-1')
+
+    batch_engine.request_pause(_LockFake(), state)
+    assert state['status'] == 'pausing'
+    assert state['stop_requested'] is True
+
+    batch_engine.request_stop(_LockFake(), state)
+    assert state['status'] == 'stopping'
+    assert state['stop_action'] == 'stop'
+    assert state['finished_at'] is None
+
+
+def test_finalizacao_atrasada_nao_libera_nova_execucao():
+    state = batch_engine.batch_state_defaults()
+    state.update(status='running', worker_active=True, execution_id='exec-nova')
+
+    batch_engine._marcar_worker_inativo(_LockFake(), state, 'exec-antiga')
+
+    assert state['worker_active'] is True
+    assert batch_engine.lote_ocupa_o_tipo(state) is True
+
+
+def test_retomada_e_rejeitada_enquanto_worker_antigo_ainda_esta_ativo(ctx):
+    state = batch_engine.batch_state_defaults()
+    state.update(status='paused', worker_active=True, execution_id='exec-1')
+
+    assert batch_engine.resume_batch(
+        _LockFake(), state, lambda app: None, lambda: ctx
+    ) is False
+    assert state['status'] == 'paused'
+    assert state['worker_active'] is True
+
+
+def test_parada_de_lote_pausado_sem_worker_e_imediata():
+    state = batch_engine.batch_state_defaults()
+    state.update(status='paused', execution_id='exec-1')
+
+    assert batch_engine.solicitar_parada_se_ativa(_LockFake(), state) is True
+    assert state['status'] == 'stopped'
+    assert state['worker_active'] is False
+    assert state['stop_requested'] is False

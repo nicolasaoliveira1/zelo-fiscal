@@ -234,10 +234,26 @@ def test_stop_during_emit():
     emit = make_emit([(True, False, None), (True, False, None)], on_call=on_call)
     run(state, emit)
     assert state['status'] == 'stopped', state['status']
-    assert state['success'] == 0   # nao contabiliza apos parada
-    assert state['index'] == 0     # nao avanca
+    assert state['success'] == 1   # conclui o item que ja estava em voo
+    assert state['index'] == 1     # nao inicia o proximo item
     assert emit.calls['n'] == 1
     print('ok test_stop_during_emit')
+
+
+def test_pause_during_emit_conclui_item_e_nao_inicia_o_proximo():
+    state = make_state([1, 2])
+
+    def on_call(cid, driver, eid, i):
+        if i == 0:
+            state['stop_requested'] = True
+            state['stop_action'] = 'pause'
+
+    emit = make_emit([(True, False, None), (True, False, None)], on_call=on_call)
+    run(state, emit)
+    assert state['status'] == 'paused', state['status']
+    assert state['success'] == 1
+    assert state['index'] == 1
+    assert emit.calls['n'] == 1
 
 
 def test_recover_fn():
