@@ -1538,9 +1538,13 @@ import { showToast } from './toasts.js';
                 if (!dock || !dockEl || dockEl.classList.contains('d-none')) return;
                 if (dock.fracao) dock.fracao.textContent = `${concluidas}/${total}`;
                 if (dock.relogio) {
-                    dock.relogio.textContent = data.status === 'paused'
-                        ? 'pausado'
-                        : formatarRelogio(segundosDesde(data.started_at));
+                    const rotulos = {
+                        paused: 'pausado',
+                        pausing: 'pausando',
+                        stopping: 'parando',
+                    };
+                    dock.relogio.textContent = rotulos[data.status]
+                        || formatarRelogio(segundosDesde(data.started_at));
                 }
                 dockEl.classList.toggle('is-paused', data.status === 'paused');
                 atualizarComp(dock.comp, total, emitidas, pendentes, falhas);
@@ -1633,7 +1637,11 @@ import { showToast } from './toasts.js';
 
                 const ultima = resolveLastMessage(data);
                 const nivel = (ultima && ultima.level || '').toString().toLowerCase();
-                const pausado = data.status === 'paused';
+                const pausado = data.status === 'paused' && data.worker_active === false;
+                const transicao = {
+                    pausing: 'Pausa solicitada; concluindo o item atual…',
+                    stopping: 'Interrupção solicitada; concluindo o item atual…',
+                }[data.status];
 
                 painel.live.classList.remove('is-warning', 'is-error', 'is-paused');
 
@@ -1647,6 +1655,13 @@ import { showToast } from './toasts.js';
                 if (pausado) {
                     painel.live.classList.add('is-paused');
                     painel.liveTexto.textContent = 'Lote pausado';
+                    painel.liveTexto.title = '';
+                    return;
+                }
+
+                if (transicao) {
+                    painel.live.classList.add('is-paused');
+                    painel.liveTexto.textContent = transicao;
                     painel.liveTexto.title = '';
                     return;
                 }
@@ -1744,8 +1759,12 @@ import { showToast } from './toasts.js';
                             atualizarUltimaLinhaConcluida(data, config.getLastCompletedId, config.setLastCompletedId);
 
                             if (config.resumeBtn) {
-                                if (data.status === 'paused') config.resumeBtn.classList.remove('d-none');
+                                if (data.status === 'paused' && data.worker_active === false) config.resumeBtn.classList.remove('d-none');
                                 else config.resumeBtn.classList.add('d-none');
+                            }
+                            if (config.pauseBtn) config.pauseBtn.disabled = data.status !== 'running';
+                            if (config.stopBtn) {
+                                config.stopBtn.disabled = !['running', 'pausing', 'paused'].includes(data.status);
                             }
 
                             if (data.status === 'completed') {
@@ -1892,7 +1911,6 @@ import { showToast } from './toasts.js';
                             .then(r => r.json())
                             .then(data => {
                                 showToast(data.message || config.messages.paused, 'primary');
-                                if (config.resumeBtn) config.resumeBtn.classList.remove('d-none');
                             });
                     });
                 }
@@ -1917,8 +1935,6 @@ import { showToast } from './toasts.js';
                             .then(r => r.json())
                             .then(data => {
                                 showToast(data.message || config.messages.stopped, 'primary');
-                                if (config.overlayEl) config.overlayEl.classList.add('d-none');
-                                esconderDock();
                             });
                     });
                 }

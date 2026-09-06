@@ -450,9 +450,11 @@ async function atualizarAndamento() {
   linha.classList.toggle('is-error', ultima.level === 'error');
   linha.classList.toggle('is-warning', ultima.level === 'warning');
 
-  const pausado = lote.status === 'paused';
+  const pausado = lote.status === 'paused' && lote.worker_active === false;
   $('manifRetomar').classList.toggle('d-none', !pausado);
-  $('manifPausar').classList.toggle('d-none', pausado);
+  $('manifPausar').classList.toggle('d-none', lote.status !== 'running');
+  $('manifPausar').disabled = lote.status !== 'running';
+  $('manifParar').disabled = !['running', 'pausing', 'paused'].includes(lote.status);
 
   if (['completed', 'stopped', 'error', 'idle'].includes(lote.status)) {
     clearInterval(pollLote);
@@ -804,7 +806,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('manifRegua').scrollIntoView({ block: 'start' });
   }
   const { lote } = await pedir('/manifestador/lote/status').catch(() => ({ lote: {} }));
-  if (['running', 'paused'].includes(lote?.status)) {
+  if (['running', 'pausing', 'stopping', 'paused'].includes(lote?.status)) {
     $('manifAndamento').classList.remove('d-none');
     iniciarPoll();
   }
