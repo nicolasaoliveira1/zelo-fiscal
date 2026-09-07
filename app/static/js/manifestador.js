@@ -726,8 +726,14 @@ function ligar() {
   });
 
   $('manifManifestar').addEventListener('click', manifestar);
-  $('manifPausar').addEventListener('click', () => pedir('/manifestador/lote/pausar', { method: 'POST' }));
-  $('manifParar').addEventListener('click', () => pedir('/manifestador/lote/parar', { method: 'POST' }));
+  $('manifPausar').addEventListener('click', () => {
+    pedir('/manifestador/lote/pausar', { method: 'POST' })
+      .catch((erro) => toast(erro.message, 'error'));
+  });
+  $('manifParar').addEventListener('click', () => {
+    pedir('/manifestador/lote/parar', { method: 'POST' })
+      .catch((erro) => toast(erro.message, 'error'));
+  });
   $('manifRetomar').addEventListener('click', async () => {
     await pedir('/manifestador/lote/retomar', { method: 'POST' });
     iniciarPoll();

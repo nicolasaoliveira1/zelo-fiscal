@@ -1910,6 +1910,10 @@ import { showToast } from './toasts.js';
                         fetch(config.endpoints.pause, { method: 'POST' })
                             .then(r => r.json())
                             .then(data => {
+                                if (data.status !== 'ok') {
+                                    showToast(buildErrorMessage(data, 'Erro ao pausar lote.'), 'error');
+                                    return;
+                                }
                                 showToast(data.message || config.messages.paused, 'primary');
                             });
                     });
@@ -1934,6 +1938,10 @@ import { showToast } from './toasts.js';
                         fetch(config.endpoints.stop, { method: 'POST' })
                             .then(r => r.json())
                             .then(data => {
+                                if (data.status !== 'ok') {
+                                    showToast(buildErrorMessage(data, 'Erro ao interromper lote.'), 'error');
+                                    return;
+                                }
                                 showToast(data.message || config.messages.stopped, 'primary');
                             });
                     });
