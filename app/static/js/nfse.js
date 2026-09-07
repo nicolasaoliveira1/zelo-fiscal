@@ -8,6 +8,13 @@ import { showToast } from './toasts.js';
 import {
   inicializarContratoNfse,
 } from './nfse_contrato.js';
+import {
+  idsSelecionadosVisiveis,
+  idsVisiveis,
+  ORDENACOES_NFSE,
+  SITUACOES_NFSE,
+  filtrarOrdenarNotas,
+} from './nfse_filtros.js';
 
 /**
  * Resposta JSON das rotas da NFSe. Os campos adicionais variam conforme a
@@ -55,6 +62,7 @@ const lerJsonObjeto = (id) => {
 };
 
 let notas = lerJson('dadosNotas');
+let notasVisiveis = notas;
 const empresas = lerJson('dadosEmpresas');
 let aliquotaConfirmada = false;
 // linhas cujo vinculo o operador reabriu para corrigir
@@ -349,21 +357,75 @@ function linha(nota, ultimaDoGrupo) {
     </tr>`;
 }
 
+function lerFiltros() {
+  return {
+    busca: document.getElementById('filtroTexto')?.value || '',
+    valor: document.getElementById('filtroValor')?.value || '',
+    situacao: document.getElementById('filtroSituacao')?.value || SITUACOES_NFSE.TODAS,
+    ordem: document.getElementById('filtroOrdenacao')?.value || ORDENACOES_NFSE.PRIORIDADE,
+  };
+}
+
+function haRefinamento(filtros) {
+  return Boolean(filtros.busca.trim() || filtros.valor.trim()
+    || filtros.situacao !== SITUACOES_NFSE.TODAS);
+}
+
+function pintarEstadoDosFiltros(resultado, filtros) {
+  const campoValor = document.getElementById('filtroValor');
+  const erroValor = document.getElementById('filtroValorErro');
+  if (campoValor) {
+    campoValor.classList.toggle('is-invalid', resultado.valor_invalido);
+    if (resultado.valor_invalido) campoValor.setAttribute('aria-invalid', 'true');
+    else campoValor.removeAttribute('aria-invalid');
+  }
+  if (erroValor) {
+    erroValor.textContent = resultado.valor_invalido
+      ? 'Informe um valor brasileiro não negativo, como 1500,00.' : '';
+  }
+
+  const contagem = document.getElementById('nfseContagemVisivel');
+  if (contagem) {
+    contagem.textContent = haRefinamento(filtros)
+      ? `${resultado.notas.length} de ${notas.length} notas`
+      : `${notas.length} notas`;
+  }
+  document.getElementById('btnLimparFiltros')?.classList.toggle(
+    'esta-oculto', !haRefinamento(filtros));
+}
+
+// Cada tecla na busca refaz filtro, ordenacao e o innerHTML inteiro da tabela.
+// Um respiro curto junta a rajada da digitacao numa passada so, sem que o
+// operador perceba a espera.
+let timerFiltro = null;
+function renderizarEmBreve() {
+  clearTimeout(timerFiltro);
+  timerFiltro = setTimeout(renderizar, 120);
+}
+
 function renderizar() {
   const corpo = document.getElementById('corpoNotas');
   const vazio = document.getElementById('nfseVazio');
   if (!corpo) return;
+  const filtros = lerFiltros();
+  const resultado = filtrarOrdenarNotas(notas, filtros);
+  notasVisiveis = resultado.notas;
+  pintarEstadoDosFiltros(resultado, filtros);
   const colunas = document.querySelectorAll('#tabelaNotas thead th').length;
-  corpo.innerHTML = notas.map((nota, i) => {
+  corpo.innerHTML = notasVisiveis.map((nota, i) => {
     // A ultima linha de um grupo fecha o bloco com a borda inferior; sem isso
     // o fundo do grupo vaza para a linha seguinte e o operador nao ve onde ele
     // termina. "Ultima" = a proxima nota nao esta no mesmo grupo.
-    const proxima = notas[i + 1];
+    const proxima = notasVisiveis[i + 1];
     const ultimaDoGrupo = !!nota.grupo
       && (!proxima || !proxima.grupo || proxima.grupo.token !== nota.grupo.token);
     return faixaDoGrupo(nota, colunas) + linha(nota, ultimaDoGrupo);
   }).join('');
-  if (vazio) vazio.classList.toggle('d-none', notas.length > 0);
+  if (vazio) {
+    vazio.textContent = notas.length
+      ? 'Nenhum resultado corresponde aos filtros.' : 'Nenhuma nota importada.';
+    vazio.classList.toggle('d-none', notasVisiveis.length > 0);
+  }
   atualizarContadores();
   pintarSelecao();
 }
@@ -736,16 +798,24 @@ function pintarSelecao() {
   const todas = document.getElementById('checkTodas');
   if (!barra) return;
 
-  barra.classList.toggle('d-none', selecionadas.size === 0);
+  // Filtrar e recorte de VISTA, nao desfazer o que o operador marcou: apagar
+  // aqui as linhas ocultas perderia calado uma selecao de dezenas de linhas na
+  // primeira tecla digitada na busca, e voltar o filtro nao a traria de volta.
+  // O recorte que importa e o da ACAO, e ele acontece no disparo (NFSE-FILTRO-18).
+  const disponiveis = idsVisiveis(notasVisiveis);
+  const alvo = idsSelecionadosVisiveis(selecionadas, notasVisiveis);
+  const ocultas = selecionadas.size - alvo.size;
+
+  barra.classList.toggle('d-none', alvo.size === 0);
   if (total) {
-    total.textContent = selecionadas.size === 1
-      ? '1 linha selecionada'
-      : `${selecionadas.size} linhas selecionadas`;
+    const rotulo = alvo.size === 1 ? '1 linha selecionada' : `${alvo.size} linhas selecionadas`;
+    // dizer so o numero visivel esconderia que ha marcacao fora do recorte
+    total.textContent = ocultas > 0 ? `${rotulo} (${ocultas} fora do filtro)` : rotulo;
   }
   if (todas) {
-    todas.checked = notas.length > 0 && selecionadas.size === notas.length;
+    todas.checked = disponiveis.size > 0 && alvo.size === disponiveis.size;
     // estado intermediario: nem todas, nem nenhuma
-    todas.indeterminate = selecionadas.size > 0 && selecionadas.size < notas.length;
+    todas.indeterminate = alvo.size > 0 && alvo.size < disponiveis.size;
   }
 }
 
@@ -756,18 +826,21 @@ function alternarSelecao(id, marcada) {
 
 function selecionarTodas(marcada) {
   selecionadas.clear();
-  if (marcada) notas.forEach((n) => selecionadas.add(n.id));
+  if (marcada) idsVisiveis(notasVisiveis).forEach((id) => selecionadas.add(id));
   renderizar();
 }
 
 async function acaoEmMassa(acao) {
-  const ids = [...selecionadas];
+  const ids = [...idsSelecionadosVisiveis(selecionadas, notasVisiveis)];
   if (!ids.length) return;
   try {
     const dados = await chamar('/nfse/notas/acao',
       { body: JSON.stringify({ acao, ids }) });
     selecionadas.clear();
-    await recarregarNotas({ forcar: true });
+    // o poll pula o redesenho quando o payload nao mudou (o caso de TUDO
+    // recusado); sem este redesenho a barra continuaria dizendo "N linhas
+    // selecionadas" com o conjunto ja vazio
+    if (!await recarregarNotas({ forcar: true })) renderizar();
 
     // o rotulo vem do servidor, onde a lista de acoes ja vive
     const rotulo = dados.rotulo || 'aplicadas';
@@ -855,15 +928,28 @@ const DESCRICAO_MODO = {
     + 'descrição antes de cada emissão.',
 };
 
+// "Todas as competências" mostra a carteira inteira para PROCURAR o histórico
+// de um tomador. A lista inteira ali atravessa meses já fechados, e a fila do
+// lote é exatamente o que a página mostra — por isso emitir a lista pede um
+// escopo fechado. Nota a nota continua valendo: ali o operador aponta a linha.
+const AVISO_ESCOPO_AMPLO = 'Escolha uma competência ou a última importação para '
+  + 'emitir a lista. "Todas as competências" serve para procurar.';
+
+function escopoAmplo() {
+  return escopoAtual() === 'todas';
+}
+
 function pintarModo() {
   const modo = modoAtual();
   const desc = document.getElementById('nfseModoDesc');
-  const bloqueado = modo === 'automatico' && !contratoAutomaticoElegivel;
+  const semContrato = modo === 'automatico' && !contratoAutomaticoElegivel;
+  const semEscopo = escopoAmplo() && modo !== 'individual';
+  const bloqueado = semContrato || semEscopo;
   const descricao = DESCRICAO_MODO[modo] || '';
   if (desc) {
-    desc.textContent = bloqueado
-      ? `${descricao} Indisponível: resolva os incidentes do contrato.`
-      : descricao;
+    if (semContrato) desc.textContent = `${descricao} Indisponível: resolva os incidentes do contrato.`;
+    else if (semEscopo) desc.textContent = `${descricao} ${AVISO_ESCOPO_AMPLO}`;
+    else desc.textContent = descricao;
   }
 
   const iniciar = document.getElementById('btnIniciarLote');
@@ -872,13 +958,18 @@ function pintarModo() {
     iniciar.textContent = modo === 'automatico'
       ? 'Emitir a lista inteira sozinho' : 'Emitir a lista inteira';
     iniciar.disabled = bloqueado;
-    if (bloqueado) iniciar.title = 'Resolva os incidentes do contrato antes de iniciar.';
+    if (semContrato) iniciar.title = 'Resolva os incidentes do contrato antes de iniciar.';
+    else if (semEscopo) iniciar.title = AVISO_ESCOPO_AMPLO;
     else iniciar.removeAttribute('title');
   }
 }
 
 export async function iniciarEmissao({ notaId = null, ignorarAliquota = false } = {}) {
   const modo = notaId ? 'individual' : modoAtual();
+  if (!notaId && escopoAmplo()) {
+    showToast(AVISO_ESCOPO_AMPLO, 'error');
+    return;
+  }
   if (modo === 'automatico' && !contratoAutomaticoElegivel) {
     const mensagem = document.getElementById('nfseContratoStatusTexto')?.textContent
       || 'O contrato da NFS-e não está elegível para o modo automático.';
@@ -1047,19 +1138,21 @@ async function recarregarNotas({ forcar = false } = {}) {
   // `forcar` e para a acao EXPLICITA do operador (confirmar/descartar um
   // agrupamento), que muda varias linhas de uma vez: ali o redesenho e o
   // resultado que ele pediu, e pular calado deixaria a tela mentindo.
-  if (!forcar && (editando.size > 0 || editandoDescricao.size > 0)) return;
+  if (!forcar && (editando.size > 0 || editandoDescricao.size > 0)) return false;
   // digitar valor/descricao na faixa do grupo tambem precisa sobreviver ao poll
-  if (!forcar && document.activeElement?.closest?.('.nfse-grupo')) return;
+  if (!forcar && document.activeElement?.closest?.('.nfse-grupo')) return false;
   try {
     const resposta = await fetch(
       `/nfse/notas?competencia=${encodeURIComponent(escopoAtual())}`);
-    if (!resposta.ok) return;
+    if (!resposta.ok) return false;
     const dados = await resposta.json();
     const novo = JSON.stringify(dados.notas);
-    if (novo === JSON.stringify(notas)) return;
+    if (novo === JSON.stringify(notas)) return false;
     notas = dados.notas;
     renderizar();
+    return true;
   } catch { /* a pagina continua util com o que ja tem na tela */ }
+  return false;
 }
 
 async function comandoLote(url, rotulo) {
@@ -1255,6 +1348,20 @@ document.addEventListener('DOMContentLoaded', () => {
     radio.addEventListener('change', pintarModo);
   });
   pintarModo();
+
+  document.getElementById('filtroTexto')?.addEventListener('input', renderizarEmBreve);
+  document.getElementById('filtroValor')?.addEventListener('input', renderizarEmBreve);
+  document.getElementById('filtroSituacao')?.addEventListener('change', renderizar);
+  document.getElementById('filtroOrdenacao')?.addEventListener('change', renderizar);
+  document.getElementById('btnLimparFiltros')?.addEventListener('click', () => {
+    const texto = document.getElementById('filtroTexto');
+    const valor = document.getElementById('filtroValor');
+    const situacao = document.getElementById('filtroSituacao');
+    if (texto) texto.value = '';
+    if (valor) valor.value = '';
+    if (situacao) situacao.value = SITUACOES_NFSE.TODAS;
+    renderizar();
+  });
 
   document.getElementById('filtroCompetencia')?.addEventListener('change', (ev) => {
     // recarrega pelo servidor: o escopo decide contadores, lista e o proprio

@@ -54,6 +54,7 @@ de uma branch própria, a partir de `main` atualizada, e chega por PR.
 
 ## Rastro documental
 
-- [ ] `docs/context.json` atualizado (rotas, modelos, diretórios novos)
+- [ ] `docs/context.json` atualizado localmente (arquivo ignorado pelo Git; rotas,
+      modelos, campos, serviços ou diretórios novos)
 - [ ] `CLAUDE.md` atualizado, se a mudança altera como se trabalha no projeto
 - [ ] Dependência nova declarada em `requirements.txt` **com o motivo em comentário**
