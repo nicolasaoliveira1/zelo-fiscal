@@ -324,12 +324,34 @@ def manifestador_lote_iniciar():
         return json_error(
             'Escolha o tipo de evento. Manifestacao nao sai por omissao.', 400)
 
-    chave_id = dados.get('chave_id')
-    if modo == manifestador_lote.MODO_INDIVIDUAL and not chave_id:
-        return json_error('Escolha a chave que deve ser manifestada.', 400)
+    chave_ids = dados.get('chave_ids')
+    if chave_ids is not None:
+        ids_validos = (
+            isinstance(chave_ids, list)
+            and bool(chave_ids)
+            and all(isinstance(chave_id, int) and not isinstance(chave_id, bool)
+                    and chave_id > 0 for chave_id in chave_ids)
+            and len(set(chave_ids)) == len(chave_ids)
+        )
+        if not ids_validos:
+            return json_error('A seleção de chaves é inválida.', 400)
+        if modo == manifestador_lote.MODO_INDIVIDUAL and len(chave_ids) != 1:
+            return json_error(
+                'O modo individual exige exatamente uma chave selecionada.', 400)
+        # `chave_id` é opção do lote individual; a seleção explícita inteira
+        # continua sendo a fonte dos alvos, inclusive no modo carteira.
+        chave_id = (chave_ids[0]
+                    if modo == manifestador_lote.MODO_INDIVIDUAL else None)
+    else:
+        chave_id = dados.get('chave_id')
+        if modo == manifestador_lote.MODO_INDIVIDUAL and not chave_id:
+            return json_error('Escolha a chave que deve ser manifestada.', 400)
 
     empresa_id = dados.get('empresa_id')
-    if modo == manifestador_lote.MODO_EMPRESA and not empresa_id:
+    # A combinação é aceita para chamadas diretas à API: com seleção explícita,
+    # `empresa_id` é compatível, mas não pode restringir nem ampliar os alvos.
+    if (modo == manifestador_lote.MODO_EMPRESA and chave_ids is None
+            and not empresa_id):
         return json_error('Escolha a empresa.', 400)
 
     if not manifestador_cofre.estado_da_carteira():
@@ -352,7 +374,7 @@ def manifestador_lote_iniciar():
             MANIF_BATCH_LOCK, MANIF_BATCH_STATE, chave_id,
             lambda _inicio: manifestador_lote.calcular_alvos(
                 modo=modo, chave_id=chave_id, empresa_id=empresa_id,
-                competencia=competencia),
+                competencia=competencia, chave_ids=chave_ids),
             manifestador_lote.worker, app_factory=_current_app_object,
         )
     except Exception as exc:

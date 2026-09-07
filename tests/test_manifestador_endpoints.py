@@ -15,7 +15,11 @@ from app.models import (
     EstadoCertificado,
     StatusManifestacao,
 )
-from app.automation.batch_state import MANIF_BATCH_STATE
+from app.automation.batch_state import (
+    MANIF_BATCH_STATE,
+    definir_manif_opcoes,
+    manif_batch_opcoes,
+)
 from app.services import batch_engine, manifestador_lote
 
 CHAVE_A = '43170122333444000181650010000045391000045393'
@@ -421,10 +425,104 @@ def test_iniciar_recusa_modo_desconhecido(client):
     assert resposta.status_code == 400
 
 
-def test_iniciar_individual_exige_a_chave(client):
+def test_iniciar_individual_exige_selecao(client):
     resposta = client.post('/manifestador/lote/iniciar',
                            json={'modo': 'individual', 'tipo_evento': '210200'})
     assert resposta.status_code == 400
+
+
+def test_iniciar_recusa_selecao_explicita_vazia(client):
+    resposta = client.post('/manifestador/lote/iniciar', json={
+        'modo': 'carteira', 'tipo_evento': '210200', 'chave_ids': [],
+    })
+    assert resposta.status_code == 400
+    assert MANIF_BATCH_STATE['status'] == 'idle'
+
+
+def test_iniciar_recusa_selecao_explicita_invalida_ou_repetida(client):
+    for chave_ids in ([0, 2], [2, '3'], [2, 2]):
+        resposta = client.post('/manifestador/lote/iniciar', json={
+            'modo': 'carteira', 'tipo_evento': '210200',
+            'chave_ids': chave_ids,
+        })
+        assert resposta.status_code == 400
+        assert MANIF_BATCH_STATE['status'] == 'idle'
+
+
+def test_iniciar_enfileira_somente_a_selecao_explicita(app, ids, client,
+                                                       monkeypatch):
+    with app.app_context():
+        emp_a = _empresa('A', '11.222.333/0001-81', EstadoCertificado.PRONTO)
+        emp_b = _empresa('B', '22.333.444/0001-92', EstadoCertificado.PRONTO)
+        a_selecionada = _chave(emp_a, CHAVE_A)
+        _chave(emp_a, CHAVE_B)
+        b_selecionada = _chave(emp_b, '43170122333444000181650010000045751000045756')
+        empresa_id = emp_a.id
+        ids_selecionados = [b_selecionada.id, a_selecionada.id]
+        ids_esperados = sorted(ids_selecionados)
+
+    monkeypatch.setattr(manifestador_lote, 'worker', lambda app_obj: None)
+    try:
+        resposta = client.post('/manifestador/lote/iniciar', json={
+            'modo': 'carteira', 'tipo_evento': '210200',
+            'empresa_id': empresa_id, 'competencia': '1900-01',
+            'chave_ids': ids_selecionados,
+        })
+
+        assert resposta.status_code == 200
+        assert resposta.get_json()['total'] == 2
+        assert MANIF_BATCH_STATE['ids'] == ids_esperados
+    finally:
+        batch_engine.reset_batch_state(MANIF_BATCH_STATE)
+
+
+def test_selecao_unica_em_carteira_nao_grava_chave_individual(
+        app, ids, client, monkeypatch):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81', EstadoCertificado.PRONTO)
+        selecionada = _chave(emp, CHAVE_A)
+        chave_id = selecionada.id
+
+    monkeypatch.setattr(manifestador_lote, 'worker', lambda app_obj: None)
+    try:
+        resposta = client.post('/manifestador/lote/iniciar', json={
+            'modo': 'carteira', 'tipo_evento': '210200',
+            'chave_ids': [chave_id],
+        })
+
+        assert resposta.status_code == 200
+        assert MANIF_BATCH_STATE['ids'] == [chave_id]
+        assert manif_batch_opcoes()['modo'] == 'carteira'
+        assert manif_batch_opcoes()['chave_id'] is None
+    finally:
+        batch_engine.reset_batch_state(MANIF_BATCH_STATE)
+        definir_manif_opcoes(modo='empresa', tipo_evento='210200',
+                             empresa_id=None, competencia=None, chave_id=None)
+
+
+def test_iniciar_revalida_selecao_que_mudou_antes_da_admissao(
+        app, ids, client, monkeypatch):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81', EstadoCertificado.PRONTO)
+        continua = _chave(emp, CHAVE_A)
+        ficou_terminal = _chave(emp, CHAVE_B)
+        ficou_terminal.status = StatusManifestacao.MANIFESTADA
+        db.session.commit()
+        ids_selecionados = [continua.id, ficou_terminal.id]
+        id_continua = continua.id
+
+    monkeypatch.setattr(manifestador_lote, 'worker', lambda app_obj: None)
+    try:
+        resposta = client.post('/manifestador/lote/iniciar', json={
+            'modo': 'carteira', 'tipo_evento': '210200',
+            'chave_ids': ids_selecionados,
+        })
+
+        assert resposta.status_code == 200
+        assert resposta.get_json()['total'] == 1
+        assert MANIF_BATCH_STATE['ids'] == [id_continua]
+    finally:
+        batch_engine.reset_batch_state(MANIF_BATCH_STATE)
 
 
 def test_iniciar_sem_inventario_do_cofre_e_recusado(app, ids, client):

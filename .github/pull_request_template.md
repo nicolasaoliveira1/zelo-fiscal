@@ -20,6 +20,14 @@ de uma branch própria, a partir de `main` atualizada, e chega por PR.
 - **Decisões registradas**: <!-- ex.: AD-027 em `.specs/STATE.md`, ou "nenhuma" -->
 - **O que deliberadamente NÃO entrou**: <!-- o corte de escopo e a razão -->
 
+## Arquivos alterados
+
+<!-- Liste todos os arquivos versionados que aparecem em
+     `git diff --name-only <base>...HEAD`, um por linha. Mantenha esta lista
+     sincronizada com o diff do PR, incluindo documentação e testes. -->
+
+- `caminho/do/arquivo`
+
 ## Como foi verificado
 
 <!-- Evidência, não promessa. Cole os números. -->
@@ -45,6 +53,7 @@ de uma branch própria, a partir de `main` atualizada, e chega por PR.
 
 ## Rastro documental
 
-- [ ] `docs/context.json` atualizado (rotas, modelos, diretórios novos)
+- [ ] `docs/context.json` atualizado localmente (arquivo ignorado pelo Git; rotas,
+      modelos, campos, serviços ou diretórios novos)
 - [ ] `CLAUDE.md` atualizado, se a mudança altera como se trabalha no projeto
 - [ ] Dependência nova declarada em `requirements.txt` **com o motivo em comentário**

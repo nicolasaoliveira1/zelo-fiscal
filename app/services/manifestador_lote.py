@@ -41,7 +41,7 @@ ALVO_BREAKER = circuit_breaker.ALVO_SEFAZ_AN
 # --- montagem da fila -------------------------------------------------------
 
 def calcular_alvos(modo=MODO_EMPRESA, chave_id=None, empresa_id=None,
-                   competencia=None):
+                   competencia=None, chave_ids=None):
     """Fila do lote no formato que o `batch_engine` espera.
 
     A fila tem de ser EXATAMENTE o que a tela mostra: filtrar aqui por um
@@ -51,19 +51,29 @@ def calcular_alvos(modo=MODO_EMPRESA, chave_id=None, empresa_id=None,
     compartilhado com os lotes de certidao; aqui nao ha vencimento a apurar."""
     consulta = ChaveManifestacao.query
 
-    if modo == MODO_INDIVIDUAL:
+    if modo == MODO_INDIVIDUAL and chave_ids is None:
         linha = db.session.get(ChaveManifestacao, chave_id)
         ids = [linha.id] if manifestavel(linha) else []
     else:
-        if modo == MODO_EMPRESA and empresa_id is not None:
-            consulta = consulta.filter_by(empresa_id=empresa_id)
-        if competencia:
-            consulta = consulta.filter_by(competencia=competencia)
+        if chave_ids is not None:
+            # A seleção da tela é a autorização do operador. Quando ela existe,
+            # filtros amplos não podem acrescentar linhas à fila.
+            if not chave_ids:
+                linhas = []
+            else:
+                consulta = consulta.filter(ChaveManifestacao.id.in_(chave_ids))
+                linhas = consulta.order_by(ChaveManifestacao.empresa_id,
+                                           ChaveManifestacao.id).all()
+        else:
+            if modo == MODO_EMPRESA and empresa_id is not None:
+                consulta = consulta.filter_by(empresa_id=empresa_id)
+            if competencia:
+                consulta = consulta.filter_by(competencia=competencia)
+            linhas = consulta.order_by(ChaveManifestacao.empresa_id,
+                                       ChaveManifestacao.id).all()
         # Ordenar por empresa antes do id e o que agrupa: cada empresa vira um
         # bloco contiguo, e o certificado troca uma vez por bloco em vez de a
         # cada nota.
-        linhas = consulta.order_by(ChaveManifestacao.empresa_id,
-                                   ChaveManifestacao.id).all()
         ids = [linha.id for linha in linhas if manifestavel(linha)]
 
     return {
