@@ -5,6 +5,7 @@ que rotas/workers e os módulos de emissão por tipo (automation/*) compartilhem
 o mesmo objeto sem dependência circular.
 """
 from threading import Lock
+from types import MappingProxyType
 
 from app.services import batch_engine
 
@@ -146,29 +147,51 @@ def trabalhista_batch_stop_requested():
     return TRABALHISTA_BATCH_STATE.get('stop_requested')
 
 
-# Opcoes do lote de manifestacao. Ficam FORA de MANIF_BATCH_STATE pela mesma
-# razao das opcoes da NFSe: `init_batch_run` chama `reset_batch_state` e dispara
-# o worker dentro do mesmo lock, entao qualquer chave escrita no estado antes de
-# iniciar seria apagada, e escrever depois correria com o worker ja lendo.
+# Opções de preparação do lote de manifestação. O snapshot da execução aceita
+# vive em `MANIF_BATCH_STATE['opcoes_execucao']`, aplicado por
+# `batch_engine.init_batch_run` depois do reset e dentro do mesmo lock. Este
+# dicionário permanece apenas como fallback para chamadas internas/testes que
+# exercitam `_manifestar_item` fora de uma execução.
 #
 # `tipo_evento` nao tem valor "esperto" de default: ele e escolhido a cada lote
 # na tela, porque Confirmacao da Operacao e irreversivel e nao deve sair por
 # omissao.
 MANIF_OPCOES_LOCK = Lock()
-_MANIF_BATCH_OPCOES = {'modo': 'empresa', 'tipo_evento': '210200',
-                       'empresa_id': None, 'competencia': None,
-                       'chave_id': None}
+_MANIF_BATCH_OPCOES = MappingProxyType({
+    'modo': 'empresa',
+    'tipo_evento': '210200',
+    'empresa_id': None,
+    'competencia': None,
+    'chave_id': None,
+})
+
+
+def manif_batch_opcoes_locked():
+    """Lê as opções com `MANIF_BATCH_LOCK` já adquirido pelo chamador."""
+    opcoes_execucao = MANIF_BATCH_STATE.get('opcoes_execucao')
+    if opcoes_execucao is not None:
+        return dict(opcoes_execucao)
+
+    with MANIF_OPCOES_LOCK:
+        return dict(_MANIF_BATCH_OPCOES)
 
 
 def manif_batch_opcoes():
-    with MANIF_OPCOES_LOCK:
-        return dict(_MANIF_BATCH_OPCOES)
+    # A rota não grava mais neste dicionário antes de admitir o lote. Se há uma
+    # execução ativa, o snapshot aceito é a única fonte — um pedido recusado não
+    # pode trocar o evento que os itens seguintes usam.
+    with MANIF_BATCH_LOCK:
+        return manif_batch_opcoes_locked()
 
 
 def definir_manif_opcoes(**valores):
-    """Grava as opcoes do proximo lote. Chaves desconhecidas sao ignoradas."""
+    """Atualiza a preparação legada fora de uma execução ativa."""
+    global _MANIF_BATCH_OPCOES
+
     with MANIF_OPCOES_LOCK:
+        opcoes = dict(_MANIF_BATCH_OPCOES)
         for chave, valor in valores.items():
-            if chave in _MANIF_BATCH_OPCOES:
-                _MANIF_BATCH_OPCOES[chave] = valor
-        return dict(_MANIF_BATCH_OPCOES)
+            if chave in opcoes:
+                opcoes[chave] = valor
+        _MANIF_BATCH_OPCOES = MappingProxyType(opcoes)
+        return dict(opcoes)

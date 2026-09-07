@@ -114,6 +114,42 @@ export function agrupar_arquivos_xml(lista) {
 }
 
 /**
+ * Monta o contrato de início da manifestação a partir da seleção visível.
+ *
+ * Quando há IDs marcados, eles são a autorização do operador e seguem no
+ * payload. O filtro de empresa só escolhe um escopo amplo quando não há
+ * seleção explícita.
+ *
+ * @param {Object} dados
+ * @param {string} dados.tipo_evento
+ * @param {string | null | undefined} dados.competencia
+ * @param {number[]} dados.ids
+ * @param {string | number | null | undefined} dados.empresa_id
+ * @returns {Record<string, unknown>}
+ */
+export function montar_corpo_manifestacao({
+  tipo_evento, competencia, ids, empresa_id,
+}) {
+  /** @type {Record<string, unknown>} */
+  const corpo = {
+    tipo_evento,
+    competencia: competencia || null,
+  };
+
+  if (ids.length) {
+    corpo.modo = ids.length === 1 ? 'individual' : 'carteira';
+    corpo.chave_ids = [...ids];
+  } else if (empresa_id) {
+    corpo.modo = 'empresa';
+    corpo.empresa_id = Number(empresa_id);
+  } else {
+    corpo.modo = 'carteira';
+  }
+
+  return corpo;
+}
+
+/**
  * Item de vencimento vindo de `/manifestador/cofre`.
  *
  * @typedef {Object} ItemVencimento

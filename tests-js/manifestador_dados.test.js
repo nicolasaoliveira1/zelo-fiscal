@@ -7,6 +7,7 @@ import {
   chave_segmentada,
   escapar_html,
   linha_do_cofre,
+  montar_corpo_manifestacao,
   somar_balanco,
   vazio_de_vencimentos,
 } from '../app/static/js/manifestador_dados.js';
@@ -58,6 +59,37 @@ test('agrupa somente XMLs pela origem da entrada', () => {
   assert.deepEqual([...grupos.keys()], ['pasta-teste', 'Arquivos avulsos']);
   assert.equal(grupos.get('pasta-teste').length, 2);
   assert.equal(grupos.get('Arquivos avulsos').length, 1);
+});
+
+test('uma seleção envia o ID explícito no modo individual', () => {
+  assert.deepEqual(montar_corpo_manifestacao({
+    tipo_evento: '210200', competencia: '2026-09', ids: [17], empresa_id: '4',
+  }), {
+    tipo_evento: '210200', competencia: '2026-09', modo: 'individual',
+    chave_ids: [17],
+  });
+});
+
+test('várias seleções prevalecem sobre o filtro de empresa', () => {
+  assert.deepEqual(montar_corpo_manifestacao({
+    tipo_evento: '210220', competencia: '', ids: [17, 29, 31], empresa_id: '4',
+  }), {
+    tipo_evento: '210220', competencia: null, modo: 'carteira',
+    chave_ids: [17, 29, 31],
+  });
+});
+
+test('sem seleção mantém os escopos amplos explícitos', () => {
+  assert.deepEqual(montar_corpo_manifestacao({
+    tipo_evento: '210200', competencia: null, ids: [], empresa_id: '4',
+  }), {
+    tipo_evento: '210200', competencia: null, modo: 'empresa', empresa_id: 4,
+  });
+  assert.deepEqual(montar_corpo_manifestacao({
+    tipo_evento: '210200', competencia: null, ids: [], empresa_id: '',
+  }), {
+    tipo_evento: '210200', competencia: null, modo: 'carteira',
+  });
 });
 
 const cofreBase = {

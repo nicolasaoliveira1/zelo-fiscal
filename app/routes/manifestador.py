@@ -15,7 +15,6 @@ from app.auth import requer_papel
 from app.automation.batch_state import (
     MANIF_BATCH_LOCK,
     MANIF_BATCH_STATE,
-    definir_manif_opcoes,
 )
 from app.models import ChaveManifestacao, Empresa, EstadoCertificado
 from app.routes import _current_app_object, bp
@@ -324,12 +323,34 @@ def manifestador_lote_iniciar():
         return json_error(
             'Escolha o tipo de evento. Manifestacao nao sai por omissao.', 400)
 
-    chave_id = dados.get('chave_id')
-    if modo == manifestador_lote.MODO_INDIVIDUAL and not chave_id:
-        return json_error('Escolha a chave que deve ser manifestada.', 400)
+    chave_ids = dados.get('chave_ids')
+    if chave_ids is not None:
+        ids_validos = (
+            isinstance(chave_ids, list)
+            and bool(chave_ids)
+            and all(isinstance(chave_id, int) and not isinstance(chave_id, bool)
+                    and chave_id > 0 for chave_id in chave_ids)
+            and len(set(chave_ids)) == len(chave_ids)
+        )
+        if not ids_validos:
+            return json_error('A seleção de chaves é inválida.', 400)
+        if modo == manifestador_lote.MODO_INDIVIDUAL and len(chave_ids) != 1:
+            return json_error(
+                'O modo individual exige exatamente uma chave selecionada.', 400)
+        # `chave_id` é opção do lote individual; a seleção explícita inteira
+        # continua sendo a fonte dos alvos, inclusive no modo carteira.
+        chave_id = (chave_ids[0]
+                    if modo == manifestador_lote.MODO_INDIVIDUAL else None)
+    else:
+        chave_id = dados.get('chave_id')
+        if modo == manifestador_lote.MODO_INDIVIDUAL and not chave_id:
+            return json_error('Escolha a chave que deve ser manifestada.', 400)
 
     empresa_id = dados.get('empresa_id')
-    if modo == manifestador_lote.MODO_EMPRESA and not empresa_id:
+    # A combinação é aceita para chamadas diretas à API: com seleção explícita,
+    # `empresa_id` é compatível, mas não pode restringir nem ampliar os alvos.
+    if (modo == manifestador_lote.MODO_EMPRESA and chave_ids is None
+            and not empresa_id):
         return json_error('Escolha a empresa.', 400)
 
     if not manifestador_cofre.estado_da_carteira():
@@ -337,23 +358,23 @@ def manifestador_lote_iniciar():
             'O cofre de certificados ainda nao foi inventariado. Rode o '
             'inventario antes de manifestar.', 409, motivo='cofre_vazio')
 
-    with MANIF_BATCH_LOCK:
-        em_andamento = batch_engine.lote_ocupa_o_tipo(MANIF_BATCH_STATE)
-    if em_andamento:
-        return json_error('Ja existe uma manifestacao em andamento.', 409)
-
     competencia = (dados.get('competencia') or '').strip() or None
-    definir_manif_opcoes(modo=modo, tipo_evento=tipo_evento,
-                         empresa_id=empresa_id, competencia=competencia,
-                         chave_id=chave_id)
+    opcoes_execucao = {
+        'modo': modo,
+        'tipo_evento': tipo_evento,
+        'empresa_id': empresa_id,
+        'competencia': competencia,
+        'chave_id': chave_id,
+    }
 
     try:
         dados_lote = batch_engine.init_batch_run(
             MANIF_BATCH_LOCK, MANIF_BATCH_STATE, chave_id,
             lambda _inicio: manifestador_lote.calcular_alvos(
                 modo=modo, chave_id=chave_id, empresa_id=empresa_id,
-                competencia=competencia),
+                competencia=competencia, chave_ids=chave_ids),
             manifestador_lote.worker, app_factory=_current_app_object,
+            state_values={'opcoes_execucao': opcoes_execucao},
         )
     except Exception as exc:
         return json_error(exc=exc, code=500)

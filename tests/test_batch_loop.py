@@ -330,6 +330,122 @@ def test_on_finish_called_em_erro_grave():
     print('ok test_on_finish_called_em_erro_grave')
 
 
+def test_init_batch_run_aplica_valores_antes_do_worker():
+    state = batch_state_defaults()
+    observado = {}
+    original_run_worker = batch_engine.run_worker
+
+    def calc_targets(_start_id):
+        return {
+            'ids': [11, 12],
+            'total': 2,
+            'scope': 'carteira',
+            'vencidas': 0,
+            'a_vencer': 0,
+            'pendentes': 0,
+        }
+
+    def worker(_app):
+        observado['opcoes'] = state['opcoes_execucao'].copy()
+        observado['ids'] = list(state['ids'])
+
+    def run_worker_sincrono(worker_fn, app_factory, on_finished=None):
+        worker_fn(app_factory())
+        if on_finished:
+            on_finished()
+
+    batch_engine.run_worker = run_worker_sincrono
+    try:
+        resultado = batch_engine.init_batch_run(
+            FakeLock(), state, None, calc_targets, worker, FakeApp,
+            state_values={
+                'opcoes_execucao': {
+                    'modo': 'carteira',
+                    'tipo_evento': '210220',
+                    'empresa_id': None,
+                    'competencia': None,
+                    'chave_id': None,
+                },
+            })
+    finally:
+        batch_engine.run_worker = original_run_worker
+
+    assert resultado['ids'] == [11, 12]
+    assert observado['ids'] == [11, 12]
+    assert observado['opcoes']['tipo_evento'] == '210220'
+    assert observado['opcoes']['modo'] == 'carteira'
+
+
+def test_init_batch_run_recusa_ocupado_sem_calcular_nem_iniciar_worker():
+    state = batch_state_defaults()
+    state['status'] = 'running'
+    state['ids'] = [99]
+    state['total'] = 1
+    chamadas = {'calculo': 0, 'worker': 0}
+
+    def calc_targets(_start_id):
+        chamadas['calculo'] += 1
+        return {'ids': [1], 'total': 1, 'vencidas': 0,
+                'a_vencer': 0, 'pendentes': 0}
+
+    def worker(_app):
+        chamadas['worker'] += 1
+
+    original_run_worker = batch_engine.run_worker
+    batch_engine.run_worker = lambda worker_fn, app_factory: worker_fn(app_factory())
+    try:
+        resultado = batch_engine.init_batch_run(
+            FakeLock(), state, None, calc_targets, worker, FakeApp,
+            state_values={'opcoes_execucao': {'tipo_evento': '210220'}})
+    finally:
+        batch_engine.run_worker = original_run_worker
+
+    assert resultado is None
+    assert chamadas == {'calculo': 0, 'worker': 0}
+    assert state['ids'] == [99]
+    assert state['opcoes_execucao'] is None
+
+
+def test_init_batch_run_cria_snapshot_para_nova_execucao():
+    state = batch_state_defaults()
+    observados = []
+    original_run_worker = batch_engine.run_worker
+
+    def calc_targets(_start_id):
+        return {
+            'ids': [11],
+            'total': 1,
+            'scope': 'carteira',
+            'vencidas': 0,
+            'a_vencer': 0,
+            'pendentes': 0,
+        }
+
+    def worker(_app):
+        observados.append(state['opcoes_execucao']['tipo_evento'])
+        state['status'] = 'completed'
+
+    def run_worker_sincrono(worker_fn, app_factory, on_finished=None):
+        worker_fn(app_factory())
+        if on_finished:
+            on_finished()
+
+    batch_engine.run_worker = run_worker_sincrono
+    try:
+        for tipo_evento in ('210220', '210200'):
+            resultado = batch_engine.init_batch_run(
+                FakeLock(), state, None, calc_targets, worker, FakeApp,
+                state_values={'opcoes_execucao': {
+                    'modo': 'carteira',
+                    'tipo_evento': tipo_evento,
+                }})
+            assert resultado['ids'] == [11]
+    finally:
+        batch_engine.run_worker = original_run_worker
+
+    assert observados == ['210220', '210200']
+
+
 # --- circuit breaker por portal (spec 09, RESOP-02) ------------------------
 
 def _breaker_com(abertos):

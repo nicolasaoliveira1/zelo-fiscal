@@ -104,6 +104,50 @@ def test_fila_respeita_o_filtro_de_competencia(app, ids):
         assert alvos['ids'] == [julho.id]
 
 
+def test_fila_explicita_ignora_filtros_e_mantem_so_as_selecionadas(app, ids):
+    """A seleção é a autorização; `empresa_id` e competência não a ampliam."""
+    with app.app_context():
+        emp_a = _empresa('A', '11.222.333/0001-81')
+        emp_b = _empresa('B', '22.333.444/0001-92')
+        a_selecionada = _chave(emp_a, CHAVES[0], competencia='2017-07')
+        _chave(emp_a, CHAVES[1], competencia='2017-08')
+        b_selecionada = _chave(emp_b, CHAVES[2], competencia='2017-08')
+
+        alvos = lote.calcular_alvos(
+            modo='empresa', empresa_id=emp_a.id, competencia='2017-08',
+            chave_ids=[b_selecionada.id, a_selecionada.id])
+
+        assert alvos['ids'] == [a_selecionada.id, b_selecionada.id]
+        assert alvos['total'] == 2
+
+
+def test_fila_explicita_revalida_elegibilidade_sem_adicionar_chave_nova(app, ids):
+    """A lista pode mudar depois da renderização; o servidor decide de novo."""
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81')
+        selecionada = _chave(emp, CHAVES[0])
+        ficou_inelegivel = _chave(emp, CHAVES[1])
+        _chave(emp, CHAVES[2])
+        ficou_inelegivel.status = StatusManifestacao.MANIFESTADA
+        db.session.commit()
+
+        alvos = lote.calcular_alvos(
+            modo='carteira', chave_ids=[selecionada.id, ficou_inelegivel.id])
+
+        assert alvos['ids'] == [selecionada.id]
+
+
+def test_fila_explicita_vazia_nao_cai_no_escopo_amplo(app, ids):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81')
+        _chave(emp, CHAVES[0])
+
+        alvos = lote.calcular_alvos(modo='carteira', chave_ids=[])
+
+        assert alvos['ids'] == []
+        assert alvos['total'] == 0
+
+
 def test_fila_usa_a_regra_unica_de_manifestavel(app, ids):
     """Se a fila divergisse de `manifestavel`, o lote enfileiraria o que o
     servico recusa — e travaria sem explicacao."""
@@ -186,6 +230,33 @@ def test_item_delega_para_a_costura_com_o_tipo_do_lote(app, ids, monkeypatch):
         assert sucesso is True
         assert grave is None
         assert falso.chamadas[0]['tipo_evento'] == svc.DESCONHECIMENTO
+
+
+def test_itens_seguem_o_snapshot_da_execucao(app, ids, monkeypatch):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81')
+        primeira = _chave(emp, CHAVES[0])
+        segunda = _chave(emp, CHAVES[1])
+        falso = _ManifestarFalso()
+        monkeypatch.setattr(lote, 'manifestar', falso)
+
+        with batch_state.MANIF_BATCH_LOCK:
+            batch_state.MANIF_BATCH_STATE['opcoes_execucao'] = {
+                'modo': 'carteira',
+                'tipo_evento': svc.DESCONHECIMENTO,
+                'empresa_id': None,
+                'competencia': None,
+                'chave_id': None,
+            }
+        try:
+            lote._manifestar_item(primeira.id, None, 'exec-1')
+            lote._manifestar_item(segunda.id, None, 'exec-1')
+        finally:
+            from app.services import batch_engine
+            batch_engine.reset_batch_state(batch_state.MANIF_BATCH_STATE)
+
+        assert [chamada['tipo_evento'] for chamada in falso.chamadas] == [
+            svc.DESCONHECIMENTO, svc.DESCONHECIMENTO]
 
 
 def test_falha_de_um_item_nao_e_grave(app, ids, monkeypatch):
@@ -281,11 +352,55 @@ def test_modos_declarados_sao_os_tres_da_spec():
 
 def test_status_traz_o_modo_e_a_chave_corrente(app, ids):
     with app.app_context():
-        dados = lote.status()
+        with batch_state.MANIF_BATCH_LOCK:
+            batch_state.MANIF_BATCH_STATE['opcoes_execucao'] = {
+                'modo': 'carteira',
+                'tipo_evento': svc.DESCONHECIMENTO,
+                'empresa_id': None,
+                'competencia': None,
+                'chave_id': None,
+            }
+        try:
+            dados = lote.status()
+        finally:
+            from app.services import batch_engine
+            batch_engine.reset_batch_state(batch_state.MANIF_BATCH_STATE)
 
         assert 'status' in dados
         assert 'modo' in dados
         assert 'chave_id' in dados
+        assert dados['modo'] == 'carteira'
+        assert dados['tipo_evento'] == svc.DESCONHECIMENTO
+
+
+def test_status_le_opcoes_dentro_do_lock(app, monkeypatch):
+    class LockObservado:
+        def __init__(self):
+            self.ativo = False
+
+        def __enter__(self):
+            self.ativo = True
+
+        def __exit__(self, *_args):
+            self.ativo = False
+
+    lock = LockObservado()
+    observado = {}
+
+    def ler_opcoes_com_lock():
+        observado['lock_ativo'] = lock.ativo
+        return {'modo': 'carteira', 'tipo_evento': svc.DESCONHECIMENTO}
+
+    monkeypatch.setattr(lote, 'MANIF_BATCH_LOCK', lock)
+    monkeypatch.setattr(lote, 'manif_batch_opcoes_locked',
+                        ler_opcoes_com_lock)
+
+    with app.app_context():
+        dados = lote.status()
+
+    assert observado['lock_ativo'] is True
+    assert dados['modo'] == 'carteira'
+    assert dados['tipo_evento'] == svc.DESCONHECIMENTO
 
 
 def test_lote_nao_cria_driver(app, ids):

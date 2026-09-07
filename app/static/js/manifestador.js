@@ -11,6 +11,7 @@ import {
   chave_segmentada as chaveSegmentada,
   escapar_html as escapar,
   linha_do_cofre as linhaDoCofre,
+  montar_corpo_manifestacao as montarCorpoManifestacao,
   somar_balanco as somarBalanco,
   vazio_de_vencimentos as vazioDeVencimentos,
 } from './manifestador_dados.js';
@@ -377,22 +378,14 @@ function avaliarBotao() {
 async function manifestar() {
   const escolhidas = marcadas();
   const empresaId = $('manifEmpresa').value;
-  /* Uma chave marcada = individual; empresa filtrada = a empresa inteira;
-   * nada filtrado = a carteira. O modo sai do que está na tela, não de um
-   * seletor à parte — assim a fila é exatamente o que o operador vê. */
-  const corpo = {
+  /* Uma seleção explícita é a autorização do operador. Sem seleção, o filtro
+   * de empresa ou a carteira inteira continuam sendo os escopos amplos. */
+  const corpo = montarCorpoManifestacao({
     tipo_evento: $('manifEvento').value,
-    competencia: $('manifCompetencia').value || null,
-  };
-  if (escolhidas.length === 1) {
-    corpo.modo = 'individual';
-    corpo.chave_id = escolhidas[0];
-  } else if (empresaId) {
-    corpo.modo = 'empresa';
-    corpo.empresa_id = Number(empresaId);
-  } else {
-    corpo.modo = 'carteira';
-  }
+    competencia: $('manifCompetencia').value,
+    ids: escolhidas,
+    empresa_id: empresaId,
+  });
 
   try {
     const dados = await pedir('/manifestador/lote/iniciar', comoJson(corpo));

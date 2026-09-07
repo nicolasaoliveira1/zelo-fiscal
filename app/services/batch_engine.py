@@ -58,6 +58,7 @@ def batch_state_defaults():
         'negativas': 0,
         'efeito_negativas': 0,
         'execution_id': None,
+        'opcoes_execucao': None,
         'last_messages': [],
     }
 
@@ -623,7 +624,15 @@ def resume_batch(batch_lock, batch_state, worker_fn, app_factory):
     return True
 
 
-def init_batch_run(batch_lock, batch_state, start_id, calc_targets_fn, worker_fn, app_factory):
+def init_batch_run(
+    batch_lock,
+    batch_state,
+    start_id,
+    calc_targets_fn,
+    worker_fn,
+    app_factory,
+    state_values=None,
+):
     with batch_lock:
         # Pausa de breaker ja vencida nao ocupa o tipo (spec 09). O reset logo
         # abaixo e quem descarta o estado antigo — aqui so se decide.
@@ -649,6 +658,8 @@ def init_batch_run(batch_lock, batch_state, start_id, calc_targets_fn, worker_fn
             'execution_id': CorrelationContext.new_execution_id(),
             'worker_active': True,
         })
+        if state_values:
+            batch_state.update(state_values)
         execution_id = batch_state['execution_id']
 
     run_worker(
