@@ -286,7 +286,9 @@ def test_status_do_lote_exige_papel(login_as):
 
 
 def test_pausar_pede_pausa_sem_descartar_a_fila(client, sessao_falsa):
-    NFSE_BATCH_STATE.update({'status': 'running', 'ids': [1, 2], 'total': 2})
+    NFSE_BATCH_STATE.update({
+        'status': 'running', 'worker_active': True, 'ids': [1, 2], 'total': 2,
+    })
     assert client.post('/nfse/lote/pausar').status_code == 200
     assert NFSE_BATCH_STATE['stop_action'] == 'pause'
     assert NFSE_BATCH_STATE['ids'] == [1, 2]
@@ -297,7 +299,9 @@ def test_pausar_sem_lote_rodando_e_recusado(client, sessao_falsa):
 
 
 def test_parar_marca_interrupcao(client, sessao_falsa):
-    NFSE_BATCH_STATE.update({'status': 'running', 'ids': [1], 'total': 1})
+    NFSE_BATCH_STATE.update({
+        'status': 'running', 'worker_active': True, 'ids': [1], 'total': 1,
+    })
     sessao_falsa.livre = False  # o worker ainda é o dono da sessão
     assert client.post('/nfse/lote/parar').status_code == 200
     assert NFSE_BATCH_STATE['stop_action'] == 'stop'

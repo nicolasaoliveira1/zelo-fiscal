@@ -1028,7 +1028,7 @@ async function consultarLote() {
     return;   // erro de rede num poll nao merece um toast por segundo
   }
 
-  const ativo = ['running', 'paused'].includes(lote.status);
+  const ativo = ['running', 'pausing', 'stopping', 'paused'].includes(lote.status);
   // a lista vem junto enquanto ha fila: as transicoes que mais interessam
   // (preenchendo -> aguardando -> emitida) nao mexem em contador nenhum, entao
   // observar so o status do lote nao as revelaria
@@ -1048,12 +1048,14 @@ async function consultarLote() {
 
 function pintarLote(lote) {
   const rodando = lote.status === 'running';
-  const pausado = lote.status === 'paused';
+  const pausado = lote.status === 'paused' && lote.worker_active === false;
+  const transicao = ['pausing', 'stopping'].includes(lote.status);
+  const ocupado = rodando || pausado || transicao;
   const painel = document.getElementById('nfseProgresso');
   const percorreLista = modoAtual() !== 'individual';
 
   document.getElementById('btnIniciarLote')?.classList.toggle(
-    'd-none', !percorreLista || rodando || pausado);
+    'd-none', !percorreLista || ocupado);
   // "Pular" existe para abandonar uma nota que ESPERA voce; no automatico nao
   // ha espera, entao o botao nao teria efeito nenhum
   document.getElementById('btnPularNota')?.classList.toggle(
@@ -1062,7 +1064,11 @@ function pintarLote(lote) {
     'd-none', !rodando || lote.total <= 1);
   document.getElementById('btnRetomarLote')?.classList.toggle('d-none', !pausado);
   document.getElementById('btnPararLote')?.classList.toggle(
-    'd-none', !(rodando || pausado));
+    'd-none', !ocupado);
+  const btnPausar = document.getElementById('btnPausarLote');
+  if (btnPausar) btnPausar.disabled = !rodando;
+  const btnParar = document.getElementById('btnPararLote');
+  if (btnParar) btnParar.disabled = !ocupado || lote.status === 'stopping';
 
   if (!painel) return;
   painel.classList.toggle('d-none', lote.status === 'idle');
@@ -1082,12 +1088,12 @@ function pintarLote(lote) {
   const mensagem = document.getElementById('nfseProgressoMensagem');
   if (mensagem) mensagem.textContent = textoDoProgresso(lote);
 
-  destacarNotaAtual(lote.nota_id, rodando);
+  destacarNotaAtual(lote.nota_id, rodando || transicao);
 
   // Enquanto a fila anda, clicar em Preencher noutra linha so renderia 409:
   // o navegador esta ocupado com a nota atual.
   document.querySelectorAll('[data-preencher]').forEach((botao) => {
-    botao.disabled = rodando || pausado;
+    botao.disabled = ocupado;
   });
 }
 
@@ -1109,6 +1115,8 @@ function textoDoProgresso(lote) {
 
 const ROTULO_LOTE = {
   running: 'Aguardando você conferir no navegador',
+  pausing: 'Pausa solicitada; concluindo a nota atual',
+  stopping: 'Interrupção solicitada; concluindo a nota atual',
   paused: 'Pausado nesta nota',
   stopped: 'Interrompido',
   completed: 'Concluído',

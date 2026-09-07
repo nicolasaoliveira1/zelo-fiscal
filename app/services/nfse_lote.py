@@ -696,7 +696,7 @@ def calcular_alvos(nota_id=None, lote_id=None, competencia=None):
 # Desfechos em que o trabalho acabou: o navegador nao tem mais razao de ficar
 # aberto (e segurando a chave do certificado no registro). `paused` fica de
 # fora — retomar depende da MESMA janela, ainda na tela de revisao.
-STATUS_QUE_FECHAM_O_NAVEGADOR = ('stopped', 'completed', 'error')
+STATUS_QUE_FECHAM_O_NAVEGADOR = ('stopping', 'stopped', 'completed', 'error')
 
 
 def _encerrar_sessao(_ctx):

@@ -44,6 +44,7 @@ def batch_state_defaults():
         'message': None,
         'stop_requested': False,
         'stop_action': None,
+        'worker_active': False,
         # alvo do circuit breaker que pausou este lote (spec 09); None = pausa
         # manual ou nenhuma. E o que permite liberar a pausa sozinha depois.
         'pausado_por_breaker': None,
@@ -88,6 +89,7 @@ def build_batch_status_payload(batch_state):
         'last_completed': batch_state.get('last_completed'),
         'success': batch_state.get('success', 0),
         'execution_id': batch_state.get('execution_id'),
+        'worker_active': batch_state.get('worker_active', False),
         'fgts_marcadas_pendente': batch_state.get('fgts_marcadas_pendente', 0),
         'positivas': batch_state.get('positivas', 0),
         'negativas': batch_state.get('negativas', 0),
@@ -133,9 +135,43 @@ def marcar_resultado_pendente(state, lock=None):
         _inc()
 
 
-def run_worker(worker_fn, app_factory):
+def _marcar_worker_inativo(batch_lock, batch_state, execution_id):
+    """Libera o dono do lote sem permitir que um worker antigo o faça.
+
+    O ``execution_id`` é um token de posse: uma finalização atrasada de uma
+    execução anterior nunca pode limpar o estado de uma retomada que já criou
+    outro worker.
+    """
+    with batch_lock:
+        if batch_state.get('execution_id') != execution_id:
+            return
+        batch_state['worker_active'] = False
+        if batch_state.get('stop_requested') and batch_state.get('status') not in (
+            'error', 'completed'
+        ):
+            batch_state['status'] = (
+                'stopped' if batch_state.get('stop_action') == 'stop' else 'paused'
+            )
+            if batch_state.get('stop_action') == 'stop':
+                batch_state['finished_at'] = utcnow_naive()
+            batch_state['stop_requested'] = False
+            batch_state['stop_action'] = None
+        elif batch_state.get('stop_requested'):
+            batch_state['stop_requested'] = False
+            batch_state['stop_action'] = None
+
+
+def run_worker(worker_fn, app_factory, on_finished=None):
     app = app_factory()
-    thread = Thread(target=worker_fn, args=(app,), daemon=True)
+
+    def _executar():
+        try:
+            worker_fn(app)
+        finally:
+            if on_finished:
+                on_finished()
+
+    thread = Thread(target=_executar, daemon=True)
     thread.start()
 
 
@@ -282,20 +318,6 @@ def run_batch_loop(
 
                 with lock:
                     if state['stop_requested']:
-                        if state.get('stop_action') == 'stop':
-                            state['status'] = 'stopped'
-                            append_batch_message(
-                                state,
-                                f'Lote {nome_lote} interrompido por solicitação.',
-                                level='warning',
-                            )
-                        else:
-                            state['status'] = 'paused'
-                            append_batch_message(
-                                state,
-                                f'Lote {nome_lote} pausado por solicitação.',
-                                level='warning',
-                            )
                         break
 
                     if state['index'] >= state['total']:
@@ -351,12 +373,6 @@ def run_batch_loop(
                     )
 
                 with lock:
-                    if state['stop_requested']:
-                        state['status'] = (
-                            'stopped' if state.get('stop_action') == 'stop' else 'paused'
-                        )
-                        break
-
                     if grave == GRAVE_FATAL or (grave and parar_em_grave):
                         # Para o lote: no manual, qualquer grave para (default);
                         # GRAVE_FATAL (driver/sessao morta) para SEMPRE, mesmo no
@@ -425,6 +441,8 @@ def run_batch_loop(
                         )
 
                     state['index'] += 1
+                    if state['stop_requested']:
+                        break
             if alerta_pendente is not None and on_breaker_aberto:
                 # o lote saiu do laco (pausou/terminou) com um alerta na agulha
                 try:
@@ -442,6 +460,26 @@ def run_batch_loop(
                     on_teardown(setup_ctx)
                 except Exception:
                     pass
+            with lock:
+                if state.get('stop_requested'):
+                    if state.get('status') not in ('error', 'completed'):
+                        if state.get('stop_action') == 'stop':
+                            state['status'] = 'stopped'
+                            state['finished_at'] = utcnow_naive()
+                            append_batch_message(
+                                state,
+                                f'Lote {nome_lote} interrompido por solicitação.',
+                                level='warning',
+                            )
+                        else:
+                            state['status'] = 'paused'
+                            append_batch_message(
+                                state,
+                                f'Lote {nome_lote} pausado por solicitação.',
+                                level='warning',
+                            )
+                    state['stop_requested'] = False
+                    state['stop_action'] = None
             if on_finish:
                 # desfecho do lote (contexto de app ainda ativo aqui); best-effort
                 try:
@@ -477,7 +515,9 @@ def lote_ocupa_o_tipo(batch_state):
     pausa de breaker ja vencida NAO ocupa: quem fecha e a janela do breaker, nao
     o estado do lote, e sem isso um portal fora de madrugada travaria o tipo
     inteiro pelo resto da vida do processo (o e-mail promete o contrario)."""
-    if batch_state.get('status') not in ('running', 'paused'):
+    if batch_state.get('worker_active'):
+        return True
+    if batch_state.get('status') not in ('running', 'pausing', 'stopping', 'paused'):
         return False
     return not pausa_de_breaker_vencida(batch_state)
 
@@ -491,7 +531,18 @@ def _registrar_pedido_de_pausa(batch_state):
     # operador pausou de proposito (e o "Retomar" dele pararia de funcionar).
     batch_state['pausado_por_breaker'] = None
     if batch_state['status'] == 'running':
-        batch_state['status'] = 'paused'
+        if batch_state.get('worker_active'):
+            batch_state['status'] = 'pausing'
+        else:
+            # Sem worker, não há item em voo para aguardar: a pausa já é
+            # efetiva. Isso também mantém idempotentes as guardas usadas por
+            # fluxos que já chegaram a `paused`.
+            batch_state['status'] = 'paused'
+            batch_state['stop_requested'] = False
+            batch_state['stop_action'] = None
+    elif not batch_state.get('worker_active'):
+        batch_state['stop_requested'] = False
+        batch_state['stop_action'] = None
     return batch_state.get('driver')
 
 
@@ -513,7 +564,7 @@ def solicitar_pausa_se_rodando(batch_lock, batch_state):
         pausa_do_breaker = (
             status == 'paused' and batch_state.get('pausado_por_breaker')
         )
-        if status != 'running' and not pausa_do_breaker:
+        if status not in ('running',) and not pausa_do_breaker:
             return False
         _registrar_pedido_de_pausa(batch_state)
         return True
@@ -522,9 +573,15 @@ def solicitar_pausa_se_rodando(batch_lock, batch_state):
 def _registrar_pedido_de_parada(batch_state):
     batch_state['stop_requested'] = True
     batch_state['stop_action'] = 'stop'
-    batch_state['status'] = 'stopped'
     batch_state['pausado_por_breaker'] = None
-    batch_state['finished_at'] = utcnow_naive()
+    if batch_state.get('worker_active'):
+        if batch_state.get('status') in ('running', 'pausing', 'paused'):
+            batch_state['status'] = 'stopping'
+    else:
+        batch_state['status'] = 'stopped'
+        batch_state['finished_at'] = utcnow_naive()
+        batch_state['stop_requested'] = False
+        batch_state['stop_action'] = None
     return batch_state.get('driver')
 
 
@@ -536,7 +593,9 @@ def request_stop(batch_lock, batch_state):
 def solicitar_parada_se_ativa(batch_lock, batch_state):
     """Para somente um lote em execução ou pausado, numa decisão atômica."""
     with batch_lock:
-        if batch_state.get('status') not in ('running', 'paused'):
+        if batch_state.get('status') not in (
+            'running', 'pausing', 'stopping', 'paused'
+        ):
             return False
         _registrar_pedido_de_parada(batch_state)
         return True
@@ -544,7 +603,7 @@ def solicitar_parada_se_ativa(batch_lock, batch_state):
 
 def resume_batch(batch_lock, batch_state, worker_fn, app_factory):
     with batch_lock:
-        if batch_state['status'] != 'paused':
+        if batch_state['status'] != 'paused' or batch_state.get('worker_active'):
             return False
 
         batch_state['stop_requested'] = False
@@ -552,8 +611,16 @@ def resume_batch(batch_lock, batch_state, worker_fn, app_factory):
         # retomou: a pausa do breaker deixou de existir (se o portal ainda
         # estiver fora, o proprio laco pausa de novo e remarca)
         batch_state['pausado_por_breaker'] = None
+        batch_state['worker_active'] = True
+        execution_id = batch_state.get('execution_id')
 
-    run_worker(worker_fn, app_factory)
+    run_worker(
+        worker_fn,
+        app_factory,
+        on_finished=lambda: _marcar_worker_inativo(
+            batch_lock, batch_state, execution_id
+        ),
+    )
     return True
 
 
@@ -589,11 +656,19 @@ def init_batch_run(
             'finished_at': None,
             'success': 0,
             'execution_id': CorrelationContext.new_execution_id(),
+            'worker_active': True,
         })
         if state_values:
             batch_state.update(state_values)
+        execution_id = batch_state['execution_id']
 
-    run_worker(worker_fn, app_factory)
+    run_worker(
+        worker_fn,
+        app_factory,
+        on_finished=lambda: _marcar_worker_inativo(
+            batch_lock, batch_state, execution_id
+        ),
+    )
     return dados_lote
 
 

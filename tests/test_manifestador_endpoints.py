@@ -576,9 +576,9 @@ def test_retomar_sem_lote_pausado_devolve_409(client):
     assert client.post('/manifestador/lote/retomar').status_code == 409
 
 
-def test_pausar_e_parar_respondem_ok(client):
-    assert client.post('/manifestador/lote/pausar').status_code == 200
-    assert client.post('/manifestador/lote/parar').status_code == 200
+def test_pausar_e_parar_sem_lote_sao_recusados(client):
+    assert client.post('/manifestador/lote/pausar').status_code == 409
+    assert client.post('/manifestador/lote/parar').status_code == 409
 
 
 def test_inicios_concorrentes_preservam_opcoes_do_vencedor(
@@ -618,8 +618,8 @@ def test_inicios_concorrentes_preservam_opcoes_do_vencedor(
         chegada_admissao.wait(timeout=5)
         return original_init(*args, **kwargs)
 
-    def worker_falso(worker_fn, app_factory):
-        workers.append((worker_fn, app_factory))
+    def worker_falso(worker_fn, app_factory, on_finished=None):
+        workers.append((worker_fn, app_factory, on_finished))
 
     monkeypatch.setattr(batch_engine, 'init_batch_run', init_sincronizado)
     monkeypatch.setattr(batch_engine, 'run_worker', worker_falso)

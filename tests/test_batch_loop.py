@@ -234,10 +234,26 @@ def test_stop_during_emit():
     emit = make_emit([(True, False, None), (True, False, None)], on_call=on_call)
     run(state, emit)
     assert state['status'] == 'stopped', state['status']
-    assert state['success'] == 0   # nao contabiliza apos parada
-    assert state['index'] == 0     # nao avanca
+    assert state['success'] == 1   # conclui o item que ja estava em voo
+    assert state['index'] == 1     # nao inicia o proximo item
     assert emit.calls['n'] == 1
     print('ok test_stop_during_emit')
+
+
+def test_pause_during_emit_conclui_item_e_nao_inicia_o_proximo():
+    state = make_state([1, 2])
+
+    def on_call(cid, driver, eid, i):
+        if i == 0:
+            state['stop_requested'] = True
+            state['stop_action'] = 'pause'
+
+    emit = make_emit([(True, False, None), (True, False, None)], on_call=on_call)
+    run(state, emit)
+    assert state['status'] == 'paused', state['status']
+    assert state['success'] == 1
+    assert state['index'] == 1
+    assert emit.calls['n'] == 1
 
 
 def test_recover_fn():
@@ -333,7 +349,12 @@ def test_init_batch_run_aplica_valores_antes_do_worker():
         observado['opcoes'] = state['opcoes_execucao'].copy()
         observado['ids'] = list(state['ids'])
 
-    batch_engine.run_worker = lambda worker_fn, app_factory: worker_fn(app_factory())
+    def run_worker_sincrono(worker_fn, app_factory, on_finished=None):
+        worker_fn(app_factory())
+        if on_finished:
+            on_finished()
+
+    batch_engine.run_worker = run_worker_sincrono
     try:
         resultado = batch_engine.init_batch_run(
             FakeLock(), state, None, calc_targets, worker, FakeApp,
@@ -404,7 +425,12 @@ def test_init_batch_run_cria_snapshot_para_nova_execucao():
         observados.append(state['opcoes_execucao']['tipo_evento'])
         state['status'] = 'completed'
 
-    batch_engine.run_worker = lambda worker_fn, app_factory: worker_fn(app_factory())
+    def run_worker_sincrono(worker_fn, app_factory, on_finished=None):
+        worker_fn(app_factory())
+        if on_finished:
+            on_finished()
+
+    batch_engine.run_worker = run_worker_sincrono
     try:
         for tipo_evento in ('210220', '210200'):
             resultado = batch_engine.init_batch_run(
