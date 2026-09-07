@@ -232,6 +232,33 @@ def test_item_delega_para_a_costura_com_o_tipo_do_lote(app, ids, monkeypatch):
         assert falso.chamadas[0]['tipo_evento'] == svc.DESCONHECIMENTO
 
 
+def test_itens_seguem_o_snapshot_da_execucao(app, ids, monkeypatch):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81')
+        primeira = _chave(emp, CHAVES[0])
+        segunda = _chave(emp, CHAVES[1])
+        falso = _ManifestarFalso()
+        monkeypatch.setattr(lote, 'manifestar', falso)
+
+        with batch_state.MANIF_BATCH_LOCK:
+            batch_state.MANIF_BATCH_STATE['opcoes_execucao'] = {
+                'modo': 'carteira',
+                'tipo_evento': svc.DESCONHECIMENTO,
+                'empresa_id': None,
+                'competencia': None,
+                'chave_id': None,
+            }
+        try:
+            lote._manifestar_item(primeira.id, None, 'exec-1')
+            lote._manifestar_item(segunda.id, None, 'exec-1')
+        finally:
+            from app.services import batch_engine
+            batch_engine.reset_batch_state(batch_state.MANIF_BATCH_STATE)
+
+        assert [chamada['tipo_evento'] for chamada in falso.chamadas] == [
+            svc.DESCONHECIMENTO, svc.DESCONHECIMENTO]
+
+
 def test_falha_de_um_item_nao_e_grave(app, ids, monkeypatch):
     """Rejeicao de uma nota nao pode derrubar o lote: as outras 199 continuam."""
     with app.app_context():
@@ -325,11 +352,55 @@ def test_modos_declarados_sao_os_tres_da_spec():
 
 def test_status_traz_o_modo_e_a_chave_corrente(app, ids):
     with app.app_context():
-        dados = lote.status()
+        with batch_state.MANIF_BATCH_LOCK:
+            batch_state.MANIF_BATCH_STATE['opcoes_execucao'] = {
+                'modo': 'carteira',
+                'tipo_evento': svc.DESCONHECIMENTO,
+                'empresa_id': None,
+                'competencia': None,
+                'chave_id': None,
+            }
+        try:
+            dados = lote.status()
+        finally:
+            from app.services import batch_engine
+            batch_engine.reset_batch_state(batch_state.MANIF_BATCH_STATE)
 
         assert 'status' in dados
         assert 'modo' in dados
         assert 'chave_id' in dados
+        assert dados['modo'] == 'carteira'
+        assert dados['tipo_evento'] == svc.DESCONHECIMENTO
+
+
+def test_status_le_opcoes_dentro_do_lock(app, monkeypatch):
+    class LockObservado:
+        def __init__(self):
+            self.ativo = False
+
+        def __enter__(self):
+            self.ativo = True
+
+        def __exit__(self, *_args):
+            self.ativo = False
+
+    lock = LockObservado()
+    observado = {}
+
+    def ler_opcoes_com_lock():
+        observado['lock_ativo'] = lock.ativo
+        return {'modo': 'carteira', 'tipo_evento': svc.DESCONHECIMENTO}
+
+    monkeypatch.setattr(lote, 'MANIF_BATCH_LOCK', lock)
+    monkeypatch.setattr(lote, 'manif_batch_opcoes_locked',
+                        ler_opcoes_com_lock)
+
+    with app.app_context():
+        dados = lote.status()
+
+    assert observado['lock_ativo'] is True
+    assert dados['modo'] == 'carteira'
+    assert dados['tipo_evento'] == svc.DESCONHECIMENTO
 
 
 def test_lote_nao_cria_driver(app, ids):

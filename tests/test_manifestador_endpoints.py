@@ -7,6 +7,8 @@ Um teste em especial vale por muitos: o filtro da lista tem de ser EXATAMENTE o
 que o lote enfileira. Divergir os dois manifestaria notas que o operador nao
 esta olhando.
 """
+from threading import Barrier, Thread
+
 from app import db
 from app.models import (
     CertificadoEmpresa,
@@ -15,12 +17,13 @@ from app.models import (
     EstadoCertificado,
     StatusManifestacao,
 )
+from app.automation import batch_state
 from app.automation.batch_state import (
     MANIF_BATCH_STATE,
     definir_manif_opcoes,
     manif_batch_opcoes,
 )
-from app.services import batch_engine, manifestador_lote
+from app.services import batch_engine, manifestador_lote, manifestador_service
 
 CHAVE_A = '43170122333444000181650010000045391000045393'
 CHAVE_B = '43170122333444000181650010000045401000045408'
@@ -576,3 +579,102 @@ def test_retomar_sem_lote_pausado_devolve_409(client):
 def test_pausar_e_parar_respondem_ok(client):
     assert client.post('/manifestador/lote/pausar').status_code == 200
     assert client.post('/manifestador/lote/parar').status_code == 200
+
+
+def test_inicios_concorrentes_preservam_opcoes_do_vencedor(
+    app, ids, monkeypatch
+):
+    """O pedido recusado não pode trocar o evento ou a fila já admitidos."""
+    with app.app_context():
+        empresa_a = _empresa('EMPRESA A', '11.222.333/0001-81',
+                             EstadoCertificado.PRONTO)
+        empresa_b = _empresa('EMPRESA B', '22.333.444/0001-92',
+                             EstadoCertificado.PRONTO)
+        chave_a = _chave(empresa_a, CHAVE_A)
+        chave_b = _chave(empresa_b, CHAVE_B)
+        empresa_a_id = empresa_a.id
+        chave_a_id = chave_a.id
+        chave_b_id = chave_b.id
+
+    payloads = [
+        {
+            'modo': 'carteira',
+            'tipo_evento': manifestador_service.DESCONHECIMENTO,
+        },
+        {
+            'modo': 'empresa',
+            'tipo_evento': manifestador_service.CONFIRMACAO,
+            'empresa_id': empresa_a_id,
+            'competencia': '2017-01',
+        },
+    ]
+    respostas = []
+    chegada_admissao = Barrier(2)
+    workers = []
+
+    original_init = batch_engine.init_batch_run
+
+    def init_sincronizado(*args, **kwargs):
+        chegada_admissao.wait(timeout=5)
+        return original_init(*args, **kwargs)
+
+    def worker_falso(worker_fn, app_factory):
+        workers.append((worker_fn, app_factory))
+
+    monkeypatch.setattr(batch_engine, 'init_batch_run', init_sincronizado)
+    monkeypatch.setattr(batch_engine, 'run_worker', worker_falso)
+    monkeypatch.setattr(
+        'app.services.manifestador_cofre.estado_da_carteira',
+        lambda: {'prontas': 2},
+    )
+
+    def enviar(payload):
+        with app.test_client() as cliente:
+            cliente.post('/login', data={
+                'username': 'admin_test',
+                'senha': 'senha-admin-1',
+            })
+            resposta = cliente.post('/manifestador/lote/iniciar', json=payload)
+            respostas.append((payload, resposta.status_code, resposta.get_json()))
+
+    threads = [Thread(target=enviar, args=(payload,)) for payload in payloads]
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        assert all(not thread.is_alive() for thread in threads)
+        assert sorted(status for _payload, status, _corpo in respostas) == [200, 409]
+        assert len(workers) == 1
+
+        vencedor, _status_vencedor, corpo_vencedor = next(
+            item for item in respostas if item[1] == 200
+        )
+        assert corpo_vencedor['tipo_evento'] == vencedor['tipo_evento']
+
+        with app.app_context():
+            assert batch_state.manif_batch_opcoes()['tipo_evento'] == (
+                vencedor['tipo_evento'])
+            assert MANIF_BATCH_STATE['scope'] == vencedor['modo']
+            ids_aceitos = list(MANIF_BATCH_STATE['ids'])
+            esperado = ([chave_a_id, chave_b_id]
+                        if vencedor['modo'] == 'carteira'
+                        else [chave_a_id])
+            assert ids_aceitos == esperado
+
+            chamadas = []
+
+            def manifestar_falso(chave_id, tipo_evento=None, **_kwargs):
+                chamadas.append((chave_id, tipo_evento))
+                return manifestador_service.Resultado(True, 'Manifestada.')
+
+            monkeypatch.setattr(manifestador_lote, 'manifestar', manifestar_falso)
+            for chave_id in ids_aceitos:
+                manifestador_lote._manifestar_item(
+                    chave_id, None, MANIF_BATCH_STATE['execution_id'])
+
+            assert [tipo for _chave_id, tipo in chamadas] == [
+                vencedor['tipo_evento'] for _ in ids_aceitos]
+    finally:
+        batch_engine.reset_batch_state(MANIF_BATCH_STATE)
