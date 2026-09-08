@@ -671,6 +671,15 @@ async function importarXml() {
 
 // --- ligação ----------------------------------------------------------------
 
+let idParaRecuperar = null;
+let _modalRecuperar = null;
+
+/** Instância preguiçosa: o modal só existe depois que o template renderiza. */
+function modalRecuperar() {
+  if (!_modalRecuperar) _modalRecuperar = new bootstrap.Modal($('manifRecuperarModal'));
+  return _modalRecuperar;
+}
+
 function ligar() {
   $('manifCofreToggle').addEventListener('click', () => alternarCofre());
 
@@ -716,15 +725,23 @@ function ligar() {
   $('manifBusca').addEventListener('input', pintarLista);
   $('manifEvento').addEventListener('change', avaliarBotao);
   $('manifLista').addEventListener('change', avaliarBotao);
-  $('manifLista').addEventListener('click', async (e) => {
+  $('manifLista').addEventListener('click', (e) => {
     const botao = e.target.closest('[data-recuperar]');
     if (!botao) return;
-    if (!window.confirm('Confirma que o envio foi interrompido? A chave ficará sem desfecho; confira a SEFAZ antes de reprocessar.')) return;
+    const chave = chaves.find((c) => String(c.id) === String(botao.dataset.recuperar));
+    $('manifRecuperarChave').innerHTML = chave ? chaveSegmentada(chave.chave) : '';
+    idParaRecuperar = botao.dataset.recuperar;
+    modalRecuperar().show();
+  });
+  $('manifRecuperarConfirmar').addEventListener('click', async () => {
+    modalRecuperar().hide();
+    if (!idParaRecuperar) return;
     try {
-      await pedir(`/manifestador/chave/${botao.dataset.recuperar}/recuperar`, { method: 'POST' });
+      await pedir(`/manifestador/chave/${idParaRecuperar}/recuperar`, { method: 'POST' });
       toast('Envio marcado como sem desfecho. Confira a SEFAZ antes de repetir.', 'warning');
       await carregarChaves();
     } catch (erro) { toast(erro.message, 'error'); }
+    idParaRecuperar = null;
   });
   $('manifMarcarTudo').addEventListener('change', (e) => {
     document.querySelectorAll('.manif-check').forEach((i) => { i.checked = e.target.checked; });
