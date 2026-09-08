@@ -7,8 +7,8 @@
     --zelo-ink: #16181C;
     --zelo-graphite: #2B2F36;
     --zelo-graphite-rgb: 43, 47, 54;
-    --zelo-slate: #6B7280;
-    --zelo-slate-rgb: 107, 114, 128;
+    --zelo-slate: #69707E;
+    --zelo-slate-rgb: 105, 112, 126;
     --zelo-line: #E3E6EB;
     --zelo-mist: #F5F6F8;
     --zelo-paper: #FFFFFF;
@@ -23,6 +23,16 @@
     --zelo-muted: #9AA1AB;
     /* "pendente" tem tom próprio (provável débito) — distinto de "vencida" */
     --zelo-pend: #C2622A;
+
+    /* status como TEXTO. O token acima é o de PREENCHIMENTO (bolinha, borda,
+       faixa `*-soft`); escurecido o bastante, ele reprovaria como preenchimento,
+       e claro o bastante para preencher, reprova como texto. No claro os dois
+       papéis não cabem no mesmo valor: sobre a própria faixa `*-soft` o texto
+       ficava em 3.18–4.07 (AA pede 4.5). No escuro cabem, e a tinta é o token. */
+    --zelo-ok-ink: #2B744C;
+    --zelo-warn-ink: #8D5D06;
+    --zelo-danger-ink: #B23A33;
+    --zelo-pend-ink: #A35223;
 
     /* status — banda suave de fundo (date-cell / linha); só a cor fala, texto fica neutro */
     --zelo-ok-soft: color-mix(in srgb, var(--zelo-ok) 16%, var(--zelo-paper));
@@ -131,9 +141,15 @@
    sobre um preenchimento sólido, então precisam do token do tema — o vermelho
    escuro do claro sumiria no fundo escuro. Bootstrap declara estes utilitários
    com !important, então a reposição também precisa. */
-.text-success { color: var(--zelo-ok) !important; }
-.text-danger { color: var(--zelo-danger) !important; }
-.text-warning { color: var(--zelo-warn) !important; }
+.text-success { color: var(--zelo-ok-ink) !important; }
+.text-danger { color: var(--zelo-danger-ink) !important; }
+.text-warning { color: var(--zelo-warn-ink) !important; }
+/* .text-secondary cai na mesma armadilha por outro caminho: no Bootstrap 5.3 ele
+   deriva de --bs-secondary-rgb, e essa variável NÃO pode trocar por tema porque
+   text-bg-secondary a usa como fundo sólido de badge com texto branco. Resultado:
+   o texto secundário ficava #6B7280 nos dois temas — 4.47 no claro e 3.65 sobre o
+   cartão escuro. O token de chrome já tem valor para cada tema. */
+.text-secondary { color: var(--zelo-slate) !important; }
 
 /* Pilha de toasts: recolhidos (deck) por padrao, expandem no hover */
 .toast-stack {
@@ -225,6 +241,12 @@
     --zelo-danger-rgb: 232, 115, 107;
     --zelo-muted: #6B7280;
     --zelo-pend: #D98A52;
+
+    /* no escuro o token de preenchimento já tem contraste de texto */
+    --zelo-ok-ink: var(--zelo-ok);
+    --zelo-warn-ink: var(--zelo-warn);
+    --zelo-danger-ink: var(--zelo-danger);
+    --zelo-pend-ink: var(--zelo-pend);
 
     --zelo-ok-soft: color-mix(in srgb, var(--zelo-ok) 22%, var(--zelo-paper));
     --zelo-warn-soft: color-mix(in srgb, var(--zelo-warn) 22%, var(--zelo-paper));
@@ -1092,6 +1114,7 @@ footer {
 
 .zl-comp-d {
     font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
     font-size: var(--zl-fs-4);
     color: var(--bs-secondary-color);
 }
@@ -1168,6 +1191,9 @@ footer {
     gap: var(--zl-space-2);
     font-size: var(--zl-fs-2);
     color: var(--bs-secondary-color);
+    /* é link: precisa do alvo mínimo de 24x24 (WCAG 2.2, SC 2.5.8) */
+    min-height: 1.5rem;
+    padding-block: 0.125rem;
 }
 
 .zl-comp-stat::before {
@@ -2097,9 +2123,9 @@ body.topo-visivel .zl-dock {
     font-weight: 600;
 }
 
-.batch-progress-live.is-warning { color: var(--zelo-warn); }
+.batch-progress-live.is-warning { color: var(--zelo-warn-ink); }
 .batch-progress-live.is-warning .batch-progress-live-dot { background: var(--zelo-warn); }
-.batch-progress-live.is-error { color: var(--zelo-danger); }
+.batch-progress-live.is-error { color: var(--zelo-danger-ink); }
 .batch-progress-live.is-error .batch-progress-live-dot { background: var(--zelo-danger); }
 
 /* pausado: nada está acontecendo — o ponto para de pulsar */
@@ -2226,9 +2252,12 @@ body.topo-visivel .zl-dock {
 }
 
 @media (max-width: 900px) {
+    /* Abaixo de 900px este botão é o ÚNICO acesso à navegação, e é tocado com o
+       dedo — encolhê-lo aqui invertia a regra. 44px é o alvo confortável; o
+       ícone continua do mesmo tamanho, quem cresce é a área clicável. */
     .menu-button {
-        width: 22px;
-        height: 22px;
+        width: 44px;
+        height: 44px;
     }
     .menu-button .menu-icon {
         font-size: var(--zl-fs-4);
@@ -2780,21 +2809,21 @@ tr.status-cinza > td:nth-last-child(3) {
 .btn-check:checked + .chip-green {
     background-color: var(--zelo-ok-soft);
     border-color: var(--zelo-ok);
-    color: var(--zelo-ok);
+    color: var(--zelo-ok-ink);
     box-shadow: var(--zl-elev-1);
 }
 
 .btn-check:checked + .chip-yellow {
     background-color: var(--zelo-warn-soft);
     border-color: var(--zelo-warn);
-    color: var(--zelo-warn);
+    color: var(--zelo-warn-ink);
     box-shadow: var(--zl-elev-1);
 }
 
 .btn-check:checked + .chip-red {
     background-color: var(--zelo-danger-soft);
     border-color: var(--zelo-danger);
-    color: var(--zelo-danger);
+    color: var(--zelo-danger-ink);
     box-shadow: var(--zl-elev-1);
 }
 
@@ -2902,10 +2931,21 @@ tr.status-cinza > td:nth-last-child(3) {
 }
 
 /* ── Status de validade — tokens Zelo trocam sozinhos por tema ── */
-.cert-status-ok      { color: var(--zelo-ok); }
-.cert-status-warn    { color: var(--zelo-warn); }
-.cert-status-danger  { color: var(--zelo-danger); }
-.cert-status-muted   { color: var(--zelo-muted); }
+/* Utilitário do papel "Dados" da tipografia: mono + dígito de largura fixa.
+   Existe para não repetir o par em cada tela e para não cair no
+   `.font-monospace` do Bootstrap, que traz outra família (SFMono) e nenhum
+   tabular-nums — o dígito dança quando a tela atualiza sozinha. */
+.zl-num {
+    font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.cert-status-ok      { color: var(--zelo-ok-ink); }
+.cert-status-warn    { color: var(--zelo-warn-ink); }
+.cert-status-danger  { color: var(--zelo-danger-ink); }
+/* "sem data" como texto é o cinza de texto do sistema; --zelo-muted continua
+   pintando a bolinha e a faixa, onde ele não precisa de contraste de leitura. */
+.cert-status-muted   { color: var(--zelo-slate); }
 
 /* ══════════════════════════════════════════════════════════════
    LINHA DE RAZÃO (E-09) — tipo · guia · validade · ações
@@ -3254,7 +3294,7 @@ tr.filter-hidden {
 }
 
 .manif-chave .f-cnpj { color: var(--zelo-graphite); }
-.manif-chave .f-dv { color: var(--zelo-muted); }
+.manif-chave .f-dv { color: var(--zelo-slate); }
 
 .manif-chave-leg {
     font-size: var(--zl-fs-1);
@@ -3310,6 +3350,7 @@ tr.filter-hidden {
 
 .manif-ta {
     font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
     font-size: var(--zl-fs-2);
 }
 
@@ -3381,6 +3422,7 @@ tr.filter-hidden {
 
 .manif-fonte-num {
     font-family: var(--zelo-font-mono);
+    font-variant-numeric: tabular-nums;
     font-size: var(--zl-fs-1);
     color: var(--bs-secondary-color);
     white-space: nowrap;
@@ -3419,13 +3461,13 @@ tr.filter-hidden {
     white-space: nowrap;
 }
 
-.manif-st.is-ok { background: var(--zelo-ok-soft); color: var(--zelo-ok); }
-.manif-st.is-warn { background: var(--zelo-warn-soft); color: var(--zelo-warn); }
-.manif-st.is-danger { background: var(--zelo-danger-soft); color: var(--zelo-danger); }
+.manif-st.is-ok { background: var(--zelo-ok-soft); color: var(--zelo-ok-ink); }
+.manif-st.is-warn { background: var(--zelo-warn-soft); color: var(--zelo-warn-ink); }
+.manif-st.is-danger { background: var(--zelo-danger-soft); color: var(--zelo-danger-ink); }
 .manif-st.is-muted { background: var(--zelo-muted-soft); color: var(--bs-secondary-color); }
 .manif-st.is-pend {
     background: color-mix(in srgb, var(--zelo-pend) 16%, var(--zelo-paper));
-    color: var(--zelo-pend);
+    color: var(--zelo-pend-ink);
 }
 
 /* ══════════════════════════════════════════════════════════════

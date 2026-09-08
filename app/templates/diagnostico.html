@@ -33,7 +33,7 @@
         <span class="small text-muted">Verde = o portal responde (não garante que a emissão funciona)</span>
     </div>
     <div class="table-responsive">
-        <table class="table table-sm table-hover mb-0 align-middle">
+        <table class="table table-sm table-hover mb-0 align-middle" aria-label="Saúde dos portais">
             <thead>
                 <tr>
                             <th scope="col" style="width: 230px;">Portal</th>
@@ -74,7 +74,7 @@
 <div class="card">
     <div class="card-header">{{ zl_secao('Últimos erros e avisos') }}</div>
     <div class="table-responsive">
-        <table class="table table-sm table-hover mb-0 align-middle">
+        <table class="table table-sm table-hover mb-0 align-middle" aria-label="Últimos erros e avisos">
             <thead>
                 <tr>
                             <th scope="col" style="width: 150px;">Quando</th>
@@ -98,7 +98,7 @@
         <span class="small text-muted">Verifica os seletores sem emitir (não gasta captcha)</span>
     </div>
     <div class="table-responsive">
-        <table class="table table-sm table-hover mb-0 align-middle">
+        <table class="table table-sm table-hover mb-0 align-middle" aria-label="Automação dos municípios">
             <thead>
                 <tr>
                             <th scope="col" style="width: 180px;">Município</th>
@@ -320,7 +320,8 @@
                 + '<button type="button" class="btn btn-sm btn-soft-primary"'
                 + ' data-devolver-motivo="' + esc(g.error_type) + '">Devolver o grupo à fila</button>'
                 + '</div>'
-                + '<div class="table-responsive"><table class="table table-sm mb-0 align-middle">'
+                + '<div class="table-responsive"><table class="table table-sm mb-0 align-middle"'
+                + ' aria-label="Falhas do grupo ' + esc(g.titulo) + '">'
                 + '<thead><tr><th scope="col">Empresa</th><th scope="col" style="width:110px;">Tipo</th><th scope="col">Último erro</th>'
                 + '<th scope="col" style="width:90px;">Tentativas</th><th scope="col" style="width:150px;">Quando</th>'
                 + '<th scope="col" style="width:110px;"></th></tr></thead>'

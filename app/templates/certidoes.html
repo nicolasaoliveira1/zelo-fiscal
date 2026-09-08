@@ -270,7 +270,7 @@
                 <div class="input-group busca">
                     <span class="input-group-text border-end-0"><i class="bi bi-search text-muted"></i></span>
                     <input type="search" class="form-control border-start-0 ps-1" id="filtroEmpresa"
-                        placeholder="Buscar empresa...">
+                        placeholder="Buscar empresa..." aria-label="Buscar empresa">
                 </div>
 
                 <div class="filtro-dd" id="estado-dd">
@@ -444,7 +444,8 @@
                 </div>
             </div>
             <div class="card-body p-0">
-                <table class="table mb-0">
+                {#- esqueleto de carregamento: forma, não conteúdo — fica fora do leitor de tela -#}
+                <table class="table mb-0" aria-hidden="true">
                     <tbody>
                         {% for _ in range(3) %}
                         <tr>

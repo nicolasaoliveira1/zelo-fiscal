@@ -4,7 +4,7 @@
 
 {% block content %}
 <style>
-    .rel-num { font-family: var(--zelo-font-mono); }
+    .rel-num { font-family: var(--zelo-font-mono); font-variant-numeric: tabular-nums; }
     .rel-dot {
         display: inline-block;
         width: .55rem;
@@ -32,6 +32,7 @@
     .rel-rank-row:last-child { border-bottom: 0; }
     .rel-rank-count {
         font-family: var(--zelo-font-mono);
+        font-variant-numeric: tabular-nums;
         font-weight: 600;
         color: var(--zelo-pend);
     }
@@ -270,7 +271,7 @@
         <p class="text-body-secondary small mb-3">{{ ultimas_emitidas|length }} certidão(ões) mais recentes.</p>
         {% if ultimas_emitidas %}
         <div class="rel-list-scroll table-responsive">
-            <table class="table table-sm rel-table align-middle mb-0">
+            <table class="table table-sm rel-table align-middle mb-0" aria-label="Últimas certidões emitidas">
                 <thead>
                     <tr class="text-body-secondary">
                             <th scope="col">Empresa</th>
@@ -344,7 +345,7 @@
         <p class="text-body-secondary small mb-3">{{ lista_pendentes|length }} certidão(ões) aguardando resolução.</p>
         {% if lista_pendentes %}
         <div class="rel-list-scroll table-responsive">
-            <table class="table table-sm rel-table align-middle mb-0">
+            <table class="table table-sm rel-table align-middle mb-0" aria-label="Certidões pendentes">
                 <thead>
                     <tr class="text-body-secondary">
                             <th scope="col">Empresa</th>
