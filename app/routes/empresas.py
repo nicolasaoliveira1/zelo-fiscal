@@ -211,8 +211,8 @@ def empresa_remover(empresa_id):
         # diz a ninguem o que fazer e ainda expoe nome de tabela e constraint.
         # O detalhe tecnico continua inteiro na auditoria, onde se investiga.
         db.session.rollback()
-        flash(f'Nao foi possivel remover "{nome}": ainda ha registros de outras '
-              f'telas vinculados a ela. O detalhe tecnico ficou na auditoria.',
+        flash(f'Não foi possível remover "{nome}": ainda há registros de outras '
+              f'telas vinculados a ela. O detalhe técnico ficou na auditoria.',
               'danger')
         auditoria.registrar('empresa.remover', alvo_tipo='empresa', alvo_id=empresa_id,
                             resultado='erro', detalhe=str(exc))
@@ -518,4 +518,3 @@ def adicionar_empresa():
         auditoria.registrar('empresa.criar', resultado='erro', detalhe=str(e))
 
     return _redirect_apos_cadastro()
-

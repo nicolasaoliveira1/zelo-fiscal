@@ -120,5 +120,7 @@ def test_erro_de_vinculo_nao_despeja_traceback_na_tela(client, ids, app, monkeyp
 
     assert 'Empresa Teste' in corpo
     assert 'registros de outras' in corpo
+    assert 'Não foi possível remover' in corpo
+    assert 'detalhe técnico ficou na auditoria' in corpo
     assert '1451' not in corpo, 'erro cru do driver nao vai para a tela'
     assert 'tarefa_emissao' not in corpo
