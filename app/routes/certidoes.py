@@ -25,6 +25,7 @@ from app.automation.emissao import (
     _pick_changed_download_pdf,
     _snapshot_downloads_pdf,
 )
+from app.automation import pdf
 from app.models import (
     Certidao,
     TipoCertidao,
@@ -202,6 +203,15 @@ def monitorar_download_federal(certidao_id):
 
         if novo_arquivo:
             log_event('federal_file_detected', certidao_id=certidao_id, arquivo=str(novo_arquivo))
+
+            titular_confere = pdf.cnpj_do_pdf_confere(
+                novo_arquivo, certidao.empresa.cnpj, origem_log='FEDERAL')
+            if titular_confere is not True:
+                log_event('federal_file_titular_inconclusivo', level='WARNING',
+                          certidao_id=certidao_id, leitura_ok=titular_confere is not None)
+                return _json_error(
+                    'O PDF encontrado não comprova o CNPJ desta empresa; ele não foi associado.',
+                    409, status='titular_inconclusivo')
 
             sucesso, msg = file_manager.mover_e_renomear(
                 novo_arquivo,
