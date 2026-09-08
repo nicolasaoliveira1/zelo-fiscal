@@ -53,6 +53,21 @@ class Empresa(db.Model):
     # delas consulta `ChaveManifestacao` direto, com filtro.
     chaves_manifestacao = db.relationship(
         'ChaveManifestacao', backref='empresa', cascade='all, delete-orphan')
+    # Fila de emissao: some com a empresa. Tarefa de emitir certidao de empresa
+    # que nao existe mais nao tem o que fazer — e sem esta cascata o InnoDB
+    # barrava a remocao inteira na FK (errno 1451), com a tela mostrando so o
+    # traceback do driver. lazy PADRAO: a listagem de empresas nao le a fila.
+    tarefas_emissao = db.relationship(
+        'TarefaEmissao', backref='empresa', cascade='all, delete-orphan')
+    # Estas duas NAO levam delete-orphan, e e decisao, nao esquecimento: as
+    # colunas sao `nullable=True` e o conteudo sobrevive a empresa. Nota de
+    # honorarios e documento fiscal e nao se apaga por remocao de cadastro; com
+    # `empresa_id` nulo ela volta ao estado "ainda nao vinculada", que a
+    # conciliacao ja sabe tratar. O apelido guarda `documento` e continua
+    # poupando digitacao mesmo sem a empresa. Sem relationship declarada o
+    # SQLAlchemy nao tocava em nenhuma das duas, e o banco recusava a remocao.
+    notas_nfse = db.relationship('NotaNfse', backref='empresa')
+    apelidos_nfse = db.relationship('ApelidoNfse', backref='empresa')
 
     def __repr__(self):
         return f'<Empresa {self.nome}>'
@@ -147,6 +162,13 @@ class Certidao(db.Model):
     atualizado_em = db.Column(
         db.DateTime, nullable=True,
         default=datetime.now, onupdate=datetime.now)
+
+    # `TarefaEmissao.certidao_id` e NOT NULL: sem esta cascata, apagar a certidao
+    # (inclusive em cascata a partir da empresa) deixaria a tarefa apontando para
+    # linha inexistente, e o InnoDB recusa. E a mesma cascata declarada em
+    # Empresa; as duas precisam existir porque a FK da fila e dupla.
+    tarefas_emissao = db.relationship(
+        'TarefaEmissao', backref='certidao', cascade='all, delete-orphan')
 
     def __repr__(self):
         if self.subtipo:

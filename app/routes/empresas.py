@@ -15,6 +15,8 @@ from flask import (
     url_for, session
 )
 
+from sqlalchemy.exc import IntegrityError
+
 from app import db, file_manager
 from app.automation.emissao import (
     _formatar_cnpj,
@@ -194,14 +196,29 @@ def empresa_remover(empresa_id):
         flash('Confirmação de remoção não recebida.', 'warning')
         return redirect(next_url)
 
+    # Lido ANTES do delete: depois do commit o nome serve so para a mensagem, e
+    # depender do objeto removido para escreve-la e frageis a toa.
+    nome = empresa.nome
+
     try:
         db.session.delete(empresa)
         db.session.commit()
-        flash(f'Empresa "{empresa.nome}" removida com sucesso.', 'success')
+        flash(f'Empresa "{nome}" removida com sucesso.', 'success')
         auditoria.registrar('empresa.remover', alvo_tipo='empresa', alvo_id=empresa_id)
+    except IntegrityError as exc:
+        # O banco recusou por vinculo. Ate aqui a tela recebia o traceback cru do
+        # driver ("(1451, 'Cannot delete or update a parent row...')"), que nao
+        # diz a ninguem o que fazer e ainda expoe nome de tabela e constraint.
+        # O detalhe tecnico continua inteiro na auditoria, onde se investiga.
+        db.session.rollback()
+        flash(f'Nao foi possivel remover "{nome}": ainda ha registros de outras '
+              f'telas vinculados a ela. O detalhe tecnico ficou na auditoria.',
+              'danger')
+        auditoria.registrar('empresa.remover', alvo_tipo='empresa', alvo_id=empresa_id,
+                            resultado='erro', detalhe=str(exc))
     except Exception as exc:
         db.session.rollback()
-        flash(f'Erro ao remover empresa: {exc}', 'danger')
+        flash(f'Erro ao remover "{nome}". O detalhe ficou na auditoria.', 'danger')
         auditoria.registrar('empresa.remover', alvo_tipo='empresa', alvo_id=empresa_id,
                             resultado='erro', detalhe=str(exc))
 
