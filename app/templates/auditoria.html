@@ -46,7 +46,7 @@
 
     <div class="card">
         <div class="table-responsive">
-            <table class="table table-sm align-middle mb-0">
+            <table class="table table-sm align-middle mb-0" aria-label="Eventos de auditoria">
                 <thead>
                     <tr>
                         <th scope="col">Data/hora</th>
@@ -60,16 +60,16 @@
                 <tbody>
                     {% for ev in eventos %}
                     <tr>
-                        <td class="font-monospace text-nowrap">
+                        <td class="zl-num text-nowrap">
                             <time class="js-utc" data-utc="{{ ev.criado_em_iso }}">{{ ev.criado_em.strftime('%d/%m/%Y %H:%M') }}</time>
                         </td>
                         <td>
                             {{ ev.usuario_nome or '—' }}
                             {% if ev.papel %}<span class="badge rounded-pill text-bg-secondary text-uppercase">{{ ev.papel }}</span>{% endif %}
                         </td>
-                        <td class="font-monospace">{{ ev.acao }}</td>
+                        <td class="zl-num">{{ ev.acao }}</td>
                         <td class="text-body-secondary small">{% if ev.alvo_tipo %}{{ ev.alvo_tipo }}{% if ev.alvo_id %} #{{ ev.alvo_id }}{% endif %}{% else %}—{% endif %}</td>
-                        <td class="font-monospace small">{{ ev.ip or '—' }}</td>
+                        <td class="zl-num small">{{ ev.ip or '—' }}</td>
                         <td>
                             {% if ev.resultado == 'erro' %}
                             <span class="badge text-bg-danger">erro</span>

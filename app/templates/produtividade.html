@@ -45,7 +45,7 @@
             <div class="card-body p-0">
                 {% if dados.por_tipo %}
                 <div class="table-responsive">
-                    <table class="table table-sm mb-0 align-middle">
+                    <table class="table table-sm mb-0 align-middle" aria-label="Produtividade por tipo">
                         <thead>
                             <tr>
                             <th scope="col">Tipo</th>
@@ -83,7 +83,7 @@
             <div class="card-header">{{ zl_secao('Origem dos lotes') }}</div>
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-sm mb-0 align-middle">
+                    <table class="table table-sm mb-0 align-middle" aria-label="Origem dos lotes">
                         <thead>
                             <tr>
                             <th scope="col">Origem</th>
@@ -112,7 +112,7 @@
             <div class="card-body p-0">
                 {% if dados.emissoes_por_dia %}
                 <div class="table-responsive">
-                    <table class="table table-sm mb-0 align-middle">
+                    <table class="table table-sm mb-0 align-middle" aria-label="Emissões por dia">
                         <thead>
                     <tr><th scope="col">Data</th><th scope="col" class="text-end">Emissões</th></tr>
                         </thead>

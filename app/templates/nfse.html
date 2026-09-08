@@ -62,6 +62,7 @@
     }
     .nfse-mono {
         font-family: var(--zelo-font-mono);
+        font-variant-numeric: tabular-nums;
         font-size: 0.84rem;
         white-space: nowrap;
     }
@@ -237,6 +238,7 @@
     .nfse-contadores { display: flex; flex-wrap: wrap; gap: 1.25rem; }
     .nfse-contador .valor {
         font-family: var(--zelo-font-mono);
+        font-variant-numeric: tabular-nums;
         font-size: 1.35rem;
         font-weight: 600;
         line-height: 1.1;
@@ -332,6 +334,7 @@
     }
     .nfse-total .valor {
         font-family: var(--zelo-font-mono);
+        font-variant-numeric: tabular-nums;
         font-size: 1.7rem;
         font-weight: 600;
         line-height: 1;
@@ -666,7 +669,7 @@
         </p>
         {% endif %}
         <div class="table-responsive">
-            <table class="table table-sm align-middle">
+            <table class="table table-sm align-middle" aria-label="Histórico de versões do contrato">
                 <thead>
                     <tr>
                         <th scope="col">Versão</th>
@@ -777,7 +780,8 @@
             <form id="formImportar" class="d-flex gap-2 align-items-center flex-wrap">
                 <input class="form-control form-control-sm" type="file" id="arquivoCsv"
                        name="arquivo" accept=".csv,text/csv,.pdf,application/pdf"
-                       multiple style="max-width: 22rem;">
+                       multiple style="max-width: 22rem;"
+                       aria-label="Arquivo do extrato ou CSV para importar">
                 <button class="btn btn-primary btn-sm" type="submit">Importar</button>
             </form>
             {% if lote %}
@@ -1002,7 +1006,8 @@
     </div>
 
     <div class="nfse-tabela-wrap">
-        <table class="table table-sm align-middle nfse-tabela mb-0" id="tabelaNotas">
+        <table class="table table-sm align-middle nfse-tabela mb-0" id="tabelaNotas"
+               aria-label="Notas de honorários da competência">
             <thead>
                 <tr>
                 <th scope="col"><input type="checkbox" class="nfse-check" id="checkTodas"
