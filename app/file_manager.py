@@ -3,6 +3,7 @@ import shutil
 import time
 import glob
 import unicodedata
+import uuid
 from thefuzz import process, fuzz
 
 from app.errors import map_exception_to_error_type
@@ -356,35 +357,24 @@ def mover_e_renomear(caminho_arquivo_origem, nome_empresa, tipo_certidao):
     else:
         novo_nome = f"CERTIDAO {tipo_certidao_limpo}{extensao}"
 
-    limpar_versoes_antigas(destino_final, novo_nome, tipo_certidao)
-
     caminho_destino_completo = os.path.join(destino_final, novo_nome)
+    caminho_temporario = f'{caminho_destino_completo}.novo-{uuid.uuid4().hex}'
 
     try:
-        shutil.move(caminho_arquivo_origem, caminho_destino_completo)
-        log_event(
-            'arquivo_movido',
-            empresa_nome=nome_empresa,
-            tipo_certidao=tipo_certidao,
-            caminho_destino=caminho_destino_completo,
-            status='ok',
-            duration_ms=int((time.time() - inicio) * 1000),
-        )
-        return True, caminho_destino_completo
+        shutil.move(caminho_arquivo_origem, caminho_temporario)
     except (OSError, PermissionError):
         try:
-            shutil.copy2(caminho_arquivo_origem, caminho_destino_completo)
+            shutil.copy2(caminho_arquivo_origem, caminho_temporario)
             os.remove(caminho_arquivo_origem)
             log_event(
                 'arquivo_movido_fallback_copy',
                 level='WARNING',
                 empresa_nome=nome_empresa,
                 tipo_certidao=tipo_certidao,
-                caminho_destino=caminho_destino_completo,
+                caminho_destino=caminho_temporario,
                 status='ok',
                 duration_ms=int((time.time() - inicio) * 1000),
             )
-            return True, caminho_destino_completo
         except (OSError, PermissionError) as e2:
             log_event(
                 'arquivo_mover_falha',
@@ -396,6 +386,33 @@ def mover_e_renomear(caminho_arquivo_origem, nome_empresa, tipo_certidao):
                 duration_ms=int((time.time() - inicio) * 1000),
             )
             return False, str(e2)
+
+    try:
+        os.replace(caminho_temporario, caminho_destino_completo)
+    except OSError as erro:
+        log_event(
+            'arquivo_substituir_falha',
+            level='ERROR',
+            empresa_nome=nome_empresa,
+            tipo_certidao=tipo_certidao,
+            caminho_destino=caminho_destino_completo,
+            caminho_temporario=caminho_temporario,
+            error=str(erro),
+            status='error',
+            duration_ms=int((time.time() - inicio) * 1000),
+        )
+        return False, str(erro)
+
+    limpar_versoes_antigas(destino_final, novo_nome, tipo_certidao)
+    log_event(
+        'arquivo_movido',
+        empresa_nome=nome_empresa,
+        tipo_certidao=tipo_certidao,
+        caminho_destino=caminho_destino_completo,
+        status='ok',
+        duration_ms=int((time.time() - inicio) * 1000),
+    )
+    return True, caminho_destino_completo
 
 
 def _normalizar_nome(texto):
