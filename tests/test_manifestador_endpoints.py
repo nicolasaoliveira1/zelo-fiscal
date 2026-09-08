@@ -368,6 +368,45 @@ def test_reprocessar_recusa_manifestada(app, ids, client):
     assert resposta.status_code == 400
 
 
+def test_recuperar_envio_interrompido_preserva_desfecho_desconhecido(app, ids, client):
+    with app.app_context():
+        chave_id = _chave(_empresa(), status=StatusManifestacao.ENVIANDO).id
+
+    resposta = client.post(f'/manifestador/chave/{chave_id}/recuperar')
+
+    assert resposta.status_code == 200
+    assert resposta.get_json()['chave']['status'] == 'indefinida'
+    with app.app_context():
+        linha = db.session.get(ChaveManifestacao, chave_id)
+        assert linha.status == StatusManifestacao.INDEFINIDA
+        assert 'interrompido' in linha.xmotivo
+
+
+def test_recuperar_envio_nao_reenvia_chave_que_nao_esta_enviando(app, ids, client):
+    with app.app_context():
+        chave_id = _chave(_empresa(), status=StatusManifestacao.PENDENTE).id
+
+    resposta = client.post(f'/manifestador/chave/{chave_id}/recuperar')
+
+    assert resposta.status_code == 400
+
+
+def test_recuperar_envio_recusa_item_ainda_ativo(app, ids, client):
+    with app.app_context():
+        chave_id = _chave(_empresa(), status=StatusManifestacao.ENVIANDO).id
+        with batch_state.MANIF_BATCH_LOCK:
+            MANIF_BATCH_STATE['worker_active'] = True
+            MANIF_BATCH_STATE['current_id'] = chave_id
+    try:
+        resposta = client.post(f'/manifestador/chave/{chave_id}/recuperar')
+    finally:
+        with batch_state.MANIF_BATCH_LOCK:
+            MANIF_BATCH_STATE['worker_active'] = False
+            MANIF_BATCH_STATE['current_id'] = None
+
+    assert resposta.status_code == 409
+
+
 def test_rotas_de_chave_inexistente_devolvem_404(client):
     assert client.post('/manifestador/chave/999999/competencia',
                        json={'competencia': '2017-01'}).status_code == 404

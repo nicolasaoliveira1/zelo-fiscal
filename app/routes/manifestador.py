@@ -469,3 +469,26 @@ def manifestador_reprocessar(chave_id):
     linha.xmotivo = None
     db.session.commit()
     return {'status': 'ok', 'chave': _chave_para_json(linha)}
+
+
+@bp.route('/manifestador/chave/<int:chave_id>/recuperar', methods=['POST'])
+@requer_papel('operador')
+def manifestador_recuperar_envio(chave_id):
+    """Registra o desfecho desconhecido de envio abandonado, sem reenviar."""
+    from app.models import StatusManifestacao
+
+    linha = db.session.get(ChaveManifestacao, chave_id)
+    if linha is None:
+        return json_error('Chave não encontrada.', 404)
+    with MANIF_BATCH_LOCK:
+        ativo = MANIF_BATCH_STATE.get('worker_active') and \
+            MANIF_BATCH_STATE.get('current_id') == chave_id
+    if ativo:
+        return json_error('Esta chave ainda está sendo processada.', 409)
+    if linha.status != StatusManifestacao.ENVIANDO:
+        return json_error('Somente chave em envio interrompido pode ser recuperada.', 400)
+    linha.status = StatusManifestacao.INDEFINIDA
+    linha.xmotivo = 'Envio interrompido; confirme na SEFAZ antes de reprocessar.'
+    db.session.commit()
+    log_event('manifestador_envio_recuperado', chave_id=chave_id)
+    return {'status': 'ok', 'chave': _chave_para_json(linha)}

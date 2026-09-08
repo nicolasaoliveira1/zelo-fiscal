@@ -334,6 +334,9 @@ function pintarLista() {
          ${c.competencia ? `<span>competência <b>${escapar(c.competencia)}</b>`
            + `${divergiu ? ' (entrada em outro mês)' : ''}</span>` : ''}
        </div>`;
+    const recuperar = c.status === 'enviando'
+      ? '<button type="button" class="btn btn-ghost btn-sm" data-recuperar="' + c.id
+        + '">Confirmar interrupção</button>' : '';
     return `<tr data-id="${c.id}">
       <td>${marcavel ? `<input type="checkbox" class="manif-check" value="${c.id}"
               aria-label="Marcar ${escapar(c.empresa || '')}">` : ''}</td>
@@ -343,7 +346,7 @@ function pintarLista() {
         ${legenda}
         ${motivo ? `<div class="manif-motivo">${escapar(motivo)}</div>` : ''}
       </td>
-      <td><span class="manif-st is-${cor}">${escapar(rotulo)}</span>${prazo}</td>
+      <td><span class="manif-st is-${cor}">${escapar(rotulo)}</span>${prazo}${recuperar}</td>
     </tr>`;
   }).join('');
 
@@ -713,6 +716,16 @@ function ligar() {
   $('manifBusca').addEventListener('input', pintarLista);
   $('manifEvento').addEventListener('change', avaliarBotao);
   $('manifLista').addEventListener('change', avaliarBotao);
+  $('manifLista').addEventListener('click', async (e) => {
+    const botao = e.target.closest('[data-recuperar]');
+    if (!botao) return;
+    if (!window.confirm('Confirma que o envio foi interrompido? A chave ficará sem desfecho; confira a SEFAZ antes de reprocessar.')) return;
+    try {
+      await pedir(`/manifestador/chave/${botao.dataset.recuperar}/recuperar`, { method: 'POST' });
+      toast('Envio marcado como sem desfecho. Confira a SEFAZ antes de repetir.', 'warning');
+      await carregarChaves();
+    } catch (erro) { toast(erro.message, 'error'); }
+  });
   $('manifMarcarTudo').addEventListener('change', (e) => {
     document.querySelectorAll('.manif-check').forEach((i) => { i.checked = e.target.checked; });
     avaliarBotao();
