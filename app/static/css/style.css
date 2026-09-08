@@ -316,17 +316,17 @@
 }
 
 .btn-outline-success {
-    --zelo-outline-color: var(--zelo-ok);
+    --zelo-outline-color: var(--zelo-ok-ink);
     --zelo-outline-focus-rgb: var(--zelo-ok-rgb);
 }
 
 .btn-outline-danger {
-    --zelo-outline-color: var(--zelo-danger);
+    --zelo-outline-color: var(--zelo-danger-ink);
     --zelo-outline-focus-rgb: var(--zelo-danger-rgb);
 }
 
 .btn-outline-warning {
-    --zelo-outline-color: var(--zelo-warn);
+    --zelo-outline-color: var(--zelo-warn-ink);
     --zelo-outline-focus-rgb: var(--zelo-warn-rgb);
 }
 
@@ -1540,14 +1540,14 @@ body.topo-visivel .zl-dock {
     gap: var(--zl-space-2);
     padding: var(--zl-space-2) var(--zl-space-4);
     background: var(--zelo-danger-soft);
-    color: var(--zelo-danger);
+    color: var(--zelo-danger-ink);
     font-weight: 600;
     font-size: var(--zl-fs-2);
 }
 
 .vg-faixa-h.is-calmo {
     background: var(--zelo-ok-soft);
-    color: var(--zelo-ok);
+    color: var(--zelo-ok-ink);
 }
 
 .vg-faixa-item {
@@ -2830,7 +2830,7 @@ tr.status-cinza > td:nth-last-child(3) {
 .btn-check:checked + .chip-red-outline {
     background-color: var(--zelo-paper);
     border-color: var(--zelo-danger);
-    color: var(--zelo-danger);
+    color: var(--zelo-danger-ink);
     box-shadow: var(--zl-elev-1);
 }
 
@@ -3317,8 +3317,8 @@ tr.filter-hidden {
 }
 
 .manif-andamento-linha { font-size: var(--zl-fs-2); font-weight: 500; }
-.manif-andamento-linha.is-warning { color: var(--zelo-warn); }
-.manif-andamento-linha.is-error { color: var(--zelo-danger); }
+.manif-andamento-linha.is-warning { color: var(--zelo-warn-ink); }
+.manif-andamento-linha.is-error { color: var(--zelo-danger-ink); }
 
 /* ── painel de entrada ───────────────────────────────────────── */
 .manif-entrada {
@@ -3593,7 +3593,7 @@ tr.filter-hidden {
    que trazem hex literal), então remapear alcança tudo.
    ══════════════════════════════════════════════════════════════ */
 :root {
-    --bs-form-invalid-color: var(--zelo-danger);
+    --bs-form-invalid-color: var(--zelo-danger-ink);
     --bs-form-invalid-border-color: var(--zelo-danger);
 }
 
