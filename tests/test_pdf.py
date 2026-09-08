@@ -30,3 +30,18 @@ def test_desconhecida():
 def test_acentos_e_espacos_normalizados():
     # acentos removidos e espacos colapsados antes da classificacao
     assert pdf.classificar_texto('certidão    negativa') == 'negativa'
+
+
+def test_cnpj_do_pdf_confere_somente_com_prova_textual(monkeypatch):
+    monkeypatch.setattr(pdf, 'extrair_texto_com_status',
+                        lambda *_args, **_kwargs: ('CNPJ: 11.222.333/0001-81', True))
+
+    assert pdf.cnpj_do_pdf_confere('sintetico.pdf', '11222333000181') is True
+    assert pdf.cnpj_do_pdf_confere('sintetico.pdf', '99888777000166') is False
+
+
+def test_cnpj_do_pdf_sem_leitura_e_inconclusivo(monkeypatch):
+    monkeypatch.setattr(pdf, 'extrair_texto_com_status',
+                        lambda *_args, **_kwargs: ('', False))
+
+    assert pdf.cnpj_do_pdf_confere('sintetico.pdf', '11222333000181') is None

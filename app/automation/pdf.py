@@ -58,6 +58,21 @@ def extrair_texto(caminho_pdf, origem_log='PDF'):
     return extrair_texto_com_status(caminho_pdf, origem_log=origem_log)[0]
 
 
+def cnpj_do_pdf_confere(caminho_pdf, cnpj_esperado, origem_log='PDF'):
+    """Confere o CNPJ esperado no texto do PDF, sem inferir titularidade.
+
+    ``None`` representa leitura inconclusiva; para associação automática isso é
+    diferente do gate de sanidade: sem prova positiva, o arquivo não tem dono.
+    """
+    texto, leitura_ok = extrair_texto_com_status(caminho_pdf, origem_log=origem_log)
+    if not leitura_ok:
+        return None
+    esperado = re.sub(r'\D', '', str(cnpj_esperado or ''))
+    encontrados = {re.sub(r'\D', '', item) for item in re.findall(
+        r'\b\d{2}[.\s]?\d{3}[.\s]?\d{3}[/-]?\d{4}[-\s]?\d{2}\b', texto)}
+    return bool(esperado and esperado in encontrados)
+
+
 def _normalizar(texto):
     texto = file_manager.remover_acentos(texto or '')
     texto = re.sub(r'\s+', ' ', texto)

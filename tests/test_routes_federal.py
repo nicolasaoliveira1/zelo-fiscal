@@ -29,6 +29,7 @@ def _monitor_mocks(finalizar_ret):
                          return_value='/tmp/chave-inexistente'), \
             patch.object(certidoes, '_snapshot_downloads_pdf', return_value=set()), \
             patch.object(certidoes, '_pick_changed_download_pdf', return_value='/tmp/fed.pdf'), \
+            patch.object(certidoes.pdf, 'cnpj_do_pdf_confere', return_value=True), \
             patch.object(certidoes.file_manager, 'mover_e_renomear', return_value=(True, '/rede/fed.pdf')), \
             patch.object(certidoes, '_gerar_visualizar_token', return_value='tok'), \
             patch.object(certidoes.certidao_service, 'finalizar_federal', return_value=finalizar_ret):
@@ -79,6 +80,19 @@ def test_monitor_exige_login(app, client_anon):
     fid = _federal_id(app)
     resp = client_anon.get(f'/certidao/monitorar_download_federal/{fid}')
     assert resp.status_code in (302, 401)
+
+
+def test_monitor_nao_associa_pdf_sem_prova_do_titular(app, client):
+    fid = _federal_id(app)
+    with _monitor_mocks({'ok': True, 'pendente': False, 'data_validade': None,
+                         'message': None}), \
+            patch.object(certidoes.pdf, 'cnpj_do_pdf_confere', return_value=False), \
+            patch.object(certidoes.file_manager, 'mover_e_renomear') as mover:
+        resposta = client.get(f'/certidao/monitorar_download_federal/{fid}')
+
+    assert resposta.status_code == 409
+    assert resposta.get_json()['status'] == 'titular_inconclusivo'
+    mover.assert_not_called()
 
 
 # ---- F3: upload manual (POST /certidao/federal/registrar/<id>) ----
