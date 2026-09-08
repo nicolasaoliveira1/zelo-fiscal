@@ -49,7 +49,8 @@ def create_app(config_class=Config):
             _aplicar_migrations_pendentes()
         checks = run_health_checks(app.config)
         log_event('startup_health_checks', checks=checks)
-        _reconciliar_nfse_orfas()
+        if _deve_reconciliar_nfse_orfas(app):
+            _reconciliar_nfse_orfas()
     
     # models importado para registrar as tabelas no SQLAlchemy/Migrate (efeito colateral)
     from app import routes, models  # noqa: F401
@@ -150,6 +151,22 @@ def _reconciliar_nfse_orfas():
         # Boot nao pode morrer por causa da limpeza: sem o app no ar o operador
         # nao tem nem como ver a nota travada, que e o problema que isto resolve.
         log_event('startup_nfse_reconciliacao_falhou', level='ERROR', error=str(e))
+
+
+def _deve_reconciliar_nfse_orfas(app):
+    """Só reconcilia no processo que efetivamente pode atender NFS-e.
+
+    Um comando administrativo cria outra aplicação sobre o mesmo banco sem
+    substituir o processo servidor. O pai do reloader também não executa o
+    servidor. Em ambos os casos, reconciliar `preenchendo` confundiria trabalho
+    vivo com abandono e devolveria a nota à fila sem prova.
+    """
+    from app.services import agendador
+
+    return (
+        not agendador.comando_cli_sem_servidor()
+        and not agendador.deve_adiar_para_reloader(app)
+    )
 
 
 def _limpar_chave_interrupcao_federal():
