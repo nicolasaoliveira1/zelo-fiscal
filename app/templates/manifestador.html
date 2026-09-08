@@ -193,6 +193,35 @@
     </div>
   </div>
 </section>
+
+{#- Confirmação de interrupção. É um "modal de confirmação com negativa nomeada":
+    o botão da esquerda é o "não" (terciário), o da direita carrega a semântica.
+    Não usar window.confirm aqui — diálogo nativo não tem tema, não tem a
+    tipografia do sistema e rotula os botões na língua do navegador, justamente
+    numa decisão que deixa a chave sem desfecho. -#}
+<div class="modal fade" id="manifRecuperarModal" tabindex="-1"
+     aria-labelledby="manifRecuperarModalTitulo" aria-hidden="true"
+     data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="manifRecuperarModalTitulo">Confirmar interrupção do envio</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2">A chave <span class="manif-chave" id="manifRecuperarChave"></span>
+          fica <strong>sem desfecho</strong>: o sistema deixa de afirmar se a SEFAZ
+          recebeu a manifestação ou não.</p>
+        <p class="mb-0 text-body-secondary">Confira na SEFAZ antes de reprocessar —
+          repetir uma manifestação que passou não é o mesmo que repetir uma que falhou.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Não, manter como está</button>
+        <button type="button" class="btn btn-danger" id="manifRecuperarConfirmar">Sim, marcar sem desfecho</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

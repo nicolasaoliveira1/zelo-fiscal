@@ -334,6 +334,9 @@ function pintarLista() {
          ${c.competencia ? `<span>competência <b>${escapar(c.competencia)}</b>`
            + `${divergiu ? ' (entrada em outro mês)' : ''}</span>` : ''}
        </div>`;
+    const recuperar = c.status === 'enviando'
+      ? '<button type="button" class="btn btn-ghost btn-sm" data-recuperar="' + c.id
+        + '">Confirmar interrupção</button>' : '';
     return `<tr data-id="${c.id}">
       <td>${marcavel ? `<input type="checkbox" class="manif-check" value="${c.id}"
               aria-label="Marcar ${escapar(c.empresa || '')}">` : ''}</td>
@@ -343,7 +346,7 @@ function pintarLista() {
         ${legenda}
         ${motivo ? `<div class="manif-motivo">${escapar(motivo)}</div>` : ''}
       </td>
-      <td><span class="manif-st is-${cor}">${escapar(rotulo)}</span>${prazo}</td>
+      <td><span class="manif-st is-${cor}">${escapar(rotulo)}</span>${prazo}${recuperar}</td>
     </tr>`;
   }).join('');
 
@@ -668,6 +671,15 @@ async function importarXml() {
 
 // --- ligação ----------------------------------------------------------------
 
+let idParaRecuperar = null;
+let _modalRecuperar = null;
+
+/** Instância preguiçosa: o modal só existe depois que o template renderiza. */
+function modalRecuperar() {
+  if (!_modalRecuperar) _modalRecuperar = new bootstrap.Modal($('manifRecuperarModal'));
+  return _modalRecuperar;
+}
+
 function ligar() {
   $('manifCofreToggle').addEventListener('click', () => alternarCofre());
 
@@ -713,6 +725,24 @@ function ligar() {
   $('manifBusca').addEventListener('input', pintarLista);
   $('manifEvento').addEventListener('change', avaliarBotao);
   $('manifLista').addEventListener('change', avaliarBotao);
+  $('manifLista').addEventListener('click', (e) => {
+    const botao = e.target.closest('[data-recuperar]');
+    if (!botao) return;
+    const chave = chaves.find((c) => String(c.id) === String(botao.dataset.recuperar));
+    $('manifRecuperarChave').innerHTML = chave ? chaveSegmentada(chave.chave) : '';
+    idParaRecuperar = botao.dataset.recuperar;
+    modalRecuperar().show();
+  });
+  $('manifRecuperarConfirmar').addEventListener('click', async () => {
+    modalRecuperar().hide();
+    if (!idParaRecuperar) return;
+    try {
+      await pedir(`/manifestador/chave/${idParaRecuperar}/recuperar`, { method: 'POST' });
+      toast('Envio marcado como sem desfecho. Confira a SEFAZ antes de repetir.', 'warning');
+      await carregarChaves();
+    } catch (erro) { toast(erro.message, 'error'); }
+    idParaRecuperar = null;
+  });
   $('manifMarcarTudo').addEventListener('change', (e) => {
     document.querySelectorAll('.manif-check').forEach((i) => { i.checked = e.target.checked; });
     avaliarBotao();
