@@ -3687,3 +3687,74 @@ tr.filter-hidden {
             var(--zelo-slate) 0 2px, transparent 2px 6px);
     }
 }
+
+/* === Contratos dos portais (Diagnóstico) =================================
+   Faixa de estado sempre visível + uma linha por incidente, decidida no
+   próprio lugar. Mesmo padrão da recon da NFS-e (`.nfse-contrato-*` em
+   nfse.html), aqui com prefixo neutro porque a central de contratos não é de
+   um domínio só. Quando a NFS-e migrar para estas classes, some a cópia.
+   A cor é só do status: o resto do bloco é monocromático. */
+.zl-contrato-faixa {
+    border-left: 3px solid var(--zelo-line);
+    background: var(--zelo-mist);
+    padding: 0.5rem 0.75rem;
+    border-radius: 0 var(--zl-radius-sm) var(--zl-radius-sm) 0;
+}
+.zl-contrato-faixa[data-estado="compativel"] {
+    border-left-color: var(--zelo-ok);
+    background: var(--zelo-ok-soft);
+}
+.zl-contrato-faixa[data-estado="autoajustado"] {
+    border-left-color: var(--zelo-warn);
+    background: var(--zelo-warn-soft);
+}
+.zl-contrato-faixa[data-estado="bloqueado"] {
+    border-left-color: var(--zelo-danger);
+    background: var(--zelo-danger-soft);
+}
+.zl-contrato-faixa[data-estado="desconhecido"] {
+    border-left-color: var(--zelo-muted);
+    background: var(--zelo-mist);
+}
+.zl-contrato-faixa .estado { font-weight: 600; }
+.zl-contrato-meta {
+    color: var(--zelo-slate);
+    font-size: 0.82rem;
+}
+.zl-contrato-incidente {
+    border-top: 1px solid var(--zelo-line);
+    padding: 0.4rem 0;
+}
+.zl-contrato-incidente:first-child { border-top: 0; }
+.zl-contrato-linha {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem 0.5rem;
+}
+.zl-contrato-campo { flex: 1 1 13rem; min-width: 0; }
+.zl-contrato-campo strong {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.zl-contrato-incidente [data-severidade="bloqueante"] {
+    background: var(--zelo-danger-soft);
+    color: var(--zelo-danger);
+    border-color: var(--zelo-danger);
+}
+.zl-contrato-incidente [data-severidade="informativa"] {
+    background: var(--zelo-warn-soft);
+    color: var(--zelo-warn);
+    border-color: var(--zelo-warn);
+}
+/* Erro fica NA LINHA, nunca em faixa global: com N incidentes uma mensagem no
+   topo não diz qual falhou. */
+.zl-contrato-erro {
+    color: var(--zelo-danger);
+    font-size: 0.82rem;
+}
+.zl-contrato-erro:empty { display: none; }

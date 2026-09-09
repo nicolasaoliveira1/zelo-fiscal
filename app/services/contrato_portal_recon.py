@@ -22,7 +22,10 @@ Um alvo que falhe não derruba os demais nem o scheduler (AC-07.5).
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from app.services import contrato_portal_preflight
+from app.services import contrato_portal, contrato_portal_preflight
+from app.services.contrato_portal_drift import COMPATIVEL as DRIFT_COMPATIVEL
+from app.services.contrato_portal_drift import REVISAO as DRIFT_REVISAO
+from app.services.contrato_portal_drift import comparar
 from app.services.execution_logger import log_event
 
 # Resultados de uma passada de recon e, para os três primeiros, também o estado
@@ -50,6 +53,9 @@ class AdaptadorRecon:
     observar: Callable[[Any, Any], Any]
     lock: Any = None
     recon_passivo_seguro: bool = False
+    # Baseline declarada no código, nunca derivada do DOM: a primeira versão
+    # ativa é decisão humana revisável (AC-01.5).
+    definicao: Callable[[], Any] | None = None
 
 
 def adaptadores_padrao() -> list[AdaptadorRecon]:
@@ -70,7 +76,23 @@ def adaptadores_padrao() -> list[AdaptadorRecon]:
         observar=trabalhista.observar_passivo,
         lock=TRABALHISTA_BATCH_LOCK,
         recon_passivo_seguro=True,
+        definicao=trabalhista.definicao_baseline,
     )]
+
+
+class AlvoOcupadoError(RuntimeError):
+    """Uma emissão está em curso no mesmo alvo; observar agora atrapalharia."""
+
+
+class NadaParaRevisarError(RuntimeError):
+    """A observação de agora não sustenta a revisão pedida."""
+
+
+def adaptador_por_alvo(fluxo, alvo):
+    for adaptador in adaptadores_padrao():
+        if adaptador.fluxo == fluxo and adaptador.alvo == alvo:
+            return adaptador
+    return None
 
 
 def _fechar(driver):
@@ -194,3 +216,79 @@ def estado_por_alvo() -> dict:
             estados[adaptador.chave_health] = {
                 'estado': DESCONHECIDO, 'versao': None, 'mensagem': None}
     return estados
+
+
+# --- ações sob demanda da central de Diagnóstico ---------------------------
+#
+# Tudo aqui abre navegador contra o portal real, sempre passivo: nenhuma dessas
+# funções preenche documento, resolve captcha ou submete. E todas passam pelo
+# lock do lote do alvo — observar durante uma emissão atrapalharia a emissão.
+
+def _observar_com_lock(adaptador, contrato, criar_driver):
+    lock = adaptador.lock
+    if lock is not None and not lock.acquire(blocking=False):
+        raise AlvoOcupadoError(
+            'Há uma emissão em curso neste portal. Tente novamente depois.')
+    driver = None
+    try:
+        driver = criar_driver()
+        return adaptador.observar(driver, contrato)
+    finally:
+        _fechar(driver)
+        if lock is not None:
+            lock.release()
+
+
+def recon_sob_demanda(adaptador, criar_driver, *, execution_id=None) -> str:
+    """Antecipa o recon agendado a pedido do admin. Mesmo caminho, mesma
+    política: autoativa só o inequívoco e registra incidente no resto."""
+    ativo = contrato_portal_preflight.buscar_ativo(
+        adaptador.fluxo, adaptador.alvo, obrigatorio=False)
+    if ativo is None:
+        return SEM_CONTRATO
+
+    lock = adaptador.lock
+    if lock is not None and not lock.acquire(blocking=False):
+        raise AlvoOcupadoError(
+            'Há uma emissão em curso neste portal. Tente novamente depois.')
+    try:
+        return _observar_alvo(adaptador, ativo, criar_driver, execution_id)
+    finally:
+        if lock is not None:
+            lock.release()
+
+
+def aceitar_incidente(incidente, adaptador, criar_driver, *, usuario_id):
+    """Observa de novo e promove a estrutura observada, se ela ainda se sustenta.
+
+    Uma observação só, duas comparações: a primeira diz o que mudou em relação
+    à base (e produz os remapeamentos da candidata), a segunda revalida a
+    candidata contra a MESMA observação — é o controle otimista que impede
+    aprovar uma tela que já mudou de novo (AC-06.4).
+    """
+    base = incidente.contrato_base
+    inventario = _observar_com_lock(adaptador, base, criar_driver)
+    resultado = comparar(contrato_portal_preflight.comparavel(base), inventario)
+    if resultado.classificacao != DRIFT_REVISAO:
+        raise NadaParaRevisarError(
+            'A observação de agora não reproduz a mudança registrada; '
+            'rode o recon antes de aprovar.')
+
+    candidata = contrato_portal.criar_candidata_revisao(
+        base.id,
+        ajustes=resultado.remapeamentos,
+        resultado=resultado,
+        fingerprint_base=base.fingerprint,
+        usuario_id=usuario_id,
+    )
+    revalidacao = comparar(contrato_portal_preflight.comparavel(candidata), inventario)
+    if revalidacao.classificacao != DRIFT_COMPATIVEL:
+        contrato_portal.rejeitar_candidata(candidata.id, usuario_id=usuario_id)
+        raise NadaParaRevisarError(
+            'A estrutura observada não fica compatível com o ajuste proposto.')
+    return contrato_portal.aceitar_candidata(
+        candidata.id,
+        fingerprint_base=base.fingerprint,
+        revalidacao=revalidacao,
+        usuario_id=usuario_id,
+    )

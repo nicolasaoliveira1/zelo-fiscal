@@ -92,7 +92,8 @@ def buscar_ativo(
         return None
 
 
-def _comparavel(contrato: ContratoPortal) -> ContratoComparavel:
+def comparavel(contrato: ContratoPortal) -> ContratoComparavel:
+    """Traduz a versão persistida para a forma que o comparador entende."""
     elementos = tuple(ElementoContratoComparavel(
         chave=item.chave,
         etapa=item.etapa,
@@ -168,7 +169,7 @@ def executar(
         raise ContratoPortalAusenteError(
             'O contrato fornecido não é a versão ativa do alvo.')
     inventario = observar(ativo)
-    resultado = comparar(_comparavel(ativo), inventario)
+    resultado = comparar(comparavel(ativo), inventario)
 
     if resultado.classificacao == AUTOATIVAVEL:
         ativo = contrato_portal.autoativar(
