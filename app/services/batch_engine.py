@@ -26,6 +26,9 @@ from app.services.execution_logger import log_event
 # run_batch_loop distingue os tres casos. O emit produz esse valor via
 # emissao._classificar_grave; o loop para SEMPRE nele, ate no modo tolerante.
 GRAVE_FATAL = 'fatal'
+# Drift estrutural já foi registrado uma vez pelo preflight. Interrompe também
+# o modo tolerante do agendador, sem alimentar novamente o breaker por item.
+GRAVE_CONTRATO_PORTAL = 'contrato_portal'
 
 
 def batch_state_defaults():
@@ -59,6 +62,7 @@ def batch_state_defaults():
         'efeito_negativas': 0,
         'execution_id': None,
         'opcoes_execucao': None,
+        'contrato_snapshot': None,
         'last_messages': [],
     }
 
@@ -373,10 +377,12 @@ def run_batch_loop(
                     )
 
                 with lock:
-                    if grave == GRAVE_FATAL or (grave and parar_em_grave):
-                        # Para o lote: no manual, qualquer grave para (default);
-                        # GRAVE_FATAL (driver/sessao morta) para SEMPRE, mesmo no
-                        # modo tolerante do agendador (RESIL-03/RESIL-04).
+                    if grave in (GRAVE_FATAL, GRAVE_CONTRATO_PORTAL) or (
+                        grave and parar_em_grave
+                    ):
+                        # Para o lote: no manual, qualquer grave para (default).
+                        # Driver morto e contrato estrutural bloqueado param
+                        # SEMPRE, inclusive no modo tolerante do agendador.
                         state['status'] = 'error'
                         state['message'] = mensagem or f'Erro grave no lote {nome_lote}.'
                         append_batch_message(

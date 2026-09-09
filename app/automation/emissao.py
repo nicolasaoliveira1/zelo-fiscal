@@ -57,7 +57,7 @@ from app.models import (
     TipoCertidao,
     get_a_vencer_dias,
 )
-from app.services import batch_engine
+from app.services import batch_engine, contrato_portal_preflight
 from app.services.correlation import CorrelationContext
 from app.utils import normalizar_cidade
 from app.services.retry import retry_call
@@ -1335,27 +1335,42 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
 
         TRABALHISTA_BATCH_STATE['driver'] = local_driver
         wait = WebDriverWait(local_driver, 20)
-        local_driver.get(info_site.get('url'))
+        snapshot_contrato = trabalhista.preparar_execucao(
+            local_driver,
+            url_legada=info_site.get('url'),
+            estado_lote=TRABALHISTA_BATCH_STATE,
+            execution_id=execution_id,
+        )
         try:
             _configurar_download_automatico_chrome(local_driver)
         except Exception as exc:
             log_event('trabalhista_batch_download_config_failed', level='WARNING',
                       certidao_id=certidao_id, error=str(exc))
 
-        # abre o formulário de emissão (pre-fill "Emitir Certidão")
-        steps.clicar_pre_fill(info_site, wait, by_padrao='css_selector')
+        # O legado podia ter uma etapa intermediária. No contrato atual, a rota
+        # aprovada já é o formulário e não existe pseudo-elemento de abertura.
+        if snapshot_contrato is None:
+            steps.clicar_pre_fill(info_site, wait, by_padrao='css_selector')
 
         # preenche o CNPJ
-        cnpj_by = steps.BY_MAP.get(info_site.get('by') or 'id')
-        if info_site.get('cnpj_field_id') and cnpj_by:
+        if snapshot_contrato is not None:
+            localizador_documento = trabalhista.localizador(
+                snapshot_contrato, 'documento')
+        else:
+            cnpj_by = steps.BY_MAP.get(info_site.get('by') or 'id')
+            localizador_documento = (
+                (cnpj_by, info_site['cnpj_field_id'])
+                if info_site.get('cnpj_field_id') and cnpj_by else None)
+        if localizador_documento:
             try:
                 campo = wait.until(EC.element_to_be_clickable(
-                    (cnpj_by, info_site['cnpj_field_id'])))
+                    localizador_documento))
                 campo.click()
                 campo.send_keys(cnpj_limpo)
                 campo.send_keys(Keys.TAB)
             except Exception:
-                pass
+                if snapshot_contrato is not None:
+                    raise
 
         snapshot_before = _snapshot_downloads_pdf(pasta_download(local_driver))
         achado_pdf = {'path': None}
@@ -1368,7 +1383,8 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
             return False
 
         ok, msg = trabalhista.resolver_captcha_e_submeter(
-            local_driver, current_app.config, _houve_sucesso, execution_id=execution_id)
+            local_driver, current_app.config, _houve_sucesso,
+            execution_id=execution_id, snapshot=snapshot_contrato)
 
         # O PDF baixado é a fonte de verdade: se chegou (mesmo que o helper tenha
         # esgotado a espera do submit), seguimos e reusamos o caminho já encontrado
@@ -1431,6 +1447,9 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
                 TRABALHISTA_BATCH_STATE, f"Trabalhista ID={certidao.id} emitida com sucesso.",
                 level='info', certidao_id=certidao.id)
         return True, False, None
+    except contrato_portal_preflight.ContratoPortalBloqueadoError as exc:
+        db.session.rollback()
+        return False, batch_engine.GRAVE_CONTRATO_PORTAL, str(exc)
     except Exception as exc:
         db.session.rollback()
         log_event('trabalhista_batch_error', level='ERROR', certidao_id=certidao_id,

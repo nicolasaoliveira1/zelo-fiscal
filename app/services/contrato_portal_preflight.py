@@ -77,6 +77,21 @@ def _carregar_ativo(fluxo: str, alvo: str) -> ContratoPortal:
     return ativo
 
 
+def buscar_ativo(
+    fluxo: str,
+    alvo: str,
+    *,
+    obrigatorio: bool = True,
+) -> ContratoPortal | None:
+    """Consulta a versão ativa; ausência só é tolerada no rollout explícito."""
+    try:
+        return _carregar_ativo(fluxo, alvo)
+    except ContratoPortalAusenteError:
+        if obrigatorio:
+            raise
+        return None
+
+
 def _comparavel(contrato: ContratoPortal) -> ContratoComparavel:
     elementos = tuple(ElementoContratoComparavel(
         chave=item.chave,
@@ -141,9 +156,17 @@ def executar(
     observar: Callable[[ContratoPortal], object],
     alvo_breaker: str | None = None,
     execution_id: str | None = None,
+    contrato_ativo: ContratoPortal | None = None,
 ) -> SnapshotContratoPortal:
     """Observa uma vez, decide e devolve somente uma versão pronta para fixar."""
-    ativo = _carregar_ativo(fluxo, alvo)
+    ativo = contrato_ativo or _carregar_ativo(fluxo, alvo)
+    if (
+        ativo.fluxo != fluxo
+        or ativo.alvo != alvo
+        or ativo.estado != 'ativa'
+    ):
+        raise ContratoPortalAusenteError(
+            'O contrato fornecido não é a versão ativa do alvo.')
     inventario = observar(ativo)
     resultado = comparar(_comparavel(ativo), inventario)
 
