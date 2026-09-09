@@ -1,4 +1,5 @@
 import enum
+import hashlib
 from sqlalchemy import event
 from app import db
 from app.utils import utcnow_naive
@@ -1076,6 +1077,182 @@ class OpcaoIncidenteContratoNfse(db.Model):
     ordem = db.Column(db.Integer, nullable=False, default=0)
 
     incidente = db.relationship('IncidenteContratoNfse', back_populates='opcoes')
+
+
+class ContratoPortal(db.Model):
+    """Versão imutável da estrutura aprovada de um portal de certidões."""
+    __tablename__ = 'contrato_portal'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'fluxo', 'alvo', 'versao',
+            name='uq_contrato_portal_fluxo_alvo_versao'),
+        db.UniqueConstraint(
+            'ativa_unica', name='uq_contrato_portal_ativa_unica'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    fluxo = db.Column(db.String(40), nullable=False, index=True)
+    alvo = db.Column(db.String(190), nullable=False, index=True)
+    versao = db.Column(db.Integer, nullable=False)
+    estado = db.Column(db.String(30), nullable=False, index=True)
+    # Hash de fluxo+alvo somente na versão ativa. NULL não colide nos índices
+    # únicos de SQLite/MySQL, mantendo a regra no banco sem índice parcial.
+    ativa_unica = db.Column(db.String(64), nullable=True)
+    host = db.Column(db.String(255), nullable=False)
+    rota = db.Column(db.String(500), nullable=False)
+    fingerprint = db.Column(db.String(64), nullable=False, index=True)
+    base_id = db.Column(
+        db.Integer,
+        db.ForeignKey('contrato_portal.id', ondelete='SET NULL'),
+        nullable=True, index=True)
+    origem = db.Column(db.String(20), nullable=False)
+    criado_em = db.Column(db.DateTime, nullable=False, default=utcnow_naive)
+    classificado_em = db.Column(db.DateTime, nullable=True)
+    ativado_em = db.Column(db.DateTime, nullable=True)
+    criado_por_id = db.Column(
+        db.Integer, db.ForeignKey('usuario.id', ondelete='SET NULL'),
+        nullable=True, index=True)
+    ativado_por_id = db.Column(
+        db.Integer, db.ForeignKey('usuario.id', ondelete='SET NULL'),
+        nullable=True, index=True)
+
+    base = db.relationship(
+        'ContratoPortal', remote_side=[id], foreign_keys=[base_id],
+        passive_deletes=True)
+    criado_por = db.relationship(
+        'Usuario', foreign_keys=[criado_por_id], passive_deletes=True)
+    ativado_por = db.relationship(
+        'Usuario', foreign_keys=[ativado_por_id], passive_deletes=True)
+    elementos = db.relationship(
+        'ElementoContratoPortal', back_populates='contrato',
+        cascade='all, delete-orphan', passive_deletes=True)
+    incidentes = db.relationship(
+        'IncidenteContratoPortal',
+        foreign_keys='IncidenteContratoPortal.contrato_base_id',
+        back_populates='contrato_base', cascade='all, delete-orphan',
+        passive_deletes=True)
+    incidentes_candidata = db.relationship(
+        'IncidenteContratoPortal',
+        foreign_keys='IncidenteContratoPortal.contrato_candidato_id',
+        back_populates='contrato_candidato', passive_deletes=True)
+
+    def __repr__(self):
+        return f'<ContratoPortal {self.fluxo}/{self.alvo} v{self.versao} {self.estado}>'
+
+
+@event.listens_for(ContratoPortal, 'before_insert')
+@event.listens_for(ContratoPortal, 'before_update')
+def _sincronizar_contrato_portal_ativo(mapper, connection, alvo):
+    if alvo.estado != 'ativa':
+        alvo.ativa_unica = None
+        return
+    identidade = f'{alvo.fluxo}\0{alvo.alvo}'.encode('utf-8')
+    alvo.ativa_unica = hashlib.sha256(identidade).hexdigest()
+
+
+class ElementoContratoPortal(db.Model):
+    """Elemento semântico aprovado em uma versão do contrato."""
+    __tablename__ = 'elemento_contrato_portal'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'contrato_id', 'chave',
+            name='uq_elemento_contrato_portal_chave'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    contrato_id = db.Column(
+        db.Integer, db.ForeignKey('contrato_portal.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    chave = db.Column(db.String(100), nullable=False)
+    etapa = db.Column(db.String(50), nullable=False, index=True)
+    papel = db.Column(db.String(40), nullable=False)
+    acao = db.Column(db.String(40), nullable=False)
+    seletor_tipo = db.Column(db.String(20), nullable=False)
+    seletor = db.Column(db.String(500), nullable=False)
+    tag = db.Column(db.String(30), nullable=False)
+    tipo = db.Column(db.String(50), nullable=False)
+    rotulo = db.Column(db.String(500), nullable=False)
+    assinatura_formulario = db.Column(db.String(64), nullable=False)
+    ordem_relativa = db.Column(db.Integer, nullable=False)
+    obrigatorio = db.Column(db.Boolean, nullable=False, default=False)
+    visivel = db.Column(db.Boolean, nullable=False, default=True)
+    somente_leitura = db.Column(db.Boolean, nullable=False, default=False)
+    autoajuste_seletor = db.Column(db.Boolean, nullable=False, default=False)
+
+    contrato = db.relationship('ContratoPortal', back_populates='elementos')
+
+    def __repr__(self):
+        return f'<ElementoContratoPortal {self.chave}>'
+
+
+class IncidenteContratoPortal(db.Model):
+    """Conjunto deduplicado de diferenças observado em um contrato."""
+    __tablename__ = 'incidente_contrato_portal'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'contrato_base_id', 'assinatura',
+            name='uq_incidente_contrato_portal_assinatura'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    contrato_base_id = db.Column(
+        db.Integer, db.ForeignKey('contrato_portal.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    contrato_candidato_id = db.Column(
+        db.Integer, db.ForeignKey('contrato_portal.id', ondelete='SET NULL'),
+        nullable=True, index=True)
+    assinatura = db.Column(db.String(64), nullable=False)
+    estado = db.Column(db.String(20), nullable=False, index=True)
+    classificacao = db.Column(db.String(30), nullable=False, index=True)
+    severidade = db.Column(db.String(20), nullable=False)
+    etapa = db.Column(db.String(50), nullable=True)
+    elemento_chave = db.Column(db.String(100), nullable=True)
+    mensagem = db.Column(db.String(500), nullable=False)
+    artefato_sanitizado = db.Column(db.String(2000), nullable=True)
+    primeira_observacao_em = db.Column(db.DateTime, nullable=False)
+    ultima_observacao_em = db.Column(db.DateTime, nullable=False)
+    observacoes = db.Column(db.Integer, nullable=False, default=1)
+    resolvido_em = db.Column(db.DateTime, nullable=True)
+    resolvido_por_id = db.Column(
+        db.Integer, db.ForeignKey('usuario.id', ondelete='SET NULL'),
+        nullable=True, index=True)
+
+    contrato_base = db.relationship(
+        'ContratoPortal', foreign_keys=[contrato_base_id],
+        back_populates='incidentes')
+    contrato_candidato = db.relationship(
+        'ContratoPortal', foreign_keys=[contrato_candidato_id],
+        back_populates='incidentes_candidata')
+    resolvido_por = db.relationship(
+        'Usuario', foreign_keys=[resolvido_por_id], passive_deletes=True)
+    diferencas = db.relationship(
+        'DiferencaContratoPortal', back_populates='incidente',
+        cascade='all, delete-orphan', passive_deletes=True)
+
+    def __repr__(self):
+        return f'<IncidenteContratoPortal {self.assinatura} {self.estado}>'
+
+
+class DiferencaContratoPortal(db.Model):
+    """Uma dimensão sanitizada que divergiu dentro de um incidente."""
+    __tablename__ = 'diferenca_contrato_portal'
+
+    id = db.Column(db.Integer, primary_key=True)
+    incidente_id = db.Column(
+        db.Integer,
+        db.ForeignKey('incidente_contrato_portal.id', ondelete='CASCADE'),
+        nullable=False, index=True)
+    ordem = db.Column(db.Integer, nullable=False, default=0)
+    dimensao = db.Column(db.String(40), nullable=False)
+    esperado = db.Column(db.String(1000), nullable=True)
+    observado = db.Column(db.String(1000), nullable=True)
+    evidencia_sanitizada = db.Column(db.String(1000), nullable=True)
+
+    incidente = db.relationship(
+        'IncidenteContratoPortal', back_populates='diferencas')
+
+    def __repr__(self):
+        return f'<DiferencaContratoPortal {self.dimensao}>'
 
 
 class ServicoNfse(db.Model):
