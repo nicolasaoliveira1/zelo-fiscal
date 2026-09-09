@@ -390,31 +390,50 @@ def montar_baseline_observada(
         raise BaselineNaoObservavelError(
             'A tela observada não é a rota declarada para este portal.')
 
-    por_identidade = {
-        (item.seletor_tipo, item.seletor): item for item in inventario.elementos
+    declarados = {
+        (item.seletor_tipo, item.seletor): item for item in declaracao.elementos
     }
-
+    usados = set()
     elementos = []
     faltantes = []
-    for esperado in declaracao.elementos:
-        observado = por_identidade.get((esperado.seletor_tipo, esperado.seletor))
-        if observado is None:
-            faltantes.append(esperado.chave)
-            continue
+
+    # A ordem é a da OBSERVAÇÃO: o contrato representa a tela inteira, não só os
+    # controles que a automação toca. `comparar` trata todo elemento observado
+    # fora do contrato como `elemento_novo`, então uma baseline que guardasse só
+    # os declarados divergiria da própria tela de onde saiu — foi o que
+    # aconteceu em 2026-09-09, com seis controles da página (ouvir captcha,
+    # enviar por e-mail, validar) virando drift um minuto após a ativação.
+    for ordem, observado in enumerate(inventario.elementos):
+        identidade = (observado.seletor_tipo, observado.seletor)
+        esperado = declarados.get(identidade)
         papel, acao = _papel_acao(observado)
-        if (papel, acao) != (esperado.papel, esperado.acao):
-            # O controle existe naquele endereço, mas não é o que se esperava
-            # dele — tratar como encontrado aprovaria um botão no lugar de um
-            # campo, e a política de autoajuste é por papel.
-            faltantes.append(esperado.chave)
-            continue
+
+        if esperado is not None:
+            if (papel, acao) != (esperado.papel, esperado.acao):
+                # O controle existe naquele endereço, mas não é o que se
+                # esperava dele — aprovar aceitaria um botão no lugar de um
+                # campo, e a política de autoajuste é por papel.
+                faltantes.append(esperado.chave)
+                usados.add(identidade)
+                continue
+            usados.add(identidade)
+            chave = esperado.chave
+            autoajuste = esperado.autoajuste_seletor
+            etapa = esperado.etapa
+        else:
+            chave = _chave_observada(observado, ordem, elementos)
+            # Nada que a declaração não nomeia pode autoajustar: deny-by-default
+            # vale com mais razão para o que ninguém revisou.
+            autoajuste = False
+            etapa = inventario.etapa
+
         elementos.append(ElementoContratoComparavel(
-            chave=esperado.chave,
-            etapa=esperado.etapa,
+            chave=chave,
+            etapa=etapa,
             papel=papel,
             acao=acao,
-            seletor_tipo=esperado.seletor_tipo,
-            seletor=esperado.seletor,
+            seletor_tipo=observado.seletor_tipo,
+            seletor=observado.seletor,
             tag=observado.tag,
             tipo=observado.tipo,
             rotulo=observado.rotulo,
@@ -424,17 +443,33 @@ def montar_baseline_observada(
             visivel=observado.visivel,
             somente_leitura=observado.somente_leitura,
             desabilitado=observado.desabilitado,
-            autoajuste_seletor=esperado.autoajuste_seletor,
+            autoajuste_seletor=autoajuste,
         ))
 
+    faltantes.extend(
+        item.chave for identidade, item in declarados.items()
+        if identidade not in usados)
     if faltantes:
         raise BaselineNaoObservavelError(
             'A tela observada não tem os controles declarados: '
-            + ', '.join(faltantes),
-            faltantes=faltantes)
+            + ', '.join(sorted(set(faltantes))),
+            faltantes=sorted(set(faltantes)))
     return ContratoComparavel(
         host=declaracao.host,
         rota=declaracao.rota,
         etapa=declaracao.etapa,
         elementos=tuple(elementos),
     )
+
+
+def _chave_observada(observado, ordem, ja_montados):
+    """Chave estável para o controle que a declaração não nomeia.
+
+    É o próprio seletor, porque é o que o operador reconhece na tela; cai para a
+    posição quando o elemento não tem seletor ou o nome já foi usado.
+    """
+    base = (observado.seletor or f'elemento-{ordem}')[:90]
+    usadas = {item.chave for item in ja_montados}
+    if base not in usadas:
+        return base
+    return f'{base}#{ordem}'[:100]

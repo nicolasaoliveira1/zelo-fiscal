@@ -21,6 +21,7 @@ from app.services import (
 )
 from app.services.contrato_portal_drift import (
     COMPATIVEL,
+    REVISAO,
     RemapeamentoSeletor,
     ResultadoComparacaoPortal,
     _diferenca,
@@ -82,11 +83,24 @@ def _inventario_do_cndt(**trocas):
         visivel=True,
     ) for ordem, item in enumerate(declaracao.elementos)
         if item.chave not in trocas.get('sem', ()))
+    # A tela real tem MAIS controles que os declarados (ouvir captcha, enviar
+    # por e-mail, validar). O contrato precisa representar a tela inteira.
+    extras = tuple(ElementoInventariado(
+        tag='input', tipo=tipo, id=seletor, name='', rotulo=rotulo,
+        seletor_tipo='id', seletor=seletor,
+        assinatura_formulario=assinatura, ordem_relativa=20 + ordem,
+        obrigatorio=False, desabilitado=False, somente_leitura=False,
+        visivel=visivel,
+    ) for ordem, (seletor, tipo, rotulo, visivel) in enumerate((
+        ('botao-ouvir-captcha', 'button', 'Ouvir caracteres do captcha.', True),
+        ('campoEmail', 'email', 'Digite seu e-mail', False),
+        ('botao-enviar', 'submit', 'Envia a certidão para o e-mail.', False),
+    )) if seletor not in trocas.get('sem', ()))
     return InventarioPortal(
         host=trocas.get('host', declaracao.host),
         rota=trocas.get('rota', declaracao.rota),
         etapa=declaracao.etapa,
-        elementos=elementos,
+        elementos=elementos + (() if trocas.get('so_declarados') else extras),
     )
 
 
@@ -380,7 +394,7 @@ def test_baseline_nasce_dos_fatos_observados_nao_dos_declarados(
         assert not (
             {e.assinatura_formulario for e in ativa.elementos}
             & assinaturas_declaradas)
-        assert sorted(e.ordem_relativa for e in ativa.elementos) == [10, 11, 12, 13]
+        assert sorted(e.ordem_relativa for e in ativa.elementos)[:4] == [10, 11, 12, 13]
         # ...e a política continuou vindo do código
         assert por_chave['documento'].autoajuste_seletor is True
         assert all(
@@ -517,3 +531,74 @@ def test_descartar_com_emissao_em_curso_responde_423(app, client):
     with app.app_context():
         assert ContratoPortal.query.filter_by(
             fluxo=FLUXO, alvo=ALVO, estado='ativa').count() == 1
+
+
+def test_contrato_guarda_a_tela_inteira_nao_so_os_declarados(
+    app, client, observando,
+):
+    """Achado real: o contrato guardava 4 controles e a tela tinha 10.
+
+    Um minuto depois de ativar, "Verificar agora" acusava `elemento_novo` nos
+    seis restantes e bloqueava o portal.
+    """
+    client.post(f'{BASE}/{FLUXO}/{ALVO}/baseline', json={})
+
+    with app.app_context():
+        ativa = ContratoPortal.query.filter_by(
+            fluxo=FLUXO, alvo=ALVO, estado='ativa').one()
+        por_chave = {e.chave: e for e in ativa.elementos}
+
+    assert len(por_chave) == 7
+    # os declarados mantêm a chave e a política
+    assert por_chave['documento'].autoajuste_seletor is True
+    assert por_chave['submeter'].autoajuste_seletor is False
+    # os demais entram pelo seletor e NUNCA autoajustam
+    assert 'botao-ouvir-captcha' in por_chave
+    assert 'campoEmail' in por_chave
+    assert all(
+        por_chave[chave].autoajuste_seletor is False
+        for chave in ('botao-ouvir-captcha', 'campoEmail', 'botao-enviar'))
+
+
+def test_observar_de_novo_logo_apos_ativar_nao_acusa_drift(
+    app, client, observando,
+):
+    """A regressão em uma linha: a tela de onde a baseline saiu é compatível."""
+    inventario = _inventario_do_cndt()
+    client.post(f'{BASE}/{FLUXO}/{ALVO}/baseline', json={})
+
+    with app.app_context():
+        ativa = ContratoPortal.query.filter_by(
+            fluxo=FLUXO, alvo=ALVO, estado='ativa').one()
+        resultado = comparar(
+            contrato_portal_preflight.comparavel(ativa), inventario)
+
+    assert resultado.classificacao == COMPATIVEL
+    assert resultado.diferencas == ()
+
+
+def test_controle_novo_na_tela_depois_da_aprovacao_ainda_e_drift(
+    app, client, observando,
+):
+    """Guardar a tela inteira não pode custar a detecção do que É novo."""
+    client.post(f'{BASE}/{FLUXO}/{ALVO}/baseline', json={})
+    com_novidade = _inventario_do_cndt()
+    novo = ElementoInventariado(
+        tag='input', tipo='submit', id='botao-emitir-turbo', name='',
+        rotulo='Emitir mais rápido', seletor_tipo='id',
+        seletor='botao-emitir-turbo', assinatura_formulario='ab' * 32,
+        ordem_relativa=99, obrigatorio=False, desabilitado=False,
+        somente_leitura=False, visivel=True)
+
+    with app.app_context():
+        ativa = ContratoPortal.query.filter_by(
+            fluxo=FLUXO, alvo=ALVO, estado='ativa').one()
+        resultado = comparar(
+            contrato_portal_preflight.comparavel(ativa),
+            InventarioPortal(
+                host=com_novidade.host, rota=com_novidade.rota,
+                etapa=com_novidade.etapa,
+                elementos=com_novidade.elementos + (novo,)))
+
+    assert resultado.classificacao == REVISAO
+    assert [d.observado for d in resultado.diferencas] == ['botao-emitir-turbo']
