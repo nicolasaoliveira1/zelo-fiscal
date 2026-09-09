@@ -2,6 +2,7 @@
 from datetime import datetime
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app import db
@@ -184,6 +185,12 @@ def test_cascade_remove_elementos_incidentes_e_diferencas(app, ids):
 
 def test_set_null_preserva_historico_ao_remover_usuario_e_base(app, ids):
     with app.app_context():
+        # `ondelete=SET NULL` so dispara com FK IMPOSTA, e no SQLite o pragma e
+        # POR CONEXAO: a limpeza entre testes o religa numa conexao propria, que
+        # nao e esta. Sem ligar aqui, o teste passava ou falhava conforme a ordem
+        # em que caisse nos workers do xdist.
+        if db.engine.dialect.name == 'sqlite':
+            db.session.execute(text('PRAGMA foreign_keys=ON'))
         usuario = Usuario(
             username='revisor_sintetico', senha_hash='hash-sintetico',
             papel='admin')

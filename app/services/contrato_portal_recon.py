@@ -25,7 +25,11 @@ from typing import Any, Callable
 from app.services import contrato_portal, contrato_portal_preflight
 from app.services.contrato_portal_drift import COMPATIVEL as DRIFT_COMPATIVEL
 from app.services.contrato_portal_drift import REVISAO as DRIFT_REVISAO
-from app.services.contrato_portal_drift import comparar
+from app.services.contrato_portal_drift import (
+    BaselineNaoObservavelError,
+    comparar,
+    montar_baseline_observada,
+)
 from app.services.execution_logger import log_event
 
 # Resultados de uma passada de recon e, para os três primeiros, também o estado
@@ -292,3 +296,30 @@ def aceitar_incidente(incidente, adaptador, criar_driver, *, usuario_id):
         revalidacao=revalidacao,
         usuario_id=usuario_id,
     )
+
+
+def criar_baseline_observada(adaptador, criar_driver, *, usuario_id):
+    """Ativa a primeira versão a partir do que a tela realmente mostra.
+
+    A declaração do código continua mandando em identidade e política; a
+    observação só preenche os fatos que ela não tem como saber. Se a tela não
+    sustenta a declaração, nada é criado — ver `montar_baseline_observada`.
+    """
+    if adaptador.definicao is None:
+        raise BaselineNaoObservavelError(
+            'Este portal não declara baseline revisável.')
+
+    declaracao = adaptador.definicao()
+    inventario = _observar_com_lock(adaptador, declaracao, criar_driver)
+    observada = montar_baseline_observada(declaracao, inventario)
+    contrato = contrato_portal.criar_baseline(
+        fluxo=adaptador.fluxo,
+        alvo=adaptador.alvo,
+        definicao=observada,
+        usuario_id=usuario_id,
+    )
+    log_event(
+        'contrato_portal_baseline_observada', fluxo=adaptador.fluxo,
+        alvo=adaptador.alvo, versao=contrato.versao,
+        elementos=len(observada.elementos))
+    return contrato

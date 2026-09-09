@@ -18,6 +18,7 @@ from app.models import ContratoPortal, IncidenteContratoPortal
 from app.routes import bp
 from app.routes.lotes import _criar_driver_lote
 from app.services import auditoria, contrato_portal, contrato_portal_recon
+from app.services.contrato_portal_drift import BaselineNaoObservavelError
 from app.services.execution_logger import log_event
 from app.utils import json_error as _json_error
 
@@ -105,25 +106,32 @@ def _adaptador_ou_404(fluxo, alvo):
           methods=['POST'])
 @requer_papel('admin')
 def diagnostico_contrato_baseline(fluxo, alvo):
-    """Cria a primeira versão ativa a partir da definição declarada no código.
+    """Ativa a primeira versão a partir do que a tela realmente mostra.
 
     Ação humana explícita de propósito (AC-01.5): até ela acontecer, os três
-    modos de emissão preservam o executor legado.
+    modos de emissão preservam o executor legado. A revisão humana está na
+    DECLARAÇÃO (quais controles, qual política) e na recusa: a ativação só passa
+    se a tela sustentar o que foi declarado, então não há como aprovar sem
+    querer uma página que não é a esperada.
     """
     adaptador, erro = _adaptador_ou_404(fluxo, alvo)
     if erro:
         return erro
-    if adaptador.definicao is None:
-        return _json_error('Este portal não declara baseline revisável.', 409)
     try:
-        contrato = contrato_portal.criar_baseline(
-            fluxo=adaptador.fluxo, alvo=adaptador.alvo,
-            definicao=adaptador.definicao(),
-            usuario_id=current_user.id)
-    except contrato_portal.ContratoPortalConflitoError as exc:
-        return _json_error(str(exc), 409)
+        contrato = contrato_portal_recon.criar_baseline_observada(
+            adaptador, _criar_driver_lote, usuario_id=current_user.id)
+    except contrato_portal_recon.AlvoOcupadoError as exc:
+        return _json_error(str(exc), 423)
+    except BaselineNaoObservavelError as exc:
+        # Recusa que ensina: diz QUAIS controles não fecharam, para o operador
+        # comparar com a tela em vez de adivinhar.
+        return _json_error(str(exc), 409, faltantes=list(exc.faltantes))
     except contrato_portal.ContratoPortalError as exc:
         return _json_error(str(exc), 409)
+    except Exception as exc:
+        log_event('contrato_portal_baseline_falhou', level='ERROR',
+                  fluxo=fluxo, alvo=alvo, error=str(exc))
+        return _json_error('Não foi possível observar o portal agora.', 409)
     auditoria.registrar(
         'contrato_portal.baseline', alvo_tipo='contrato_portal',
         alvo_id=contrato.id,

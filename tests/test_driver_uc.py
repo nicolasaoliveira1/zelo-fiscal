@@ -10,8 +10,15 @@ import pytest
 
 from app.automation import driver
 
+# Capturado no import, ANTES de a trava do conftest trocar o atributo.
+_uc_original = driver._criar_driver_uc
+
 
 def test_criar_driver_uc_sem_pacote_levanta_uc_indisponivel(monkeypatch):
+    # Este teste exercita a PROPRIA criacao de driver, entao desfaz a trava
+    # global do conftest (`_sem_navegador_real`). Nenhum navegador sobe: o
+    # import do pacote e sabotado logo abaixo.
+    monkeypatch.setattr(driver, '_criar_driver_uc', _uc_original)
     # Forca ImportError em 'import undetected_chromedriver'
     monkeypatch.setitem(sys.modules, 'undetected_chromedriver', None)
     with pytest.raises(driver.UcIndisponivelError) as exc_info:

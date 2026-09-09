@@ -11,13 +11,20 @@ import pytest
 
 from app import db
 from app.automation import trabalhista
+from app.automation.trabalhista_recon import ElementoInventariado, InventarioPortal
 from app.models import ContratoPortal, IncidenteContratoPortal, Usuario
 from app.routes import contratos_portais
-from app.services import contrato_portal, contrato_portal_recon
+from app.services import (
+    contrato_portal,
+    contrato_portal_preflight,
+    contrato_portal_recon,
+)
 from app.services.contrato_portal_drift import (
+    COMPATIVEL,
     RemapeamentoSeletor,
     ResultadoComparacaoPortal,
     _diferenca,
+    comparar,
 )
 
 BASE = '/diagnostico/contratos-portais'
@@ -48,6 +55,53 @@ def _incidente(app, contrato_id):
         contrato_portal.registrar_incidente(contrato_id, resultado)
         return IncidenteContratoPortal.query.filter_by(
             contrato_base_id=contrato_id, estado='aberto').one().id
+
+
+def _inventario_do_cndt(**trocas):
+    """Inventário sintético no formato que `observar_passivo` devolveria.
+
+    Os fatos aqui (assinatura do formulário, ordem relativa) são de propósito
+    DIFERENTES dos que a declaração inventa: é o que prova que a baseline nasce
+    da observação, não do código.
+    """
+    declaracao = trabalhista.definicao_baseline()
+    assinatura = trocas.get('assinatura', 'ab' * 32)
+    elementos = tuple(ElementoInventariado(
+        tag=item.tag,
+        tipo=item.tipo,
+        id=item.seletor,
+        name='',
+        rotulo=item.rotulo,
+        seletor_tipo='id',
+        seletor=item.seletor,
+        assinatura_formulario=assinatura,
+        ordem_relativa=10 + ordem,
+        obrigatorio=item.obrigatorio,
+        desabilitado=False,
+        somente_leitura=False,
+        visivel=True,
+    ) for ordem, item in enumerate(declaracao.elementos)
+        if item.chave not in trocas.get('sem', ()))
+    return InventarioPortal(
+        host=trocas.get('host', declaracao.host),
+        rota=trocas.get('rota', declaracao.rota),
+        etapa=declaracao.etapa,
+        elementos=elementos,
+    )
+
+
+@pytest.fixture()
+def observando(monkeypatch):
+    """Observa uma tela sintética. NUNCA abre navegador: o portal é de governo,
+    e teste não bate em portal real."""
+    def _instalar(inventario=None):
+        monkeypatch.setattr(
+            contratos_portais, '_criar_driver_lote', lambda: MagicMock())
+        monkeypatch.setattr(
+            trabalhista, 'observar_passivo',
+            lambda driver, contrato: inventario or _inventario_do_cndt())
+    _instalar()
+    return _instalar
 
 
 # --- autorização ------------------------------------------------------------
@@ -98,7 +152,7 @@ def test_listagem_traz_incidentes_e_historico_do_alvo(app, client):
 
 # --- baseline ---------------------------------------------------------------
 
-def test_baseline_criada_por_acao_explicita_do_admin(app, client):
+def test_baseline_criada_por_acao_explicita_do_admin(app, client, observando):
     resposta = client.post(f'{BASE}/{FLUXO}/{ALVO}/baseline', json={})
 
     assert resposta.status_code == 201
@@ -110,7 +164,7 @@ def test_baseline_criada_por_acao_explicita_do_admin(app, client):
         assert ativa.ativado_por_id is not None
 
 
-def test_segunda_baseline_no_mesmo_alvo_e_409(app, client):
+def test_segunda_baseline_no_mesmo_alvo_e_409(app, client, observando):
     _baseline(app)
 
     resposta = client.post(f'{BASE}/{FLUXO}/{ALVO}/baseline', json={})
@@ -296,3 +350,90 @@ def test_restaurar_devolve_a_versao_anterior_apos_autoajuste(app, client):
             fluxo=FLUXO, alvo=ALVO, estado='ativa').one()
         elementos = {e.chave: e.seletor for e in ativa.elementos}
         assert elementos['documento'] == 'cpfCnpj'
+
+
+# --- ativação por observação ------------------------------------------------
+
+def test_baseline_nasce_dos_fatos_observados_nao_dos_declarados(
+    app, client, observando,
+):
+    """Declaração manda em identidade e política; a tela manda nos fatos.
+
+    Achado real: a declaração inventava `assinatura_formulario` e
+    `ordem_relativa`, e a primeira comparação acusava `formulario_alterado` nos
+    quatro controles — o portal ficava bloqueado para sempre.
+    """
+    declarada = trabalhista.definicao_baseline()
+
+    resposta = client.post(f'{BASE}/{FLUXO}/{ALVO}/baseline', json={})
+
+    assert resposta.status_code == 201
+    with app.app_context():
+        ativa = ContratoPortal.query.filter_by(
+            fluxo=FLUXO, alvo=ALVO, estado='ativa').one()
+        por_chave = {e.chave: e for e in ativa.elementos}
+        assinaturas_declaradas = {
+            e.assinatura_formulario for e in declarada.elementos}
+
+        # os fatos vieram da observação...
+        assert {e.assinatura_formulario for e in ativa.elementos} == {'ab' * 32}
+        assert not (
+            {e.assinatura_formulario for e in ativa.elementos}
+            & assinaturas_declaradas)
+        assert sorted(e.ordem_relativa for e in ativa.elementos) == [10, 11, 12, 13]
+        # ...e a política continuou vindo do código
+        assert por_chave['documento'].autoajuste_seletor is True
+        assert all(
+            por_chave[chave].autoajuste_seletor is False
+            for chave in ('captcha_imagem', 'captcha_resposta', 'submeter'))
+
+
+def test_baseline_observada_nao_bloqueia_na_primeira_comparacao(
+    app, client, observando,
+):
+    """O contrato recém-ativado bate com a tela de onde ele saiu."""
+    inventario = _inventario_do_cndt()
+    client.post(f'{BASE}/{FLUXO}/{ALVO}/baseline', json={})
+
+    with app.app_context():
+        ativa = ContratoPortal.query.filter_by(
+            fluxo=FLUXO, alvo=ALVO, estado='ativa').one()
+        resultado = comparar(
+            contrato_portal_preflight.comparavel(ativa), inventario)
+
+    assert resultado.classificacao == COMPATIVEL
+
+
+def test_controle_declarado_ausente_recusa_e_diz_qual(app, client, observando):
+    observando(_inventario_do_cndt(sem=('submeter',)))
+
+    resposta = client.post(f'{BASE}/{FLUXO}/{ALVO}/baseline', json={})
+
+    assert resposta.status_code == 409
+    corpo = resposta.get_json()
+    assert corpo['faltantes'] == ['submeter']
+    assert 'submeter' in corpo['message']
+    with app.app_context():
+        assert ContratoPortal.query.filter_by(fluxo=FLUXO, alvo=ALVO).count() == 0
+
+
+def test_tela_de_outra_rota_nao_vira_baseline(app, client, observando):
+    observando(_inventario_do_cndt(rota='/outraTela'))
+
+    resposta = client.post(f'{BASE}/{FLUXO}/{ALVO}/baseline', json={})
+
+    assert resposta.status_code == 409
+    assert 'rota declarada' in resposta.get_json()['message']
+    with app.app_context():
+        assert ContratoPortal.query.filter_by(fluxo=FLUXO, alvo=ALVO).count() == 0
+
+
+def test_baseline_com_emissao_em_curso_responde_423(app, client, monkeypatch):
+    monkeypatch.setattr(
+        contratos_portais.contrato_portal_recon, 'criar_baseline_observada',
+        MagicMock(side_effect=contrato_portal_recon.AlvoOcupadoError(
+            'Há uma emissão em curso neste portal. Tente novamente depois.')))
+
+    resposta = client.post(f'{BASE}/{FLUXO}/{ALVO}/baseline', json={})
+
+    assert resposta.status_code == 423

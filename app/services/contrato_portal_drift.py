@@ -349,3 +349,92 @@ def comparar(
         classificacao=REVISAO,
         diferencas=tuple(diferencas),
     )
+
+
+class BaselineNaoObservavelError(ValueError):
+    """A tela observada não sustenta a baseline declarada."""
+
+    def __init__(self, mensagem, faltantes=()):
+        super().__init__(mensagem)
+        self.faltantes = tuple(faltantes)
+
+
+def montar_baseline_observada(
+    declaracao: ContratoComparavel,
+    inventario,
+) -> ContratoComparavel:
+    """Junta a DECLARAÇÃO (identidade e política) com a OBSERVAÇÃO (os fatos).
+
+    Uma baseline escrita à mão não tem como saber a assinatura do formulário nem
+    a ordem relativa dos controles — só a página sabe. Inventar esses valores faz
+    a primeira comparação acusar `formulario_alterado` em todo elemento e o
+    portal ficar bloqueado para sempre, mesmo com os seletores certos (achado
+    real de 2026-09-09).
+
+    O que continua vindo do código, e nunca do DOM:
+
+    - **quais** controles existem (`chave`) e onde entram (`host`/`rota`/`etapa`);
+    - **qual** o papel e a ação esperados de cada um;
+    - **onde** ele deve estar (`seletor`);
+    - **o que pode autoajustar** depois (`autoajuste_seletor`).
+
+    O que vem da observação são só os fatos daqueles controles: assinatura do
+    formulário, ordem relativa, tag, tipo, rótulo e flags de estado.
+
+    Se um controle declarado não está na tela, ou está com outro papel, **nada é
+    montado**: levanta `BaselineNaoObservavelError` com as chaves que não
+    fecharam. Aprovar uma tela que não é a esperada é exatamente o erro que o
+    contrato existe para impedir.
+    """
+    if (inventario.host, inventario.rota) != (declaracao.host, declaracao.rota):
+        raise BaselineNaoObservavelError(
+            'A tela observada não é a rota declarada para este portal.')
+
+    por_identidade = {
+        (item.seletor_tipo, item.seletor): item for item in inventario.elementos
+    }
+
+    elementos = []
+    faltantes = []
+    for esperado in declaracao.elementos:
+        observado = por_identidade.get((esperado.seletor_tipo, esperado.seletor))
+        if observado is None:
+            faltantes.append(esperado.chave)
+            continue
+        papel, acao = _papel_acao(observado)
+        if (papel, acao) != (esperado.papel, esperado.acao):
+            # O controle existe naquele endereço, mas não é o que se esperava
+            # dele — tratar como encontrado aprovaria um botão no lugar de um
+            # campo, e a política de autoajuste é por papel.
+            faltantes.append(esperado.chave)
+            continue
+        elementos.append(ElementoContratoComparavel(
+            chave=esperado.chave,
+            etapa=esperado.etapa,
+            papel=papel,
+            acao=acao,
+            seletor_tipo=esperado.seletor_tipo,
+            seletor=esperado.seletor,
+            tag=observado.tag,
+            tipo=observado.tipo,
+            rotulo=observado.rotulo,
+            assinatura_formulario=observado.assinatura_formulario,
+            ordem_relativa=observado.ordem_relativa,
+            obrigatorio=observado.obrigatorio,
+            visivel=observado.visivel,
+            somente_leitura=observado.somente_leitura,
+            desabilitado=observado.desabilitado,
+            autoajuste_seletor=esperado.autoajuste_seletor,
+        ))
+
+    if faltantes:
+        raise BaselineNaoObservavelError(
+            'A tela observada não tem os controles declarados: '
+            + ', '.join(faltantes),
+            faltantes=faltantes)
+    return ContratoComparavel(
+        host=declaracao.host,
+        rota=declaracao.rota,
+        etapa=declaracao.etapa,
+        elementos=tuple(elementos),
+    )

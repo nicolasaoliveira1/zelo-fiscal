@@ -91,6 +91,9 @@ test('alvo sem contrato mostra a ação de baseline, não a de verificar', () =>
   assert.ok(container.querySelector('[data-acao="baseline"]'));
   assert.equal(container.querySelector('[data-acao="recon"]'), null);
   assert.match(container.textContent, /Sem contrato ativo/);
+  // O rótulo precisa dizer que o portal será observado: ativar não é só gravar.
+  assert.match(
+    container.querySelector('[data-acao="baseline"]').textContent, /Observar o portal/);
 });
 
 test('lista vazia diz que não há portal, sem quebrar', () => {

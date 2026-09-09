@@ -100,7 +100,7 @@ function historicoHtml(alvo) {
 export function alvoHtml(alvo) {
   const acoes = alvo.pode_criar_baseline
     ? `<button type="button" class="btn btn-sm btn-primary" data-acao="baseline">
-         Revisar e ativar a baseline
+         Observar o portal e ativar
        </button>`
     : `<button type="button" class="btn btn-sm btn-soft-primary" data-acao="recon">
          Verificar agora
@@ -178,7 +178,8 @@ export async function inicializarContratosPortais(opcoes = {}) {
     // Promover contrato muda o que a automação vai obedecer: confirmação
     // explícita, nunca um clique só.
     if (acao === 'baseline' && !confirmar(
-      'Ativar esta baseline? A automação passa a obedecer o contrato.')) return;
+      'O portal será aberto e observado agora. Se a tela tiver os controles '
+      + 'declarados, ela vira a versão ativa e a automação passa a obedecê-la.')) return;
     if (acao === 'aceitar' && !confirmar(
       'Ativar a estrutura observada agora? O portal será observado de novo antes.')) return;
     if (acao === 'restaurar' && !confirmar(
