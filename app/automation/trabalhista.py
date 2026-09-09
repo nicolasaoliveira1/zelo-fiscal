@@ -91,6 +91,22 @@ def _url_contrato(snapshot_ou_modelo):
     return f'https://{snapshot_ou_modelo.host}{snapshot_ou_modelo.rota}'
 
 
+def observar_passivo(driver, contrato):
+    """Observação passiva do CNDT para o recon agendado (AC-08.5).
+
+    Chega à tela observável e inventaria: não preenche documento, não resolve
+    captcha e não submete. É o único caminho pelo qual o agendador toca o
+    portal.
+    """
+    driver.get(_url_contrato(contrato))
+    return trabalhista_recon.inventariar(
+        driver,
+        host_esperado=contrato.host,
+        rota_esperada=contrato.rota,
+        etapa='formulario',
+    )
+
+
 def _validar_snapshot(snapshot):
     try:
         for chave in (

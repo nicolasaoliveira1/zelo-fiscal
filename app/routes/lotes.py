@@ -782,6 +782,10 @@ def _registrar_fluxos_agendador():
     agendador.registrar_fluxo(TipoCertidao.TRABALHISTA, {
         'tipo': TipoCertidao.TRABALHISTA,
         'calc_ids': _fluxo_trabalhista_calc_ids, 'rodar_lote': _fluxo_trabalhista_rodar})
+    # O recon agendado abre a mesma janela background do lote; o ponto unico
+    # dessa decisao continua sendo `_criar_driver_lote` (nao ha copia no
+    # agendador, que nao importa `routes`).
+    agendador.registrar_criador_driver_recon(_criar_driver_lote)
 
 
 _registrar_fluxos_agendador()

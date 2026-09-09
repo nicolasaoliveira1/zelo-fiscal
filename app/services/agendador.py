@@ -29,6 +29,7 @@ _JOB_VERIF_MUNICIPIOS = 'agendador_verificacao_municipios'
 _JOB_RECHECK_RECEITA = 'agendador_recheck_receita'
 _JOB_INVENTARIO_COFRE = 'agendador_inventario_cofre'
 _JOB_RESUMO_DIARIO = 'agendador_resumo_diario'
+_JOB_RECON_PORTAIS = 'agendador_recon_portais'
 # Offset em horas para a verificacao de municipios nao concorrer com o lote da
 # renovacao (que roda na hora cheia e pode demorar): abre navegador, nao captcha.
 _OFFSET_VERIFICACAO_H = 3
@@ -42,15 +43,30 @@ _OFFSET_INVENTARIO_COFRE_H = 7
 # achados na pauta, e sair antes deles significaria contar o dia pela metade e
 # empurrar o resto para o dia seguinte (AD-029).
 _OFFSET_RESUMO_DIARIO_H = 8
+# O recon dos contratos abre navegador, mas so ate a tela observavel: nao
+# preenche, nao resolve captcha e nao submete. Fica numa janela propria, antes
+# dos jobs longos e bem antes do resumo, para o achado do dia entrar na pauta.
+_OFFSET_RECON_PORTAIS_H = 2
 # 6h: se o PC ligou depois do horário, o job ainda roda atrasado (catch-up).
 _MISFIRE_GRACE = 6 * 3600
 
 _scheduler = None
 _scheduler_lock = Lock()
 _fluxos = {}  # tipo_value -> cfg do fluxo automatizável (registrado por routes)
+_criador_driver_recon = None  # injetado por routes (registrar_criador_driver_recon)
 
 
 # --- registry de fluxos (injetado por routes, sem import circular) ---------
+
+def registrar_criador_driver_recon(fn):
+    """Injeta o criador de driver dos lotes para o job de recon.
+
+    A janela background do lote tem ponto unico em `lotes._criar_driver_lote`
+    e este modulo nao importa `routes`; por isso a funcao chega injetada, como
+    ja acontece com os fluxos."""
+    global _criador_driver_recon
+    _criador_driver_recon = fn
+
 
 def registrar_fluxo(tipo, cfg):
     """Registra um fluxo automatizável para o job de renovação. Chamado por
@@ -224,6 +240,7 @@ def _confirmar_jobs_obrigatorios(app, scheduler):
         _JOB_RECHECK_RECEITA,
         _JOB_INVENTARIO_COFRE,
         _JOB_RESUMO_DIARIO,
+        _JOB_RECON_PORTAIS,
     }
     if renovacao_ativa:
         esperados.add(_JOB_RENOVACAO)
@@ -325,6 +342,15 @@ def _agendar_jobs(app):
         args=[app], id=_JOB_RESUMO_DIARIO, replace_existing=True,
         misfire_grace_time=_MISFIRE_GRACE, coalesce=True, max_instances=1)
 
+    # Recon passivo dos contratos dos portais (RAC-07): so navega ate a tela
+    # observavel — nao emite, nao preenche e nao gasta captcha —, entao roda
+    # independente de `ativo`, como os demais jobs de verificacao.
+    _scheduler.add_job(
+        job_recon_portais,
+        CronTrigger(hour=(hora + _OFFSET_RECON_PORTAIS_H) % 24, minute=20),
+        args=[app], id=_JOB_RECON_PORTAIS, replace_existing=True,
+        misfire_grace_time=_MISFIRE_GRACE, coalesce=True, max_instances=1)
+
     if ativo:
         _scheduler.add_job(
             job_renovacao_diaria, CronTrigger(hour=hora, minute=0),
@@ -379,6 +405,33 @@ def job_verificacao_municipios(app):
         except Exception as exc:
             log_event('municipios_verificacao_alerta_falhou', level='ERROR', error=str(exc))
         return relatorios
+
+
+def job_recon_portais(app):
+    """Recon passivo diario dos contratos dos portais (RAC-07).
+
+    Antecipatorio: NAO substitui o preflight de cada execucao, porque o portal
+    pode mudar depois da madrugada. Alvo ocupado por emissao vira `adiado`, e
+    a falha de um alvo nao derruba os demais nem o scheduler.
+    """
+    from app.services import contrato_portal_recon
+
+    if _criador_driver_recon is None:
+        # Sem `routes` importado (CLI, teste isolado) nao ha de onde tirar o
+        # driver do lote; nao e erro, e ausencia de superficie.
+        log_event('contrato_portal_recon_sem_driver', level='WARNING')
+        return {}
+
+    with app.app_context():
+        execution_id = CorrelationContext.new_execution_id()
+        resultados = contrato_portal_recon.executar(
+            contrato_portal_recon.adaptadores_padrao(),
+            _criador_driver_recon,
+            execution_id=execution_id,
+        )
+        log_event('contrato_portal_recon_diario', execution_id=execution_id,
+                  alvos=len(resultados), resultados=sorted(set(resultados.values())))
+        return resultados
 
 
 def _ler_config_recheck():
