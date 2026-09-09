@@ -172,14 +172,38 @@ def executar(
     resultado = comparar(comparavel(ativo), inventario)
 
     if resultado.classificacao == AUTOATIVAVEL:
-        ativo = contrato_portal.autoativar(
-            ativo.id, resultado, fingerprint_base=ativo.fingerprint)
+        try:
+            ativo = contrato_portal.autoativar(
+                ativo.id, resultado, fingerprint_base=ativo.fingerprint)
+        except contrato_portal.ContratoPortalError as erro:
+            # Não deu para promover o ajuste: seguir com a versão antiga
+            # esbarraria no elemento que mudou, mais adiante e com o captcha já
+            # gasto. Fail closed, como todo o resto do preflight.
+            log_event(
+                'contrato_portal_promocao_falhou', level='ERROR',
+                fluxo=fluxo, alvo=alvo, versao=ativo.versao,
+                error=str(erro), execution_id=execution_id)
+            raise ContratoPortalBloqueadoError(
+                'A estrutura mudou e o ajuste não pôde ser promovido.') from erro
     elif resultado.classificacao != COMPATIVEL:
-        contrato_portal.registrar_incidente(
-            ativo.id,
-            resultado,
-            artefato_sanitizado=inventario.artefato_sanitizado or None,
-        )
+        try:
+            contrato_portal.registrar_incidente(
+                ativo.id,
+                resultado,
+                artefato_sanitizado=inventario.artefato_sanitizado or None,
+            )
+        except contrato_portal.ContratoPortalError as erro:
+            # Registrar o incidente é escrituração; BLOQUEAR é a decisão de
+            # segurança. Se o banco recusa a escrituração, o bloqueio vale do
+            # mesmo jeito — deixar a exceção subir trocava "parou com
+            # segurança" por erro cru no meio da emissão, e foi assim que a
+            # largura de coluna derrubou a emissão individual.
+            log_event(
+                'contrato_portal_incidente_nao_registrado', level='ERROR',
+                fluxo=fluxo, alvo=alvo, versao=ativo.versao,
+                resultado=resultado.classificacao, error=str(erro),
+                execution_id=execution_id,
+            )
         mensagem = 'Estrutura do portal incompatível com o contrato ativo.'
         if alvo_breaker:
             circuit_breaker.registrar_falha(alvo_breaker, mensagem)

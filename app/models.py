@@ -1208,7 +1208,10 @@ class IncidenteContratoPortal(db.Model):
     etapa = db.Column(db.String(50), nullable=True)
     elemento_chave = db.Column(db.String(100), nullable=True)
     mensagem = db.Column(db.String(500), nullable=False)
-    artefato_sanitizado = db.Column(db.String(2000), nullable=True)
+    # Text, nao String: o artefato e o JSON do inventario INTEIRO (ate 300
+    # elementos), e um portal real passa de 2000 com folga. O SQLite ignora a
+    # largura e o InnoDB impoe — achado real, DataError 1406.
+    artefato_sanitizado = db.Column(db.Text, nullable=True)
     primeira_observacao_em = db.Column(db.DateTime, nullable=False)
     ultima_observacao_em = db.Column(db.DateTime, nullable=False)
     observacoes = db.Column(db.Integer, nullable=False, default=1)
@@ -1244,9 +1247,11 @@ class DiferencaContratoPortal(db.Model):
         nullable=False, index=True)
     ordem = db.Column(db.Integer, nullable=False, default=0)
     dimensao = db.Column(db.String(40), nullable=False)
-    esperado = db.Column(db.String(1000), nullable=True)
-    observado = db.Column(db.String(1000), nullable=True)
-    evidencia_sanitizada = db.Column(db.String(1000), nullable=True)
+    # Mesma razao do artefato acima: rotulo longo e lista de evidencias nao
+    # cabem numa largura fixa, e estourar aqui derruba o registro do incidente.
+    esperado = db.Column(db.Text, nullable=True)
+    observado = db.Column(db.Text, nullable=True)
+    evidencia_sanitizada = db.Column(db.Text, nullable=True)
 
     incidente = db.relationship(
         'IncidenteContratoPortal', back_populates='diferencas')

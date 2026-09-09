@@ -248,6 +248,14 @@ def registrar_incidente(
             'Conflito ao registrar incidente do portal.') from erro
     except Exception as erro:
         db.session.rollback()
+        # A causa fica no log: a mensagem que sobe é a mesma para qualquer
+        # falha de persistência, e sem isto o diagnóstico começa do zero — foi
+        # o que custou horas no DataError de largura de coluna.
+        log_event(
+            'contrato_portal_incidente_persistencia_falhou', level='ERROR',
+            contrato_base_id=contrato_base_id,
+            classificacao=resultado.classificacao,
+            error_type=type(erro).__name__, error=str(erro)[:300])
         raise PersistenciaContratoPortalError(
             'Não foi possível registrar o incidente do portal.') from erro
 

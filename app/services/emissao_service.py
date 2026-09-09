@@ -762,7 +762,10 @@ def _executar_automacao_baixar(certidao, cfg):
                         certidao_id=certidao.id, error=str(e_quit),
                     )
 
-    except contrato_portal_preflight.ContratoPortalBloqueadoError as e:
+    except contrato_portal_preflight.PreflightContratoPortalError as e:
+        # Toda a familia do preflight, nao so o bloqueio: contrato ausente ou
+        # falha de persistencia sao ambiente local (spec 09), nao falha do
+        # portal — merecem mensagem acionavel, nunca erro cru do Selenium.
         log_event(
             'contrato_portal_bloqueado', level='WARNING',
             fluxo=trabalhista.FLUXO_CONTRATO, alvo=trabalhista.ALVO_CONTRATO)
