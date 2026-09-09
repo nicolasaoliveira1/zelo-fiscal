@@ -1658,6 +1658,13 @@ def _classificar_grave(exc):
     - `True` (grave "comum", ex.: timeout de download): no lote automatico vira
       falha por-item e o loop segue; no manual continua abortando (RESIL-01/03).
     """
+    if isinstance(exc, trabalhista.PortalNaoRespondeuError):
+        # Portal lento NAO e navegador morto. O tipo declarado ganha da
+        # heuristica, que caminha pela cadeia de causas e enxergaria o
+        # TimeoutException do Selenium — subclasse de WebDriverException, que
+        # ela trata como sessao morta. Fatal aqui abortaria o lote inteiro e,
+        # pior, pularia o circuit breaker: o portal fora nunca seria contado.
+        return True
     return batch_engine.GRAVE_FATAL if _erro_indica_navegador_fechado(exc) else True
 
 

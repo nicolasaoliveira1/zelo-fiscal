@@ -357,6 +357,13 @@ def run_batch_loop(
                         break
 
                     state['current_id'] = certidao_id
+                    # Rastro no LOG, nao so no estado em memoria: sem ele um
+                    # item que trava nao deixa vestigio no `app.jsonl` e a
+                    # triagem nem sabe qual item era (achado de 2026-09-09).
+                    log_event(
+                        f'{event_prefix}_item_start', certidao_id=certidao_id,
+                        indice=state['index'] + 1, total=state['total'],
+                        execution_id=execution_id)
                     append_batch_message(
                         state,
                         f"{curto} iniciando ID={certidao_id} "

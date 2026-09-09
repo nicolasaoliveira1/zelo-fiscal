@@ -347,3 +347,102 @@ def test_estadual_rs_tolera_falha_de_preenchimento_sem_snapshot(
         assert erro is None
         assert not resultado.get('erro_acionavel')
         monitor.assert_called_once()
+
+
+# --- portal que engasga -----------------------------------------------------
+
+def test_navegacao_do_lote_tem_teto_de_tempo(app, ids):
+    """Sem teto, `driver.get` bloqueia sem limite e o lote fica parado calado."""
+    with app.app_context():
+        driver = MagicMock()
+
+        trabalhista.preparar_execucao(
+            driver, url_legada='https://legado.exemplo/entrada',
+            estado_lote={'contrato_snapshot': _snapshot()})
+
+        driver.set_page_load_timeout.assert_called_once_with(
+            trabalhista.TIMEOUT_CARREGAMENTO_S)
+
+
+def test_portal_que_nao_carrega_vira_erro_em_vez_de_travar(app, ids):
+    from selenium.common.exceptions import TimeoutException
+
+    with app.app_context():
+        driver = MagicMock()
+        driver.get.side_effect = TimeoutException('timeout: Timed out receiving message')
+
+        with pytest.raises(trabalhista.PortalNaoRespondeuError) as exc:
+            trabalhista.preparar_execucao(
+                driver, url_legada='https://legado.exemplo/entrada',
+                estado_lote={'contrato_snapshot': _snapshot()})
+
+        assert '30s' in str(exc.value)
+
+
+def test_timeout_do_portal_alimenta_o_breaker(app, ids, monkeypatch):
+    """Portal que não responde é falha DO PORTAL (spec 09), não ambiente local."""
+    mensagem = 'O portal do CNDT não respondeu em 30s.'
+
+    assert batch_engine._falha_e_do_portal(mensagem) is True
+
+    registradas = []
+    monkeypatch.setattr(
+        batch_engine.circuit_breaker, 'registrar_falha',
+        lambda alvo, msg: registradas.append((alvo, msg)) or False)
+
+    batch_engine._breaker_falha('Trabalhista', mensagem)
+
+    assert registradas == [('Trabalhista', mensagem)]
+
+
+def test_lote_registra_no_log_qual_item_comecou(app, ids, monkeypatch):
+    """O item que trava precisa deixar vestígio no app.jsonl, não só no estado."""
+    eventos = []
+    monkeypatch.setattr(
+        batch_engine, 'log_event',
+        lambda evento, **campos: eventos.append((evento, campos)))
+    estado = batch_engine.batch_state_defaults()
+    estado.update({
+        'status': 'running', 'ids': [ids['trabalhista']], 'total': 1,
+        'execution_id': 'exec-sintetica',
+    })
+
+    batch_engine.run_batch_loop(
+        app, lock=Lock(), state=estado,
+        emit_fn=lambda *args: (True, False, None),
+        nome_lote='Trabalhista', curto='Trabalhista', tag='TRABALHISTA-LOTE',
+        event_prefix='trabalhista_teste', alvo_lote='Trabalhista',
+    )
+
+    inicios = [c for e, c in eventos if e == 'trabalhista_teste_item_start']
+    assert len(inicios) == 1
+    assert inicios[0]['certidao_id'] == ids['trabalhista']
+    assert (inicios[0]['indice'], inicios[0]['total']) == (1, 1)
+
+
+def test_item_do_lote_que_estoura_o_teto_e_classificado_como_portal(
+    app, ids, monkeypatch,
+):
+    """Ponta a ponta: a mensagem que o item devolve tem de abrir o breaker.
+
+    O que o `run_batch_loop` classifica é a MENSAGEM, não a exceção — então
+    provar só o tipo do erro não diria se o breaker conta a falha.
+    """
+    from selenium.common.exceptions import TimeoutException
+
+    with app.app_context():
+        driver = MagicMock()
+        driver.get.side_effect = TimeoutException('timeout: Timed out')
+        _ativar_baseline()
+        estado = emissao.TRABALHISTA_BATCH_STATE
+        estado['contrato_snapshot'] = _snapshot()
+        try:
+            sucesso, grave, mensagem = emissao._emitir_trabalhista_certidao(
+                ids['trabalhista'], driver=driver, execution_id='exec-sintetica')
+        finally:
+            estado['contrato_snapshot'] = None
+
+        assert sucesso is False
+        # grave "comum": no lote do agendador vira falha por-item, não aborta
+        assert grave is not batch_engine.GRAVE_FATAL
+        assert batch_engine._falha_e_do_portal(mensagem) is True

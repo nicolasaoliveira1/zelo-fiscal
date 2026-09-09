@@ -13,6 +13,7 @@ import hashlib
 import json
 import time
 
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -30,6 +31,10 @@ from app.services.execution_logger import log_event
 FLUXO_CONTRATO = 'trabalhista'
 ALVO_CONTRATO = 'cndt'
 HOST_CNDT = 'cndt-certidao.tst.jus.br'
+# Teto de carregamento de pagina. Sem ele, `driver.get` bloqueia sem limite:
+# em 2026-09-09 um lote emitiu 4 itens e ficou 8 minutos parado no quinto, sem
+# um unico evento no log. Portal que engasga tem de virar falha do item.
+TIMEOUT_CARREGAMENTO_S = 30
 ROTA_CNDT = '/gerarCertidao'
 
 
@@ -87,6 +92,41 @@ def definicao_baseline() -> ContratoComparavel:
     )
 
 
+class PortalNaoRespondeuError(RuntimeError):
+    """O portal nao terminou de carregar dentro do teto.
+
+    E falha do PORTAL: alimenta o circuit breaker (spec 09), diferente de
+    drive de rede, permissao e banco.
+
+    NAO herda de `TimeoutException` de proposito, embora seja o que a origem
+    sugere: `TimeoutException` e subclasse de `WebDriverException`, que
+    `_erro_indica_navegador_fechado` trata como sessao morta — e sessao morta e
+    GRAVE_FATAL, que aborta o lote inteiro E pula o breaker. Portal lento nao e
+    navegador morto: e falha do item, contada no breaker.
+    """
+
+
+def _navegar(driver, url, *, execution_id=None):
+    """Navega com teto de tempo e deixa rastro nos dois lados da chamada."""
+    try:
+        driver.set_page_load_timeout(TIMEOUT_CARREGAMENTO_S)
+    except Exception:
+        # Driver que nao aceita o ajuste nao justifica abortar a emissao; o
+        # rastro abaixo continua dizendo onde ela estava.
+        pass
+    log_event('trabalhista_navegando', url=url, execution_id=execution_id)
+    try:
+        driver.get(url)
+    except TimeoutException as erro:
+        log_event(
+            'trabalhista_portal_nao_respondeu', level='WARNING',
+            url=url, timeout_s=TIMEOUT_CARREGAMENTO_S, execution_id=execution_id)
+        raise PortalNaoRespondeuError(
+            'O portal do CNDT não respondeu em '
+            f'{TIMEOUT_CARREGAMENTO_S}s.') from erro
+    log_event('trabalhista_navegado', url=url, execution_id=execution_id)
+
+
 def _url_contrato(snapshot_ou_modelo):
     return f'https://{snapshot_ou_modelo.host}{snapshot_ou_modelo.rota}'
 
@@ -98,7 +138,7 @@ def observar_passivo(driver, contrato):
     captcha e não submete. É o único caminho pelo qual o agendador toca o
     portal.
     """
-    driver.get(_url_contrato(contrato))
+    _navegar(driver, _url_contrato(contrato))
     return trabalhista_recon.inventariar(
         driver,
         host_esperado=contrato.host,
@@ -132,16 +172,16 @@ def preparar_execucao(
         fixado = estado_lote.get('contrato_snapshot')
         if fixado is not None:
             _validar_snapshot(fixado)
-            driver.get(_url_contrato(fixado))
+            _navegar(driver, _url_contrato(fixado), execution_id=execution_id)
             return fixado
 
     ativo = contrato_portal_preflight.buscar_ativo(
         FLUXO_CONTRATO, ALVO_CONTRATO, obrigatorio=False)
     if ativo is None:
-        driver.get(url_legada)
+        _navegar(driver, url_legada, execution_id=execution_id)
         return None
 
-    driver.get(_url_contrato(ativo))
+    _navegar(driver, _url_contrato(ativo), execution_id=execution_id)
 
     def _observar(contrato):
         return trabalhista_recon.inventariar(
