@@ -104,6 +104,9 @@ export function alvoHtml(alvo) {
        </button>`
     : `<button type="button" class="btn btn-sm btn-soft-primary" data-acao="recon">
          Verificar agora
+       </button>
+       <button type="button" class="btn btn-sm btn-ghost" data-acao="descartar">
+         Descartar contrato
        </button>`;
   const incidentes = (alvo.incidentes || []).map(incidenteHtml).join('');
   return `
@@ -184,6 +187,9 @@ export async function inicializarContratosPortais(opcoes = {}) {
       'Ativar a estrutura observada agora? O portal será observado de novo antes.')) return;
     if (acao === 'restaurar' && !confirmar(
       'Restaurar esta versão como ativa?')) return;
+    if (acao === 'descartar' && !confirmar(
+      'Descartar o contrato deste portal? A automação volta a usar os seletores '
+      + 'fixos do código até você ativar uma versão nova.')) return;
 
     botao.disabled = true;
     mostrarErro(botao, '');
@@ -208,6 +214,9 @@ export async function inicializarContratosPortais(opcoes = {}) {
         await enviar(
           `${base}/${botao.dataset.contrato}/restaurar`, { confirmado: true });
         aviso = ['Versão restaurada.', 'success'];
+      } else if (acao === 'descartar') {
+        await enviar(`${base}/${fluxo}/${alvo}/descartar`, { confirmado: true });
+        aviso = ['Contrato descartado; a automação voltou ao mapa fixo.', 'info'];
       }
       // Estado primeiro, aviso depois: a lista não pode deixar de refletir o
       // que já foi gravado porque a notificação falhou.

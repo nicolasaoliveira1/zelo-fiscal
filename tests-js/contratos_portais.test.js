@@ -205,3 +205,45 @@ test('verificar agora não pede confirmação e não promove nada', async () => 
   assert.equal(confirmou, false);
   assert.match(chamadas[1].url, /\/trabalhista\/cndt\/recon$/);
 });
+
+test('descartar pede confirmação e envia confirmado:true', async () => {
+  const semIncidente = { ...ALVO_BLOQUEADO, estado: 'compativel', incidentes: [] };
+  const chamadas = comFetch([
+    { corpo: { alvos: [semIncidente] } },
+    { corpo: { status: 'ok', versao: 3 } },
+    { corpo: { alvos: [semIncidente] } },
+  ]);
+  let perguntou = null;
+  await inicializarContratosPortais({
+    confirmar: (texto) => { perguntou = texto; return true; },
+  });
+
+  document.querySelector('[data-acao="descartar"]').click();
+  await assentar();
+
+  assert.match(perguntou, /seletores fixos do código/);
+  assert.match(chamadas[1].url, /\/trabalhista\/cndt\/descartar$/);
+  assert.equal(JSON.parse(chamadas[1].opcoes.body).confirmado, true);
+});
+
+test('descartar recusado no diálogo não envia nada', async () => {
+  const semIncidente = { ...ALVO_BLOQUEADO, estado: 'compativel', incidentes: [] };
+  const chamadas = comFetch([{ corpo: { alvos: [semIncidente] } }]);
+  await inicializarContratosPortais({ confirmar: () => false });
+  chamadas.length = 0;
+
+  document.querySelector('[data-acao="descartar"]').click();
+  await assentar();
+
+  assert.equal(chamadas.length, 0);
+});
+
+test('alvo sem contrato não oferece descartar', () => {
+  const container = document.getElementById('contratos-portais');
+  container.innerHTML = alvoHtml({
+    ...ALVO_BLOQUEADO, estado: 'desconhecido', versao: null,
+    pode_criar_baseline: true, incidentes: [], historico: [],
+  });
+
+  assert.equal(container.querySelector('[data-acao="descartar"]'), null);
+});

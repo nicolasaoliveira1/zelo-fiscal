@@ -230,6 +230,53 @@ def diagnostico_contrato_incidente_rejeitar(incidente_id):
     return jsonify({'status': 'ok'})
 
 
+@bp.route('/diagnostico/contratos-portais/<fluxo>/<alvo>/descartar',
+          methods=['POST'])
+@requer_papel('admin')
+def diagnostico_contrato_descartar(fluxo, alvo):
+    """Arquiva a versão ativa: a automação volta ao executor legado.
+
+    É o "desligado" do piloto. Não apaga história — a versão arquivada continua
+    contando por que saiu, e o alvo pode receber uma baseline nova depois.
+    """
+    dados = request.get_json(silent=True) or {}
+    if dados.get('confirmado') is not True:
+        return _json_error(
+            'Descarte um contrato apenas com confirmação explícita.', 400)
+
+    adaptador, erro = _adaptador_ou_404(fluxo, alvo)
+    if erro:
+        return erro
+    ativa = (ContratoPortal.query
+             .filter_by(fluxo=adaptador.fluxo, alvo=adaptador.alvo,
+                        estado='ativa')
+             .one_or_none())
+    if ativa is None:
+        return _json_error('O portal não possui contrato ativo.', 409)
+    # Lote em curso já fixou o snapshot e termina com ele; o problema é o lote
+    # que ainda não fixou — descartar no meio faria metade da fila obedecer o
+    # contrato e metade o mapa legado.
+    lock = adaptador.lock
+    if lock is not None and not lock.acquire(blocking=False):
+        return _json_error(
+            'Há uma emissão em curso neste portal. Tente novamente depois.', 423)
+    try:
+        contrato_portal.descartar_ativa(
+            adaptador.fluxo, adaptador.alvo,
+            fingerprint_ativa=ativa.fingerprint,
+            usuario_id=current_user.id)
+    except contrato_portal.ContratoPortalError as exc:
+        return _json_error(str(exc), 409)
+    finally:
+        if lock is not None:
+            lock.release()
+    auditoria.registrar(
+        'contrato_portal.descartar', alvo_tipo='contrato_portal',
+        alvo_id=ativa.id,
+        detalhe=f'{adaptador.fluxo}/{adaptador.alvo} v{ativa.versao}')
+    return jsonify({'status': 'ok', 'versao': ativa.versao})
+
+
 @bp.route('/diagnostico/contratos-portais/<int:contrato_id>/restaurar',
           methods=['POST'])
 @requer_papel('admin')

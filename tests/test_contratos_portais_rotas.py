@@ -437,3 +437,83 @@ def test_baseline_com_emissao_em_curso_responde_423(app, client, monkeypatch):
     resposta = client.post(f'{BASE}/{FLUXO}/{ALVO}/baseline', json={})
 
     assert resposta.status_code == 423
+
+
+# --- descarte ---------------------------------------------------------------
+
+def test_descartar_sem_confirmacao_explicita_e_400(app, client):
+    _baseline(app)
+
+    resposta = client.post(f'{BASE}/{FLUXO}/{ALVO}/descartar', json={})
+
+    assert resposta.status_code == 400
+    with app.app_context():
+        assert ContratoPortal.query.filter_by(
+            fluxo=FLUXO, alvo=ALVO, estado='ativa').count() == 1
+
+
+def test_descartar_sem_contrato_ativo_e_409(client):
+    resposta = client.post(
+        f'{BASE}/{FLUXO}/{ALVO}/descartar', json={'confirmado': True})
+
+    assert resposta.status_code == 409
+
+
+def test_descartar_arquiva_a_versao_e_encerra_incidentes(app, client):
+    """Descartar não apaga história: arquiva, e fecha o que ficou pendente."""
+    contrato_id = _baseline(app)
+    incidente_id = _incidente(app, contrato_id)
+
+    resposta = client.post(
+        f'{BASE}/{FLUXO}/{ALVO}/descartar', json={'confirmado': True})
+
+    assert resposta.status_code == 200
+    with app.app_context():
+        assert ContratoPortal.query.filter_by(
+            fluxo=FLUXO, alvo=ALVO, estado='ativa').count() == 0
+        arquivada = db.session.get(ContratoPortal, contrato_id)
+        assert arquivada.estado == 'arquivada'
+        assert arquivada.ativa_unica is None
+        assert len(arquivada.elementos) == 4
+        assert db.session.get(
+            IncidenteContratoPortal, incidente_id).estado == 'rejeitado'
+
+
+def test_apos_descartar_o_alvo_volta_a_aceitar_baseline(app, client, observando):
+    _baseline(app)
+    client.post(f'{BASE}/{FLUXO}/{ALVO}/descartar', json={'confirmado': True})
+
+    resposta = client.post(f'{BASE}/{FLUXO}/{ALVO}/baseline', json={})
+
+    assert resposta.status_code == 201
+    # Versão nova, não v1 de novo: a história do descarte continua legível.
+    assert resposta.get_json()['versao'] == 2
+    with app.app_context():
+        assert ContratoPortal.query.filter_by(fluxo=FLUXO, alvo=ALVO).count() == 2
+
+
+def test_painel_volta_a_oferecer_baseline_depois_do_descarte(app, client):
+    _baseline(app)
+    client.post(f'{BASE}/{FLUXO}/{ALVO}/descartar', json={'confirmado': True})
+
+    alvo = client.get(BASE).get_json()['alvos'][0]
+
+    assert alvo['estado'] == contrato_portal_recon.DESCONHECIDO
+    assert alvo['pode_criar_baseline'] is True
+    assert alvo['incidentes'] == []
+
+
+def test_descartar_com_emissao_em_curso_responde_423(app, client):
+    _baseline(app)
+    lock = contrato_portal_recon.adaptadores_padrao()[0].lock
+    lock.acquire()
+    try:
+        resposta = client.post(
+            f'{BASE}/{FLUXO}/{ALVO}/descartar', json={'confirmado': True})
+    finally:
+        lock.release()
+
+    assert resposta.status_code == 423
+    with app.app_context():
+        assert ContratoPortal.query.filter_by(
+            fluxo=FLUXO, alvo=ALVO, estado='ativa').count() == 1

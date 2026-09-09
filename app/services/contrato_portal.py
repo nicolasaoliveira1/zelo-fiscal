@@ -130,17 +130,20 @@ def criar_baseline(
     *, fluxo: str, alvo: str, definicao: ContratoComparavel,
     usuario_id: int | None, agora=None,
 ) -> ContratoPortal:
-    """Cria a primeira versão somente como decisão humana explícita."""
+    """Cria a versão de partida somente como decisão humana explícita."""
     if usuario_id is None:
         raise BaselineRequerHumanoError(
             'A baseline inicial exige revisão humana.')
     instante = _agora(agora)
     try:
+        # Recusa por VERSAO ATIVA, nao por historico: depois de descartar, o
+        # alvo volta a poder receber uma baseline, e o historico de por que a
+        # anterior saiu continua servindo a quem for olhar.
         existente = ContratoPortal.query.filter_by(
-            fluxo=fluxo, alvo=alvo).first()
+            fluxo=fluxo, alvo=alvo, estado='ativa').first()
         if existente is not None:
             raise ContratoPortalConflitoError(
-                'O alvo já possui histórico de contrato.')
+                'O alvo já possui contrato ativo.')
         contrato = _novo_contrato(
             fluxo=fluxo, alvo=alvo, host=definicao.host,
             rota=definicao.rota, estado='ativa', origem='usuario',
@@ -506,3 +509,49 @@ def restaurar(
         db.session.rollback()
         raise PersistenciaContratoPortalError(
             'Não foi possível restaurar o contrato do portal.') from erro
+
+
+def descartar_ativa(fluxo, alvo, *, fingerprint_ativa, usuario_id, agora=None):
+    """Arquiva a versão ativa: o alvo volta a NÃO ter contrato.
+
+    Sem versão ativa, os três modos de emissão voltam ao executor legado — é
+    esse o "desligado" do piloto, e é por isso que descartar não apaga nada: a
+    versão arquivada e os incidentes dela continuam contando por que ela saiu.
+    Incidentes abertos são encerrados junto, senão o painel seguiria pedindo
+    decisão sobre um contrato que já não governa nada.
+    """
+    instante = _agora(agora)
+    try:
+        ativa = ContratoPortal.query.options(
+            selectinload(ContratoPortal.elementos)).filter_by(
+                fluxo=fluxo, alvo=alvo,
+                estado='ativa').with_for_update().one_or_none()
+        if ativa is None:
+            raise ContratoPortalConflitoError('O alvo não possui contrato ativo.')
+        _validar_base_ativa(ativa, fingerprint_ativa)
+
+        abertos = IncidenteContratoPortal.query.filter_by(
+            contrato_base_id=ativa.id, estado='aberto').all()
+        for incidente in abertos:
+            incidente.estado = 'rejeitado'
+            incidente.resolvido_em = instante
+            incidente.resolvido_por_id = usuario_id
+
+        ativa.estado = 'arquivada'
+        db.session.commit()
+        log_event(
+            'contrato_portal_descartado', fluxo=fluxo, alvo=alvo,
+            versao=ativa.versao, fingerprint=ativa.fingerprint[:12],
+            incidentes_encerrados=len(abertos))
+        return ativa
+    except ContratoPortalError:
+        db.session.rollback()
+        raise
+    except Exception as erro:
+        db.session.rollback()
+        log_event(
+            'contrato_portal_descarte_falhou', level='ERROR',
+            fluxo=fluxo, alvo=alvo, error_type=type(erro).__name__,
+            error=str(erro)[:300])
+        raise PersistenciaContratoPortalError(
+            'Não foi possível descartar o contrato do portal.') from erro
