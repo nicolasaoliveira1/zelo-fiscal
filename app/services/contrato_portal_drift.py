@@ -7,7 +7,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
-from app.automation.trabalhista_recon import (
+from app.services.contrato_portal_protocol import (
     ElementoInventariado,
     InventarioPortal,
 )

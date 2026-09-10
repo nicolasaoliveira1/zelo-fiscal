@@ -8,10 +8,16 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from typing import Any
 
 from selenium.common.exceptions import WebDriverException
+
+from app.services.contrato_portal_protocol import (
+    ElementoInventariado,
+    FormularioInventariado,
+    InventarioPortal,
+)
 
 
 ESPERA_ENTRE_FOTOS_S = 0.4
@@ -19,57 +25,6 @@ MAX_FORMULARIOS = 50
 MAX_ELEMENTOS = 300
 MAX_ROTULO = 500
 MAX_IDENTIFICADOR = 500
-
-
-@dataclass(frozen=True)
-class FormularioInventariado:
-    id: str
-    name: str
-    metodo: str
-    acao_caminho: str
-    ordem: int
-    assinatura: str
-
-
-@dataclass(frozen=True)
-class ElementoInventariado:
-    tag: str
-    tipo: str
-    id: str
-    name: str
-    rotulo: str
-    seletor_tipo: str
-    seletor: str
-    assinatura_formulario: str
-    ordem_relativa: int
-    obrigatorio: bool
-    desabilitado: bool
-    somente_leitura: bool
-    visivel: bool
-    href_caminho: str = ''
-
-
-@dataclass(frozen=True)
-class InventarioPortal:
-    host: str
-    rota: str
-    etapa: str
-    formularios: tuple[FormularioInventariado, ...] = ()
-    elementos: tuple[ElementoInventariado, ...] = ()
-    estado: str = 'ok'
-    motivo: str | None = None
-    artefato_sanitizado: str = field(default='{}', repr=False)
-
-    @classmethod
-    def desconhecido(cls, etapa: str, motivo: str):
-        return cls(
-            host='', rota='', etapa=etapa, estado='desconhecida',
-            motivo=motivo)
-
-    @property
-    def conhecido(self) -> bool:
-        return self.estado == 'ok'
-
 
 JS_INVENTARIO_TRABALHISTA = r"""
 return (function () {

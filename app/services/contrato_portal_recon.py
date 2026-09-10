@@ -19,10 +19,12 @@ Três limites de propósito:
 
 Um alvo que falhe não derruba os demais nem o scheduler (AC-07.5).
 """
-from dataclasses import dataclass
-from typing import Any, Callable
-
 from app.services import contrato_portal, contrato_portal_preflight
+from app.services.contrato_portal_registry import (
+    AdaptadorRecon,
+    RegistroAdaptadores,
+)
+from app.services.contrato_portal_protocol import AdaptadorPortal
 from app.services.contrato_portal_drift import COMPATIVEL as DRIFT_COMPATIVEL
 from app.services.contrato_portal_drift import REVISAO as DRIFT_REVISAO
 from app.services.contrato_portal_drift import (
@@ -42,27 +44,7 @@ ADIADO = 'adiado'
 SEM_CONTRATO = 'sem_contrato'
 
 
-@dataclass(frozen=True)
-class AdaptadorRecon:
-    """Alvo que declara observação passiva segura.
-
-    `chave_health` é o alvo do circuit breaker, porque é assim que o painel
-    indexa cada portal — não um rótulo próprio, que viraria um segundo nome para
-    a mesma coisa.
-    """
-    fluxo: str
-    alvo: str
-    nome: str
-    chave_health: str
-    observar: Callable[[Any, Any], Any]
-    lock: Any = None
-    recon_passivo_seguro: bool = False
-    # Baseline declarada no código, nunca derivada do DOM: a primeira versão
-    # ativa é decisão humana revisável (AC-01.5).
-    definicao: Callable[[], Any] | None = None
-
-
-def adaptadores_padrao() -> list[AdaptadorRecon]:
+def _registro_padrao() -> RegistroAdaptadores:
     """Registry do piloto: só o Trabalhista declara recon passivo seguro.
 
     Os municípios continuam no dry-run diário que já existe; duas navegações
@@ -72,16 +54,20 @@ def adaptadores_padrao() -> list[AdaptadorRecon]:
     from app.automation.batch_state import TRABALHISTA_BATCH_LOCK
     from app.services import circuit_breaker
 
-    return [AdaptadorRecon(
-        fluxo=trabalhista.FLUXO_CONTRATO,
-        alvo=trabalhista.ALVO_CONTRATO,
-        nome='Trabalhista (CNDT/TST)',
-        chave_health=circuit_breaker.ALVO_TRABALHISTA,
-        observar=trabalhista.observar_passivo,
-        lock=TRABALHISTA_BATCH_LOCK,
-        recon_passivo_seguro=True,
-        definicao=trabalhista.definicao_baseline,
-    )]
+    return RegistroAdaptadores((AdaptadorRecon(
+            fluxo=trabalhista.FLUXO_CONTRATO,
+            alvo=trabalhista.ALVO_CONTRATO,
+            nome='Trabalhista (CNDT/TST)',
+            chave_health=circuit_breaker.ALVO_TRABALHISTA,
+            observar=trabalhista.observar_passivo,
+            lock=TRABALHISTA_BATCH_LOCK,
+            recon_passivo_seguro=True,
+            definicao=trabalhista.definicao_baseline,
+        ),))
+
+
+def adaptadores_padrao() -> list[AdaptadorPortal]:
+    return list(_registro_padrao().todos())
 
 
 class AlvoOcupadoError(RuntimeError):
@@ -93,10 +79,7 @@ class NadaParaRevisarError(RuntimeError):
 
 
 def adaptador_por_alvo(fluxo, alvo):
-    for adaptador in adaptadores_padrao():
-        if adaptador.fluxo == fluxo and adaptador.alvo == alvo:
-            return adaptador
-    return None
+    return _registro_padrao().por_alvo(fluxo, alvo)
 
 
 def _fechar(driver):
