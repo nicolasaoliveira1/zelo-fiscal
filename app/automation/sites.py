@@ -63,15 +63,13 @@ SITES_CERTIDOES = {
     },
     
     'TRABALHISTA': {
-        'url': 'https://cndt-certidao.tst.jus.br/inicio.faces',
-        'pre_fill_click_id': "input[value='Emitir Certidão']",
-        'pre_fill_click_by': 'css_selector',                  
-        'cnpj_field_id': 'gerarCertidaoForm:cpfCnpj',
+        'url': 'https://cndt-certidao.tst.jus.br/gerarCertidao',
+        'cnpj_field_id': 'cpfCnpj',
         'by': 'id',
         # captcha de imagem (base64) + submit — spec 07 COV-01a (CNDT full-auto)
-        'captcha_img_id': 'idImgBase64',
-        'captcha_input_id': 'idCampoResposta',
-        'submit_id': 'gerarCertidaoForm:btnEmitirCertidao'
+        'captcha_img_id': 'captcha-imagem',
+        'captcha_input_id': 'captcha-resposta',
+        'submit_id': 'botao-emitir'
     }
 }
 

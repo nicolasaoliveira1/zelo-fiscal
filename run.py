@@ -12,6 +12,51 @@ def make_shell_context():
     return {'db': db, 'Empresa': Empresa, 'Certidao': Certidao}
 
 
+PORTA = int(os.environ.get('PORT') or os.environ.get('FLASK_RUN_PORT') or 5000)
+
+
+def _porta_ocupada(porta, host='127.0.0.1', timeout=2.0):
+    """Alguem ja atende nessa porta?
+
+    Checa por CONEXAO, nao por bind: no Windows o socket do servidor sobe com
+    `SO_REUSEADDR` e um segundo bind na mesma porta **da certo**, ao contrario
+    do Linux. O resultado e dois servidores escutando e o Windows escolhendo
+    quem atende cada conexao — foi assim que uma sessao inteira foi gasta
+    investigando "o app nao responde" enquanto as requisicoes caiam num
+    processo morto (2026-09-09).
+
+    Ha uma janela entre esta checagem e o bind de verdade, e ela nao e
+    fechavel daqui: e guarda best-effort contra o caso do Windows descrito, nao
+    exclusao mutua.
+
+    Pior: o socket sobrevive ao dono. Ja apareceu `LISTENING` com um PID que
+    `taskkill` nao encontra e sem nenhum python vivo na maquina; ai o connect
+    completa e a requisicao morre em silencio. Por isso a checagem e connect.
+    """
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as teste:
+        teste.settimeout(timeout)
+        try:
+            return teste.connect_ex((host, porta)) == 0
+        except OSError:
+            return False
+
+
+def _recusar_porta_ocupada(porta):
+    print(f'ERRO: ja ha algo escutando em 127.0.0.1:{porta}.')
+    print('Subir por cima cria um segundo servidor na mesma porta e as')
+    print('requisicoes passam a cair em qualquer um dos dois.')
+    print('')
+    print(f'  netstat -ano | findstr :{porta}      (ve quem esta la)')
+    print('  taskkill /PID <pid> /T /F            (derruba)')
+    print('')
+    print('Se o PID nao existir mais, o socket ficou orfao no Windows:')
+    print('  net stop winnat && net start winnat  (como administrador)')
+    print('Ou use outra porta:  set PORT=5001')
+    sys.exit(1)
+
+
 def _processo_que_serve(debug):
     """Distingue o servidor real do processo pai do reloader do Werkzeug."""
     return not debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
@@ -42,6 +87,12 @@ if __name__ == '__main__':
     # jobs recorrentes realmente estão registrados e com o scheduler rodando.
     _garantir_servicos_recorrentes(debug)
 
+    # Quem checa e quem ABRE a porta: o processo unico, ou o pai do reloader.
+    # O filho reusa o socket que o pai ja abriu, entao checar nele faria o
+    # filho recusar a porta do proprio pai a cada reload.
+    if os.environ.get('WERKZEUG_RUN_MAIN') != 'true' and _porta_ocupada(PORTA):
+        _recusar_porta_ocupada(PORTA)
+
     if debug:
         # Dois modos de reload, escolhidos por FLASK_RELOAD_AUTO (o painel seta;
         # na mao o padrao e o de sempre, vigiando o codigo):
@@ -54,9 +105,10 @@ if __name__ == '__main__':
         gatilho = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reload.trigger')
         open(gatilho, 'a').close()
         if automatico:
-            app.run(debug=True, use_reloader=True, extra_files=[gatilho])
+            app.run(debug=True, port=PORTA, use_reloader=True,
+                    extra_files=[gatilho])
         else:
-            app.run(debug=True, use_reloader=True,
+            app.run(debug=True, port=PORTA, use_reloader=True,
                     extra_files=[gatilho], exclude_patterns=['*.py'])
     else:
-        app.run(debug=False)
+        app.run(debug=False, port=PORTA)

@@ -22,7 +22,7 @@ from selenium.webdriver.support.ui import Select, WebDriverWait
 
 from app import db, file_manager
 from app.errors import ErrorType
-from app.automation import SITES_CERTIDOES, capture, pdf, steps
+from app.automation import SITES_CERTIDOES, capture, pdf, steps, trabalhista
 from app.automation.batch_state import (
     FGTS_BATCH_LOCK,
     FGTS_BATCH_STATE,
@@ -59,6 +59,7 @@ from app.automation.emissao import (
 )
 from app.automation.sites import is_ipm_atende
 from app.models import Certidao
+from app.services import contrato_portal_preflight
 from app.services.execution_logger import log_event
 from app.services.visualizar_token import _gerar_visualizar_token
 from app.utils import json_error as _json_error
@@ -562,6 +563,9 @@ def _executar_automacao_baixar(certidao, cfg):
     certidao_pdf_msg = None
     pdf_invalida_msg = None
 
+    # snapshot do contrato do portal; só o Trabalhista fixa um (T6)
+    snapshot_contrato = None
+
     # contexto compartilhado com helpers de steps
     contexto = {
         'arquivo_salvo_msg': None,
@@ -590,6 +594,10 @@ def _executar_automacao_baixar(certidao, cfg):
                 info_site.get('login_cert_url'),
                 info_site.get('url')
             )
+        elif tipo_certidao_chave == 'TRABALHISTA':
+            log_event('emit_navigate', certidao_id=certidao.id, url=info_site.get('url'))
+            snapshot_contrato = trabalhista.preparar_execucao(
+                driver, url_legada=info_site.get('url'))
         else:
             log_event('emit_navigate', certidao_id=certidao.id, url=info_site.get('url'))
             driver.get(info_site.get('url'))
@@ -626,33 +634,43 @@ def _executar_automacao_baixar(certidao, cfg):
         if steps_before_cnpj is None:
             # padrão atual: pre_fill depois select_tipo
             steps_before_cnpj = ['pre_fill', 'select_tipo']
+        if tipo_certidao_chave == 'TRABALHISTA' and snapshot_contrato is not None:
+            steps_before_cnpj = []
 
         for step in steps_before_cnpj:
             _baixar_executar_acao(step, info_site, wait, driver, certidao, contexto)
 
-        if info_site.get('cnpj_field_id'):
+        if tipo_certidao_chave == 'TRABALHISTA' and snapshot_contrato is not None:
+            localizador_documento = trabalhista.localizador(
+                snapshot_contrato, 'documento')
+        else:
             field_by = _get_by(info_site.get('by'))
-            if field_by:
-                try:
-                    campo1 = wait.until(EC.element_to_be_clickable(
-                        (field_by, info_site['cnpj_field_id'])))
-                    if info_site.get('slow_typing'):
-                        campo1.clear()
-                        apenas_numeros = _normalizar_cnpj(cnpj_limpo)
-                        campo1.click()
-                        for digito in apenas_numeros:
-                            campo1.send_keys(digito)
-                            time.sleep(0.1)
-                    else:
-                        campo1.click()
-                        dado_a_preencher = inscricao_limpa if info_site.get(
-                            'cnpj_field_id') == 'inscricao' else cnpj_limpo
-                        campo1.send_keys(dado_a_preencher)
+            localizador_documento = (
+                (field_by, info_site['cnpj_field_id'])
+                if info_site.get('cnpj_field_id') and field_by else None)
+        if localizador_documento:
+            try:
+                campo1 = wait.until(EC.element_to_be_clickable(
+                    localizador_documento))
+                if info_site.get('slow_typing'):
+                    campo1.clear()
+                    apenas_numeros = _normalizar_cnpj(cnpj_limpo)
+                    campo1.click()
+                    for digito in apenas_numeros:
+                        campo1.send_keys(digito)
+                        time.sleep(0.1)
+                else:
+                    campo1.click()
+                    dado_a_preencher = inscricao_limpa if info_site.get(
+                        'cnpj_field_id') == 'inscricao' else cnpj_limpo
+                    campo1.send_keys(dado_a_preencher)
 
-                    if tipo_certidao_chave == 'TRABALHISTA':
-                        campo1.send_keys(Keys.TAB)
-                except Exception:
-                    pass
+                if tipo_certidao_chave == 'TRABALHISTA':
+                    campo1.send_keys(Keys.TAB)
+            except Exception:
+                if snapshot_contrato is not None:
+                    raise
+                pass
 
         if tipo_certidao_chave == 'TRABALHISTA':
             # Emissão individual do CNDT é MANUAL (decisão do usuário): o operador
@@ -744,6 +762,27 @@ def _executar_automacao_baixar(certidao, cfg):
                         certidao_id=certidao.id, error=str(e_quit),
                     )
 
+    except contrato_portal_preflight.PreflightContratoPortalError as e:
+        # Toda a familia do preflight, nao so o bloqueio: contrato ausente ou
+        # falha de persistencia sao ambiente local (spec 09), nao falha do
+        # portal — merecem mensagem acionavel, nunca erro cru do Selenium.
+        log_event(
+            'contrato_portal_bloqueado', level='WARNING',
+            fluxo=trabalhista.FLUXO_CONTRATO, alvo=trabalhista.ALVO_CONTRATO)
+        resultado['erro_acionavel'] = {
+            'message': str(e),
+            'error_type': ErrorType.PORTAL.value,
+            'acao': 'Revise o contrato Trabalhista no Diagnóstico.',
+            'code': 409,
+        }
+        # Fecha o Chrome como o handler generico abaixo: sem isto, todo
+        # bloqueio de contrato deixava um navegador vazando.
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+        return resultado
     except Exception as e:
         log_event('emit_selenium_error', level='ERROR', certidao_id=certidao.id, error=str(e))
         if _erro_indica_navegador_fechado(e):

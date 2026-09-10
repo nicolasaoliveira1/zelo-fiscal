@@ -243,6 +243,38 @@ def _sem_cert_store_real(monkeypatch):
     monkeypatch.setattr(cert_store, 'encontrar_issuer', lambda subject_cn: None)
 
 
+@pytest.fixture(scope='session', autouse=True)
+def _sem_navegador_real():
+    """Nenhum teste abre Chrome de verdade.
+
+    Aconteceu em 2026-09-09: um teste de rota chamou o criador de driver do
+    lote sem duble, abriu o navegador e bateu no portal do CNDT — portal de
+    governo, na suite que roda no CI. Teste que precisa exercitar a propria
+    criacao de driver guarda a referencia original no import do modulo.
+
+    Escopo de SESSAO de proposito: um autouse por teste trocando atributo de
+    modulo mexe na ordem de teardown e chegou a virar teste vermelho por
+    ordem de execucao.
+    """
+    from unittest import mock
+
+    from app.automation import driver
+
+    def _recusar(*args, **kwargs):
+        raise AssertionError(
+            'Teste tentou abrir um navegador real. Injete um duble de driver.')
+
+    remendos = [
+        mock.patch.object(driver, '_criar_driver_chrome', _recusar),
+        mock.patch.object(driver, '_criar_driver_uc', _recusar),
+    ]
+    for remendo in remendos:
+        remendo.start()
+    yield
+    for remendo in remendos:
+        remendo.stop()
+
+
 @pytest.fixture(scope='session')
 def app():
     return create_app()

@@ -50,6 +50,7 @@
   - Unitário mantido assistido/manual para evitar consumo indevido de solver (o operador resolve o captcha).
   - Lote com captcha de imagem resolvido automaticamente via 2captcha; disponível também na emissão proativa do agendador.
   - Classificação do PDF: positiva vira PENDENTE (arquivo removido); negativa/positiva-com-efeitos-de-negativa grava validade de 180 dias.
+  - **Contrato adaptativo (piloto)**: os seletores do CNDT deixaram de ser constante de código e passam a vir de uma **versão aprovada** da estrutura do portal, guardada em banco. Antes de preencher qualquer campo, a automação observa a tela e compara com a versão ativa: se nada mudou, segue; se um campo de entrada mudou de endereço de forma inequívoca, ajusta sozinha; se mudou a rota, o captcha ou o botão de emitir, **para antes de gastar captcha** e abre um incidente para revisão humana. Enquanto não houver versão ativa, o fluxo antigo continua valendo sem alteração.
 
 ## Verificação preventiva dos municípios
 

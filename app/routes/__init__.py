@@ -514,6 +514,7 @@ def certidoes_painel():
 
 # (ex.: a variavel local 'certidoes', as rotas empresas()/relatorios()).
 from app.routes import certidoes as _mod_certidoes  # noqa: E402,F401
+from app.routes import contratos_portais as _mod_contratos_portais  # noqa: E402,F401
 from app.routes import empresas as _mod_empresas  # noqa: E402,F401
 from app.routes import lotes as _mod_lotes  # noqa: E402,F401
 from app.routes import manifestador as _mod_manifestador  # noqa: E402,F401

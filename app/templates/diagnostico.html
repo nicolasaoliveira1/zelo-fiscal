@@ -57,6 +57,25 @@
 
 <div class="card mb-3">
     <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap">
+        {{ zl_secao('Contratos dos portais') }}
+        <span class="small text-muted">A estrutura aprovada de cada portal; a automação obedece a versão ativa</span>
+    </div>
+    <div class="card-body">
+        <div id="contratos-portais">
+            <p class="text-muted mb-0">Carregando…</p>
+        </div>
+    </div>
+    <div class="card-footer small text-muted">
+        Ativar e Verificar agora apenas <strong>observam</strong> a tela do portal: não preenchem documento,
+        não resolvem captcha e não emitem certidão. A primeira versão nasce do que a tela mostra —
+        se algum controle declarado não estiver lá, a ativação é recusada e diz qual. Ativar uma
+        versão muda o que a automação obedece,
+        por isso pede confirmação.
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap">
         {{ zl_secao('Falhas da fila') }}
         <span class="small text-muted">Emissões que esgotaram as tentativas</span>
     </div>
@@ -470,5 +489,11 @@
                     '<tr><td colspan="4" class="text-center text-muted py-3">Falha ao carregar municípios.</td></tr>';
             });
     })();
+</script>
+<script type="module">
+    import { inicializarContratosPortais } from '{{ url_for('static', filename='js/contratos_portais.js') }}';
+    inicializarContratosPortais({
+        base: '{{ url_for("main.diagnostico_contratos_portais") }}',
+    });
 </script>
 {% endblock %}

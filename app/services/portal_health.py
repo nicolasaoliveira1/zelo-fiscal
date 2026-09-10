@@ -11,6 +11,12 @@ depois de 20 falhas. Duas fontes, de proposito:
 Verde significa "o portal responde", NAO "a emissao funciona" — o rotulo na tela
 precisa dizer isso, senao vira falsa confianca.
 
+Por isso ha DUAS dimensoes, nunca uma so (RAC-07.4): `estado` diz se o portal
+responde, e `contrato_estado` diz se a estrutura ainda bate com o contrato
+aprovado — `compativel`, `autoajustado`, `bloqueado` ou `desconhecido`. Um HTTP
+200 com o formulario trocado e exatamente o caso que a primeira dimensao nao
+enxerga.
+
 O resultado e cacheado por uma janela curta: recarregar o painel nao pode virar
 uma rajada de requisicoes contra o portal.
 """
@@ -22,7 +28,7 @@ from datetime import datetime, timedelta
 import requests
 
 from app.automation import SITES_CERTIDOES
-from app.services import circuit_breaker, dryrun_municipio
+from app.services import circuit_breaker, contrato_portal_recon, dryrun_municipio
 from app.services.nfe_sefaz import URLS as NFE_SEFAZ_URLS
 from app.utils import normalizar_cidade
 
@@ -195,9 +201,25 @@ def snapshot(config, forcar=False):
 
     abertos = circuit_breaker.abertos()
     alvos_abertos = {b['alvo'] for b in abertos}
+    contratos = contrato_portal_recon.estado_por_alvo()
     portais = fixos + _municipios()
     for item in portais:
         item['breaker_aberto'] = item['chave'] in alvos_abertos
+        # Alvo sem adaptador de contrato fica `desconhecido`: a dimensao existe,
+        # mas ninguem a avaliou ainda. Desconhecido nao e reprovacao.
+        contrato = contratos.get(item['chave']) or {
+            'estado': contrato_portal_recon.DESCONHECIDO,
+            'versao': None, 'mensagem': None}
+        item['contrato_estado'] = contrato['estado']
+        item['contrato_versao'] = contrato['versao']
+        item['contrato_mensagem'] = contrato['mensagem']
+        # So `bloqueado` reprova: o portal responde, mas a automacao esbarraria
+        # na estrutura mudada. Desconhecido preserva o significado anterior do
+        # painel para os alvos que ainda nao tem contrato.
+        item['pronto_para_automatizar'] = bool(
+            item['estado'] == 'ok'
+            and not item['breaker_aberto']
+            and contrato['estado'] != contrato_portal_recon.BLOQUEADO)
 
     return {'portais': portais, 'breakers': abertos}
 
