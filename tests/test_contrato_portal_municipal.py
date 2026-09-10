@@ -224,6 +224,53 @@ def test_snapshot_traduz_seletores_em_copia_sem_regravar_config():
     assert config == config_original
 
 
+def test_snapshot_ignora_passo_que_o_contrato_nunca_declarou():
+    """`after_cnpj` além do primeiro passo não entra na baseline observável.
+
+    `_itens_declarados` para no primeiro pós-CNPJ (é até onde a observação
+    passiva chega) e deduplica por `(by, locator)`. Exigir essas chaves na
+    tradução bloqueava a emissão de todo município com dois passos pós-CNPJ ou
+    com um localizador repetido — o contrato existia e mesmo assim nada saía.
+    """
+    info = {'cnpj_field_id': 'campo-antigo', 'by': 'id'}
+    config = {
+        'before_cnpj': [
+            {'tipo': 'click', 'by': 'id', 'locator': 'aba-antiga'},
+            # repete o endereço do primeiro: `_itens_declarados` deduplica
+            {'tipo': 'click', 'by': 'id', 'locator': 'aba-antiga'},
+        ],
+        'after_cnpj': [
+            {'tipo': 'click', 'by': 'id', 'locator': 'consultar'},
+            {'tipo': 'click', 'by': 'id', 'locator': 'baixar'},
+        ],
+    }
+    elementos = {
+        'cnpj': ElementoSnapshotPortal(
+            chave='cnpj', etapa='formulario', papel='entrada', acao='preencher',
+            seletor_tipo='css_selector', seletor='#campo-novo'),
+        'before_cnpj[1]': ElementoSnapshotPortal(
+            chave='before_cnpj[1]', etapa='formulario', papel='navegacao',
+            acao='navegar', seletor_tipo='name', seletor='aba-nova'),
+        'after_cnpj[1]': ElementoSnapshotPortal(
+            chave='after_cnpj[1]', etapa='formulario', papel='submissao',
+            acao='submeter', seletor_tipo='id', seletor='consultar-novo'),
+    }
+    snapshot = SnapshotContratoPortal(
+        contrato_id=1, fluxo='municipal', alvo='municipio:vilacontrato:padrao',
+        versao=2, fingerprint='a' * 64, host='portal.exemplo', rota='/cnd',
+        elementos=elementos,
+    )
+
+    novo_info, novo_config = municipal.aplicar_snapshot(snapshot, info, config)
+
+    assert novo_info['cnpj_field_id'] == '#campo-novo'
+    assert novo_config['before_cnpj'][0]['locator'] == 'aba-nova'
+    # sem chave própria: seguem o cadastro, em vez de derrubar a emissão
+    assert novo_config['before_cnpj'][1]['locator'] == 'aba-antiga'
+    assert novo_config['after_cnpj'][0]['locator'] == 'consultar-novo'
+    assert novo_config['after_cnpj'][1]['locator'] == 'baixar'
+
+
 def test_dryrun_passivo_nao_executa_fill():
     municipio = _municipio(config_automacao=json.dumps({
         'skip_cnpj_fill': True,

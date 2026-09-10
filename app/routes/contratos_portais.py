@@ -21,6 +21,7 @@ from app.services import auditoria, contrato_portal, contrato_portal_recon
 from app.services.contrato_portal_drift import BaselineNaoObservavelError
 from app.services.execution_logger import log_event
 from app.utils import json_error as _json_error
+from app.utils import utcnow_naive
 
 
 def _iso(valor):
@@ -214,16 +215,26 @@ def diagnostico_contrato_incidente_rejeitar(incidente_id):
     if erro:
         return erro
     candidata_id = incidente.contrato_candidato_id
+    candidata = (db.session.get(ContratoPortal, candidata_id)
+                 if candidata_id is not None else None)
     try:
-        if candidata_id is not None:
+        # Só a candidata que ainda AGUARDA revisão é rejeitável. O incidente
+        # guarda o vínculo mesmo depois de a candidata ser recusada (ele só
+        # vincula, nunca desvincula) e reabre no preflight seguinte: sem esta
+        # checagem, "Manter a versão atual" batia em `ContratoPortalTransicaoError`
+        # e o incidente ficava aberto no painel para sempre.
+        if candidata is not None and candidata.estado == 'candidata_revisao':
             contrato_portal.rejeitar_candidata(
                 candidata_id, usuario_id=current_user.id)
         else:
-            # Incidente do preflight não tem candidata: recusar é encerrar o
-            # incidente, sem promover nada.
+            # Incidente do preflight não tem candidata viva: recusar é encerrar
+            # o incidente, sem promover nada.
             incidente.estado = 'rejeitado'
+            incidente.resolvido_em = utcnow_naive()
+            incidente.resolvido_por_id = current_user.id
             db.session.commit()
     except contrato_portal.ContratoPortalError as exc:
+        db.session.rollback()
         return _json_error(str(exc), 409)
     auditoria.registrar(
         'contrato_portal.rejeitar', alvo_tipo='contrato_portal',
@@ -295,7 +306,7 @@ def diagnostico_contrato_restaurar(contrato_id):
     # Pelo registry, como as demais rotas: sem isto daria para restaurar o
     # contrato de um alvo que ja saiu de `adaptadores_padrao()` — ativo no banco
     # e sem ninguem para obedece-lo.
-    _, erro = _adaptador_ou_404(historico.fluxo, historico.alvo)
+    adaptador, erro = _adaptador_ou_404(historico.fluxo, historico.alvo)
     if erro:
         return erro
     ativa = (ContratoPortal.query
@@ -304,12 +315,22 @@ def diagnostico_contrato_restaurar(contrato_id):
              .one_or_none())
     if ativa is None:
         return _json_error('O portal não possui contrato ativo.', 409)
+    # Mesmo motivo do descarte: trocar a versão ativa no meio de um lote faria
+    # metade da fila obedecer uma estrutura e metade outra. Quem já fixou o
+    # snapshot termina com ele; o problema é quem ainda não fixou.
+    lock = adaptador.lock
+    if lock is not None and not lock.acquire(blocking=False):
+        return _json_error(
+            'Há uma emissão em curso neste portal. Tente novamente depois.', 423)
     try:
         nova = contrato_portal.restaurar(
             historico.id, fingerprint_ativa=ativa.fingerprint,
             usuario_id=current_user.id)
     except contrato_portal.ContratoPortalError as exc:
         return _json_error(str(exc), 409)
+    finally:
+        if lock is not None:
+            lock.release()
     auditoria.registrar(
         'contrato_portal.restaurar', alvo_tipo='contrato_portal',
         alvo_id=nova.id,

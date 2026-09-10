@@ -28,6 +28,7 @@ from app.services.contrato_portal_registry import (
 )
 from app.services.contrato_portal_protocol import AdaptadorPortal
 from app.services.contrato_portal_drift import COMPATIVEL as DRIFT_COMPATIVEL
+from app.services.contrato_portal_drift import DESCONHECIDA as DRIFT_DESCONHECIDA
 from app.services.contrato_portal_drift import REVISAO as DRIFT_REVISAO
 from app.services.contrato_portal_drift import (
     BaselineNaoObservavelError,
@@ -152,8 +153,15 @@ def _observar_alvo(adaptador, ativo, criar_driver, execution_id):
         versao_evento = snapshot.versao
         if resultado == AUTOAJUSTADO:
             origem_evento = 'sistema'
-    except contrato_portal_preflight.ContratoPortalBloqueadoError:
-        resultado = BLOQUEADO
+    except contrato_portal_preflight.ContratoPortalBloqueadoError as exc:
+        # Observação inconclusiva (driver morto, DOM instável, rota que não
+        # abriu) NÃO é drift: o preflight bloqueia igual, mas o recon precisa
+        # dizer `desconhecido`, senão o painel acusa "mudança estrutural
+        # aguardando revisão" por causa de um portal que engasgou.
+        resultado = (
+            DESCONHECIDO
+            if getattr(exc, 'classificacao', None) == DRIFT_DESCONHECIDA
+            else BLOQUEADO)
     except Exception as exc:
         erro = exc
         log_event(

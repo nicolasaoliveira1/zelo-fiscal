@@ -34,9 +34,20 @@ class ContratoPortalAusenteError(PreflightContratoPortalError):
 
 
 class ContratoPortalBloqueadoError(PreflightContratoPortalError):
-    def __init__(self, classificacao: str):
-        super().__init__(
-            'A estrutura do portal mudou e a emissão foi bloqueada para revisão.')
+    """Bloqueio estrutural: `classificacao` é o veredito, `mensagem` o motivo.
+
+    Os dois são separados de propósito. Quem levanta por drift passa só a
+    classificação (`revisao`, `desconhecida`) e herda a frase padrão; quem
+    levanta por um snapshot incompleto tem um motivo específico a dizer, e ele
+    precisa chegar ao log e ao operador — antes, o argumento era engolido para
+    dentro de `classificacao` e toda causa virava a mesma frase.
+    """
+
+    MENSAGEM_PADRAO = (
+        'A estrutura do portal mudou e a emissão foi bloqueada para revisão.')
+
+    def __init__(self, classificacao: str, mensagem: str | None = None):
+        super().__init__(mensagem or self.MENSAGEM_PADRAO)
         self.classificacao = classificacao
 
 
@@ -192,7 +203,9 @@ def executar(
                 origem=ativo.origem, duracao_ms=_duracao_ms(inicio),
                 error=str(erro), execution_id=execution_id)
             raise ContratoPortalBloqueadoError(
-                'A estrutura mudou e o ajuste não pôde ser promovido.') from erro
+                'revisao',
+                'A estrutura mudou e o ajuste não pôde ser promovido.',
+            ) from erro
     elif resultado.classificacao != COMPATIVEL:
         try:
             contrato_portal.registrar_incidente(

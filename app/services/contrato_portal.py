@@ -498,6 +498,15 @@ def restaurar(
             raise ContratoPortalTransicaoError(
                 'A versão já é a ativa do alvo.')
         _validar_base_ativa(ativa, fingerprint_ativa)
+        # Incidentes abertos são da versão que sai. Como o painel só lista os
+        # da ativa, deixá-los abertos os tornava invisíveis e eternos — mesma
+        # razão pela qual `descartar_ativa` os encerra.
+        abertos = IncidenteContratoPortal.query.filter_by(
+            contrato_base_id=ativa.id, estado='aberto').all()
+        for incidente in abertos:
+            incidente.estado = 'rejeitado'
+            incidente.resolvido_em = instante
+            incidente.resolvido_por_id = usuario_id
         restaurada = _clonar(
             historico, estado='candidata_revisao', origem='usuario',
             instante=instante, criado_por_id=usuario_id, base=historico)

@@ -221,6 +221,27 @@ def test_preparar_rs_sem_contrato_preserva_fluxo_legado():
     driver.get.assert_not_called()
 
 
+def test_preflight_rs_nao_deixa_download_bloqueado_no_driver_da_emissao():
+    """O `deny` do CDP vale pela sessão inteira e o RS baixa PDF de verdade.
+
+    Bloquear download durante o preflight fazia todo item do lote esperar os
+    180s de monitoramento por um arquivo que o Chrome estava recusando. A defesa
+    continua no recon (`observar_passivo`), que usa driver descartável.
+    """
+    driver = MagicMock()
+    snapshot = _snapshot(cnpj='cnpj', desafio='altcha-widget', enviar='enviar')
+
+    with patch.object(rs.dryrun_municipio, 'bloquear_downloads') as bloquear, \
+            patch.object(rs, '_entrar_na_tela'), \
+            patch.object(rs, 'inventariar'), \
+            patch.object(preflight, 'buscar_ativo',
+                         return_value=SimpleNamespace(versao=1)), \
+            patch.object(preflight, 'executar', return_value=snapshot):
+        assert rs.preparar_execucao(driver) is snapshot
+
+    bloquear.assert_not_called()
+
+
 def test_preparar_rs_fixa_snapshot_e_nao_reautentica_no_item_seguinte():
     driver = MagicMock()
     snapshot = _snapshot(cnpj='cnpj', desafio='altcha-widget', enviar='enviar')
@@ -233,7 +254,24 @@ def test_preparar_rs_fixa_snapshot_e_nao_reautentica_no_item_seguinte():
     assert primeiro is snapshot
     assert segundo is snapshot
     entrar.assert_called_once_with(driver, snapshot)
-    assert estado['contrato_sessao_driver_id'] == id(driver)
+    # Guarda o OBJETO, não `id()`: endereço de memória é reaproveitado depois do
+    # GC e um driver novo podia herdar a sessão de um que já morreu.
+    assert estado['contrato_sessao_driver'] is driver
+
+
+def test_preparar_rs_reautentica_quando_o_driver_e_outro():
+    """Driver recriado no meio do lote precisa passar pelo certificado de novo."""
+    primeiro_driver = MagicMock()
+    segundo_driver = MagicMock()
+    snapshot = _snapshot(cnpj='cnpj', desafio='altcha-widget', enviar='enviar')
+    estado = {'contrato_snapshot': snapshot}
+
+    with patch.object(rs, '_entrar_na_tela') as entrar:
+        rs.preparar_execucao(primeiro_driver, estado_lote=estado)
+        rs.preparar_execucao(segundo_driver, estado_lote=estado)
+
+    assert entrar.call_count == 2
+    assert estado['contrato_sessao_driver'] is segundo_driver
 
 
 def test_lote_rs_bloqueia_antes_de_preencher_cnpj(app, ids):

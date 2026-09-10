@@ -737,11 +737,21 @@ def aplicar_snapshot(snapshot: SnapshotContratoPortal, info_site, config):
     def elemento(chave):
         item = snapshot.elemento(chave)
         if item.seletor_tipo == 'nenhum' or not item.seletor:
-            raise ContratoPortalBloqueadoError('seletor municipal ausente')
+            raise ContratoPortalBloqueadoError(
+                'desconhecida', 'seletor municipal ausente')
         return item
 
+    # O contrato só declara o que a observação passiva alcança: `after_cnpj`
+    # além do primeiro passo nunca entra, e `_itens_declarados` deduplica por
+    # `(by, locator)`, então um passo que repete um endereço já declarado
+    # também não tem chave própria. Exigir aqui uma chave que a baseline jamais
+    # teve bloqueava a emissão de qualquer município nessas condições; o
+    # localizador não declarado segue o valor do cadastro, como antes.
+    def declarado(chave):
+        return chave in snapshot.elementos
+
     def aplicar_info(chave, campo_locator, campo_by):
-        if not novo_info.get(campo_locator):
+        if not novo_info.get(campo_locator) or not declarado(chave):
             return
         item = elemento(chave)
         novo_info[campo_locator] = item.seletor
@@ -755,9 +765,10 @@ def aplicar_snapshot(snapshot: SnapshotContratoPortal, info_site, config):
         passos = novo_config.get(etapa) or []
         for indice, passo in enumerate(passos, start=1):
             by, locator = _alvo_passo(passo)
-            if not by or not locator:
+            chave = _chave_passo(etapa, indice)
+            if not by or not locator or not declarado(chave):
                 continue
-            item = elemento(_chave_passo(etapa, indice))
+            item = elemento(chave)
             passo['by'] = item.seletor_tipo
             passo['locator'] = item.seletor
     return novo_info, novo_config
@@ -774,6 +785,7 @@ def preparar_execucao(driver, contexto, *, estado_lote=None, execution_id=None):
         if fixado is not None:
             if fixado.alvo != contexto.alvo or fixado.fluxo != FLUXO_CONTRATO:
                 raise ContratoPortalBloqueadoError(
+                    'desconhecida',
                     'Snapshot municipal fixado para outro alvo.')
             return fixado
 
@@ -790,6 +802,11 @@ def preparar_execucao(driver, contexto, *, estado_lote=None, execution_id=None):
         execution_id=execution_id,
         contrato_ativo=ativo,
     )
+    # A observação passiva reusa o dry-run: ele navega para a URL e EXECUTA os
+    # cliques pré-CNPJ (só o passo que emite fica de fora). Sem voltar à tela
+    # inicial, a emissão repetiria esses mesmos passos sobre uma página já
+    # avançada — clicando duas vezes ou não achando mais o elemento.
+    driver.get(_url_do_contexto(contexto))
     if snapshots is not None:
         snapshots[contexto.alvo] = snapshot
     return snapshot

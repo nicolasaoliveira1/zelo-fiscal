@@ -111,8 +111,6 @@ def definicao_baseline() -> ContratoComparavel:
         etapa=ETAPA_CONTRATO,
         elementos=elementos,
     )
-
-
 # O inventário comum já sanitiza campos, rótulos, formulários e rotas. O RS
 # acrescenta apenas o host do widget ALTCHA, que é um componente customizado;
 # seu conteúdo interno nunca é lido. A presença do host é suficiente para
@@ -296,7 +294,6 @@ def _observar_tela(driver, contrato):
         driver.set_page_load_timeout(_TEMPO_MAXIMO_CARREGAMENTO_S)
     except Exception:
         pass
-    dryrun_municipio.bloquear_downloads(driver)
     try:
         _entrar_na_tela(driver, contrato)
     except Exception:
@@ -310,7 +307,16 @@ def _observar_tela(driver, contrato):
 
 
 def observar_passivo(driver, contrato):
-    """Observa a tela do RS sem preencher CNPJ, resolver ALTCHA ou enviar."""
+    """Observa a tela do RS sem preencher CNPJ, resolver ALTCHA ou enviar.
+
+    O bloqueio de download vive AQUI, não em `_observar_tela`: este é o caminho
+    do recon, com driver descartável. O preflight da emissão usa o mesmo
+    observador no driver do lote, e `Page.setDownloadBehavior: deny` fica
+    valendo pela sessão inteira — a certidão do RS chega por download de
+    verdade, então bloquear ali fazia todo item do lote estourar os 180s de
+    espera sem nunca receber o PDF.
+    """
+    dryrun_municipio.bloquear_downloads(driver)
     return _observar_tela(driver, contrato)
 
 
@@ -327,13 +333,15 @@ def localizador(snapshot: SnapshotContratoPortal, chave: str):
     elemento = snapshot.elemento(chave)
     by = _BY_SNAPSHOT.get(elemento.seletor_tipo)
     if by is None or not elemento.seletor:
-        raise ContratoPortalBloqueadoError('seletor estadual RS ausente')
+        raise ContratoPortalBloqueadoError(
+            'desconhecida', 'seletor estadual RS ausente')
     return by, elemento.seletor
 
 
 def validar_snapshot(snapshot):
     if snapshot.fluxo != FLUXO_CONTRATO or snapshot.alvo != ALVO_CONTRATO:
         raise ContratoPortalBloqueadoError(
+            'desconhecida',
             'Snapshot estadual RS fixado para outro fluxo ou alvo.')
     for chave in _CONTROLES_CONTRATO:
         localizador(snapshot, chave)
@@ -345,10 +353,13 @@ def preparar_execucao(driver, *, estado_lote=None, execution_id=None):
         fixado = estado_lote.get('contrato_snapshot')
         if fixado is not None:
             validar_snapshot(fixado)
-            if estado_lote.get('contrato_sessao_driver_id') != id(driver):
-                dryrun_municipio.bloquear_downloads(driver)
+            # Compara o OBJETO, não `id()`: o CPython reaproveita endereço, e um
+            # driver recriado no meio do lote podia cair no mesmo id do que
+            # acabou de morrer — a sessão seria dada como autenticada sem nunca
+            # ter passado pelo certificado.
+            if estado_lote.get('contrato_sessao_driver') is not driver:
                 _entrar_na_tela(driver, fixado)
-                estado_lote['contrato_sessao_driver_id'] = id(driver)
+                estado_lote['contrato_sessao_driver'] = driver
             return fixado
 
     ativo = contrato_portal_preflight.buscar_ativo(
@@ -367,7 +378,7 @@ def preparar_execucao(driver, *, estado_lote=None, execution_id=None):
     validar_snapshot(snapshot)
     if estado_lote is not None:
         estado_lote['contrato_snapshot'] = snapshot
-        estado_lote['contrato_sessao_driver_id'] = id(driver)
+        estado_lote['contrato_sessao_driver'] = driver
     return snapshot
 
 
@@ -382,6 +393,3 @@ def adaptador_estadual_rs():
         recon_passivo_seguro=True,
         definicao=definicao_baseline,
     )
-
-
-adaptador_rs = adaptador_estadual_rs

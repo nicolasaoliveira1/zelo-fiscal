@@ -111,7 +111,6 @@ def _observar_tela(driver, contrato):
     except Exception:
         pass
 
-    dryrun_municipio.bloquear_downloads(driver)
     try:
         driver.get(_url_do_contrato(contrato))
     except (TimeoutException, WebDriverException):
@@ -128,7 +127,13 @@ def _observar_tela(driver, contrato):
 
 
 def observar_passivo(driver, contrato):
-    """Chega à tela do contrato sem preencher, clicar ou baixar."""
+    """Chega à tela do contrato sem preencher, clicar ou baixar.
+
+    O bloqueio de download é do RECON, que usa driver descartável. O preflight
+    da emissão chama `_observar_tela` direto: `Page.setDownloadBehavior: deny`
+    vale pela sessão inteira e não pode sobrar ligado no driver que vai emitir.
+    """
+    dryrun_municipio.bloquear_downloads(driver)
     return _observar_tela(driver, contrato)
 
 
@@ -145,14 +150,15 @@ def localizador(snapshot: SnapshotContratoPortal, chave: str):
     elemento = snapshot.elemento(chave)
     by = _BY_SNAPSHOT.get(elemento.seletor_tipo)
     if by is None or not elemento.seletor:
-        raise ContratoPortalBloqueadoError('seletor FGTS ausente')
+        raise ContratoPortalBloqueadoError(
+            'desconhecida', 'seletor FGTS ausente')
     return by, elemento.seletor
 
 
 def validar_snapshot(snapshot):
     if snapshot.fluxo != FLUXO_CONTRATO or snapshot.alvo != ALVO_CONTRATO:
         raise ContratoPortalBloqueadoError(
-            'Snapshot FGTS fixado para outro fluxo ou alvo.')
+            'desconhecida', 'Snapshot FGTS fixado para outro fluxo ou alvo.')
     for chave in _CONTROLES_CONTRATO:
         localizador(snapshot, chave)
 
@@ -174,7 +180,7 @@ def preparar_execucao(driver, *, estado_lote=None, execution_id=None):
     snapshot = contrato_portal_preflight.executar(
         fluxo=FLUXO_CONTRATO,
         alvo=ALVO_CONTRATO,
-        observar=lambda contrato: observar_passivo(driver, contrato),
+        observar=lambda contrato: _observar_tela(driver, contrato),
         alvo_breaker=circuit_breaker.ALVO_FGTS,
         execution_id=execution_id,
         contrato_ativo=ativo,

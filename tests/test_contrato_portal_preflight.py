@@ -113,6 +113,27 @@ def test_preflight_autoativa_antes_de_fixar_snapshot(app, ids):
         assert ContratoPortal.query.filter_by(estado='ativa').one().id == snapshot.contrato_id
 
 
+def test_preflight_falha_promocao_preserva_classificacao_e_mensagem(app, ids, monkeypatch):
+    with app.app_context():
+        _baseline()
+
+        def falhar(*args, **kwargs):
+            raise contrato_portal.ContratoPortalConflitoError(
+                'conflito sintético')
+
+        monkeypatch.setattr(contrato_portal_preflight.contrato_portal,
+                            'autoativar', falhar)
+
+        with pytest.raises(
+                contrato_portal_preflight.ContratoPortalBloqueadoError,
+                match='A estrutura mudou e o ajuste não pôde ser promovido') as erro:
+            contrato_portal_preflight.executar(
+                fluxo='trabalhista', alvo='cndt',
+                observar=lambda contrato: _inventario(seletor='documento-atual'))
+
+        assert erro.value.classificacao == 'revisao'
+
+
 @pytest.mark.parametrize('inventario', [
     InventarioPortal(
         host='portal.exemplo.gov.br', rota='/certidao/emitir',

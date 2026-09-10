@@ -37,7 +37,10 @@ export function rotuloResultadoRecon(resultado) {
 function esc(valor) {
   const div = document.createElement('div');
   div.textContent = valor === null || valor === undefined ? '' : String(valor);
-  return div.innerHTML;
+  // textContent -> innerHTML escapa &, < e >, mas NÃO as aspas. Metade destes
+  // valores (fluxo, alvo, estado, severidade, id) entra dentro de atributos com
+  // aspas duplas, onde uma aspa solta fecha o atributo e injeta markup.
+  return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function dataHora(iso) {

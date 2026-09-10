@@ -600,12 +600,20 @@ def _executar_automacao_baixar(certidao, cfg):
                 driver, execution_id=cfg.get('execution_id'))
             contexto['contrato_snapshot'] = snapshot_contrato
             if snapshot_contrato is None:
-                log_event('estadual_rs_cert_login', certidao_id=certidao.id)
-                _login_certificado_rs(
-                    driver,
-                    info_site.get('login_cert_url'),
-                    info_site.get('url')
-                )
+                # A guarda por `login_cert_url` continua valendo: sem ela, um RS
+                # sem URL de login cairia em `_login_certificado_rs(driver, None,
+                # ...)` em vez de simplesmente abrir a página.
+                if info_site.get('login_cert_url'):
+                    log_event('estadual_rs_cert_login', certidao_id=certidao.id)
+                    _login_certificado_rs(
+                        driver,
+                        info_site.get('login_cert_url'),
+                        info_site.get('url')
+                    )
+                else:
+                    log_event('emit_navigate', certidao_id=certidao.id,
+                              url=info_site.get('url'))
+                    driver.get(info_site.get('url'))
         elif tipo_certidao_chave == 'TRABALHISTA':
             log_event('emit_navigate', certidao_id=certidao.id, url=info_site.get('url'))
             snapshot_contrato = trabalhista.preparar_execucao(

@@ -63,6 +63,11 @@ def batch_state_defaults():
         'execution_id': None,
         'opcoes_execucao': None,
         'contrato_snapshot': None,
+        # Driver que já passou pela preparação do contrato (ex.: sessão por
+        # certificado do RS). Fica nos defaults para o reset limpar junto com o
+        # snapshot: `reset_batch_state` faz `update`, e chave fora daqui
+        # sobreviveria ao lote seguinte.
+        'contrato_sessao_driver': None,
         # Municípios podem ter mais de uma tela no mesmo lote (ex.: variantes
         # do Imbé); cada alvo recebe o snapshot que ficou fixado no primeiro
         # item daquela tela.
