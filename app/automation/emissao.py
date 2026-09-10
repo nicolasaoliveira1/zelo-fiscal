@@ -1164,6 +1164,8 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
     if not certidao:
         return False, False, 'Certidão não encontrada.'
 
+    from app.services import contrato_portal_fgts
+
     info_site = SITES_CERTIDOES.get('FGTS', {})
     if not info_site.get('url'):
         return False, True, 'Configuração FGTS ausente.'
@@ -1181,20 +1183,28 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
 
         FGTS_BATCH_STATE['driver'] = local_driver
 
-        pagina_ok = _preparar_pagina_fgts(
-            local_driver,
-            info_site.get('url'),
-            info_site.get('cnpj_field_id')
-        )
+        snapshot_contrato = contrato_portal_fgts.preparar_execucao(
+            local_driver, estado_lote=FGTS_BATCH_STATE,
+            execution_id=execution_id)
+        if snapshot_contrato is None:
+            pagina_ok = _preparar_pagina_fgts(
+                local_driver,
+                info_site.get('url'),
+                info_site.get('cnpj_field_id')
+            )
+        else:
+            pagina_ok = True
 
         if not pagina_ok:
             return False, True, 'Erro ao carregar página FGTS.'
 
         wait = WebDriverWait(local_driver, 20)
 
-        field_by = By.ID
-        campo_cnpj = wait.until(EC.element_to_be_clickable(
-            (field_by, info_site.get('cnpj_field_id'))))
+        localizador_cnpj = (
+            contrato_portal_fgts.localizador(snapshot_contrato, 'cnpj')
+            if snapshot_contrato is not None
+            else (By.ID, info_site.get('cnpj_field_id')))
+        campo_cnpj = wait.until(EC.element_to_be_clickable(localizador_cnpj))
         if _fgts_stop_requested():
             return False, False, 'Lote interrompido.'
         campo_cnpj.click()
@@ -1207,6 +1217,7 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
             'data_encontrada': None,
             'impedimento_fgts': False,
             'impedimento_msg': None,
+            'contrato_snapshot': snapshot_contrato,
         }
 
         scope_atual = (FGTS_BATCH_STATE.get('scope') or 'default').strip().lower()
@@ -1215,7 +1226,9 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
             and scope_atual in {'default', 'pendentes'}
         )
 
-        _automatizar_fgts(contexto, local_driver, wait, certidao, detectar_impedimento)
+        _automatizar_fgts(
+            contexto, local_driver, wait, certidao, detectar_impedimento,
+            snapshot=snapshot_contrato)
 
         if _fgts_stop_requested():
             return False, False, 'Lote interrompido.'
@@ -1293,6 +1306,9 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
             )
             return True, False, None
         return False, False, 'Falha ao gerar PDF FGTS.'
+    except contrato_portal_preflight.PreflightContratoPortalError as exc:
+        db.session.rollback()
+        return False, batch_engine.GRAVE_CONTRATO_PORTAL, str(exc)
     except Exception as exc:
         log_event(
             'fgts_emit_error',
@@ -1686,7 +1702,19 @@ def _classificar_grave(exc):
     return batch_engine.GRAVE_FATAL if _erro_indica_navegador_fechado(exc) else True
 
 
-def _automatizar_fgts(contexto, driver, wait, certidao, detectar_impedimento=False):
+def _automatizar_fgts(
+    contexto, driver, wait, certidao, detectar_impedimento=False,
+    snapshot=None,
+):
+    if snapshot is None:
+        def _localizador(chave, legado):
+            return legado
+    else:
+        from app.services import contrato_portal_fgts
+
+        def _localizador(chave, legado):
+            return contrato_portal_fgts.localizador(snapshot, chave)
+
     def _parar_se_solicitado():
         if _fgts_stop_requested():
             try:
@@ -1716,7 +1744,8 @@ def _automatizar_fgts(contexto, driver, wait, certidao, detectar_impedimento=Fal
         log_event('fgts_impedimento', level='WARNING', certidao_id=certidao.id, message=mensagem)
 
     try:
-        btn_consultar = _aguardar_clickable((By.ID, "mainForm:btnConsultar"))
+        btn_consultar = _aguardar_clickable(_localizador(
+            'consultar', (By.ID, "mainForm:btnConsultar")))
         if not btn_consultar:
             return
         log_event('fgts_click', certidao_id=certidao.id, botao='Consultar')
@@ -1731,7 +1760,8 @@ def _automatizar_fgts(contexto, driver, wait, certidao, detectar_impedimento=Fal
                 _marcar_impedimento_e_sair(msg_impedimento)
                 return
 
-        btn_certificado = _aguardar_clickable((By.ID, "mainForm:j_id76"))
+        btn_certificado = _aguardar_clickable(_localizador(
+            'certificado', (By.ID, "mainForm:j_id76")))
         if not btn_certificado:
             if detectar_impedimento:
                 msg_impedimento = _fgts_detectar_mensagem_impedimento(driver)
@@ -1769,7 +1799,8 @@ def _automatizar_fgts(contexto, driver, wait, certidao, detectar_impedimento=Fal
                     certidao_id=certidao.id, error=str(e),
                 )
 
-        btn_visualizar = _aguardar_clickable((By.ID, "mainForm:btnVisualizar"))
+        btn_visualizar = _aguardar_clickable(_localizador(
+            'visualizar', (By.ID, "mainForm:btnVisualizar")))
         if not btn_visualizar:
             if detectar_impedimento:
                 msg_impedimento = _fgts_detectar_mensagem_impedimento(driver)
@@ -1893,6 +1924,8 @@ def _automatizar_fgts(contexto, driver, wait, certidao, detectar_impedimento=Fal
                 'fgts_pdf_gerar_error', level='ERROR',
                 certidao_id=certidao.id, error=str(e_pdf),
             )
+    except contrato_portal_preflight.PreflightContratoPortalError:
+        raise
     except Exception as e:
         if _fgts_stop_requested():
             return

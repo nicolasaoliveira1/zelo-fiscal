@@ -432,7 +432,8 @@ def job_recon_portais(app):
     with app.app_context():
         execution_id = CorrelationContext.new_execution_id()
         resultados = contrato_portal_recon.executar(
-            contrato_portal_recon.adaptadores_padrao(incluir_municipais=True),
+            contrato_portal_recon.adaptadores_padrao(
+                incluir_municipais=True, incluir_fgts=True),
             _criador_driver_recon,
             execution_id=execution_id,
         )

@@ -66,12 +66,18 @@ def _registro_padrao() -> RegistroAdaptadores:
         ),))
 
 
-def adaptadores_padrao(*, incluir_municipais=False) -> list[AdaptadorPortal]:
+def adaptadores_padrao(
+    *, incluir_municipais=False, incluir_fgts=False,
+) -> list[AdaptadorPortal]:
     adaptadores = list(_registro_padrao().todos())
     if incluir_municipais:
         from app.services import contrato_portal_municipal
 
         adaptadores.extend(contrato_portal_municipal.adaptadores_municipais())
+    if incluir_fgts:
+        from app.services import contrato_portal_fgts
+
+        adaptadores.append(contrato_portal_fgts.adaptador_fgts())
     return adaptadores
 
 
@@ -85,8 +91,13 @@ class NadaParaRevisarError(RuntimeError):
 
 def adaptador_por_alvo(fluxo, alvo):
     adaptador = _registro_padrao().por_alvo(fluxo, alvo)
-    if adaptador is not None or fluxo != 'municipal':
+    if adaptador is not None or fluxo not in {'municipal', 'fgts'}:
         return adaptador
+    if fluxo == 'fgts':
+        from app.services import contrato_portal_fgts
+
+        return (contrato_portal_fgts.adaptador_fgts()
+                if alvo == contrato_portal_fgts.ALVO_CONTRATO else None)
     from app.services import contrato_portal_municipal
 
     return contrato_portal_municipal.adaptador_por_alvo(alvo)
@@ -204,7 +215,8 @@ def estado_por_alvo() -> dict:
     """
     estados = {}
     try:
-        adaptadores = adaptadores_padrao(incluir_municipais=True)
+        adaptadores = adaptadores_padrao(
+            incluir_municipais=True, incluir_fgts=True)
     except Exception:
         return estados
     prioridade = {

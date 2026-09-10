@@ -479,7 +479,11 @@ def _baixar_executar_acao(nome_acao, info_site, wait, driver, certidao, contexto
     #3 ação específica para FGTS: emitir e salvar PDF
     elif nome_acao == 'fgts_emitir_pdf':
         try:
-            _automatizar_fgts(contexto, driver, wait, certidao)
+            _automatizar_fgts(
+                contexto, driver, wait, certidao,
+                snapshot=contexto.get('contrato_snapshot'))
+        except contrato_portal_preflight.PreflightContratoPortalError:
+            raise
         except Exception as e:
             log_event(
                 'fgts_emitir_pdf_error', level='ERROR',
@@ -600,6 +604,15 @@ def _executar_automacao_baixar(certidao, cfg):
             log_event('emit_navigate', certidao_id=certidao.id, url=info_site.get('url'))
             snapshot_contrato = trabalhista.preparar_execucao(
                 driver, url_legada=info_site.get('url'))
+        elif tipo_certidao_chave == 'FGTS':
+            from app.services import contrato_portal_fgts
+
+            log_event('emit_navigate', certidao_id=certidao.id, url=info_site.get('url'))
+            snapshot_contrato = contrato_portal_fgts.preparar_execucao(
+                driver, execution_id=cfg.get('execution_id'))
+            contexto['contrato_snapshot'] = snapshot_contrato
+            if snapshot_contrato is None:
+                driver.get(info_site.get('url'))
         else:
             log_event('emit_navigate', certidao_id=certidao.id, url=info_site.get('url'))
             driver.get(info_site.get('url'))
@@ -658,6 +671,11 @@ def _executar_automacao_baixar(certidao, cfg):
         if tipo_certidao_chave == 'TRABALHISTA' and snapshot_contrato is not None:
             localizador_documento = trabalhista.localizador(
                 snapshot_contrato, 'documento')
+        elif tipo_certidao_chave == 'FGTS' and snapshot_contrato is not None:
+            from app.services import contrato_portal_fgts
+
+            localizador_documento = contrato_portal_fgts.localizador(
+                snapshot_contrato, 'cnpj')
         else:
             field_by = _get_by(info_site.get('by'))
             localizador_documento = (
@@ -784,7 +802,11 @@ def _executar_automacao_baixar(certidao, cfg):
         fluxo_contrato = trabalhista.FLUXO_CONTRATO
         alvo_contrato = trabalhista.ALVO_CONTRATO
         acao_contrato = 'Revise o contrato Trabalhista no Diagnóstico.'
-        if tipo_certidao_chave == 'MUNICIPAL' and contexto_contrato_municipal:
+        if tipo_certidao_chave == 'FGTS':
+            fluxo_contrato = 'fgts'
+            alvo_contrato = 'fgts'
+            acao_contrato = 'Revise o contrato FGTS no Diagnóstico.'
+        elif tipo_certidao_chave == 'MUNICIPAL' and contexto_contrato_municipal:
             fluxo_contrato = 'municipal'
             alvo_contrato = contexto_contrato_municipal.alvo
             acao_contrato = 'Revise o contrato municipal no Diagnóstico.'
