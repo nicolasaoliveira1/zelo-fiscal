@@ -364,14 +364,34 @@ def _verificar(
 
     # 2) pre_fill_click: o passo pre-CNPJ que vive em COLUNA do municipio, nao em
     #    `before_cnpj`. Em Imbe/Sorriso e o radio "Pessoa Juridica" e em Capao da
-    #    Canoa a troca de modo para CNPJ — e nesses portais o campo de CNPJ so e
-    #    renderizado DEPOIS do clique. Sem executa-lo, o dry-run procurava um campo
-    #    que ainda nao existe e reportava "quebrado" num portal intacto (relatado
-    #    no Imbe: `form:cnpjDI`). Executar e seguro pela mesma regra do
-    #    `_passo_emite`: e anterior ao CNPJ, e sem CNPJ nao ha o que emitir.
-    if not pula_cnpj:
-        info_pre = {'pre_fill_click_id': getattr(municipio, 'pre_fill_click_id', None),
-                    'pre_fill_click_by': getattr(municipio, 'pre_fill_click_by', None)}
+    #    Canoa a troca de modo para CNPJ. A emissao real sempre passa por ele,
+    #    inclusive quando `skip_cnpj_fill` esta ligado porque o preenchimento
+    #    acontece nos steps. A observacao passiva, porem, so pode localiza-lo:
+    #    clicar alteraria o estado do portal.
+    info_pre = {'pre_fill_click_id': getattr(municipio, 'pre_fill_click_id', None),
+                'pre_fill_click_by': getattr(municipio, 'pre_fill_click_by', None)}
+    if modo_passivo and info_pre['pre_fill_click_id']:
+        alvo = (f"{info_pre['pre_fill_click_by'] or 'id'}"
+                f"={info_pre['pre_fill_click_id']}")
+        if _localiza(driver, info_pre['pre_fill_click_by'] or 'id',
+                     info_pre['pre_fill_click_id'], timeout):
+            relatorio['resultado'] = PARCIAL
+            _registrar(
+                'pre_fill_click', alvo, PARCIAL,
+                'controle localizado sem clicar na observação passiva')
+            relatorio['mensagem'] = (
+                'Verificação parou no controle pré-CNPJ: a observação passiva '
+                'não pode clicar no portal.')
+        else:
+            relatorio['resultado'] = QUEBRADO
+            _registrar(
+                'pre_fill_click', alvo, QUEBRADO,
+                'elemento não encontrado')
+            relatorio['mensagem'] = (
+                f'Passo pré-CNPJ ({alvo}) não existe mais no portal.')
+        return relatorio
+
+    if not modo_passivo:
         clicou = steps_engine.clicar_pre_fill(info_pre, wait, by_padrao='id', pausa=1)
         if clicou is not None:
             alvo = (f"{info_pre['pre_fill_click_by'] or 'id'}"

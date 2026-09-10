@@ -67,6 +67,10 @@ class InventarioPortal:
         return self.estado == 'ok'
 
 
+class PortalObservacaoTemporariamenteIndisponivelError(RuntimeError):
+    """A tela não pôde ser aberta; não há evidência de drift estrutural."""
+
+
 @runtime_checkable
 class AdaptadorPortal(Protocol):
     """Interface estrutural de um alvo que o núcleo pode observar.
@@ -82,6 +86,7 @@ class AdaptadorPortal(Protocol):
     chave_health: str
     observar: Callable[[Any, Any], InventarioPortal]
     lock: Any
+    preflight_state: Any
     recon_passivo_seguro: bool
     definicao: Callable[[], Any] | None
     criar_driver: Callable[[], Any] | None

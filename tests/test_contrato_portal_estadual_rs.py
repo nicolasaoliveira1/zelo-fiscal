@@ -16,6 +16,7 @@ from app.services.contrato_portal_preflight import (
     ElementoSnapshotPortal,
     SnapshotContratoPortal,
 )
+from app.services.contrato_portal_protocol import InventarioPortal
 
 
 def _contrato():
@@ -176,6 +177,18 @@ def test_observador_rs_falha_de_sessao_fica_desconhecido():
     assert 'autenticar' in resultado.motivo
 
 
+def test_preflight_rs_nao_classifica_falha_do_driver_como_drift():
+    driver = MagicMock()
+    inventario = InventarioPortal.desconhecido(
+        rs.ETAPA_CONTRATO, 'falha do driver durante a observação RS')
+
+    with patch.object(rs, '_entrar_na_tela'), \
+            patch.object(rs, 'inventariar', return_value=inventario):
+        with pytest.raises(
+                rs.PortalObservacaoTemporariamenteIndisponivelError):
+            rs._observar_tela(driver, _contrato())
+
+
 def test_registry_rs_e_explicito_e_nao_cobre_ufs_nao_adaptadas():
     assert all(a.fluxo != rs.FLUXO_CONTRATO
                for a in contrato_portal_recon.adaptadores_padrao())
@@ -274,6 +287,24 @@ def test_preparar_rs_reautentica_quando_o_driver_e_outro():
     assert estado['contrato_sessao_driver'] is segundo_driver
 
 
+def test_lote_rs_revalida_pagina_com_snapshot_em_cache(app, ids):
+    driver = MagicMock()
+    snapshot = _snapshot(cnpj='cnpj', desafio='altcha-widget', enviar='enviar')
+
+    with app.app_context(), \
+            patch.object(emissao, '_rs_batch_stop_requested', return_value=False), \
+            patch.object(rs, 'preparar_execucao', return_value=snapshot), \
+            patch.object(emissao, '_rs_garantir_pagina_solicitacao',
+                         return_value=False) as garantir:
+        resultado = emissao._emitir_estadual_rs_certidao(
+            ids['rs'], driver=driver, execution_id='exec-sintetica')
+
+    assert resultado == (
+        False, True, 'Não foi possível abrir a página de solicitação da certidão RS.')
+    garantir.assert_called_once()
+    assert garantir.call_args.kwargs['localizador'] == ('id', 'cnpj')
+
+
 def test_lote_rs_bloqueia_antes_de_preencher_cnpj(app, ids):
     driver = MagicMock()
     bloqueio = ContratoPortalBloqueadoError('estrutura mudou')
@@ -288,6 +319,24 @@ def test_lote_rs_bloqueia_antes_de_preencher_cnpj(app, ids):
         False, batch_engine.GRAVE_CONTRATO_PORTAL, str(bloqueio))
     driver.click.assert_not_called()
     driver.send_keys.assert_not_called()
+
+
+def test_observacao_transitoria_rs_nao_vira_bloqueio_de_contrato(app, ids):
+    driver = MagicMock()
+    erro = rs.PortalObservacaoTemporariamenteIndisponivelError(
+        'portal RS temporariamente indisponível')
+
+    with app.app_context(), \
+            patch.object(emissao, '_rs_batch_stop_requested', return_value=False), \
+            patch.object(rs, 'preparar_execucao', side_effect=erro), \
+            patch.object(emissao.capture, 'capturar_contexto_falha'):
+        resultado = emissao._emitir_estadual_rs_certidao(
+            ids['rs'], driver=driver, execution_id='exec-sintetica')
+
+    assert resultado[0] is False
+    assert resultado[1] is True
+    assert resultado[2] == 'Portal indisponivel: Confira se o portal esta no ar e tente novamente mais tarde.'
+    assert resultado[1] != batch_engine.GRAVE_CONTRATO_PORTAL
 
 
 def test_individual_rs_transforma_bloqueio_em_erro_acionavel(app, ids):

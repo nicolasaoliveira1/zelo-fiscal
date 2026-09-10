@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from contextlib import contextmanager
 from threading import Thread
 
 from sqlalchemy import or_
@@ -68,6 +69,10 @@ def batch_state_defaults():
         # snapshot: `reset_batch_state` faz `update`, e chave fora daqui
         # sobreviveria ao lote seguinte.
         'contrato_sessao_driver': None,
+        # O preflight marca somente a janela em que consulta/fixa o contrato.
+        # O lock do lote nao fica preso durante Selenium; as rotas de contrato
+        # consultam esta sentinela sob o mesmo lock antes de mutar a ativa.
+        'contrato_preflight_em_andamento': False,
         # Municípios podem ter mais de uma tela no mesmo lote (ex.: variantes
         # do Imbé); cada alvo recebe o snapshot que ficou fixado no primeiro
         # item daquela tela.
@@ -78,6 +83,27 @@ def batch_state_defaults():
 
 def reset_batch_state(batch_state):
     batch_state.update(batch_state_defaults())
+
+
+@contextmanager
+def preflight_contrato(batch_lock, batch_state):
+    """Coordena mutacao do contrato com a janela de pinning do lote.
+
+    O lock protege apenas a troca da sentinela. A observacao do portal e o
+    preflight continuam fora do lock, como exige RAC-12; enquanto eles rodam,
+    a rota de descarte/restauracao enxerga a sentinela e responde 423.
+    """
+    if batch_lock is None or batch_state is None:
+        yield
+        return
+
+    with batch_lock:
+        batch_state['contrato_preflight_em_andamento'] = True
+    try:
+        yield
+    finally:
+        with batch_lock:
+            batch_state['contrato_preflight_em_andamento'] = False
 
 
 def build_batch_status_payload(batch_state):

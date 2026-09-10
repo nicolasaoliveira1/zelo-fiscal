@@ -10,11 +10,11 @@ from __future__ import annotations
 import time
 from urllib.parse import urlsplit
 
-from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
 
 from app.automation import trabalhista_recon
-from app.automation.batch_state import RS_BATCH_LOCK
+from app.automation.batch_state import RS_BATCH_LOCK, RS_BATCH_STATE
 from app.automation.sites import SITES_CERTIDOES
 from app.services import circuit_breaker, contrato_portal_preflight
 from app.services import dryrun_municipio
@@ -26,7 +26,10 @@ from app.services.contrato_portal_preflight import (
     ContratoPortalBloqueadoError,
     SnapshotContratoPortal,
 )
-from app.services.contrato_portal_protocol import InventarioPortal
+from app.services.contrato_portal_protocol import (
+    InventarioPortal,
+    PortalObservacaoTemporariamenteIndisponivelError,
+)
 from app.services.contrato_portal_registry import AdaptadorRecon
 
 
@@ -296,14 +299,24 @@ def _observar_tela(driver, contrato):
         pass
     try:
         _entrar_na_tela(driver, contrato)
+    except (TimeoutException, WebDriverException) as erro:
+        raise PortalObservacaoTemporariamenteIndisponivelError(
+            'Portal Estadual RS temporariamente indisponível durante a observação.') from erro
     except Exception:
         return InventarioPortal.desconhecido(
             ETAPA_CONTRATO, 'falha ao autenticar ou abrir o portal estadual RS')
-    return inventariar(
+    inventario = inventariar(
         driver,
         host_esperado=contrato.host,
         rota_esperada=contrato.rota,
     )
+    if (
+        inventario.estado == 'desconhecida'
+        and str(inventario.motivo or '').startswith('falha do driver')
+    ):
+        raise PortalObservacaoTemporariamenteIndisponivelError(
+            f'falha ao observar o portal Estadual RS: {inventario.motivo}')
+    return inventario
 
 
 def observar_passivo(driver, contrato):
@@ -317,7 +330,10 @@ def observar_passivo(driver, contrato):
     espera sem nunca receber o PDF.
     """
     dryrun_municipio.bloquear_downloads(driver)
-    return _observar_tela(driver, contrato)
+    try:
+        return _observar_tela(driver, contrato)
+    except PortalObservacaoTemporariamenteIndisponivelError as erro:
+        return InventarioPortal.desconhecido(ETAPA_CONTRATO, str(erro))
 
 
 _BY_SNAPSHOT = {
@@ -390,6 +406,7 @@ def adaptador_estadual_rs():
         chave_health=circuit_breaker.ALVO_ESTADUAL_RS,
         observar=observar_passivo,
         lock=RS_BATCH_LOCK,
+        preflight_state=RS_BATCH_STATE,
         recon_passivo_seguro=True,
         definicao=definicao_baseline,
     )

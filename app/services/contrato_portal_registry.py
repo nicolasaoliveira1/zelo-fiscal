@@ -17,6 +17,7 @@ class AdaptadorRecon:
     chave_health: str
     observar: Callable[[Any, Any], Any]
     lock: Any = None
+    preflight_state: Any = None
     recon_passivo_seguro: bool = False
     # Baseline declarada no código, nunca derivada do DOM: a primeira versão
     # ativa é decisão humana revisável (AC-01.5).

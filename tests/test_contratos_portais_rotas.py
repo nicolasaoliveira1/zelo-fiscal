@@ -11,6 +11,10 @@ import pytest
 
 from app import db
 from app.automation import trabalhista
+from app.automation.batch_state import (
+    TRABALHISTA_BATCH_LOCK,
+    TRABALHISTA_BATCH_STATE,
+)
 from app.automation.trabalhista_recon import ElementoInventariado, InventarioPortal
 from app.models import ContratoPortal, IncidenteContratoPortal, Usuario
 from app.routes import contratos_portais
@@ -526,6 +530,23 @@ def test_descartar_com_emissao_em_curso_responde_423(app, client):
             f'{BASE}/{FLUXO}/{ALVO}/descartar', json={'confirmado': True})
     finally:
         lock.release()
+
+    assert resposta.status_code == 423
+    with app.app_context():
+        assert ContratoPortal.query.filter_by(
+            fluxo=FLUXO, alvo=ALVO, estado='ativa').count() == 1
+
+
+def test_descartar_durante_pinning_do_contrato_responde_423(app, client):
+    _baseline(app)
+    with TRABALHISTA_BATCH_LOCK:
+        TRABALHISTA_BATCH_STATE['contrato_preflight_em_andamento'] = True
+    try:
+        resposta = client.post(
+            f'{BASE}/{FLUXO}/{ALVO}/descartar', json={'confirmado': True})
+    finally:
+        with TRABALHISTA_BATCH_LOCK:
+            TRABALHISTA_BATCH_STATE['contrato_preflight_em_andamento'] = False
 
     assert resposta.status_code == 423
     with app.app_context():

@@ -213,14 +213,32 @@ def test_sem_pre_fill_click_nao_registra_etapa():
     assert [c['etapa'] for c in rel['checagens']] == ['url', 'cnpj']
 
 
-def test_pre_fill_click_nao_roda_com_skip_cnpj_fill():
-    # Sem campo proprio de CNPJ o clique perde a finalidade, e a pagina esta num
-    # estado que o fluxo real nunca alcanca (o passo que emite nao foi executado).
+def test_pre_fill_click_roda_com_skip_cnpj_fill_no_dryrun_ativo():
+    # `skip_cnpj_fill` so muda quem preenche o documento; o clique pre-CNPJ
+    # continua sendo parte do fluxo real e precisa ser exercitado no dry-run
+    # nao passivo.
     cfg = {'skip_cnpj_fill': True, 'before_cnpj': []}
     muni = _municipio(pre_fill_click_id="input[value='J']", pre_fill_click_by='css_selector')
-    with patch.object(dr.steps_engine, 'clicar_pre_fill') as pre:
+    with patch.object(dr.steps_engine, 'clicar_pre_fill', return_value=True) as pre:
         dr.verificar_municipio(muni, _FakeDriver(), config=cfg)
+    pre.assert_called_once()
+
+
+def test_pre_fill_click_passivo_apenas_localiza_sem_clicar():
+    cfg = {'skip_cnpj_fill': True, 'before_cnpj': []}
+    muni = _municipio(
+        pre_fill_click_id="input[value='J']",
+        pre_fill_click_by='css_selector',
+    )
+    driver = _FakeDriver(encontra=["input[value='J']"])
+    with patch.object(dr.steps_engine, 'clicar_pre_fill') as pre:
+        rel = dr.verificar_municipio(
+            muni, driver, config=cfg, modo_passivo=True, timeout=0)
+
     pre.assert_not_called()
+    assert rel['resultado'] == dr.PARCIAL
+    assert rel['checagens'][1]['etapa'] == 'pre_fill_click'
+    assert 'sem clicar' in rel['checagens'][1]['detalhe']
 
 
 def test_localiza_respeita_o_teto_e_desiste():

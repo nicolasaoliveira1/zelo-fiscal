@@ -105,6 +105,28 @@ def _adaptador_ou_404(fluxo, alvo):
     return adaptador, None
 
 
+def _adquirir_lock_contrato(adaptador):
+    """Adquire a contenção do alvo sem correr durante o Selenium.
+
+    O worker publica `contrato_preflight_em_andamento` sob este lock e observa
+    o portal fora dele. Assim, descarte/restauração não intercalam com o
+    pinning, sem transformar a requisição do Diagnóstico em espera pelo portal.
+    """
+    lock = adaptador.lock
+    if lock is None:
+        return None, None
+    if not lock.acquire(blocking=False):
+        return None, _json_error(
+            'Há uma emissão em curso neste portal. Tente novamente depois.', 423)
+    estado = getattr(adaptador, 'preflight_state', None)
+    if estado and estado.get('contrato_preflight_em_andamento'):
+        lock.release()
+        return None, _json_error(
+            'Há uma emissão fixando o contrato neste portal. Tente novamente depois.',
+            423)
+    return lock, None
+
+
 @bp.route('/diagnostico/contratos-portais/<fluxo>/<alvo>/baseline',
           methods=['POST'])
 @requer_papel('admin')
@@ -211,9 +233,12 @@ def diagnostico_contrato_incidente_aceitar(incidente_id):
 @requer_papel('admin')
 def diagnostico_contrato_incidente_rejeitar(incidente_id):
     """Recusa a mudança: a versão ativa continua sendo a que já estava."""
-    incidente, erro = _incidente_ou_404(incidente_id)
-    if erro:
-        return erro
+    incidente = (IncidenteContratoPortal.query
+                 .filter_by(id=incidente_id, estado='aberto')
+                 .with_for_update()
+                 .one_or_none())
+    if incidente is None:
+        return _json_error('Incidente não encontrado ou já resolvido.', 404)
     candidata_id = incidente.contrato_candidato_id
     candidata = (db.session.get(ContratoPortal, candidata_id)
                  if candidata_id is not None else None)
@@ -269,10 +294,9 @@ def diagnostico_contrato_descartar(fluxo, alvo):
     # Lote em curso já fixou o snapshot e termina com ele; o problema é o lote
     # que ainda não fixou — descartar no meio faria metade da fila obedecer o
     # contrato e metade o mapa legado.
-    lock = adaptador.lock
-    if lock is not None and not lock.acquire(blocking=False):
-        return _json_error(
-            'Há uma emissão em curso neste portal. Tente novamente depois.', 423)
+    lock, erro_lock = _adquirir_lock_contrato(adaptador)
+    if erro_lock:
+        return erro_lock
     try:
         contrato_portal.descartar_ativa(
             adaptador.fluxo, adaptador.alvo,
@@ -318,10 +342,9 @@ def diagnostico_contrato_restaurar(contrato_id):
     # Mesmo motivo do descarte: trocar a versão ativa no meio de um lote faria
     # metade da fila obedecer uma estrutura e metade outra. Quem já fixou o
     # snapshot termina com ele; o problema é quem ainda não fixou.
-    lock = adaptador.lock
-    if lock is not None and not lock.acquire(blocking=False):
-        return _json_error(
-            'Há uma emissão em curso neste portal. Tente novamente depois.', 423)
+    lock, erro_lock = _adquirir_lock_contrato(adaptador)
+    if erro_lock:
+        return erro_lock
     try:
         nova = contrato_portal.restaurar(
             historico.id, fingerprint_ativa=ativa.fingerprint,

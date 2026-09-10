@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import time
 from dataclasses import asdict, dataclass
 from types import SimpleNamespace
@@ -442,7 +443,8 @@ def _papel_acao_declarados(chave, passo=None, *, terminal=False):
         # Clicáveis identificados como input/radio são entradas; os demais
         # normalmente são botões e devem permanecer protegidos como ação de
         # submissão, ainda que a etapa os use apenas para navegar.
-        if any(marca in locator for marca in ('input', 'radio', 'select')):
+        if any(re.search(rf'(?<![\w-]){marca}(?![\w-])', locator)
+               for marca in ('input', 'radio', 'select')):
             return 'entrada', 'preencher'
         return 'submissao', 'submeter'
     return 'entrada', 'preencher'
@@ -484,7 +486,7 @@ def _itens_declarados(contexto):
 
     pre_by = getattr(view, 'pre_fill_click_by', None)
     pre_locator = getattr(view, 'pre_fill_click_id', None)
-    if pre_locator and not contexto.config.get('skip_cnpj_fill'):
+    if pre_locator:
         papel, acao = _papel_acao_declarados('pre_fill_click')
         adicionar('pre_fill_click', pre_by or 'id', pre_locator,
                    papel, acao, True)
@@ -613,6 +615,8 @@ class _DriverComPerfil:
 
 
 def _adaptador_contexto(contexto):
+    from app.automation.batch_state import MUNICIPAL_BATCH_STATE
+
     def observar(driver, _contrato):
         return observar_passivo(driver, contexto)
 
@@ -627,6 +631,7 @@ def _adaptador_contexto(contexto):
         chave_health=contexto.chave_health,
         observar=observar,
         lock=_lock_municipal(),
+        preflight_state=MUNICIPAL_BATCH_STATE,
         recon_passivo_seguro=True,
         definicao=definir,
         criar_driver=lambda: _criar_driver_municipal(contexto),

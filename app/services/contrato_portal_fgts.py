@@ -14,7 +14,7 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
 
 from app.automation import trabalhista_recon
-from app.automation.batch_state import FGTS_BATCH_LOCK
+from app.automation.batch_state import FGTS_BATCH_LOCK, FGTS_BATCH_STATE
 from app.automation.sites import SITES_CERTIDOES
 from app.services import circuit_breaker, contrato_portal_preflight
 from app.services import dryrun_municipio
@@ -26,7 +26,10 @@ from app.services.contrato_portal_preflight import (
     ContratoPortalBloqueadoError,
     SnapshotContratoPortal,
 )
-from app.services.contrato_portal_protocol import InventarioPortal
+from app.services.contrato_portal_protocol import (
+    InventarioPortal,
+    PortalObservacaoTemporariamenteIndisponivelError,
+)
 from app.services.contrato_portal_registry import AdaptadorRecon
 
 
@@ -113,17 +116,25 @@ def _observar_tela(driver, contrato):
 
     try:
         driver.get(_url_do_contrato(contrato))
-    except (TimeoutException, WebDriverException):
-        return InventarioPortal.desconhecido(
-            ETAPA_CONTRATO, 'falha ao abrir o portal do FGTS')
+    except (TimeoutException, WebDriverException) as erro:
+        raise PortalObservacaoTemporariamenteIndisponivelError(
+            'falha ao abrir o portal FGTS; indisponível temporariamente durante a '
+            'observação.') from erro
     except Exception:
         return InventarioPortal.desconhecido(
             ETAPA_CONTRATO, 'falha ao abrir o portal do FGTS')
-    return inventariar(
+    inventario = inventariar(
         driver,
         host_esperado=contrato.host,
         rota_esperada=contrato.rota,
     )
+    if (
+        inventario.estado == 'desconhecida'
+        and str(inventario.motivo or '').startswith('falha do driver')
+    ):
+        raise PortalObservacaoTemporariamenteIndisponivelError(
+            f'falha ao observar o portal FGTS: {inventario.motivo}')
+    return inventario
 
 
 def observar_passivo(driver, contrato):
@@ -134,7 +145,10 @@ def observar_passivo(driver, contrato):
     vale pela sessão inteira e não pode sobrar ligado no driver que vai emitir.
     """
     dryrun_municipio.bloquear_downloads(driver)
-    return _observar_tela(driver, contrato)
+    try:
+        return _observar_tela(driver, contrato)
+    except PortalObservacaoTemporariamenteIndisponivelError as erro:
+        return InventarioPortal.desconhecido(ETAPA_CONTRATO, str(erro))
 
 
 _BY_SNAPSHOT = {
@@ -169,7 +183,6 @@ def preparar_execucao(driver, *, estado_lote=None, execution_id=None):
         fixado = estado_lote.get('contrato_snapshot')
         if fixado is not None:
             validar_snapshot(fixado)
-            driver.get(_url_do_contrato(fixado))
             return fixado
 
     ativo = contrato_portal_preflight.buscar_ativo(
@@ -199,6 +212,7 @@ def adaptador_fgts():
         chave_health=circuit_breaker.ALVO_FGTS,
         observar=observar_passivo,
         lock=FGTS_BATCH_LOCK,
+        preflight_state=FGTS_BATCH_STATE,
         recon_passivo_seguro=True,
         definicao=definicao_baseline,
     )

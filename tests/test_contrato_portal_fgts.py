@@ -116,6 +116,17 @@ def test_observador_fgts_falha_de_navegacao_fica_desconhecido():
     assert 'falha ao abrir' in resultado.motivo
 
 
+def test_preflight_fgts_nao_classifica_falha_do_driver_como_drift():
+    driver = MagicMock()
+    inventario = InventarioPortal.desconhecido(
+        fgts.ETAPA_CONTRATO, 'falha do driver durante a observação')
+
+    with patch.object(fgts, 'inventariar', return_value=inventario):
+        with pytest.raises(
+                fgts.PortalObservacaoTemporariamenteIndisponivelError):
+            fgts._observar_tela(driver, _contrato())
+
+
 def test_snapshot_fgts_fornece_localizadores_atualizados():
     snapshot = _snapshot(
         cnpj='cnpj-novo', consultar='consultar-novo',
@@ -168,8 +179,9 @@ def test_preparar_fgts_fixa_snapshot_no_lote_e_nao_reobserva():
     buscar.assert_called_once_with(
         fgts.FLUXO_CONTRATO, fgts.ALVO_CONTRATO, obrigatorio=False)
     executar.assert_called_once()
-    driver.get.assert_called_once_with(
-        f'https://{snapshot.host}{snapshot.rota}')
+    # A navegação fica no preparador compartilhado da emissão, que limpa
+    # cookies, aplica retry e preserva a recuperação do lote.
+    driver.get.assert_not_called()
 
 
 def test_lote_fgts_bloqueia_antes_de_preencher_cnpj(app, ids):
@@ -186,6 +198,42 @@ def test_lote_fgts_bloqueia_antes_de_preencher_cnpj(app, ids):
         False, batch_engine.GRAVE_CONTRATO_PORTAL, str(bloqueio))
     driver.click.assert_not_called()
     driver.send_keys.assert_not_called()
+
+
+def test_lote_fgts_reusa_preparador_com_snapshot_em_cache(app, ids):
+    driver = MagicMock()
+    snapshot = _snapshot(
+        cnpj='cnpj', consultar='consultar', certificado='certificado',
+        visualizar='visualizar')
+
+    with app.app_context(), \
+            patch.object(emissao, '_fgts_stop_requested', return_value=False), \
+            patch.object(fgts, 'preparar_execucao', return_value=snapshot), \
+            patch.object(emissao, '_preparar_pagina_fgts', return_value=False) as preparar:
+        resultado = emissao._emitir_fgts_certidao(
+            ids['fgts'], driver=driver, execution_id='exec-sintetica')
+
+    assert resultado == (False, True, 'Erro ao carregar página FGTS.')
+    preparar.assert_called_once()
+    assert preparar.call_args.kwargs['localizador'] == ('id', 'cnpj')
+
+
+def test_observacao_transitoria_fgts_nao_vira_bloqueio_de_contrato(app, ids):
+    driver = MagicMock()
+    erro = fgts.PortalObservacaoTemporariamenteIndisponivelError(
+        'portal FGTS temporariamente indisponível')
+
+    with app.app_context(), \
+            patch.object(emissao, '_fgts_stop_requested', return_value=False), \
+            patch.object(fgts, 'preparar_execucao', side_effect=erro), \
+            patch.object(emissao.capture, 'capturar_contexto_falha'):
+        resultado = emissao._emitir_fgts_certidao(
+            ids['fgts'], driver=driver, execution_id='exec-sintetica')
+
+    assert resultado[0] is False
+    assert resultado[1] is True
+    assert resultado[2] == 'Portal indisponivel: Confira se o portal esta no ar e tente novamente mais tarde.'
+    assert resultado[1] != batch_engine.GRAVE_CONTRATO_PORTAL
 
 
 def test_individual_fgts_transforma_bloqueio_em_erro_acionavel(app, ids):

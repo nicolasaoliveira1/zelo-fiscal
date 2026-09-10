@@ -59,6 +59,9 @@ from app.models import (
 )
 from app.services import batch_engine, contrato_portal_preflight
 from app.services.correlation import CorrelationContext
+from app.services.contrato_portal_protocol import (
+    PortalObservacaoTemporariamenteIndisponivelError,
+)
 from app.utils import normalizar_cidade
 from app.services.retry import retry_call
 from app.services.execution_logger import log_event
@@ -216,8 +219,10 @@ def _formatar_cnpj(cnpj_limpo):
     )
 
 
-def _preparar_pagina_fgts(driver, url, cnpj_field_id):
-    if not driver or not url or not cnpj_field_id:
+def _preparar_pagina_fgts(driver, url, cnpj_field_id=None, *, localizador=None):
+    localizador_cnpj = localizador or (
+        (By.ID, cnpj_field_id) if cnpj_field_id else None)
+    if not driver or not url or not localizador_cnpj:
         return False
 
     try:
@@ -245,6 +250,7 @@ def _preparar_pagina_fgts(driver, url, cnpj_field_id):
                 pass
             raise
 
+    carregamento_ok = True
     try:
         retry_call(
             _carregar_url_fgts,
@@ -260,8 +266,12 @@ def _preparar_pagina_fgts(driver, url, cnpj_field_id):
                 error=str(exc),
             ),
         )
-    except TimeoutException:
-        pass
+    except (TimeoutException, WebDriverException) as erro:
+        carregamento_ok = False
+        log_event('fgts_page_load_failed', level='WARNING', error=str(erro))
+
+    if not carregamento_ok:
+        return False
 
     deadline = time.time() + 20
     while time.time() < deadline:
@@ -269,7 +279,7 @@ def _preparar_pagina_fgts(driver, url, cnpj_field_id):
             return False
         try:
             WebDriverWait(driver, 1).until(
-                EC.element_to_be_clickable((By.ID, cnpj_field_id))
+                EC.element_to_be_clickable(localizador_cnpj)
             )
             return True
         except TimeoutException:
@@ -362,24 +372,32 @@ def _wait_file_stable(caminho_arquivo, checks=3, interval=0.6):
     return False
 
 
-def _rs_pagina_solicitacao_pronta(driver, cnpj_field_name='campoCnpj', timeout=3):
+def _rs_pagina_solicitacao_pronta(
+    driver, cnpj_field_name='campoCnpj', timeout=3, localizador=None
+):
+    campo_locator = localizador or (By.NAME, cnpj_field_name)
     try:
         WebDriverWait(driver, timeout).until(
-            EC.element_to_be_clickable((By.NAME, cnpj_field_name))
+            EC.element_to_be_clickable(campo_locator)
         )
         return True
     except Exception:
         return False
 
 
-def _rs_garantir_pagina_solicitacao(driver, info_site):
+def _rs_garantir_pagina_solicitacao(driver, info_site, localizador=None):
     cnpj_field_name = info_site.get('cnpj_field_id', 'campoCnpj')
     url_atual = (driver.current_url or '').lower()
-    if 'certidaositfiscalsolic.aspx' in url_atual and _rs_pagina_solicitacao_pronta(driver, cnpj_field_name):
+    if (
+        'certidaositfiscalsolic.aspx' in url_atual
+        and _rs_pagina_solicitacao_pronta(
+            driver, cnpj_field_name, localizador=localizador)
+    ):
         return True
 
     _login_certificado_rs(driver, info_site.get('login_cert_url'), info_site.get('url'))
-    return _rs_pagina_solicitacao_pronta(driver, cnpj_field_name, timeout=8)
+    return _rs_pagina_solicitacao_pronta(
+        driver, cnpj_field_name, timeout=8, localizador=localizador)
 
 
 def _rs_preencher_cnpj_com_confirmacao(
@@ -454,16 +472,22 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
 
         from app.services import contrato_portal_estadual_rs
 
-        snapshot_contrato = contrato_portal_estadual_rs.preparar_execucao(
-            local_driver,
-            estado_lote=RS_BATCH_STATE,
-            execution_id=execution_id,
+        with batch_engine.preflight_contrato(RS_BATCH_LOCK, RS_BATCH_STATE):
+            snapshot_contrato = contrato_portal_estadual_rs.preparar_execucao(
+                local_driver,
+                estado_lote=RS_BATCH_STATE,
+                execution_id=execution_id,
+            )
+        _log_etapa('Garantindo página de solicitação RS')
+        localizador_cnpj = (
+            contrato_portal_estadual_rs.localizador(snapshot_contrato, 'cnpj')
+            if snapshot_contrato is not None else None
         )
-        if snapshot_contrato is None:
-            _log_etapa('Garantindo página de solicitação RS')
-            if not _rs_garantir_pagina_solicitacao(local_driver, info_site):
-                _log_etapa('Falha ao abrir página de solicitação RS')
-                return False, True, 'Não foi possível abrir a página de solicitação da certidão RS.'
+        if not _rs_garantir_pagina_solicitacao(
+            local_driver, info_site, localizador=localizador_cnpj
+        ):
+            _log_etapa('Falha ao abrir página de solicitação RS')
+            return False, True, 'Não foi possível abrir a página de solicitação da certidão RS.'
         _log_etapa('Página de solicitação pronta')
 
         if _rs_sessao_expirada(local_driver):
@@ -892,9 +916,12 @@ def _emitir_municipal_certidao_lote(certidao_id, driver=None, execution_id=None)
 
         wait = WebDriverWait(local_driver, 20)
         local_driver.get(info_site.get('url'))
-        snapshot_contrato = contrato_portal_municipal.preparar_execucao(
-            local_driver, contexto_contrato_municipal,
-            estado_lote=MUNICIPAL_BATCH_STATE, execution_id=execution_id)
+        with batch_engine.preflight_contrato(
+            MUNICIPAL_BATCH_LOCK, MUNICIPAL_BATCH_STATE
+        ):
+            snapshot_contrato = contrato_portal_municipal.preparar_execucao(
+                local_driver, contexto_contrato_municipal,
+                estado_lote=MUNICIPAL_BATCH_STATE, execution_id=execution_id)
         if snapshot_contrato is not None:
             info_site, config_municipal = contrato_portal_municipal.aplicar_snapshot(
                 snapshot_contrato, info_site, config_municipal)
@@ -1210,17 +1237,24 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
 
         FGTS_BATCH_STATE['driver'] = local_driver
 
-        snapshot_contrato = contrato_portal_fgts.preparar_execucao(
-            local_driver, estado_lote=FGTS_BATCH_STATE,
-            execution_id=execution_id)
-        if snapshot_contrato is None:
-            pagina_ok = _preparar_pagina_fgts(
-                local_driver,
-                info_site.get('url'),
-                info_site.get('cnpj_field_id')
-            )
-        else:
-            pagina_ok = True
+        with batch_engine.preflight_contrato(FGTS_BATCH_LOCK, FGTS_BATCH_STATE):
+            snapshot_contrato = contrato_portal_fgts.preparar_execucao(
+                local_driver, estado_lote=FGTS_BATCH_STATE,
+                execution_id=execution_id)
+        localizador_cnpj = (
+            contrato_portal_fgts.localizador(snapshot_contrato, 'cnpj')
+            if snapshot_contrato is not None else None
+        )
+        url_fgts = (
+            f'https://{snapshot_contrato.host}{snapshot_contrato.rota}'
+            if snapshot_contrato is not None else info_site.get('url')
+        )
+        pagina_ok = _preparar_pagina_fgts(
+            local_driver,
+            url_fgts,
+            info_site.get('cnpj_field_id'),
+            localizador=localizador_cnpj,
+        )
 
         if not pagina_ok:
             return False, True, 'Erro ao carregar página FGTS.'
@@ -1392,12 +1426,15 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
 
         TRABALHISTA_BATCH_STATE['driver'] = local_driver
         wait = WebDriverWait(local_driver, 20)
-        snapshot_contrato = trabalhista.preparar_execucao(
-            local_driver,
-            url_legada=info_site.get('url'),
-            estado_lote=TRABALHISTA_BATCH_STATE,
-            execution_id=execution_id,
-        )
+        with batch_engine.preflight_contrato(
+            TRABALHISTA_BATCH_LOCK, TRABALHISTA_BATCH_STATE
+        ):
+            snapshot_contrato = trabalhista.preparar_execucao(
+                local_driver,
+                url_legada=info_site.get('url'),
+                estado_lote=TRABALHISTA_BATCH_STATE,
+                execution_id=execution_id,
+            )
         try:
             _configurar_download_automatico_chrome(local_driver)
         except Exception as exc:
@@ -1719,7 +1756,10 @@ def _classificar_grave(exc):
     - `True` (grave "comum", ex.: timeout de download): no lote automatico vira
       falha por-item e o loop segue; no manual continua abortando (RESIL-01/03).
     """
-    if isinstance(exc, trabalhista.PortalNaoRespondeuError):
+    if isinstance(exc, (
+        trabalhista.PortalNaoRespondeuError,
+        PortalObservacaoTemporariamenteIndisponivelError,
+    )):
         # Portal lento NAO e navegador morto. O tipo declarado ganha da
         # heuristica, que caminha pela cadeia de causas e enxergaria o
         # TimeoutException do Selenium — subclasse de WebDriverException, que

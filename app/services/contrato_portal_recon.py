@@ -58,7 +58,10 @@ def _registro_padrao() -> RegistroAdaptadores:
     diárias equivalentes contra o mesmo portal não se justificam.
     """
     from app.automation import trabalhista
-    from app.automation.batch_state import TRABALHISTA_BATCH_LOCK
+    from app.automation.batch_state import (
+        TRABALHISTA_BATCH_LOCK,
+        TRABALHISTA_BATCH_STATE,
+    )
     from app.services import circuit_breaker
 
     return RegistroAdaptadores((AdaptadorRecon(
@@ -68,6 +71,7 @@ def _registro_padrao() -> RegistroAdaptadores:
             chave_health=circuit_breaker.ALVO_TRABALHISTA,
             observar=trabalhista.observar_passivo,
             lock=TRABALHISTA_BATCH_LOCK,
+            preflight_state=TRABALHISTA_BATCH_STATE,
             recon_passivo_seguro=True,
             definicao=trabalhista.definicao_baseline,
         ),))

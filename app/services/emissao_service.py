@@ -30,6 +30,8 @@ from app.automation.batch_state import (
     MUNICIPAL_BATCH_STATE,
     RS_BATCH_LOCK,
     RS_BATCH_STATE,
+    TRABALHISTA_BATCH_LOCK,
+    TRABALHISTA_BATCH_STATE,
     marcar_emissao_individual,
     automacao_em_curso,
     mensagem_automacao_em_curso,
@@ -59,7 +61,7 @@ from app.automation.emissao import (
 )
 from app.automation.sites import is_ipm_atende
 from app.models import Certidao
-from app.services import contrato_portal_preflight
+from app.services import batch_engine, contrato_portal_preflight
 from app.services.execution_logger import log_event
 from app.services.visualizar_token import _gerar_visualizar_token
 from app.utils import json_error as _json_error
@@ -596,8 +598,9 @@ def _executar_automacao_baixar(certidao, cfg):
         if tipo_certidao_chave == 'ESTADUAL' and estado_emp == 'RS':
             from app.services import contrato_portal_estadual_rs
 
-            snapshot_contrato = contrato_portal_estadual_rs.preparar_execucao(
-                driver, execution_id=cfg.get('execution_id'))
+            with batch_engine.preflight_contrato(RS_BATCH_LOCK, RS_BATCH_STATE):
+                snapshot_contrato = contrato_portal_estadual_rs.preparar_execucao(
+                    driver, execution_id=cfg.get('execution_id'))
             contexto['contrato_snapshot'] = snapshot_contrato
             if snapshot_contrato is None:
                 # A guarda por `login_cert_url` continua valendo: sem ela, um RS
@@ -616,14 +619,18 @@ def _executar_automacao_baixar(certidao, cfg):
                     driver.get(info_site.get('url'))
         elif tipo_certidao_chave == 'TRABALHISTA':
             log_event('emit_navigate', certidao_id=certidao.id, url=info_site.get('url'))
-            snapshot_contrato = trabalhista.preparar_execucao(
-                driver, url_legada=info_site.get('url'))
+            with batch_engine.preflight_contrato(
+                TRABALHISTA_BATCH_LOCK, TRABALHISTA_BATCH_STATE
+            ):
+                snapshot_contrato = trabalhista.preparar_execucao(
+                    driver, url_legada=info_site.get('url'))
         elif tipo_certidao_chave == 'FGTS':
             from app.services import contrato_portal_fgts
 
             log_event('emit_navigate', certidao_id=certidao.id, url=info_site.get('url'))
-            snapshot_contrato = contrato_portal_fgts.preparar_execucao(
-                driver, execution_id=cfg.get('execution_id'))
+            with batch_engine.preflight_contrato(FGTS_BATCH_LOCK, FGTS_BATCH_STATE):
+                snapshot_contrato = contrato_portal_fgts.preparar_execucao(
+                    driver, execution_id=cfg.get('execution_id'))
             contexto['contrato_snapshot'] = snapshot_contrato
             if snapshot_contrato is None:
                 driver.get(info_site.get('url'))
@@ -637,9 +644,12 @@ def _executar_automacao_baixar(certidao, cfg):
             contexto_contrato_municipal = contrato_portal_municipal.contexto_da_emissao(
                 cfg['regra_municipio'], cfg.get('imbe_tipo') or '',
                 config_municipal, info_site)
-            snapshot_contrato = contrato_portal_municipal.preparar_execucao(
-                driver, contexto_contrato_municipal,
-                estado_lote=estado_contrato_municipal)
+            with batch_engine.preflight_contrato(
+                MUNICIPAL_BATCH_LOCK, MUNICIPAL_BATCH_STATE
+            ):
+                snapshot_contrato = contrato_portal_municipal.preparar_execucao(
+                    driver, contexto_contrato_municipal,
+                    estado_lote=estado_contrato_municipal)
             if snapshot_contrato is not None:
                 info_site, config_municipal = contrato_portal_municipal.aplicar_snapshot(
                     snapshot_contrato, info_site, config_municipal)

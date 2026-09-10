@@ -101,6 +101,19 @@ def test_adaptador_declara_municipio_e_variante_sem_mudar_configuracao():
     assert json.loads(municipio.config_automacao) == original
 
 
+def test_declaracao_inclui_pre_fill_click_mesmo_com_skip_cnpj_fill():
+    municipio = _municipio(
+        pre_fill_click_id='radio-pessoa-juridica',
+        pre_fill_click_by='id',
+        config_automacao=json.dumps({'skip_cnpj_fill': True}),
+    )
+
+    itens = municipal.adaptadores_municipais([municipio])[0].definicao().elementos
+
+    assert [item.chave for item in itens] == ['pre_fill_click']
+    assert itens[0].seletor == 'radio-pessoa-juridica'
+
+
 def test_inventario_municipal_aceita_rota_da_variante_sem_ler_valores():
     payload = _payload_municipal(consulta='?codigo=7', fragmento='#geral')
     driver = _DriverInventario([payload, copy.deepcopy(payload)])
@@ -290,6 +303,13 @@ def test_dryrun_passivo_nao_executa_fill():
     assert relatorio['resultado'] == dryrun.PARCIAL
     assert 'ação de formulário' in relatorio['mensagem']
     executar.assert_not_called()
+
+
+def test_locator_de_botao_com_nome_composto_nao_e_classificado_como_entrada():
+    passo = {'tipo': 'click', 'by': 'id', 'locator': 'btnSelecionarCertidao'}
+
+    assert municipal._papel_acao_declarados(
+        'before_cnpj[1]', passo) == ('submissao', 'submeter')
 
 
 def test_preparar_execucao_sem_contrato_preserva_fluxo_legado():
