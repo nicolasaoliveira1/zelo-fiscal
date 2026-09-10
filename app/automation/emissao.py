@@ -848,6 +848,11 @@ def _emitir_municipal_certidao_lote(certidao_id, driver=None, execution_id=None)
     if cidade_regra_norm == 'IMBE':
         nome_certidao_arquivo = _nome_certidao_imbe(nome_certidao_arquivo, imbe_tipo)
 
+    from app.services import contrato_portal_municipal
+
+    contexto_contrato_municipal = contrato_portal_municipal.contexto_da_emissao(
+        regra_municipio, imbe_tipo, config_municipal, info_site)
+
     local_driver = driver
     criado_localmente = False
 
@@ -860,6 +865,12 @@ def _emitir_municipal_certidao_lote(certidao_id, driver=None, execution_id=None)
 
         wait = WebDriverWait(local_driver, 20)
         local_driver.get(info_site.get('url'))
+        snapshot_contrato = contrato_portal_municipal.preparar_execucao(
+            local_driver, contexto_contrato_municipal,
+            estado_lote=MUNICIPAL_BATCH_STATE, execution_id=execution_id)
+        if snapshot_contrato is not None:
+            info_site, config_municipal = contrato_portal_municipal.aplicar_snapshot(
+                snapshot_contrato, info_site, config_municipal)
         try:
             _configurar_download_automatico_chrome(local_driver)
         except Exception as exc:
@@ -1113,6 +1124,9 @@ def _emitir_municipal_certidao_lote(certidao_id, driver=None, execution_id=None)
                 certidao_id=certidao_id,
             )
         return True, False, 'CNPJ não cadastrado no município. Certidão marcada como pendente.'
+    except contrato_portal_preflight.PreflightContratoPortalError as exc:
+        db.session.rollback()
+        return False, batch_engine.GRAVE_CONTRATO_PORTAL, str(exc)
     except Exception as exc:
         err_type = map_exception_to_error_type(exc).value
         log_event(
@@ -1448,8 +1462,8 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
                 level='info', certidao_id=certidao.id)
         return True, False, None
     except contrato_portal_preflight.PreflightContratoPortalError as exc:
-        # A familia inteira, igual ao caminho individual: contrato ausente ou
-        # malformado tambem tem de parar o lote com o codigo dedicado. Cair no
+        # A família inteira, igual ao caminho individual: contrato ausente ou
+        # malformado também tem de parar o lote com o código dedicado. Cair no
         # `except Exception` abaixo perderia a garantia de interromper o modo
         # tolerante do agendador.
         db.session.rollback()

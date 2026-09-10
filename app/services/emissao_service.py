@@ -565,6 +565,8 @@ def _executar_automacao_baixar(certidao, cfg):
 
     # snapshot do contrato do portal; só o Trabalhista fixa um (T6)
     snapshot_contrato = None
+    contexto_contrato_municipal = None
+    estado_contrato_municipal = {'contrato_snapshots': {}}
 
     # contexto compartilhado com helpers de steps
     contexto = {
@@ -601,6 +603,19 @@ def _executar_automacao_baixar(certidao, cfg):
         else:
             log_event('emit_navigate', certidao_id=certidao.id, url=info_site.get('url'))
             driver.get(info_site.get('url'))
+
+        if tipo_certidao_chave == 'MUNICIPAL' and usar_config_municipal:
+            from app.services import contrato_portal_municipal
+
+            contexto_contrato_municipal = contrato_portal_municipal.contexto_da_emissao(
+                cfg['regra_municipio'], cfg.get('imbe_tipo') or '',
+                config_municipal, info_site)
+            snapshot_contrato = contrato_portal_municipal.preparar_execucao(
+                driver, contexto_contrato_municipal,
+                estado_lote=estado_contrato_municipal)
+            if snapshot_contrato is not None:
+                info_site, config_municipal = contrato_portal_municipal.aplicar_snapshot(
+                    snapshot_contrato, info_site, config_municipal)
 
         try:
             _configurar_download_automatico_chrome(driver)
@@ -763,16 +778,23 @@ def _executar_automacao_baixar(certidao, cfg):
                     )
 
     except contrato_portal_preflight.PreflightContratoPortalError as e:
-        # Toda a familia do preflight, nao so o bloqueio: contrato ausente ou
-        # falha de persistencia sao ambiente local (spec 09), nao falha do
+        # Toda a família do preflight, não só o bloqueio: contrato ausente ou
+        # falha de persistência são ambiente local (spec 09), não falha do
         # portal — merecem mensagem acionavel, nunca erro cru do Selenium.
+        fluxo_contrato = trabalhista.FLUXO_CONTRATO
+        alvo_contrato = trabalhista.ALVO_CONTRATO
+        acao_contrato = 'Revise o contrato Trabalhista no Diagnóstico.'
+        if tipo_certidao_chave == 'MUNICIPAL' and contexto_contrato_municipal:
+            fluxo_contrato = 'municipal'
+            alvo_contrato = contexto_contrato_municipal.alvo
+            acao_contrato = 'Revise o contrato municipal no Diagnóstico.'
         log_event(
             'contrato_portal_bloqueado', level='WARNING',
-            fluxo=trabalhista.FLUXO_CONTRATO, alvo=trabalhista.ALVO_CONTRATO)
+            fluxo=fluxo_contrato, alvo=alvo_contrato)
         resultado['erro_acionavel'] = {
             'message': str(e),
             'error_type': ErrorType.PORTAL.value,
-            'acao': 'Revise o contrato Trabalhista no Diagnóstico.',
+            'acao': acao_contrato,
             'code': 409,
         }
         # Fecha o Chrome como o handler generico abaixo: sem isto, todo

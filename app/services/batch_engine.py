@@ -63,6 +63,10 @@ def batch_state_defaults():
         'execution_id': None,
         'opcoes_execucao': None,
         'contrato_snapshot': None,
+        # Municípios podem ter mais de uma tela no mesmo lote (ex.: variantes
+        # do Imbé); cada alvo recebe o snapshot que ficou fixado no primeiro
+        # item daquela tela.
+        'contrato_snapshots': {},
         'last_messages': [],
     }
 

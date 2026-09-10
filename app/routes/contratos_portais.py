@@ -91,7 +91,8 @@ def _alvo_para_painel(adaptador):
 def diagnostico_contratos_portais():
     """Estado de cada alvo com contrato adaptativo. Só leitura."""
     alvos = [_alvo_para_painel(adaptador)
-             for adaptador in contrato_portal_recon.adaptadores_padrao()]
+             for adaptador in contrato_portal_recon.adaptadores_padrao(
+                 incluir_municipais=True)]
     return jsonify({'status': 'ok', 'alvos': alvos})
 
 

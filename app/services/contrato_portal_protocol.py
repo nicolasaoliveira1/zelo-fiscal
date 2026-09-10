@@ -84,3 +84,4 @@ class AdaptadorPortal(Protocol):
     lock: Any
     recon_passivo_seguro: bool
     definicao: Callable[[], Any] | None
+    criar_driver: Callable[[], Any] | None

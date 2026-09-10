@@ -21,6 +21,10 @@ class AdaptadorRecon:
     # Baseline declarada no código, nunca derivada do DOM: a primeira versão
     # ativa é decisão humana revisável (AC-01.5).
     definicao: Callable[[], Any] | None = None
+    # Alguns fluxos precisam preservar uma escolha de driver existente (ex.:
+    # Município IPM usa UC + perfil dedicado). Quando ausente, o núcleo usa a
+    # fábrica injetada pelo scheduler/rota.
+    criar_driver: Callable[[], Any] | None = None
 
 
 class RegistroAdaptadores:

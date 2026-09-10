@@ -66,8 +66,13 @@ def _registro_padrao() -> RegistroAdaptadores:
         ),))
 
 
-def adaptadores_padrao() -> list[AdaptadorPortal]:
-    return list(_registro_padrao().todos())
+def adaptadores_padrao(*, incluir_municipais=False) -> list[AdaptadorPortal]:
+    adaptadores = list(_registro_padrao().todos())
+    if incluir_municipais:
+        from app.services import contrato_portal_municipal
+
+        adaptadores.extend(contrato_portal_municipal.adaptadores_municipais())
+    return adaptadores
 
 
 class AlvoOcupadoError(RuntimeError):
@@ -79,7 +84,12 @@ class NadaParaRevisarError(RuntimeError):
 
 
 def adaptador_por_alvo(fluxo, alvo):
-    return _registro_padrao().por_alvo(fluxo, alvo)
+    adaptador = _registro_padrao().por_alvo(fluxo, alvo)
+    if adaptador is not None or fluxo != 'municipal':
+        return adaptador
+    from app.services import contrato_portal_municipal
+
+    return contrato_portal_municipal.adaptador_por_alvo(alvo)
 
 
 def _fechar(driver):
@@ -95,7 +105,8 @@ def _observar_alvo(adaptador, ativo, criar_driver, execution_id):
     """Abre o driver, observa uma vez e devolve o resultado da comparação."""
     driver = None
     try:
-        driver = criar_driver()
+        fabrica = getattr(adaptador, 'criar_driver', None) or criar_driver
+        driver = fabrica()
         snapshot = contrato_portal_preflight.executar(
             fluxo=adaptador.fluxo,
             alvo=adaptador.alvo,
@@ -193,15 +204,25 @@ def estado_por_alvo() -> dict:
     """
     estados = {}
     try:
-        adaptadores = adaptadores_padrao()
+        adaptadores = adaptadores_padrao(incluir_municipais=True)
     except Exception:
         return estados
+    prioridade = {
+        COMPATIVEL: 1,
+        AUTOAJUSTADO: 2,
+        DESCONHECIDO: 3,
+        BLOQUEADO: 4,
+    }
     for adaptador in adaptadores:
         try:
-            estados[adaptador.chave_health] = _estado_do_alvo(adaptador)
+            estado = _estado_do_alvo(adaptador)
         except Exception:
-            estados[adaptador.chave_health] = {
+            estado = {
                 'estado': DESCONHECIDO, 'versao': None, 'mensagem': None}
+        anterior = estados.get(adaptador.chave_health)
+        if anterior is None or prioridade.get(estado['estado'], 0) > prioridade.get(
+                anterior['estado'], 0):
+            estados[adaptador.chave_health] = estado
     return estados
 
 
@@ -218,7 +239,8 @@ def _observar_com_lock(adaptador, contrato, criar_driver):
             'Há uma emissão em curso neste portal. Tente novamente depois.')
     driver = None
     try:
-        driver = criar_driver()
+        fabrica = getattr(adaptador, 'criar_driver', None) or criar_driver
+        driver = fabrica()
         return adaptador.observar(driver, contrato)
     finally:
         _fechar(driver)
