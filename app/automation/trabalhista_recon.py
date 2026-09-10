@@ -259,8 +259,22 @@ def _normalizar_payload(
             raise _InventarioInvalidoError('estrutura de formulário inválida')
         identificador = _texto(item.get('id'))
         nome = _texto(item.get('name'))
-        seletor_tipo = 'id' if identificador else ('name' if nome else 'nenhum')
-        seletor = identificador or nome
+        seletor_tipo_declarado = _texto(
+            item.get('seletor_tipo'), limite=30).lower()
+        seletor_declarado = _texto(item.get('seletor'))
+        if seletor_tipo_declarado:
+            if seletor_tipo_declarado not in {
+                'id', 'name', 'css_selector', 'xpath', 'class_name', 'nenhum',
+            }:
+                raise _InventarioInvalidoError('tipo de seletor não permitido')
+            seletor_tipo = seletor_tipo_declarado
+            seletor = ('' if seletor_tipo == 'nenhum'
+                       else seletor_declarado)
+            if seletor_tipo != 'nenhum' and not seletor:
+                raise _InventarioInvalidoError('seletor vazio')
+        else:
+            seletor_tipo = 'id' if identificador else ('name' if nome else 'nenhum')
+            seletor = identificador or nome
         elementos.append(ElementoInventariado(
             tag=_texto(item.get('tag'), limite=30).lower(),
             tipo=_texto(item.get('tipo'), limite=50).lower(),

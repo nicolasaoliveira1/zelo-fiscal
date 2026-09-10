@@ -122,7 +122,15 @@ def _diferenca(
 
 
 def _papel_acao(elemento: ElementoInventariado) -> tuple[str, str]:
-    if elemento.tag == 'img':
+    tag = elemento.tag.lower()
+    tipo = elemento.tipo.lower()
+    if (
+        tag == 'img'
+        or 'captcha' in tag
+        or 'captcha' in tipo
+        or 'altcha' in tag
+        or 'altcha' in tipo
+    ):
         return 'captcha', 'observar'
     if elemento.tag == 'a':
         return 'navegacao', 'navegar'

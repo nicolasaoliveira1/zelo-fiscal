@@ -298,8 +298,17 @@ def resolver_altcha_rs_com_2captcha(driver, config, allow_solver=False):
     }
 
 
-def clicar_enviar_estadual_rs(driver, timeout=8, retries=4, post_wait=0.5):
+def clicar_enviar_estadual_rs(
+    driver, timeout=8, retries=4, post_wait=0.5, localizador=None,
+):
+    """Aciona Enviar, usando o seletor fixado quando o contrato está ativo.
+
+    Sem localizador mantém o fallback legado da função JavaScript. Com um
+    snapshot ativo, esse fallback fica proibido: o contrato precisa governar o
+    único efeito de submissão.
+    """
     metodos_tentados = []
+    seletor = localizador or (By.ID, 'btnEnviar')
 
     for tentativa in range(1, max(1, int(retries)) + 1):
         if tentativa > 1:
@@ -307,7 +316,7 @@ def clicar_enviar_estadual_rs(driver, timeout=8, retries=4, post_wait=0.5):
 
         try:
             btn = WebDriverWait(driver, timeout).until(
-                EC.presence_of_element_located((By.ID, 'btnEnviar'))
+                EC.presence_of_element_located(seletor)
             )
             try:
                 driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
@@ -315,7 +324,7 @@ def clicar_enviar_estadual_rs(driver, timeout=8, retries=4, post_wait=0.5):
                 pass
 
             try:
-                WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.ID, 'btnEnviar')))
+                WebDriverWait(driver, 2).until(EC.element_to_be_clickable(seletor))
                 btn.click()
                 time.sleep(post_wait)
                 return {
@@ -339,19 +348,20 @@ def clicar_enviar_estadual_rs(driver, timeout=8, retries=4, post_wait=0.5):
         except Exception:
             metodos_tentados.append('find_btn')
 
-        try:
-            executou = driver.execute_script(
-                "if (typeof EnviarSolCer === 'function') { EnviarSolCer(); return true; } return false;"
-            )
-            if executou:
-                time.sleep(post_wait)
-                return {
-                    'clicked': True,
-                    'method': 'js_function',
-                    'attempt': tentativa
-                }
-        except Exception:
-            metodos_tentados.append('js_function')
+        if localizador is None:
+            try:
+                executou = driver.execute_script(
+                    "if (typeof EnviarSolCer === 'function') { EnviarSolCer(); return true; } return false;"
+                )
+                if executou:
+                    time.sleep(post_wait)
+                    return {
+                        'clicked': True,
+                        'method': 'js_function',
+                        'attempt': tentativa
+                    }
+            except Exception:
+                metodos_tentados.append('js_function')
 
     return {
         'clicked': False,

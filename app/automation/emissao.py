@@ -382,11 +382,14 @@ def _rs_garantir_pagina_solicitacao(driver, info_site):
     return _rs_pagina_solicitacao_pronta(driver, cnpj_field_name, timeout=8)
 
 
-def _rs_preencher_cnpj_com_confirmacao(driver, cnpj_field_name, cnpj_limpo, tentativas=3):
+def _rs_preencher_cnpj_com_confirmacao(
+    driver, cnpj_field_name, cnpj_limpo, tentativas=3, localizador=None,
+):
+    campo_locator = localizador or (By.NAME, cnpj_field_name)
     for _ in range(max(1, int(tentativas))):
         try:
             campo_cnpj = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.NAME, cnpj_field_name))
+                EC.element_to_be_clickable(campo_locator)
             )
             campo_cnpj.click()
             campo_cnpj.clear()
@@ -424,6 +427,7 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
 
     local_driver = driver
     criado_localmente = False
+    snapshot_contrato = None
     inicio_fluxo = time.time()
 
     def _log_etapa(etapa, extra=''):
@@ -448,10 +452,18 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
 
         RS_BATCH_STATE['driver'] = local_driver
 
-        _log_etapa('Garantindo página de solicitação RS')
-        if not _rs_garantir_pagina_solicitacao(local_driver, info_site):
-            _log_etapa('Falha ao abrir página de solicitação RS')
-            return False, True, 'Não foi possível abrir a página de solicitação da certidão RS.'
+        from app.services import contrato_portal_estadual_rs
+
+        snapshot_contrato = contrato_portal_estadual_rs.preparar_execucao(
+            local_driver,
+            estado_lote=RS_BATCH_STATE,
+            execution_id=execution_id,
+        )
+        if snapshot_contrato is None:
+            _log_etapa('Garantindo página de solicitação RS')
+            if not _rs_garantir_pagina_solicitacao(local_driver, info_site):
+                _log_etapa('Falha ao abrir página de solicitação RS')
+                return False, True, 'Não foi possível abrir a página de solicitação da certidão RS.'
         _log_etapa('Página de solicitação pronta')
 
         if _rs_sessao_expirada(local_driver):
@@ -464,6 +476,11 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
             info_site.get('cnpj_field_id', 'campoCnpj'),
             cnpj_limpo,
             tentativas=3,
+            localizador=(
+                contrato_portal_estadual_rs.localizador(
+                    snapshot_contrato, 'cnpj')
+                if snapshot_contrato is not None else None
+            ),
         ):
             _log_etapa('Falha ao preencher CNPJ')
             return False, False, 'Não foi possível preencher o CNPJ antes de resolver o ALTCHA.'
@@ -525,7 +542,14 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
                 handle_principal_rs = local_driver.current_window_handle
             except Exception:
                 handle_principal_rs = None
-            envio_rs = _clicar_enviar_estadual_rs(local_driver, timeout=8, retries=4, post_wait=0.5)
+            envio_rs = _clicar_enviar_estadual_rs(
+                local_driver, timeout=8, retries=4, post_wait=0.5,
+                localizador=(
+                    contrato_portal_estadual_rs.localizador(
+                        snapshot_contrato, 'enviar')
+                    if snapshot_contrato is not None else None
+                ),
+            )
             _log_etapa('Resultado clique Enviar', extra=f"clicked={envio_rs.get('clicked')} method={envio_rs.get('method')}")
             if not envio_rs.get('clicked'):
                 return False, False, 'Não foi possível acionar o botão Enviar no lote RS.'
@@ -670,6 +694,9 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
             )
 
         return True, False, None
+    except contrato_portal_preflight.PreflightContratoPortalError as exc:
+        db.session.rollback()
+        return False, batch_engine.GRAVE_CONTRATO_PORTAL, str(exc)
     except Exception as exc:
         db.session.rollback()
         log_event(

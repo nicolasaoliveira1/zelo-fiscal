@@ -567,7 +567,7 @@ def _executar_automacao_baixar(certidao, cfg):
     certidao_pdf_msg = None
     pdf_invalida_msg = None
 
-    # snapshot do contrato do portal; só o Trabalhista fixa um (T6)
+    # snapshot do contrato do portal; cada adaptador fixa o seu alvo
     snapshot_contrato = None
     contexto_contrato_municipal = None
     estado_contrato_municipal = {'contrato_snapshots': {}}
@@ -593,13 +593,19 @@ def _executar_automacao_baixar(certidao, cfg):
 
         wait = WebDriverWait(driver, 20)
 
-        if tipo_certidao_chave == 'ESTADUAL' and estado_emp == 'RS' and info_site.get('login_cert_url'):
-            log_event('estadual_rs_cert_login', certidao_id=certidao.id)
-            _login_certificado_rs(
-                driver,
-                info_site.get('login_cert_url'),
-                info_site.get('url')
-            )
+        if tipo_certidao_chave == 'ESTADUAL' and estado_emp == 'RS':
+            from app.services import contrato_portal_estadual_rs
+
+            snapshot_contrato = contrato_portal_estadual_rs.preparar_execucao(
+                driver, execution_id=cfg.get('execution_id'))
+            contexto['contrato_snapshot'] = snapshot_contrato
+            if snapshot_contrato is None:
+                log_event('estadual_rs_cert_login', certidao_id=certidao.id)
+                _login_certificado_rs(
+                    driver,
+                    info_site.get('login_cert_url'),
+                    info_site.get('url')
+                )
         elif tipo_certidao_chave == 'TRABALHISTA':
             log_event('emit_navigate', certidao_id=certidao.id, url=info_site.get('url'))
             snapshot_contrato = trabalhista.preparar_execucao(
@@ -675,6 +681,12 @@ def _executar_automacao_baixar(certidao, cfg):
             from app.services import contrato_portal_fgts
 
             localizador_documento = contrato_portal_fgts.localizador(
+                snapshot_contrato, 'cnpj')
+        elif (tipo_certidao_chave == 'ESTADUAL' and estado_emp == 'RS'
+              and snapshot_contrato is not None):
+            from app.services import contrato_portal_estadual_rs
+
+            localizador_documento = contrato_portal_estadual_rs.localizador(
                 snapshot_contrato, 'cnpj')
         else:
             field_by = _get_by(info_site.get('by'))
@@ -806,6 +818,10 @@ def _executar_automacao_baixar(certidao, cfg):
             fluxo_contrato = 'fgts'
             alvo_contrato = 'fgts'
             acao_contrato = 'Revise o contrato FGTS no Diagnóstico.'
+        elif tipo_certidao_chave == 'ESTADUAL' and estado_emp == 'RS':
+            fluxo_contrato = 'estadual'
+            alvo_contrato = 'rs'
+            acao_contrato = 'Revise o contrato Estadual RS no Diagnóstico.'
         elif tipo_certidao_chave == 'MUNICIPAL' and contexto_contrato_municipal:
             fluxo_contrato = 'municipal'
             alvo_contrato = contexto_contrato_municipal.alvo
