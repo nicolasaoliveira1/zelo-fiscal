@@ -443,7 +443,7 @@ def _papel_acao_declarados(chave, passo=None, *, terminal=False):
         # Clicáveis identificados como input/radio são entradas; os demais
         # normalmente são botões e devem permanecer protegidos como ação de
         # submissão, ainda que a etapa os use apenas para navegar.
-        if any(re.search(rf'(?<![\w-]){marca}(?![\w-])', locator)
+        if any(re.search(rf'(?<!\w){marca}(?!\w)', locator)
                for marca in ('input', 'radio', 'select')):
             return 'entrada', 'preencher'
         return 'submissao', 'submeter'

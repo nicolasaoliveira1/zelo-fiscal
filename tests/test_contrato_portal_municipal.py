@@ -310,6 +310,10 @@ def test_locator_de_botao_com_nome_composto_nao_e_classificado_como_entrada():
 
     assert municipal._papel_acao_declarados(
         'before_cnpj[1]', passo) == ('submissao', 'submeter')
+    for locator in ('input-cnpj', 'radio-pessoa-juridica', 'select-cidade'):
+        passo['locator'] = locator
+        assert municipal._papel_acao_declarados(
+            'before_cnpj[1]', passo) == ('entrada', 'preencher')
 
 
 def test_preparar_execucao_sem_contrato_preserva_fluxo_legado():
