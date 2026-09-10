@@ -88,6 +88,7 @@ def _dados_elemento(elemento):
         'obrigatorio': elemento.obrigatorio,
         'visivel': elemento.visivel,
         'somente_leitura': elemento.somente_leitura,
+        'desabilitado': elemento.desabilitado,
         'autoajuste_seletor': elemento.autoajuste_seletor,
     }
 
@@ -139,6 +140,9 @@ def criar_baseline(
         # Recusa por VERSAO ATIVA, nao por historico: depois de descartar, o
         # alvo volta a poder receber uma baseline, e o historico de por que a
         # anterior saiu continua servindo a quem for olhar.
+        # Este SELECT e conveniencia para dar 409 legivel; a garantia de "uma
+        # ativa por alvo" e a constraint `ativa_unica` do banco, capturada como
+        # IntegrityError abaixo. Nao troque um pelo outro.
         existente = ContratoPortal.query.filter_by(
             fluxo=fluxo, alvo=alvo, estado='ativa').first()
         if existente is not None:
@@ -196,7 +200,13 @@ def _registrar_incidente(
         incidente.estado = 'aberto'
         incidente.resolvido_em = None
         incidente.resolvido_por_id = None
-        incidente.contrato_candidato = candidata
+        # Só VINCULA, nunca desvincula: o preflight reobserva o mesmo drift sem
+        # candidata nenhuma, e sobrescrever com None soltava a candidata que
+        # aguardava revisão. Solto, o incidente ficava fora do alcance de
+        # `_resolver_incidentes` (que caminha por `candidata.incidentes_candidata`)
+        # e permanecia aberto no painel mesmo depois da correção ser promovida.
+        if candidata is not None:
+            incidente.contrato_candidato = candidata
         return incidente
 
     primeira = resultado.diferencas[0]

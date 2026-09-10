@@ -1447,7 +1447,11 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
                 TRABALHISTA_BATCH_STATE, f"Trabalhista ID={certidao.id} emitida com sucesso.",
                 level='info', certidao_id=certidao.id)
         return True, False, None
-    except contrato_portal_preflight.ContratoPortalBloqueadoError as exc:
+    except contrato_portal_preflight.PreflightContratoPortalError as exc:
+        # A familia inteira, igual ao caminho individual: contrato ausente ou
+        # malformado tambem tem de parar o lote com o codigo dedicado. Cair no
+        # `except Exception` abaixo perderia a garantia de interromper o modo
+        # tolerante do agendador.
         db.session.rollback()
         return False, batch_engine.GRAVE_CONTRATO_PORTAL, str(exc)
     except Exception as exc:

@@ -36,6 +36,8 @@ def upgrade():
 
 
 def downgrade():
+    # `LEFT()` e MySQL/MariaDB — o unico alvo real deste projeto (o SQLite dos
+    # testes monta o schema por create_all, nunca desce migration).
     # Reversao encolhe a coluna: linha gravada depois do upgrade pode nao caber
     # de volta. Trunca antes, no proprio SQL, para o downgrade nao morrer com
     # DataError no pior momento possivel.

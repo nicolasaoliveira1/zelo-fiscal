@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from selenium.common.exceptions import WebDriverException
 
 
+ESPERA_ENTRE_FOTOS_S = 0.4
 MAX_FORMULARIOS = 50
 MAX_ELEMENTOS = 300
 MAX_ROTULO = 500
@@ -358,6 +360,11 @@ def inventariar(
             host_esperado=host_esperado,
             rota_esperada=rota_esperada,
             etapa=etapa)
+        # Respiro entre as fotos: coladas, as duas perdem igualmente o
+        # conteudo que chega depois do onload (captcha buscado por XHR, por
+        # exemplo) e o par identico-porem-incompleto passa como "estavel" —
+        # esvaziando o teste que ele existe para fazer.
+        time.sleep(ESPERA_ENTRE_FOTOS_S)
         segunda = _normalizar_payload(
             driver.execute_script(JS_INVENTARIO_TRABALHISTA),
             host_esperado=host_esperado,

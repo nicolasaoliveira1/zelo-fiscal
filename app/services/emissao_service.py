@@ -775,6 +775,13 @@ def _executar_automacao_baixar(certidao, cfg):
             'acao': 'Revise o contrato Trabalhista no Diagnóstico.',
             'code': 409,
         }
+        # Fecha o Chrome como o handler generico abaixo: sem isto, todo
+        # bloqueio de contrato deixava um navegador vazando.
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
         return resultado
     except Exception as e:
         log_event('emit_selenium_error', level='ERROR', certidao_id=certidao.id, error=str(e))

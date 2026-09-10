@@ -6,15 +6,23 @@ A causa é a divergência SQLite×MySQL de largura de VARCHAR: o artefato é o J
 de TODOS os elementos da página, e o SQLite ignora o limite que o InnoDB impõe.
 """
 import json
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
 
 from app import db
 from app.automation import trabalhista
-from app.models import IncidenteContratoPortal, Usuario
+from app.models import ContratoPortal, IncidenteContratoPortal, Usuario
 from app.services import contrato_portal, contrato_portal_preflight
-from app.services.contrato_portal_drift import ResultadoComparacaoPortal, _diferenca
+from app.automation.trabalhista_recon import ElementoInventariado, InventarioPortal
+from app.services.contrato_portal_drift import (
+    COMPATIVEL,
+    RemapeamentoSeletor,
+    ResultadoComparacaoPortal,
+    _diferenca,
+    comparar,
+)
 
 
 def _artefato_realista():
@@ -135,3 +143,98 @@ def test_promocao_que_nao_persiste_falha_fechada(app, ids, monkeypatch):
                 observar=lambda contrato: _inventario_falso(),
                 contrato_ativo=ativo,
             )
+
+
+# --- achados da revisão do PR #51 -------------------------------------------
+
+def _baseline_com_controle_desabilitado(usuario_id):
+    """Baseline igual à do CNDT, mas com o submeter desabilitado."""
+    declaracao = trabalhista.definicao_baseline()
+    elementos = tuple(
+        replace(item, desabilitado=(item.chave == 'submeter'))
+        for item in declaracao.elementos)
+    return contrato_portal.criar_baseline(
+        fluxo=trabalhista.FLUXO_CONTRATO, alvo=trabalhista.ALVO_CONTRATO,
+        definicao=replace(declaracao, elementos=elementos),
+        usuario_id=usuario_id)
+
+
+def test_habilitacao_sobrevive_ao_banco_e_nao_vira_drift(app, ids):
+    """A coluna faltava e o comparador comparava a dimensão mesmo assim.
+
+    Recarregado, o elemento voltava sempre como habilitado — e um controle que
+    nasce desabilitado na baseline gerava `habilitacao_alterada` espúrio em todo
+    preflight seguinte, bloqueando o alvo para sempre.
+    """
+    with app.app_context():
+        usuario = Usuario(
+            username='admin_habilitacao', senha_hash='hash-sintetico',
+            papel='admin')
+        db.session.add(usuario)
+        db.session.commit()
+        ativo = _baseline_com_controle_desabilitado(usuario.id)
+        db.session.expire_all()
+
+        recarregado = contrato_portal_preflight.comparavel(
+            db.session.get(ContratoPortal, ativo.id))
+        por_chave = {item.chave: item for item in recarregado.elementos}
+
+        assert por_chave['submeter'].desabilitado is True
+        assert por_chave['documento'].desabilitado is False
+        # A prova que importa: comparado com a tela de onde saiu, é compatível.
+        assert comparar(
+            recarregado, _inventario_da_declaracao(recarregado),
+        ).classificacao == COMPATIVEL
+
+
+def test_reobservar_o_mesmo_drift_nao_solta_a_candidata(app, ids):
+    """Vínculo só se cria, nunca se apaga.
+
+    O preflight reobserva sem candidata nenhuma; sobrescrever com None soltava a
+    candidata em revisão, e o incidente ficava fora do alcance de
+    `_resolver_incidentes` — aberto para sempre no painel.
+    """
+    with app.app_context():
+        usuario = Usuario(
+            username='admin_vinculo', senha_hash='hash-sintetico', papel='admin')
+        db.session.add(usuario)
+        db.session.commit()
+        base = contrato_portal.criar_baseline(
+            fluxo=trabalhista.FLUXO_CONTRATO, alvo=trabalhista.ALVO_CONTRATO,
+            definicao=trabalhista.definicao_baseline(), usuario_id=usuario.id)
+        resultado = _resultado_revisao()
+        candidata = contrato_portal.criar_candidata_revisao(
+            base.id,
+            ajustes=(RemapeamentoSeletor(
+                chave='submeter', seletor_tipo_anterior='id',
+                seletor_anterior='botao-emitir', seletor_tipo_novo='id',
+                seletor_novo='botao-emitir-novo'),),
+            resultado=resultado,
+            fingerprint_base=base.fingerprint,
+            usuario_id=usuario.id)
+        incidente_id = IncidenteContratoPortal.query.filter_by(
+            contrato_base_id=base.id).one().id
+        assert db.session.get(
+            IncidenteContratoPortal, incidente_id).contrato_candidato_id == candidata.id
+
+        # O preflight vê o mesmo drift de novo, sem candidata.
+        contrato_portal.registrar_incidente(base.id, resultado)
+
+        incidente = db.session.get(IncidenteContratoPortal, incidente_id)
+        assert incidente.contrato_candidato_id == candidata.id
+        assert incidente.observacoes == 2
+
+
+def _inventario_da_declaracao(modelo):
+    """Inventário que reproduz exatamente o contrato dado."""
+    return InventarioPortal(
+        host=modelo.host, rota=modelo.rota, etapa=modelo.etapa,
+        elementos=tuple(ElementoInventariado(
+            tag=item.tag, tipo=item.tipo, id=item.seletor, name='',
+            rotulo=item.rotulo, seletor_tipo=item.seletor_tipo,
+            seletor=item.seletor,
+            assinatura_formulario=item.assinatura_formulario,
+            ordem_relativa=item.ordem_relativa,
+            obrigatorio=item.obrigatorio, desabilitado=item.desabilitado,
+            somente_leitura=item.somente_leitura, visivel=item.visivel,
+        ) for item in modelo.elementos))

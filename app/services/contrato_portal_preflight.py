@@ -109,6 +109,7 @@ def comparavel(contrato: ContratoPortal) -> ContratoComparavel:
         obrigatorio=item.obrigatorio,
         visivel=item.visivel,
         somente_leitura=item.somente_leitura,
+        desabilitado=item.desabilitado,
         autoajuste_seletor=item.autoajuste_seletor,
     ) for item in sorted(
         contrato.elementos,

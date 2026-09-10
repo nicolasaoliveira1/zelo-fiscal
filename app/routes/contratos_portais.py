@@ -290,6 +290,12 @@ def diagnostico_contrato_restaurar(contrato_id):
     historico = db.session.get(ContratoPortal, contrato_id)
     if historico is None:
         return _json_error('Versão não encontrada.', 404)
+    # Pelo registry, como as demais rotas: sem isto daria para restaurar o
+    # contrato de um alvo que ja saiu de `adaptadores_padrao()` — ativo no banco
+    # e sem ninguem para obedece-lo.
+    _, erro = _adaptador_ou_404(historico.fluxo, historico.alvo)
+    if erro:
+        return erro
     ativa = (ContratoPortal.query
              .filter_by(fluxo=historico.fluxo, alvo=historico.alvo,
                         estado='ativa')

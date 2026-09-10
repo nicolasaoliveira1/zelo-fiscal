@@ -1177,6 +1177,11 @@ class ElementoContratoPortal(db.Model):
     obrigatorio = db.Column(db.Boolean, nullable=False, default=False)
     visivel = db.Column(db.Boolean, nullable=False, default=True)
     somente_leitura = db.Column(db.Boolean, nullable=False, default=False)
+    # Persistido porque o comparador COMPARA esta dimensao (habilitacao_alterada).
+    # Sem a coluna, `comparavel()` reconstruia sempre False e um controle que
+    # nasce desabilitado na baseline (botao de emitir travado ate validar, por
+    # exemplo) gerava drift espurio em todo preflight seguinte.
+    desabilitado = db.Column(db.Boolean, nullable=False, default=False)
     autoajuste_seletor = db.Column(db.Boolean, nullable=False, default=False)
 
     contrato = db.relationship('ContratoPortal', back_populates='elementos')

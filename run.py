@@ -25,6 +25,10 @@ def _porta_ocupada(porta, host='127.0.0.1', timeout=2.0):
     investigando "o app nao responde" enquanto as requisicoes caiam num
     processo morto (2026-09-09).
 
+    Ha uma janela entre esta checagem e o bind de verdade, e ela nao e
+    fechavel daqui: e guarda best-effort contra o caso do Windows descrito, nao
+    exclusao mutua.
+
     Pior: o socket sobrevive ao dono. Ja apareceu `LISTENING` com um PID que
     `taskkill` nao encontra e sem nenhum python vivo na maquina; ai o connect
     completa e a requisicao morre em silencio. Por isso a checagem e connect.

@@ -446,3 +446,47 @@ def test_item_do_lote_que_estoura_o_teto_e_classificado_como_portal(
         # grave "comum": no lote do agendador vira falha por-item, não aborta
         assert grave is not batch_engine.GRAVE_FATAL
         assert batch_engine._falha_e_do_portal(mensagem) is True
+
+
+def test_bloqueio_no_individual_fecha_o_navegador(app, ids, monkeypatch):
+    """Achado da revisão do PR #51: o handler do preflight devolvia o resultado
+    sem `driver.quit()`, e cada bloqueio de contrato vazava um Chrome."""
+    with app.test_request_context('/'):
+        _ativar_baseline()
+        driver = MagicMock()
+        monkeypatch.setattr(
+            emissao_service, '_abrir_driver_baixar', lambda *args: (driver, False))
+        monkeypatch.setattr(
+            emissao_service.trabalhista, 'preparar_execucao',
+            MagicMock(side_effect=contrato_portal_preflight.ContratoPortalBloqueadoError(
+                'revisao')))
+        monkeypatch.setattr(
+            emissao_service, '_baixar_monitorar_download', MagicMock())
+        certidao = db.session.get(emissao.Certidao, ids['trabalhista'])
+        cfg, _ = emissao_service._montar_config_baixar(certidao)
+
+        resultado = emissao_service._executar_automacao_baixar(certidao, cfg)
+
+        assert resultado['erro_acionavel']['code'] == 409
+        driver.quit.assert_called_once()
+
+
+def test_contrato_ausente_no_lote_para_com_o_codigo_dedicado(app, ids, monkeypatch):
+    """A família inteira do preflight, não só o bloqueio.
+
+    Antes, um contrato ausente ou malformado caía no `except Exception` genérico
+    e perdia a garantia de interromper o modo tolerante do agendador.
+    """
+    with app.app_context():
+        _ativar_baseline()
+        monkeypatch.setattr(
+            emissao.trabalhista, 'preparar_execucao',
+            MagicMock(side_effect=contrato_portal_preflight.ContratoPortalAusenteError(
+                'O contrato fornecido não é a versão ativa do alvo.')))
+
+        sucesso, grave, mensagem = emissao._emitir_trabalhista_certidao(
+            ids['trabalhista'], driver=MagicMock(), execution_id='exec-sintetica')
+
+    assert sucesso is False
+    assert grave == batch_engine.GRAVE_CONTRATO_PORTAL
+    assert 'versão ativa' in mensagem
