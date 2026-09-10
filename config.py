@@ -151,6 +151,29 @@ class Config:
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+    # Conexao do banco com teto e reciclagem. Sem isto o boot podia travar sem
+    # limite: o MySQL do escritorio esta na LAN, e uma conexao que nao completa
+    # o aperto de mao bloqueava para sempre — so um restart do Windows soltava
+    # (achado de 2026-09-09).
+    #
+    # `connect_timeout` cobre SO o aperto de mao; nao ha teto de leitura de
+    # proposito. Um `read_timeout` mataria consulta legitimamente lenta e, pior,
+    # faria um ALTER TABLE demorado parecer falho enquanto o servidor continua
+    # aplicando — schema mentido e pior que boot lento.
+    #
+    # `pool_pre_ping` custa um SELECT 1 por checkout e evita entregar conexao
+    # que o `wait_timeout` do MySQL ja fechou; `pool_recycle` derruba antes
+    # disso acontecer. Ambos so fazem sentido em servidor de rede: o SQLite dos
+    # testes fica de fora.
+    _e_mysql = SQLALCHEMY_DATABASE_URI.startswith('mysql')
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_pre_ping': True,
+        'pool_recycle': _env_int('DB_POOL_RECYCLE_S', 1800),
+        'connect_args': {
+            'connect_timeout': _env_int('DB_CONNECT_TIMEOUT_S', 10),
+        },
+    } if _e_mysql else {}
+
     # recarrega templates Jinja a cada request
     TEMPLATES_AUTO_RELOAD = True
 

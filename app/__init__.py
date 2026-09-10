@@ -4,6 +4,7 @@ from flask_migrate import Migrate
 from flask_wtf.csrf import CSRFProtect
 from config import Config
 import os
+import time
 import logging
 
 from app.services.execution_logger import configure_logging, log_event
@@ -45,7 +46,7 @@ def create_app(config_class=Config):
     csrf.init_app(app)
 
     with app.app_context():
-        if app.config.get('AUTO_DB_UPGRADE', True):
+        if app.config.get('AUTO_DB_UPGRADE', True) and not _e_pai_do_reloader(app):
             _aplicar_migrations_pendentes()
         checks = run_health_checks(app.config)
         log_event('startup_health_checks', checks=checks)
@@ -121,18 +122,46 @@ def create_app(config_class=Config):
     return app
 
 
+def _e_pai_do_reloader(app):
+    """True quando outro processo vai subir e fazer o mesmo trabalho.
+
+    Mesmo criterio do agendador (`deve_adiar_para_reloader`): com o reloader
+    ligado, pai e filho executam `create_app` inteiro. Migrar duas vezes contra
+    o mesmo banco nao so desperdiça como coloca os dois processos disputando a
+    mesma tabela de versao no boot. Quem migra e quem atende.
+    """
+    from app.services.agendador import deve_adiar_para_reloader
+
+    try:
+        return deve_adiar_para_reloader(app)
+    except Exception:
+        # Na duvida, migra: schema velho com codigo novo e pior que migrar duas
+        # vezes.
+        return False
+
+
 def _aplicar_migrations_pendentes():
     """Roda 'flask db upgrade' no boot (no-op se ja estiver no head).
 
     Evita o cenario de codigo novo + schema velho, em que leituras de modelo
     falham e caem em defaults silenciosos. Controlado por AUTO_DB_UPGRADE.
+
+    Instrumentado nos DOIS lados de proposito: `upgrade()` nao tem teto de
+    tempo, entao um banco que nao responde trava o boot em silencio — sem o
+    evento de inicio, o log nao dizia nem que ele tinha chegado aqui.
     """
     from flask_migrate import upgrade as _db_upgrade
 
+    inicio = time.time()
+    log_event('startup_db_upgrade_inicio')
     try:
         _db_upgrade()
     except Exception as e:
-        log_event('startup_db_upgrade_failed', level='ERROR', error=str(e))
+        log_event('startup_db_upgrade_failed', level='ERROR',
+                  duration_ms=int((time.time() - inicio) * 1000), error=str(e))
+        return
+    log_event('startup_db_upgrade_ok',
+              duration_ms=int((time.time() - inicio) * 1000))
 
 
 def _reconciliar_nfse_orfas():

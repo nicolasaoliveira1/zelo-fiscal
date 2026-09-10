@@ -99,3 +99,65 @@ def test_init_liga_no_processo_que_serve(app, ids, monkeypatch):
     sched = agendador.init(app)
     assert sched is not None
     assert sched.running
+
+
+# --- migration no boot: quem migra é quem atende -----------------------------
+
+def test_pai_do_reloader_nao_migra(app, monkeypatch):
+    """Pai e filho rodam `create_app` inteiro; migrar duas vezes coloca os dois
+    disputando a tabela de versão no boot."""
+    import app as pacote_app
+
+    monkeypatch.setitem(app.config, 'DEBUG', True)
+    monkeypatch.setattr(app, 'debug', True, raising=False)
+    monkeypatch.delenv('WERKZEUG_RUN_MAIN', raising=False)
+
+    assert pacote_app._e_pai_do_reloader(app) is True
+
+
+def test_processo_que_serve_migra(app, monkeypatch):
+    import app as pacote_app
+
+    monkeypatch.setattr(app, 'debug', True, raising=False)
+    monkeypatch.setenv('WERKZEUG_RUN_MAIN', 'true')
+
+    assert pacote_app._e_pai_do_reloader(app) is False
+
+
+def test_sem_debug_migra(app, monkeypatch):
+    import app as pacote_app
+
+    monkeypatch.setattr(app, 'debug', False, raising=False)
+    monkeypatch.delenv('WERKZEUG_RUN_MAIN', raising=False)
+
+    assert pacote_app._e_pai_do_reloader(app) is False
+
+
+def test_guard_que_falha_nao_impede_a_migration(app, monkeypatch):
+    """Na dúvida, migra: schema velho com código novo é pior que migrar 2x."""
+    import app as pacote_app
+
+    monkeypatch.setattr(
+        agendador, 'deve_adiar_para_reloader',
+        lambda _app: (_ for _ in ()).throw(RuntimeError('guard quebrado')))
+
+    assert pacote_app._e_pai_do_reloader(app) is False
+
+
+def test_upgrade_registra_inicio_e_duracao(app, monkeypatch):
+    """Sem o evento de INÍCIO, um banco que não responde trava o boot em
+    silêncio — o log não dizia nem que ele havia chegado ali."""
+    import app as pacote_app
+
+    eventos = []
+    monkeypatch.setattr(
+        pacote_app, 'log_event',
+        lambda evento, **campos: eventos.append((evento, campos)))
+    monkeypatch.setattr(
+        'flask_migrate.upgrade', lambda *a, **k: None)
+
+    pacote_app._aplicar_migrations_pendentes()
+
+    assert [e for e, _ in eventos] == [
+        'startup_db_upgrade_inicio', 'startup_db_upgrade_ok']
+    assert 'duration_ms' in eventos[1][1]
