@@ -172,6 +172,34 @@ def test_estrutura_compativel_fecha_o_driver_e_nao_toca_o_breaker(
         assert circuit_breaker.abertos() == []
 
 
+def test_recon_registra_resultado_duracao_versao_e_origem(
+    app, ids, monkeypatch,
+):
+    with app.app_context():
+        ativo = _ativar_baseline()
+        eventos = []
+        monkeypatch.setattr(
+            contrato_portal_recon, 'log_event',
+            lambda evento, **campos: eventos.append((evento, campos)))
+        monkeypatch.setattr(
+            contrato_portal_recon.contrato_portal_preflight, 'executar',
+            lambda **kwargs: MagicMock(versao=ativo.versao + 1))
+
+        resultados = contrato_portal_recon.executar(
+            [_adaptador()], lambda: MagicMock(), execution_id='exec-sintetica')
+
+    evento, campos = next(
+        item for item in eventos if item[0] == 'contrato_portal_recon_resultado')
+    assert resultados == {
+        trabalhista.ALVO_CONTRATO: contrato_portal_recon.AUTOAJUSTADO}
+    assert campos['resultado'] == contrato_portal_recon.AUTOAJUSTADO
+    assert campos['versao'] == ativo.versao + 1
+    assert campos['origem'] == 'sistema'
+    assert campos['execution_id'] == 'exec-sintetica'
+    assert isinstance(campos['duracao_ms'], int)
+    assert campos['duracao_ms'] >= 0
+
+
 def test_autoativacao_e_reportada_pela_troca_de_versao(app, ids, monkeypatch):
     with app.app_context():
         ativo = _ativar_baseline()
@@ -258,6 +286,19 @@ def test_health_sem_contrato_ativo_fica_desconhecido_sem_reprovar(app, ids, monk
                 if p['chave'] == circuit_breaker.ALVO_TRABALHISTA)
     assert trab['contrato_estado'] == contrato_portal_recon.DESCONHECIDO
     assert trab['pronto_para_automatizar'] is True
+
+
+def test_health_composto_conhece_fgts_e_estadual_rs(app, ids, monkeypatch):
+    monkeypatch.setattr(portal_health.requests, 'get',
+                        lambda url, **kwargs: MagicMock(status_code=200))
+    with app.app_context():
+        resultado = portal_health.snapshot({}, forcar=True)
+
+    por_chave = {item['chave']: item for item in resultado['portais']}
+    for chave in ('FGTS', 'Estadual RS'):
+        assert por_chave[chave]['contrato_estado'] == (
+            contrato_portal_recon.DESCONHECIDO)
+        assert por_chave[chave]['pronto_para_automatizar'] is True
 
 
 def test_health_separa_responde_de_pronto_para_automatizar(app, ids, monkeypatch):

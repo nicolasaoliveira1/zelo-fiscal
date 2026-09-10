@@ -87,11 +87,15 @@ def test_preflight_compativel_devolve_snapshot_imutavel_e_auditado(
             snapshot.elementos['documento'] = snapshot.elemento('documento')
         evento, campos = eventos[-1]
         assert evento == 'contrato_portal_preflight'
-        assert campos == {
-            'fluxo': 'trabalhista', 'alvo': 'cndt', 'versao': 1,
-            'fingerprint': baseline.fingerprint[:12], 'resultado': 'compativel',
-            'execution_id': 'exec-sintetica',
-        }
+        assert campos['fluxo'] == 'trabalhista'
+        assert campos['alvo'] == 'cndt'
+        assert campos['versao'] == 1
+        assert campos['fingerprint'] == baseline.fingerprint[:12]
+        assert campos['resultado'] == 'compativel'
+        assert campos['origem'] == 'usuario'
+        assert campos['execution_id'] == 'exec-sintetica'
+        assert isinstance(campos['duracao_ms'], int)
+        assert campos['duracao_ms'] >= 0
 
 
 def test_preflight_autoativa_antes_de_fixar_snapshot(app, ids):

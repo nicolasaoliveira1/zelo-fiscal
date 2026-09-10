@@ -206,9 +206,57 @@ Quando uma automação Selenium quebra (tipicamente porque um portal mudou de es
 - **Painel de municípios** em `GET /diagnostico/municipios`: estado da automação de cada município, com dry-run sob demanda.
 - **Contratos dos portais** em `GET /diagnostico` (seção "Contratos dos portais", perfil admin): estrutura aprovada de cada portal com contrato adaptativo, incidentes abertos e histórico de versões. **Verificar agora** só observa a tela do portal — não preenche, não resolve captcha e não emite. Ativar uma versão muda o que a automação obedece e por isso pede confirmação; se houver emissão em curso no mesmo portal, a ação é recusada (HTTP 423) em vez de atrapalhar o lote.
 - Um job diário do agendador (`agendador_recon_portais`, deslocado 2h20 da hora configurada) faz a mesma observação sozinho, para a mudança de layout aparecer antes da primeira emissão do dia. Roda mesmo com a renovação automática desligada, porque não emite nem consome captcha.
+- **Saúde composta dos portais** em `GET /diagnostico/portais` (admin): `estado` informa apenas se o portal respondeu ao ping ou ao último dry-run; `contrato_estado` informa `compativel`, `autoajustado`, `bloqueado` ou `desconhecido`; `pronto_para_automatizar` combina essas dimensões com o circuit breaker. O `GET /health?detalhado=1` é separado e cobre somente a infraestrutura da aplicação.
 - Retry com limite e backoff em pontos recuperáveis (ex.: timeout de carregamento e leitura de caminho de rede).
 - **Health check** em `GET /health`: retorna `ok` ou `degraded` com detalhes de banco de dados, caminho de rede (incluindo leitura e escrita), profile do Chrome e configuração do solver.
 - Para ajustar verbosidade/saída, use `LOG_LEVEL`, `QUIET_WERKZEUG_LOGS`, `LOG_CONSOLE_FORMAT` (`human`/`json`) e `LOG_JSON_FILE` no `.env`. Para reduzir ruído local, logs HTTP de estáticos/polling são filtrados e o log padrão fica em nível `WARNING`.
+
+### Runbook da recon adaptativa
+
+O contrato ativo é a versão que governa o alvo. O preflight observa e fixa essa versão antes de
+preencher documento ou consumir captcha; uma mudança descoberta depois do pinning só vale para a
+próxima execução. A ausência de contrato ativo é o desligado daquele alvo e preserva o executor
+legado durante o rollout.
+
+Alvos atualmente registrados no núcleo:
+
+| Alvo | Adaptador | Rollout e fallback |
+| --- | --- | --- |
+| Trabalhista/CNDT | piloto | contrato ativo obrigatório para o caminho adaptativo; sem ele, executor legado |
+| Municipal | município/variante | entra explicitamente quando a configuração fechou; dry-run legado só é aposentado após cobertura da variante |
+| FGTS | `fgts` | contrato independente; sem contrato ativo, mapa legado |
+| Estadual RS | `estadual/rs` | contrato independente; sem contrato ativo, fluxo legado |
+| Federal, Estadual SP/MT/MS e demais UFs sem adaptador | nenhum | permanecem assistidos ou legados; não recebem proteção parcial |
+
+Quando um alvo aparece como `bloqueado`:
+
+1. Pare de repetir a emissão e abra `/diagnostico/contratos-portais` como admin.
+2. Leia o incidente e use **Verificar agora** para uma observação passiva recente. Essa ação não
+   preenche, resolve captcha, submete nem baixa documento.
+3. Só use **Revisar e ativar** depois da confirmação explícita e da reobservação da mesma estrutura.
+   **Manter a versão atual** encerra a candidata sem trocar o contrato. `Restaurar` cria uma nova
+   versão a partir do histórico; `Descartar contrato` arquiva a ativa e volta ao executor legado.
+4. Depois de uma correção, confirme no painel que o contrato deixou `bloqueado` antes de iniciar
+   um lote. O circuit breaker continua sendo alimentado apenas pelo preflight da execução real;
+   o recon antecipatório não abre breaker.
+
+Os eventos `contrato_portal_preflight` e `contrato_portal_recon_resultado` são a métrica operacional
+do motor: carregam fluxo, alvo canônico, resultado, `duracao_ms`, versão, origem (`usuario` ou
+`sistema`) e `execution_id` quando houver. Fingerprints são truncados; não entram CNPJ, empresa,
+valor, captcha, HTML bruto ou valores de formulário. Agregue por fluxo/alvo/resultado, nunca por
+cliente.
+
+Retenção e privacidade seguem esta divisão:
+
+- versões, incidentes, diferenças e artefatos sanitizados do contrato são histórico estruturado e
+  não têm prune automático; o artefato sanitizado contém metadados da estrutura, nunca formulário,
+  captcha ou documento;
+- o histórico geral de diagnóstico é podado por `DIAGNOSTICO_RETENCAO_DIAS` (padrão: 30 dias);
+- screenshots e HTML capturados em falhas Selenium ficam em `SELENIUM_CAPTURE_DIR` e são podados
+  por `SELENIUM_CAPTURE_RETENCAO_DIAS` (padrão: 14 dias); não são baseline nem evidência para
+  ativação e não devem ser versionados;
+- `logs/app.jsonl` é saída operacional rotativa. Para investigação, correlacione `request_id` ou
+  `execution_id` sem copiar dados de cliente para tickets, fixtures ou documentação.
 
 ## Testes e CI
 

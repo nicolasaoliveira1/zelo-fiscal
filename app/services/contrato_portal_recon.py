@@ -19,6 +19,8 @@ Três limites de propósito:
 
 Um alvo que falhe não derruba os demais nem o scheduler (AC-07.5).
 """
+import time
+
 from app.services import contrato_portal, contrato_portal_preflight
 from app.services.contrato_portal_registry import (
     AdaptadorRecon,
@@ -42,6 +44,10 @@ BLOQUEADO = 'bloqueado'
 DESCONHECIDO = 'desconhecido'
 ADIADO = 'adiado'
 SEM_CONTRATO = 'sem_contrato'
+
+
+def _duracao_ms(inicio):
+    return max(0, int((time.perf_counter() - inicio) * 1000))
 
 
 def _registro_padrao() -> RegistroAdaptadores:
@@ -125,7 +131,12 @@ def _fechar(driver):
 
 def _observar_alvo(adaptador, ativo, criar_driver, execution_id):
     """Abre o driver, observa uma vez e devolve o resultado da comparação."""
+    inicio = time.perf_counter()
     driver = None
+    resultado = DESCONHECIDO
+    erro = None
+    versao_evento = ativo.versao
+    origem_evento = ativo.origem
     try:
         fabrica = getattr(adaptador, 'criar_driver', None) or criar_driver
         driver = fabrica()
@@ -137,27 +148,47 @@ def _observar_alvo(adaptador, ativo, criar_driver, execution_id):
             execution_id=execution_id,
             contrato_ativo=ativo,
         )
+        resultado = AUTOAJUSTADO if snapshot.versao != ativo.versao else COMPATIVEL
+        versao_evento = snapshot.versao
+        if resultado == AUTOAJUSTADO:
+            origem_evento = 'sistema'
     except contrato_portal_preflight.ContratoPortalBloqueadoError:
-        return BLOQUEADO
+        resultado = BLOQUEADO
     except Exception as exc:
+        erro = exc
         log_event(
             'contrato_portal_recon_falhou', level='ERROR',
             fluxo=adaptador.fluxo, alvo=adaptador.alvo,
-            error=str(exc), execution_id=execution_id)
-        return DESCONHECIDO
+            error=str(exc), duracao_ms=_duracao_ms(inicio),
+            versao=versao_evento, origem=origem_evento,
+            execution_id=execution_id)
     finally:
         _fechar(driver)
-    return AUTOAJUSTADO if snapshot.versao != ativo.versao else COMPATIVEL
+        campos = {
+            'fluxo': adaptador.fluxo,
+            'alvo': adaptador.alvo,
+            'resultado': resultado,
+            'versao': versao_evento,
+            'origem': origem_evento,
+            'duracao_ms': _duracao_ms(inicio),
+            'execution_id': execution_id,
+        }
+        if erro is not None:
+            campos['error'] = str(erro)
+        log_event('contrato_portal_recon_resultado', **campos)
+    return resultado
 
 
 def _recon_de_um(adaptador, criar_driver, execution_id):
+    inicio = time.perf_counter()
     lock = adaptador.lock
     if lock is not None and not lock.acquire(blocking=False):
         # Emissão em andamento no mesmo alvo: adiar é o comportamento correto,
         # não erro. A observação de amanhã cobre o mesmo terreno.
         log_event(
             'contrato_portal_recon_adiado', fluxo=adaptador.fluxo,
-            alvo=adaptador.alvo, execution_id=execution_id)
+            alvo=adaptador.alvo, resultado=ADIADO,
+            duracao_ms=_duracao_ms(inicio), execution_id=execution_id)
         return ADIADO
     try:
         ativo = contrato_portal_preflight.buscar_ativo(
@@ -165,7 +196,8 @@ def _recon_de_um(adaptador, criar_driver, execution_id):
         if ativo is None:
             log_event(
                 'contrato_portal_recon_sem_contrato', fluxo=adaptador.fluxo,
-                alvo=adaptador.alvo, execution_id=execution_id)
+                alvo=adaptador.alvo, resultado=SEM_CONTRATO,
+                duracao_ms=_duracao_ms(inicio), execution_id=execution_id)
             return SEM_CONTRATO
         return _observar_alvo(adaptador, ativo, criar_driver, execution_id)
     finally:
