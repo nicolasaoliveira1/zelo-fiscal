@@ -41,7 +41,7 @@ def test_monitor_negativa_retorna_validade_e_token(app, client):
     fid = _federal_id(app)
     with _monitor_mocks({'ok': True, 'pendente': False,
                          'data_validade': date(2026, 12, 31), 'message': None}):
-        resp = client.get(f'/certidao/monitorar_download_federal/{fid}')
+        resp = client.post(f'/certidao/monitorar_download_federal/{fid}')
     assert resp.status_code == 200
     data = resp.get_json()
     assert data['status'] == 'success'
@@ -55,7 +55,7 @@ def test_monitor_positiva_retorna_status_pendente(app, client):
     fid = _federal_id(app)
     with _monitor_mocks({'ok': True, 'pendente': True, 'data_validade': None,
                          'message': 'Certidão Federal POSITIVA: pendente.'}):
-        resp = client.get(f'/certidao/monitorar_download_federal/{fid}')
+        resp = client.post(f'/certidao/monitorar_download_federal/{fid}')
     assert resp.status_code == 200
     data = resp.get_json()
     assert data['status'] == 'pendente'
@@ -68,7 +68,7 @@ def test_monitor_falha_do_nucleo_retorna_json_error(app, client):
     fid = _federal_id(app)
     with _monitor_mocks({'ok': False, 'grave': True,
                          'message': 'Erro ao marcar PENDENTE no banco.'}):
-        resp = client.get(f'/certidao/monitorar_download_federal/{fid}')
+        resp = client.post(f'/certidao/monitorar_download_federal/{fid}')
     assert resp.status_code == 500
     data = resp.get_json()
     assert data['status'] == 'error'
@@ -78,7 +78,7 @@ def test_monitor_falha_do_nucleo_retorna_json_error(app, client):
 def test_monitor_exige_login(app, client_anon):
     # AD-005: rota protegida — sem sessao, nao executa (redirect/401), sem tocar no nucleo.
     fid = _federal_id(app)
-    resp = client_anon.get(f'/certidao/monitorar_download_federal/{fid}')
+    resp = client_anon.post(f'/certidao/monitorar_download_federal/{fid}')
     assert resp.status_code in (302, 401)
 
 
@@ -88,11 +88,18 @@ def test_monitor_nao_associa_pdf_sem_prova_do_titular(app, client):
                          'message': None}), \
             patch.object(certidoes.pdf, 'cnpj_do_pdf_confere', return_value=False), \
             patch.object(certidoes.file_manager, 'mover_e_renomear') as mover:
-        resposta = client.get(f'/certidao/monitorar_download_federal/{fid}')
-
+        resposta = client.post(f'/certidao/monitorar_download_federal/{fid}')
     assert resposta.status_code == 409
     assert resposta.get_json()['status'] == 'titular_inconclusivo'
     mover.assert_not_called()
+
+
+def test_monitor_get_nao_executa_automacao(app, client):
+    fid = _federal_id(app)
+    with patch.object(certidoes, '_snapshot_downloads_pdf') as snapshot:
+        resposta = client.get(f'/certidao/monitorar_download_federal/{fid}')
+    assert resposta.status_code == 405
+    snapshot.assert_not_called()
 
 
 # ---- F3: upload manual (POST /certidao/federal/registrar/<id>) ----

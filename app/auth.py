@@ -88,6 +88,11 @@ _ROTAS_JSON_POST = {
     '/certidao/monitorar_download_federal/stop',
 }
 
+_PREFIXOS_JSON_POST = (
+    '/certidao/baixar/',
+    '/certidao/monitorar_download_federal/',
+)
+
 
 def _prefere_json():
     """Decide resposta JSON (API/fetch) vs HTML (redirect/flash em página).
@@ -104,7 +109,12 @@ def _prefere_json():
     # POST/PUT/…: JSON só para endpoints de API (fetch); senão é form de página.
     # '_json' é substring pois esses endpoints têm o id depois (.../_json/<id>).
     p = request.path
-    return '_json' in p or '/lote/' in p or p in _ROTAS_JSON_POST
+    return (
+        '_json' in p
+        or '/lote/' in p
+        or p in _ROTAS_JSON_POST
+        or p.startswith(_PREFIXOS_JSON_POST)
+    )
 
 
 def _envelope_erro(mensagem, code, **extra):

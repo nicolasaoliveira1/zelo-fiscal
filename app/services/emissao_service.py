@@ -1,7 +1,7 @@
 """Orquestracao da emissao individual de certidao (fluxo "baixar").
 
 Extraido de app/routes.py (spec 05, REFA-01): concentra a camada Selenium + a
-regra de negocio da emissao unitaria, deixando a rota GET /certidao/baixar/<id>
+regra de negocio da emissao unitaria, deixando a rota POST /certidao/baixar/<id>
 fina (a rota so delega a `baixar_certidao`). A decisao de driver — IPM
 Atende.Net -> undetected-chromedriver com perfil dedicado; demais tipos/
 municipios -> Chrome padrao — vive aqui em `_abrir_driver_baixar` e continua
@@ -940,7 +940,7 @@ def _montar_resposta_baixar(certidao, cfg, resultado):
 def baixar_certidao(certidao_id):
     """Orquestra a emissao individual e devolve a resposta HTTP (JSON/redirect).
 
-    Chamada pela rota fina GET /certidao/baixar/<id> (blueprint main). Mantem o
+    Chamada pela rota fina POST /certidao/baixar/<id> (blueprint main). Mantem o
     contrato original: valida, monta config, marca emissao individual ativa,
     executa a automacao Selenium e monta a resposta.
     """

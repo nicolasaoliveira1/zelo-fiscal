@@ -868,6 +868,7 @@ import { showToast } from './toasts.js';
                             };
 
                             fetch(`/certidao/monitorar_download_federal/${idParaMonitorar}`, {
+                                method: 'POST',
                                 signal: monitorController.signal
                             })
                                 .then(response => response.json())
@@ -1146,7 +1147,7 @@ import { showToast } from './toasts.js';
                                     }
 
                                     showLoading(fgtsBatchEmpresaNome || '', fgtsBatchTipoCert || '');
-                                    fetch(fgtsBatchSingleUrl)
+                                    fetch(fgtsBatchSingleUrl, { method: 'POST' })
                                         .then(response => response.json())
                                         .then(dataSingle => {
                                             handleDownloadResponse(dataSingle);
@@ -1217,7 +1218,7 @@ import { showToast } from './toasts.js';
                                     }
 
                                     showLoading(trabalhistaBatchEmpresaNome || '', trabalhistaBatchTipoCert || '');
-                                    fetch(trabalhistaBatchSingleUrl)
+                                    fetch(trabalhistaBatchSingleUrl, { method: 'POST' })
                                         .then(response => response.json())
                                         .then(dataSingle => {
                                             handleDownloadResponse(dataSingle);
@@ -1290,7 +1291,7 @@ import { showToast } from './toasts.js';
                                     }
 
                                     showLoading(rsBatchEmpresaNome || '', rsBatchTipoCert || '');
-                                    fetch(rsBatchSingleUrl)
+                                    fetch(rsBatchSingleUrl, { method: 'POST' })
                                         .then(response => response.json())
                                         .then(dataSingle => {
                                             handleDownloadResponse(dataSingle);
@@ -1398,7 +1399,7 @@ import { showToast } from './toasts.js';
                                     }
 
                                     showLoading(municipalBatchEmpresaNome || '', municipalBatchTipoCert || '');
-                                    fetch(municipalBatchSingleUrl)
+                                    fetch(municipalBatchSingleUrl, { method: 'POST' })
                                         .then(response => response.json())
                                         .then(dataSingle => {
                                             handleDownloadResponse(dataSingle);
@@ -1424,7 +1425,7 @@ import { showToast } from './toasts.js';
 
                     showLoading(empresaNome, tipoCert);
 
-                    fetch(pythonUrlComParams)
+                    fetch(pythonUrlComParams, { method: 'POST' })
                         .then(response => response.json())
                         .then(data => {
                             resetDownloadButton(btn, originalHTML);

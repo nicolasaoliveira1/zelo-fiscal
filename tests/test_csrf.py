@@ -24,6 +24,20 @@ def test_post_sem_token_csrf_rejeitado(app, login_as, ids):
         app.config['WTF_CSRF_ENABLED'] = False
 
 
+def test_comandos_de_certidao_sem_token_csrf_rejeitados(app, login_as, ids):
+    c = login_as('admin')
+    app.config['WTF_CSRF_ENABLED'] = True
+    try:
+        for caminho in (
+            f'/certidao/baixar/{ids["fgts"]}',
+            f'/certidao/monitorar_download_federal/{ids["fgts"]}',
+        ):
+            resp = c.post(caminho)
+            assert resp.status_code == 400
+    finally:
+        app.config['WTF_CSRF_ENABLED'] = False
+
+
 def test_post_com_header_token_ok(app, login_as, ids):
     c = login_as('admin')
     app.config['WTF_CSRF_ENABLED'] = True
