@@ -6,6 +6,7 @@ AUTH-01.5 (logout), edge "usuário desativado barrado no próximo request".
 """
 from app import db
 from app.models import Usuario
+from app.services import usuario_service
 
 
 # --- AUTH-01.1: barra acesso sem login ---
@@ -111,3 +112,41 @@ def test_usuario_desativado_barrado_no_proximo_request(login_as, app):
         db.session.commit()
     # user_loader retorna None p/ inativo -> anônimo -> API 401
     assert c.get('/api/pendencias').status_code == 401
+
+
+def test_resetar_senha_revoga_dois_cookies_e_nova_senha_funciona(login_as, app):
+    cliente_a = login_as('operador')
+    cliente_b = login_as('operador')
+    assert cliente_a.get('/api/pendencias').status_code == 200
+    assert cliente_b.get('/api/pendencias').status_code == 200
+
+    with app.app_context():
+        usuario = Usuario.query.filter_by(username='op_test').one()
+        usuario_service.resetar_senha(usuario, 'senha-nova-sintetica-9')
+
+    assert cliente_a.get('/api/pendencias').status_code == 401
+    assert cliente_b.get('/api/pendencias').status_code == 401
+
+    cliente_antigo = app.test_client()
+    resposta_antiga = cliente_antigo.post(
+        '/login', data={'username': 'op_test', 'senha': 'senha-op-1'})
+    assert resposta_antiga.status_code == 401
+
+    cliente_novo = app.test_client()
+    resposta_nova = cliente_novo.post(
+        '/login', data={'username': 'op_test', 'senha': 'senha-nova-sintetica-9'})
+    assert resposta_nova.status_code == 302
+    assert cliente_novo.get('/api/pendencias').status_code == 200
+
+
+def test_loader_rejeita_cookie_sem_versao_ou_com_versao_antiga(login_as, app):
+    cliente = login_as('operador')
+    with app.app_context():
+        usuario = Usuario.query.filter_by(username='op_test').one()
+        versao = usuario.sessao_versao
+
+    for user_id in ('1', f'{usuario.id}:0', f'{usuario.id}:{versao + 1}',
+                    f'{usuario.id}:texto'):
+        with cliente.session_transaction() as sessao:
+            sessao['_user_id'] = user_id
+        assert cliente.get('/api/pendencias').status_code == 401

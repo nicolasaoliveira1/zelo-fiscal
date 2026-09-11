@@ -100,6 +100,25 @@ def test_desativar_admin_com_outro_admin_ok(ctx):
 
 def test_resetar_senha(ctx):
     u = svc.criar_usuario('ana', 'antiga123')
+    assert u.sessao_versao == 1
     svc.resetar_senha(u, 'nova-senha-9')
+    assert u.sessao_versao == 2
     assert svc.autenticar('ana', 'nova-senha-9') is not None
     assert svc.autenticar('ana', 'antiga123') is None
+
+
+def test_resetar_senha_faz_rollback_da_versao_se_commit_falhar(ctx, monkeypatch):
+    u = svc.criar_usuario('ana', 'antiga123')
+    hash_antigo = u.senha_hash
+
+    def _falhar():
+        raise RuntimeError('falha de commit')
+
+    monkeypatch.setattr(db.session, 'commit', _falhar)
+    with pytest.raises(RuntimeError, match='falha de commit'):
+        svc.resetar_senha(u, 'nova-senha-9')
+
+    monkeypatch.undo()
+    salvo = db.session.get(type(u), u.id)
+    assert salvo.sessao_versao == 1
+    assert salvo.senha_hash == hash_antigo

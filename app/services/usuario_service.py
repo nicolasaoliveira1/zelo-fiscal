@@ -81,4 +81,9 @@ def definir_papel(usuario, papel):
 
 def resetar_senha(usuario, nova_senha):
     usuario.set_senha(nova_senha)
-    db.session.commit()
+    usuario.sessao_versao = (usuario.sessao_versao or 1) + 1
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
