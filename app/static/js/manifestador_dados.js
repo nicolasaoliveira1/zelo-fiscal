@@ -128,13 +128,18 @@ export function agrupar_arquivos_xml(lista) {
  * @returns {Record<string, unknown>}
  */
 export function montar_corpo_manifestacao({
-  tipo_evento, competencia, ids, empresa_id,
+  tipo_evento, competencia, ids, empresa_id, justificativa,
 }) {
   /** @type {Record<string, unknown>} */
   const corpo = {
     tipo_evento,
     competencia: competencia || null,
   };
+
+  if (tipo_evento === '210240' && typeof justificativa === 'string'
+      && justificativa.trim()) {
+    corpo.justificativa = justificativa.trim();
+  }
 
   if (ids.length) {
     corpo.modo = ids.length === 1 ? 'individual' : 'carteira';
@@ -147,6 +152,40 @@ export function montar_corpo_manifestacao({
   }
 
   return corpo;
+}
+
+/**
+ * Decide se uma chave deve aparecer para o termo de busca.
+ *
+ * Chave numérica só é consultada quando o termo inteiro é numérico ou uma
+ * máscara de chave. Assim uma busca textual nunca vira `includes('')`.
+ *
+ * @param {Object} chave
+ * @param {string | null | undefined} busca
+ * @returns {boolean}
+ */
+export function chave_visivel(chave, busca) {
+  const termo = String(busca ?? '').trim().toLowerCase();
+  if (!termo) return true;
+
+  if (String(chave?.empresa ?? '').toLowerCase().includes(termo)) return true;
+
+  const somenteMascaraNumerica = /^[\d\s./-]+$/.test(termo);
+  if (!somenteMascaraNumerica) return false;
+  const digitos = termo.replace(/\D/g, '');
+  return Boolean(digitos) && String(chave?.chave ?? '').includes(digitos);
+}
+
+/**
+ * Filtra a fila sem duplicar a regra entre apresentação e teste.
+ *
+ * @param {unknown} chaves
+ * @param {string | null | undefined} busca
+ * @returns {Object[]}
+ */
+export function filtrar_chaves(chaves, busca) {
+  return (Array.isArray(chaves) ? chaves : [])
+    .filter((chave) => chave_visivel(chave, busca));
 }
 
 /**

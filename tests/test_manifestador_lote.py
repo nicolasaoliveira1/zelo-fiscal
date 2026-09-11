@@ -210,7 +210,11 @@ class _ManifestarFalso:
         self.resultados = resultados or {}
 
     def __call__(self, chave_id, tipo_evento=None, **kwargs):
-        self.chamadas.append({'chave_id': chave_id, 'tipo_evento': tipo_evento})
+        self.chamadas.append({
+            'chave_id': chave_id,
+            'tipo_evento': tipo_evento,
+            'justificativa': kwargs.get('justificativa'),
+        })
         return self.resultados.get(
             chave_id, svc.Resultado(True, 'Manifestada.'))
 
@@ -230,6 +234,25 @@ def test_item_delega_para_a_costura_com_o_tipo_do_lote(app, ids, monkeypatch):
         assert sucesso is True
         assert grave is None
         assert falso.chamadas[0]['tipo_evento'] == svc.DESCONHECIMENTO
+
+
+def test_item_delega_justificativa_do_snapshot(app, ids, monkeypatch):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81')
+        linha = _chave(emp, CHAVES[0])
+        falso = _ManifestarFalso()
+        monkeypatch.setattr(lote, 'manifestar', falso)
+        batch_state.definir_manif_opcoes(
+            tipo_evento=svc.NAO_REALIZADA,
+            justificativa='Motivo sintético',
+        )
+        try:
+            lote._manifestar_item(linha.id, None, 'exec-1')
+        finally:
+            batch_state.definir_manif_opcoes(
+                tipo_evento=svc.CONFIRMACAO, justificativa=None)
+
+        assert falso.chamadas[0]['justificativa'] == 'Motivo sintético'
 
 
 def test_itens_seguem_o_snapshot_da_execucao(app, ids, monkeypatch):

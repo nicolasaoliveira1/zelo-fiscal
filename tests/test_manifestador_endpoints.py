@@ -56,6 +56,12 @@ def test_pagina_abre_para_operador(client):
     assert client.get('/manifestador').status_code == 200
 
 
+def test_pagina_expoe_campo_de_justificativa_do_evento(client):
+    corpo = client.get('/manifestador').get_data(as_text=True)
+    assert 'id="manifJustificativa"' in corpo
+    assert 'maxlength="60"' in corpo
+
+
 def test_pagina_exige_login(client_anon):
     resposta = client_anon.get('/manifestador')
     assert resposta.status_code in (302, 401)
@@ -459,6 +465,35 @@ def test_iniciar_exige_tipo_de_evento(app, ids, client):
                            json={'modo': 'carteira'})
     assert resposta.status_code == 400
     assert 'omiss' in resposta.get_json()['message'].lower()
+
+
+def test_iniciar_210240_exige_justificativa(app, ids, client):
+    for valor in (None, '   ', 'abc', 'x' * 61):
+        payload = {'modo': 'carteira', 'tipo_evento': '210240'}
+        if valor is not None:
+            payload['justificativa'] = valor
+        resposta = client.post('/manifestador/lote/iniciar', json=payload)
+        assert resposta.status_code == 400
+        assert 'justificativa' in resposta.get_json()['message'].lower()
+
+
+def test_iniciar_210240_salva_justificativa_limpa_no_snapshot(
+        app, ids, client, monkeypatch):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81', EstadoCertificado.PRONTO)
+        chave_id = _chave(emp, CHAVE_A).id
+
+    monkeypatch.setattr(manifestador_lote, 'worker', lambda app_obj: None)
+    try:
+        resposta = client.post('/manifestador/lote/iniciar', json={
+            'modo': 'carteira', 'tipo_evento': '210240',
+            'chave_ids': [chave_id], 'justificativa': '  Motivo sintético  ',
+        })
+
+        assert resposta.status_code == 200
+        assert manif_batch_opcoes()['justificativa'] == 'Motivo sintético'
+    finally:
+        batch_engine.reset_batch_state(MANIF_BATCH_STATE)
 
 
 def test_iniciar_recusa_modo_desconhecido(client):

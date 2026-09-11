@@ -92,6 +92,16 @@
         <option value="210220">Desconhecimento da Operação</option>
         <option value="210240">Operação não Realizada</option>
       </select>
+      <div class="manif-justificativa d-none" id="manifJustificativaBloco">
+        <label class="visually-hidden" for="manifJustificativa">Justificativa</label>
+        <textarea class="form-control form-control-sm" id="manifJustificativa"
+                  rows="1" minlength="5" maxlength="60"
+                  placeholder="Justificativa (5 a 60 caracteres)"
+                  aria-describedby="manifJustificativaAjuda"></textarea>
+        <span class="visually-hidden" id="manifJustificativaAjuda">
+          Obrigatória para Operação não Realizada, entre 5 e 60 caracteres.
+        </span>
+      </div>
       <button type="button" class="btn btn-primary btn-sm" id="manifManifestar" disabled>
         Manifestar
       </button>

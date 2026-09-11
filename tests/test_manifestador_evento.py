@@ -116,6 +116,19 @@ def test_operacao_nao_realizada_exige_justificativa():
     assert 'justificativa' in str(erro.value).lower()
 
 
+@pytest.mark.parametrize('justificativa', ['    ', 'abc', 'x' * 61])
+def test_justificativa_tem_limites_do_schema(justificativa):
+    with pytest.raises(svc.EventoError):
+        _montar(tipo_evento=svc.NAO_REALIZADA,
+                justificativa=justificativa)
+
+
+def test_justificativa_remove_espacos_nas_fronteiras():
+    raiz = _montar(tipo_evento=svc.NAO_REALIZADA,
+                   justificativa='  abcde  ')
+    assert _texto(raiz, 'xJust') == 'abcde'
+
+
 def test_justificativa_entra_no_detevento():
     raiz = _montar(tipo_evento=svc.NAO_REALIZADA,
                    justificativa='Mercadoria devolvida ao fornecedor')

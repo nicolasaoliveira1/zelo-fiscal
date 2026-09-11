@@ -323,6 +323,12 @@ def manifestador_lote_iniciar():
         return json_error(
             'Escolha o tipo de evento. Manifestacao nao sai por omissao.', 400)
 
+    try:
+        justificativa = manifestador_service.validar_justificativa(
+            tipo_evento, dados.get('justificativa'))
+    except manifestador_service.EventoError as exc:
+        return json_error(str(exc), 400)
+
     chave_ids = dados.get('chave_ids')
     if chave_ids is not None:
         ids_validos = (
@@ -365,6 +371,7 @@ def manifestador_lote_iniciar():
         'empresa_id': empresa_id,
         'competencia': competencia,
         'chave_id': chave_id,
+        'justificativa': justificativa,
     }
 
     try:

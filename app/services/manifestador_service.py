@@ -38,6 +38,8 @@ DESCRICOES = {
 # O unico dos quatro que carrega texto livre. Sem `xJust` a SEFAZ rejeita; nos
 # outros tres, um `xJust` a mais e rejeicao de schema.
 EXIGEM_JUSTIFICATIVA = (NAO_REALIZADA,)
+JUSTIFICATIVA_MINIMA = 5
+JUSTIFICATIVA_MAXIMA = 60
 
 # Manifestacao do destinatario e sempre Ambiente Nacional — nao e a UF da
 # empresa.
@@ -58,6 +60,20 @@ class EventoError(Exception):
 
 def _so_digitos(valor):
     return re.sub(r'\D', '', str(valor or ''))
+
+
+def validar_justificativa(tipo_evento, justificativa):
+    """Normaliza e valida o texto exigido pelo evento 210240."""
+    if tipo_evento not in EXIGEM_JUSTIFICATIVA:
+        return None
+    if not isinstance(justificativa, str):
+        justificativa = ''
+    limpa = justificativa.strip()
+    if not JUSTIFICATIVA_MINIMA <= len(limpa) <= JUSTIFICATIVA_MAXIMA:
+        raise EventoError(
+            f'{DESCRICOES[tipo_evento]} exige justificativa entre '
+            f'{JUSTIFICATIVA_MINIMA} e {JUSTIFICATIVA_MAXIMA} caracteres.')
+    return limpa
 
 
 def montar_evento(chave, cnpj_destinatario, tipo_evento=CONFIRMACAO,
@@ -87,10 +103,7 @@ def montar_evento(chave, cnpj_destinatario, tipo_evento=CONFIRMACAO,
             'O CNPJ do destinatario precisa ter 14 digitos — e ele que a SEFAZ '
             'confere contra o certificado que assina o evento.')
 
-    if tipo_evento in EXIGEM_JUSTIFICATIVA and not (justificativa or '').strip():
-        raise EventoError(
-            f'{DESCRICOES[tipo_evento]} exige justificativa; sem ela a SEFAZ '
-            f'rejeita o evento.')
+    justificativa = validar_justificativa(tipo_evento, justificativa)
 
     tp_amb = TP_AMB.get(ambiente)
     if tp_amb is None:

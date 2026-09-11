@@ -10,6 +10,7 @@ import {
   balanco_vazio as balancoVazio,
   chave_segmentada as chaveSegmentada,
   escapar_html as escapar,
+  filtrar_chaves as filtrarChaves,
   linha_do_cofre as linhaDoCofre,
   montar_corpo_manifestacao as montarCorpoManifestacao,
   somar_balanco as somarBalanco,
@@ -287,10 +288,7 @@ async function carregarChaves() {
 }
 
 function visiveis() {
-  const busca = ($('manifBusca').value || '').trim().toLowerCase();
-  if (!busca) return chaves;
-  return chaves.filter((c) => (c.empresa || '').toLowerCase().includes(busca)
-    || c.chave.includes(busca.replace(/\D/g, '')));
+  return filtrarChaves(chaves, $('manifBusca').value);
 }
 
 function pintarLista() {
@@ -371,9 +369,19 @@ function marcadas() {
 }
 
 function avaliarBotao() {
-  const temEvento = Boolean($('manifEvento').value);
+  const evento = $('manifEvento').value;
+  const exigeJustificativa = evento === '210240';
+  const campoJustificativa = $('manifJustificativa');
+  const blocoJustificativa = $('manifJustificativaBloco');
+  const temJustificativa = Boolean(campoJustificativa.value.trim());
+  blocoJustificativa.classList.toggle('d-none', !exigeJustificativa);
+  campoJustificativa.required = exigeJustificativa;
+  campoJustificativa.setAttribute('aria-required', String(exigeJustificativa));
+  const temEvento = Boolean(evento);
   const temAlvo = marcadas().length > 0 || Boolean($('manifEmpresa').value);
-  $('manifManifestar').disabled = !(temEvento && temAlvo);
+  $('manifManifestar').disabled = !(
+    temEvento && temAlvo && (!exigeJustificativa || temJustificativa)
+  );
   const n = marcadas().length;
   $('manifManifestar').textContent = n ? `Manifestar ${n}` : 'Manifestar';
 }
@@ -388,6 +396,7 @@ async function manifestar() {
     competencia: $('manifCompetencia').value,
     ids: escolhidas,
     empresa_id: empresaId,
+    justificativa: $('manifJustificativa').value,
   });
 
   try {
@@ -724,6 +733,7 @@ function ligar() {
   });
   $('manifBusca').addEventListener('input', pintarLista);
   $('manifEvento').addEventListener('change', avaliarBotao);
+  $('manifJustificativa').addEventListener('input', avaliarBotao);
   $('manifLista').addEventListener('change', avaliarBotao);
   $('manifLista').addEventListener('click', (e) => {
     const botao = e.target.closest('[data-recuperar]');
