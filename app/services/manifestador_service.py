@@ -227,7 +227,8 @@ def _gravar_desfecho(linha, resposta):
 
 
 def manifestar(chave_id, tipo_evento=CONFIRMACAO, justificativa=None,
-               ambiente=None, execution_id=None):
+               ambiente=None, execution_id=None, ator_id=None, ator_nome=None,
+               ator_papel=None, ator_contexto=None):
     """Manifesta UMA chave e grava o desfecho. Nunca levanta.
 
     E a unica porta entre o sistema e a SEFAZ (a costura do design). Trocar o
@@ -304,12 +305,18 @@ def manifestar(chave_id, tipo_evento=CONFIRMACAO, justificativa=None,
 
     sucesso, mensagem = _gravar_desfecho(linha, resposta)
 
+    detalhe_auditoria = (
+        f'chave={linha.chave} evento={tipo_evento} '
+        f'cStat={resposta.cstat} prot={resposta.protocolo} '
+        f'empresa={empresa.nome}')
+    if ator_contexto:
+        detalhe_auditoria += f' contexto={ator_contexto}'
+
     auditoria.registrar(
         'manifestacao', alvo_tipo='chave_manifestacao', alvo_id=linha.id,
         resultado='ok' if sucesso else 'erro',
-        detalhe=(f'chave={linha.chave} evento={tipo_evento} '
-                 f'cStat={resposta.cstat} prot={resposta.protocolo} '
-                 f'empresa={empresa.nome}'))
+        detalhe=detalhe_auditoria, ator_id=ator_id, ator_nome=ator_nome,
+        ator_papel=ator_papel)
     log_event('manifestador_desfecho', chave=linha.chave, cstat=resposta.cstat,
               status=linha.status, execution_id=execution_id)
 

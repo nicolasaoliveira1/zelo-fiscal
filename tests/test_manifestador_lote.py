@@ -210,7 +210,8 @@ class _ManifestarFalso:
         self.resultados = resultados or {}
 
     def __call__(self, chave_id, tipo_evento=None, **kwargs):
-        self.chamadas.append({'chave_id': chave_id, 'tipo_evento': tipo_evento})
+        self.chamadas.append({
+            'chave_id': chave_id, 'tipo_evento': tipo_evento, **kwargs})
         return self.resultados.get(
             chave_id, svc.Resultado(True, 'Manifestada.'))
 
@@ -257,6 +258,38 @@ def test_itens_seguem_o_snapshot_da_execucao(app, ids, monkeypatch):
 
         assert [chamada['tipo_evento'] for chamada in falso.chamadas] == [
             svc.DESCONHECIMENTO, svc.DESCONHECIMENTO]
+
+
+def test_item_transmite_ator_do_snapshot_ao_worker(app, ids, monkeypatch):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81')
+        linha = _chave(emp, CHAVES[0])
+        falso = _ManifestarFalso()
+        monkeypatch.setattr(lote, 'manifestar', falso)
+
+        with batch_state.MANIF_BATCH_LOCK:
+            batch_state.MANIF_BATCH_STATE['opcoes_execucao'] = {
+                'modo': 'empresa',
+                'tipo_evento': svc.CONFIRMACAO,
+                'empresa_id': emp.id,
+                'competencia': None,
+                'chave_id': linha.id,
+                'ator_id': 17,
+                'ator_nome': 'operador_sintetico',
+                'ator_papel': 'operador',
+                'ator_contexto': 'retomada',
+            }
+        try:
+            lote._manifestar_item(linha.id, None, 'exec-1')
+        finally:
+            from app.services import batch_engine
+            batch_engine.reset_batch_state(batch_state.MANIF_BATCH_STATE)
+
+        chamada = falso.chamadas[0]
+        assert chamada['ator_id'] == 17
+        assert chamada['ator_nome'] == 'operador_sintetico'
+        assert chamada['ator_papel'] == 'operador'
+        assert chamada['ator_contexto'] == 'retomada'
 
 
 def test_falha_de_um_item_nao_e_grave(app, ids, monkeypatch):

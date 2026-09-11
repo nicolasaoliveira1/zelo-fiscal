@@ -16,6 +16,7 @@ from app.models import (
     Empresa,
     EstadoCertificado,
     StatusManifestacao,
+    Usuario,
 )
 from app.automation import batch_state
 from app.automation.batch_state import (
@@ -613,6 +614,66 @@ def test_status_do_lote_traz_modo_e_chave(client):
 
 def test_retomar_sem_lote_pausado_devolve_409(client):
     assert client.post('/manifestador/lote/retomar').status_code == 409
+
+
+def test_inicio_e_retomada_usam_os_dois_usuarios_autenticados(
+        app, ids, login_as, monkeypatch):
+    with app.app_context():
+        empresa = _empresa(estado_cert=EstadoCertificado.PRONTO)
+        chave = _chave(empresa)
+        chave_id = chave.id
+
+    trabalhadores = []
+
+    def worker_falso(worker_fn, app_factory, on_finished=None):
+        trabalhadores.append((worker_fn, app_factory, on_finished))
+
+    monkeypatch.setattr(batch_engine, 'run_worker', worker_falso)
+    monkeypatch.setattr(
+        'app.services.manifestador_cofre.estado_da_carteira',
+        lambda: {'prontas': 1},
+    )
+    operador = login_as('operador')
+    administrador = login_as('admin')
+    try:
+        resposta_inicio = operador.post(
+            '/manifestador/lote/iniciar',
+            json={
+                'modo': 'individual',
+                'tipo_evento': manifestador_service.CONFIRMACAO,
+                'chave_id': chave_id,
+                'ator_id': 999999,
+                'ator_nome': 'ator-forjado',
+                'ator_papel': 'admin',
+            })
+        assert resposta_inicio.status_code == 200
+
+        with app.app_context():
+            operador_salvo = Usuario.query.filter_by(username='op_test').one()
+            assert MANIF_BATCH_STATE['opcoes_execucao']['ator_id'] == operador_salvo.id
+            assert MANIF_BATCH_STATE['opcoes_execucao']['ator_nome'] == 'op_test'
+            assert MANIF_BATCH_STATE['opcoes_execucao']['ator_papel'] == 'operador'
+            assert MANIF_BATCH_STATE['opcoes_execucao']['ator_contexto'] == 'iniciador'
+
+        with batch_state.MANIF_BATCH_LOCK:
+            MANIF_BATCH_STATE['status'] = 'paused'
+            MANIF_BATCH_STATE['worker_active'] = False
+
+        resposta_retomada = administrador.post('/manifestador/lote/retomar')
+        assert resposta_retomada.status_code == 200
+
+        with app.app_context():
+            administrador_salvo = Usuario.query.filter_by(username='admin_test').one()
+            opcoes = MANIF_BATCH_STATE['opcoes_execucao']
+            assert opcoes['ator_id'] == administrador_salvo.id
+            assert opcoes['ator_nome'] == 'admin_test'
+            assert opcoes['ator_papel'] == 'admin'
+            assert opcoes['ator_contexto'] == 'retomada'
+            assert opcoes['tipo_evento'] == manifestador_service.CONFIRMACAO
+            assert opcoes['chave_id'] == chave_id
+            assert len(trabalhadores) == 2
+    finally:
+        batch_engine.reset_batch_state(MANIF_BATCH_STATE)
 
 
 def test_pausar_e_parar_sem_lote_sao_recusados(client):

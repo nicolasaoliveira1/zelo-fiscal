@@ -70,6 +70,17 @@ def test_registrar_ator_sintetico_fora_de_request(ctx, app):
     assert ev.alvo_id == 5
 
 
+def test_registrar_ator_autenticado_do_worker_fora_de_request(ctx, app):
+    auditoria.registrar(
+        'manifestacao', alvo_tipo='chave_manifestacao', alvo_id=5,
+        ator_id=17, ator_nome='operador_sintetico', ator_papel='operador')
+    ev = EventoAuditoria.query.filter_by(acao='manifestacao').first()
+    assert ev is not None
+    assert ev.usuario_id == 17
+    assert ev.usuario_nome == 'operador_sintetico'
+    assert ev.papel == 'operador'
+
+
 def test_registrar_ator_nao_sobrepoe_usuario_logado(ctx, app):
     from flask_login import login_user
     u = svc.criar_usuario('carla', 'senha-1', PapelUsuario.OPERADOR)
