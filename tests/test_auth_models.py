@@ -55,6 +55,15 @@ def test_papel_default_leitura(ctx):
     assert salvo.papel == PapelUsuario.LEITURA == 'leitura'
 
 
+def test_usuario_tem_versao_de_sessao_inicial(ctx):
+    u = Usuario(username='ana')
+    u.set_senha('x')
+    db.session.add(u)
+    db.session.commit()
+    assert u.sessao_versao == 1
+    assert u.get_id() == f'{u.id}:1'
+
+
 def test_username_unico(ctx):
     from sqlalchemy.exc import IntegrityError
     u1 = Usuario(username='ana'); u1.set_senha('x')

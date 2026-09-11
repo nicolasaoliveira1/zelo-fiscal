@@ -37,6 +37,19 @@ def _fmt_datahora(dt):
     return dt.strftime('%d/%m/%Y %H:%M') if dt else '—'
 
 
+def _adicionar_linha_textual(ws, valores):
+    """Anexa uma linha e força seus valores textuais a permanecerem texto.
+
+    O openpyxl interpreta strings iniciadas por ``=`` como fórmulas durante o
+    append. A carteira é uma exportação de dados, então nenhum campo dessa
+    linha pode virar código executável ao ser aberto no Excel.
+    """
+    ws.append(valores)
+    for celula in ws[ws.max_row]:
+        if isinstance(celula.value, str):
+            celula.data_type = 's'
+
+
 def gerar_planilha_carteira(status=None, tipo=None, estado=None, cidade=None):
     """XLSX com 1 linha por certidao do recorte (mesmos filtros do painel).
 
@@ -57,7 +70,7 @@ def gerar_planilha_carteira(status=None, tipo=None, estado=None, cidade=None):
     for linha in linhas:
         emp = linha.empresa
         cert = linha.certidao
-        ws.append([
+        _adicionar_linha_textual(ws, [
             emp.nome,
             emp.cnpj,
             emp.estado,

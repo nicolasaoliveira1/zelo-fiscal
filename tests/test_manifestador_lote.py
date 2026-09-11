@@ -211,7 +211,10 @@ class _ManifestarFalso:
 
     def __call__(self, chave_id, tipo_evento=None, **kwargs):
         self.chamadas.append({
-            'chave_id': chave_id, 'tipo_evento': tipo_evento, **kwargs})
+            'chave_id': chave_id,
+            'tipo_evento': tipo_evento,
+            **kwargs,
+        })
         return self.resultados.get(
             chave_id, svc.Resultado(True, 'Manifestada.'))
 
@@ -231,6 +234,25 @@ def test_item_delega_para_a_costura_com_o_tipo_do_lote(app, ids, monkeypatch):
         assert sucesso is True
         assert grave is None
         assert falso.chamadas[0]['tipo_evento'] == svc.DESCONHECIMENTO
+
+
+def test_item_delega_justificativa_do_snapshot(app, ids, monkeypatch):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81')
+        linha = _chave(emp, CHAVES[0])
+        falso = _ManifestarFalso()
+        monkeypatch.setattr(lote, 'manifestar', falso)
+        batch_state.definir_manif_opcoes(
+            tipo_evento=svc.NAO_REALIZADA,
+            justificativa='Motivo sintético',
+        )
+        try:
+            lote._manifestar_item(linha.id, None, 'exec-1')
+        finally:
+            batch_state.definir_manif_opcoes(
+                tipo_evento=svc.CONFIRMACAO, justificativa=None)
+
+        assert falso.chamadas[0]['justificativa'] == 'Motivo sintético'
 
 
 def test_itens_seguem_o_snapshot_da_execucao(app, ids, monkeypatch):
@@ -319,7 +341,8 @@ def test_falha_de_rede_alimenta_o_breaker(app, ids, monkeypatch):
     with app.app_context():
         emp = _empresa('A', '11.222.333/0001-81')
         linha = _chave(emp, CHAVES[0])
-        resultado = svc.Resultado(False, 'Nao consegui falar com a SEFAZ')
+        resultado = svc.Resultado(
+            False, 'Nao consegui falar com a SEFAZ', falha_servico=True)
         monkeypatch.setattr(lote, 'manifestar',
                             _ManifestarFalso({linha.id: resultado}))
         circuit_breaker.limpar()
@@ -330,6 +353,62 @@ def test_falha_de_rede_alimenta_o_breaker(app, ids, monkeypatch):
             assert circuit_breaker.aberto(lote.ALVO_BREAKER) is True
         finally:
             circuit_breaker.limpar()
+
+
+def test_breaker_do_manifestador_e_contado_uma_vez_por_item(app, ids, monkeypatch):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81')
+        linha = _chave(emp, CHAVES[0])
+        resultado = svc.Resultado(
+            False, 'Falha de transporte', falha_servico=True)
+        monkeypatch.setattr(lote, 'manifestar',
+                            _ManifestarFalso({linha.id: resultado}))
+        circuit_breaker.limpar()
+        with batch_state.MANIF_BATCH_LOCK:
+            batch_state.MANIF_BATCH_STATE.update(
+                status='running', worker_active=True)
+        try:
+            for _ in range(circuit_breaker.LIMIAR_PADRAO):
+                lote._manifestar_item(linha.id, None, 'exec-1')
+
+            registro = circuit_breaker.abertos()[0]
+            assert registro['ocorrencias'] == circuit_breaker.LIMIAR_PADRAO
+            assert batch_state.MANIF_BATCH_STATE['stop_requested'] is True
+        finally:
+            from app.services import batch_engine
+            batch_engine.reset_batch_state(batch_state.MANIF_BATCH_STATE)
+            circuit_breaker.limpar()
+
+
+def test_falha_local_sem_resposta_nao_alimenta_o_breaker(app, ids, monkeypatch):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81')
+        linha = _chave(emp, CHAVES[0])
+        resultado = svc.Resultado(False, 'Certificado ausente antes do envio')
+        monkeypatch.setattr(lote, 'manifestar',
+                            _ManifestarFalso({linha.id: resultado}))
+        circuit_breaker.limpar()
+        try:
+            for _ in range(circuit_breaker.LIMIAR_PADRAO * 2):
+                lote._manifestar_item(linha.id, None, 'exec-1')
+
+            assert circuit_breaker.aberto(lote.ALVO_BREAKER) is False
+        finally:
+            circuit_breaker.limpar()
+
+
+def test_manifestador_e_o_unico_dono_do_breaker_no_motor(monkeypatch):
+    recebido = {}
+
+    monkeypatch.setattr(
+        lote.batch_engine,
+        'run_batch_loop',
+        lambda *_args, **kwargs: recebido.update(kwargs),
+    )
+
+    lote._rodar_lote(None)
+
+    assert recebido['gerenciar_breaker_resultado'] is False
 
 
 def test_rejeicao_da_sefaz_NAO_alimenta_o_breaker(app, ids, monkeypatch):

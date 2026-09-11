@@ -113,6 +113,9 @@ class NfseSession:
         if self.driver_vivo() and automacao.sessao_valida(self._driver):
             return self._driver
 
+        # A confirmação pertence ao navegador autenticado que foi conferido.
+        # Se ele morreu ou saiu da sessão, não pode acompanhar o próximo login.
+        self._invalidar_aliquota()
         if self._driver is not None:
             self._descartar_driver()
 
@@ -150,9 +153,12 @@ class NfseSession:
         um `quit()` que levanta nao pode deixar a policy presa no registro."""
         self._descartar_driver()
         self._liberar_politica()
+        self._invalidar_aliquota()
+        log_event('nfse_sessao_encerrada')
+
+    def _invalidar_aliquota(self):
         self.aliquota = None
         self.aliquota_confirmada = False
-        log_event('nfse_sessao_encerrada')
 
     def _liberar_politica(self):
         """Devolve a policy ativa, se houver. Idempotente."""

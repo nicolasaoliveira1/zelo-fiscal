@@ -44,6 +44,20 @@ ENDPOINTS_PUBLICOS = {'auth.login', 'static', 'main.health'}
 _RANK = {PapelUsuario.LEITURA: 1, PapelUsuario.OPERADOR: 2, PapelUsuario.ADMIN: 3}
 
 
+def _separar_id_sessao(user_id):
+    """Lê o identificador versionado sem confiar em partes fornecidas pelo cliente."""
+    if not isinstance(user_id, str) or user_id.count(':') != 1:
+        return None
+    id_texto, versao_texto = user_id.split(':')
+    if not id_texto.isdecimal() or not versao_texto.isdecimal():
+        return None
+    usuario_id = int(id_texto)
+    sessao_versao = int(versao_texto)
+    if usuario_id <= 0 or sessao_versao <= 0:
+        return None
+    return usuario_id, sessao_versao
+
+
 def init_auth(app):
     """Liga LoginManager, enforcement global e error handlers ao app."""
     login_manager.init_app(app)
@@ -51,9 +65,14 @@ def init_auth(app):
 
     @login_manager.user_loader
     def _carregar_usuario(user_id):
-        usuario = db.session.get(Usuario, int(user_id))
-        # barra sessão de usuário inexistente ou desativado (edge case)
-        if usuario is None or not usuario.ativo:
+        partes = _separar_id_sessao(user_id)
+        if partes is None:
+            return None
+        usuario_id, sessao_versao = partes
+        usuario = db.session.get(Usuario, usuario_id)
+        # barra sessão inexistente, antiga ou de usuário desativado
+        if (usuario is None or not usuario.ativo
+                or usuario.sessao_versao != sessao_versao):
             return None
         return usuario
 
@@ -88,6 +107,11 @@ _ROTAS_JSON_POST = {
     '/certidao/monitorar_download_federal/stop',
 }
 
+_PREFIXOS_JSON_POST = (
+    '/certidao/baixar/',
+    '/certidao/monitorar_download_federal/',
+)
+
 
 def _prefere_json():
     """Decide resposta JSON (API/fetch) vs HTML (redirect/flash em página).
@@ -104,7 +128,12 @@ def _prefere_json():
     # POST/PUT/…: JSON só para endpoints de API (fetch); senão é form de página.
     # '_json' é substring pois esses endpoints têm o id depois (.../_json/<id>).
     p = request.path
-    return '_json' in p or '/lote/' in p or p in _ROTAS_JSON_POST
+    return (
+        '_json' in p
+        or '/lote/' in p
+        or p in _ROTAS_JSON_POST
+        or p.startswith(_PREFIXOS_JSON_POST)
+    )
 
 
 def _envelope_erro(mensagem, code, **extra):

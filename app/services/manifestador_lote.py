@@ -127,8 +127,11 @@ def _alimentar_breaker(resultado):
     para representar, e nao tem nada a ver com a nota."""
     if resultado.sucesso:
         circuit_breaker.registrar_sucesso(ALVO_BREAKER)
-    elif resultado.consumo_indevido or not resultado.cstat:
-        circuit_breaker.registrar_falha(ALVO_BREAKER, mensagem=resultado.mensagem)
+        return False
+    if resultado.consumo_indevido or resultado.falha_servico:
+        return circuit_breaker.registrar_falha(
+            ALVO_BREAKER, mensagem=resultado.mensagem)
+    return False
 
 
 def _manifestar_item(chave_id, _driver, execution_id):
@@ -144,19 +147,23 @@ def _manifestar_item(chave_id, _driver, execution_id):
         ator_nome=opcoes.get('ator_nome'),
         ator_papel=opcoes.get('ator_papel'),
         ator_contexto=opcoes.get('ator_contexto'),
+        justificativa=opcoes.get('justificativa'),
         execution_id=execution_id)
 
-    _alimentar_breaker(resultado)
+    breaker_abriu = _alimentar_breaker(resultado)
 
-    if resultado.consumo_indevido:
+    if resultado.consumo_indevido or breaker_abriu:
         # PARA o lote, nao passa para a proxima chave. A SEFAZ bloqueou o CNPJ
         # por 1 hora e continuar enviando REINICIA o cronometro — com 200 chaves
         # na fila seriam 200 requisicoes prolongando o bloqueio, e 50 bloqueios
         # consecutivos viram bloqueio PERMANENTE (NT 2018.002). Pausa e
         # retomavel: a fila fica intacta para depois.
         batch_engine.request_pause(MANIF_BATCH_LOCK, MANIF_BATCH_STATE)
-        log_event('manifestador_consumo_indevido', level='ERROR',
-                  chave_id=chave_id, execution_id=execution_id)
+        log_event(
+            'manifestador_breaker_pausou', level='ERROR', chave_id=chave_id,
+            execution_id=execution_id,
+            consumo_indevido=resultado.consumo_indevido,
+        )
         return False, None, resultado.mensagem
 
     return resultado.sucesso, None, resultado.mensagem
@@ -195,6 +202,7 @@ def _rodar_lote(app):
         # sem navegador: a canalizacao e HTTP com certificado de cliente
         create_driver=None,
         alvo_lote=ALVO_BREAKER,
+        gerenciar_breaker_resultado=False,
     )
 
 

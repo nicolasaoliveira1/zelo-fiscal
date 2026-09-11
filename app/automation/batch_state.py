@@ -167,6 +167,7 @@ _MANIF_BATCH_OPCOES = MappingProxyType({
     'ator_nome': None,
     'ator_papel': None,
     'ator_contexto': None,
+    'justificativa': None,
 })
 
 

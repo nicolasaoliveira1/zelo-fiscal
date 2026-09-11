@@ -173,6 +173,24 @@ def test_grave_tolerado_continua_no_modo_agendador():
     print('ok test_grave_tolerado_continua_no_modo_agendador')
 
 
+def test_grave_tolerado_respeita_dono_unico_do_breaker():
+    state = make_state([1])
+    emit = make_emit([(False, True, 'timeout')])
+    fake = _breaker_com(set())
+
+    _com_breaker(fake, lambda: run(
+        state,
+        emit,
+        parar_em_grave=False,
+        alvo_lote='MANIFESTADOR',
+        gerenciar_breaker_resultado=False,
+    ))
+
+    assert state['status'] == 'completed'
+    assert fake.falhas == []
+    print('ok test_grave_tolerado_respeita_dono_unico_do_breaker')
+
+
 def test_grave_fatal_para_mesmo_no_modo_tolerante():
     # RESIL-04: GRAVE_FATAL (driver/sessao morta) para o lote MESMO com
     # parar_em_grave=False; os itens seguintes nao sao tentados.

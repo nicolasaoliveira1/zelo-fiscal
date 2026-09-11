@@ -236,6 +236,7 @@ def run_batch_loop(
     alvo_lote=None,
     alvo_fn=None,
     on_breaker_aberto=None,
+    gerenciar_breaker_resultado=True,
 ):
     """Loop generico de lote compartilhado por FGTS, Estadual RS e Municipal.
 
@@ -264,6 +265,9 @@ def run_batch_loop(
         sao pulados e o lote segue nos demais (spec 09, RESOP-02.4).
       on_breaker_aberto(alvo, mensagem): callback opcional disparado quando o
         breaker ABRE durante este lote (o alerta por e-mail vive fora do motor).
+      gerenciar_breaker_resultado: quando False, o `emit_fn` é o único dono da
+        contabilização pós-envio; útil para fluxos que classificam o resultado
+        com mais precisão que a mensagem genérica do motor.
 
     Breaker (spec 09): consultado ANTES de criar driver/emitir — item recusado
     nao abre navegador nem gasta captcha, e como o `emit_fn` nao roda, a
@@ -401,7 +405,7 @@ def run_batch_loop(
                         # Modo tolerante (agendador): um grave "comum" (ex.: timeout
                         # de download) NAO aborta o lote — vira falha por-item e o
                         # loop segue para o proximo (RESIL-01).
-                        if _breaker_falha(alvo, mensagem):
+                        if gerenciar_breaker_resultado and _breaker_falha(alvo, mensagem):
                             alerta_pendente = (alvo, mensagem)
                         state['falhas'] += 1
                         append_batch_message(
@@ -420,13 +424,14 @@ def run_batch_loop(
                     # nem falha técnica.
                     resultou_pendente = state.get('pendentes_resultado', 0) > pendentes_antes
 
-                    if sucesso or resultou_pendente:
-                        # Desfecho nao-erro: o portal respondeu. Certidao positiva
-                        # (pendente) e resposta do portal, nao portal fora.
-                        if alvo:
-                            circuit_breaker.registrar_sucesso(alvo)
-                    elif _breaker_falha(alvo, mensagem):
-                        alerta_pendente = (alvo, mensagem)
+                    if gerenciar_breaker_resultado:
+                        if sucesso or resultou_pendente:
+                            # Desfecho nao-erro: o portal respondeu. Certidao positiva
+                            # (pendente) e resposta do portal, nao portal fora.
+                            if alvo:
+                                circuit_breaker.registrar_sucesso(alvo)
+                        elif _breaker_falha(alvo, mensagem):
+                            alerta_pendente = (alvo, mensagem)
 
                     if resultou_pendente:
                         append_batch_message(

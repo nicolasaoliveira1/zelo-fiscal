@@ -451,6 +451,7 @@ class Usuario(db.Model, UserMixin):
     senha_hash = db.Column(db.String(255), nullable=False)
     papel = db.Column(db.String(20), nullable=False, default=PapelUsuario.LEITURA)
     ativo = db.Column(db.Boolean, nullable=False, default=True)
+    sessao_versao = db.Column(db.Integer, nullable=False, default=1)
     criado_em = db.Column(db.DateTime, nullable=False, default=utcnow_naive)
 
     def set_senha(self, senha):
@@ -459,6 +460,10 @@ class Usuario(db.Model, UserMixin):
 
     def checar_senha(self, senha):
         return check_password_hash(self.senha_hash, senha)
+
+    def get_id(self):
+        """Identidade assinada pelo Flask-Login, revogável em lote por versão."""
+        return f'{self.id}:{self.sessao_versao}'
 
     @property
     def is_active(self):

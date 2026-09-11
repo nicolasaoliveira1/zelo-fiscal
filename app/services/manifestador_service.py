@@ -38,6 +38,10 @@ DESCRICOES = {
 # O unico dos quatro que carrega texto livre. Sem `xJust` a SEFAZ rejeita; nos
 # outros tres, um `xJust` a mais e rejeicao de schema.
 EXIGEM_JUSTIFICATIVA = (NAO_REALIZADA,)
+# NT 2020.001, leiaute do evento de Manifestação do Destinatário: xJust tem
+# tamanho de 15 a 255 caracteres.
+JUSTIFICATIVA_MINIMA = 15
+JUSTIFICATIVA_MAXIMA = 255
 
 # Manifestacao do destinatario e sempre Ambiente Nacional — nao e a UF da
 # empresa.
@@ -58,6 +62,20 @@ class EventoError(Exception):
 
 def _so_digitos(valor):
     return re.sub(r'\D', '', str(valor or ''))
+
+
+def validar_justificativa(tipo_evento, justificativa):
+    """Normaliza e valida o texto exigido pelo evento 210240."""
+    if tipo_evento not in EXIGEM_JUSTIFICATIVA:
+        return None
+    if not isinstance(justificativa, str):
+        justificativa = ''
+    limpa = justificativa.strip()
+    if not JUSTIFICATIVA_MINIMA <= len(limpa) <= JUSTIFICATIVA_MAXIMA:
+        raise EventoError(
+            f'{DESCRICOES[tipo_evento]} exige justificativa entre '
+            f'{JUSTIFICATIVA_MINIMA} e {JUSTIFICATIVA_MAXIMA} caracteres.')
+    return limpa
 
 
 def montar_evento(chave, cnpj_destinatario, tipo_evento=CONFIRMACAO,
@@ -87,10 +105,7 @@ def montar_evento(chave, cnpj_destinatario, tipo_evento=CONFIRMACAO,
             'O CNPJ do destinatario precisa ter 14 digitos — e ele que a SEFAZ '
             'confere contra o certificado que assina o evento.')
 
-    if tipo_evento in EXIGEM_JUSTIFICATIVA and not (justificativa or '').strip():
-        raise EventoError(
-            f'{DESCRICOES[tipo_evento]} exige justificativa; sem ela a SEFAZ '
-            f'rejeita o evento.')
+    justificativa = validar_justificativa(tipo_evento, justificativa)
 
     tp_amb = TP_AMB.get(ambiente)
     if tp_amb is None:
@@ -141,7 +156,7 @@ TETO_REENVIOS = 3
 class Resultado:
     """Desfecho de uma manifestacao, do ponto de vista de quem chamou."""
 
-    def __init__(self, sucesso, mensagem, resposta=None):
+    def __init__(self, sucesso, mensagem, resposta=None, *, falha_servico=False):
         self.sucesso = sucesso
         self.mensagem = mensagem
         self.cstat = getattr(resposta, 'cstat', None)
@@ -150,6 +165,7 @@ class Resultado:
         self.ja_existia = bool(getattr(resposta, 'duplicidade', False))
         self.indefinido = bool(getattr(resposta, 'indefinido', False))
         self.consumo_indevido = bool(getattr(resposta, 'consumo_indevido', False))
+        self.falha_servico = bool(falha_servico)
 
     def __repr__(self):
         return (f'<Resultado sucesso={self.sucesso} cstat={self.cstat} '
@@ -301,7 +317,7 @@ def manifestar(chave_id, tipo_evento=CONFIRMACAO, justificativa=None,
                   chave=linha.chave, error=str(exc), execution_id=execution_id)
         return Resultado(
             False, f'Erro inesperado ao enviar a chave {linha.chave}. Confira '
-                   f'no portal se a manifestacao saiu.')
+                   f'no portal se a manifestacao saiu.', falha_servico=True)
 
     sucesso, mensagem = _gravar_desfecho(linha, resposta)
 
@@ -320,4 +336,9 @@ def manifestar(chave_id, tipo_evento=CONFIRMACAO, justificativa=None,
     log_event('manifestador_desfecho', chave=linha.chave, cstat=resposta.cstat,
               status=linha.status, execution_id=execution_id)
 
-    return Resultado(sucesso, mensagem, resposta)
+    return Resultado(
+        sucesso,
+        mensagem,
+        resposta,
+        falha_servico=bool(resposta.erro or resposta.indefinido),
+    )

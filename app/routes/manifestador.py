@@ -333,6 +333,12 @@ def manifestador_lote_iniciar():
         return json_error(
             'Escolha o tipo de evento. Manifestacao nao sai por omissao.', 400)
 
+    try:
+        justificativa = manifestador_service.validar_justificativa(
+            tipo_evento, dados.get('justificativa'))
+    except manifestador_service.EventoError as exc:
+        return json_error(str(exc), 400)
+
     chave_ids = dados.get('chave_ids')
     if chave_ids is not None:
         ids_validos = (
@@ -375,6 +381,7 @@ def manifestador_lote_iniciar():
         'empresa_id': empresa_id,
         'competencia': competencia,
         'chave_id': chave_id,
+        'justificativa': justificativa,
     }
     opcoes_execucao.update(_capturar_ator('iniciador'))
 
@@ -478,8 +485,10 @@ def manifestador_reprocessar(chave_id):
             f'Chave em "{linha.status}" nao entra em reprocessamento.', 400)
 
     linha.status = StatusManifestacao.PENDENTE
-    linha.cstat = None
-    linha.xmotivo = None
+    # Mantém o último cStat para o serviço reconhecer a mesma rejeição no
+    # próximo envio. O status já voltou a pendente e a UI pode continuar
+    # apresentando a fila; preservar o motivo também ajuda o operador a decidir
+    # se deve corrigir algo antes de tentar de novo.
     db.session.commit()
     return {'status': 'ok', 'chave': _chave_para_json(linha)}
 
