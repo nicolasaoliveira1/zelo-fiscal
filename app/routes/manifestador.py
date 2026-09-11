@@ -465,8 +465,10 @@ def manifestador_reprocessar(chave_id):
             f'Chave em "{linha.status}" nao entra em reprocessamento.', 400)
 
     linha.status = StatusManifestacao.PENDENTE
-    linha.cstat = None
-    linha.xmotivo = None
+    # Mantém o último cStat para o serviço reconhecer a mesma rejeição no
+    # próximo envio. O status já voltou a pendente e a UI pode continuar
+    # apresentando a fila; preservar o motivo também ajuda o operador a decidir
+    # se deve corrigir algo antes de tentar de novo.
     db.session.commit()
     return {'status': 'ok', 'chave': _chave_para_json(linha)}
 

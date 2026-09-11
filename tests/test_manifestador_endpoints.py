@@ -358,6 +358,22 @@ def test_reprocessar_aceita_rejeitada_e_indefinida(app, ids, client):
         assert resposta.get_json()['chave']['status'] == 'pendente'
 
 
+def test_reprocessar_preserva_cstat_para_contar_mesma_rejeicao(app, ids, client):
+    with app.app_context():
+        emp = _empresa()
+        linha = _chave(emp, CHAVE_A, StatusManifestacao.REJEITADA)
+        linha.cstat = '596'
+        linha.xmotivo = 'Rejeição sintética'
+        db.session.commit()
+        chave_id = linha.id
+
+    resposta = client.post(f'/manifestador/chave/{chave_id}/reprocessar')
+
+    assert resposta.status_code == 200
+    assert resposta.get_json()['chave']['status'] == 'pendente'
+    assert resposta.get_json()['chave']['cstat'] == '596'
+
+
 def test_reprocessar_recusa_manifestada(app, ids, client):
     """Fato fiscal consumado nao volta a fila por um clique de reprocessar."""
     with app.app_context():
