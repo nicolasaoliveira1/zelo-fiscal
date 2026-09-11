@@ -314,6 +314,41 @@ def test_item_transmite_ator_do_snapshot_ao_worker(app, ids, monkeypatch):
         assert chamada['ator_contexto'] == 'retomada'
 
 
+def test_item_transmite_ator_e_justificativa_do_snapshot(app, ids, monkeypatch):
+    with app.app_context():
+        emp = _empresa('A', '11.222.333/0001-81')
+        linha = _chave(emp, CHAVES[0])
+        falso = _ManifestarFalso()
+        monkeypatch.setattr(lote, 'manifestar', falso)
+
+        with batch_state.MANIF_BATCH_LOCK:
+            batch_state.MANIF_BATCH_STATE['opcoes_execucao'] = {
+                'modo': 'empresa',
+                'tipo_evento': svc.NAO_REALIZADA,
+                'empresa_id': emp.id,
+                'competencia': None,
+                'chave_id': linha.id,
+                'ator_id': 17,
+                'ator_nome': 'operador_sintetico',
+                'ator_papel': 'operador',
+                'ator_contexto': 'retomada',
+                'justificativa': 'Motivo sintético suficiente',
+            }
+        try:
+            lote._manifestar_item(linha.id, None, 'exec-1')
+        finally:
+            from app.services import batch_engine
+            batch_engine.reset_batch_state(batch_state.MANIF_BATCH_STATE)
+
+        chamada = falso.chamadas[0]
+        assert chamada['tipo_evento'] == svc.NAO_REALIZADA
+        assert chamada['justificativa'] == 'Motivo sintético suficiente'
+        assert chamada['ator_id'] == 17
+        assert chamada['ator_nome'] == 'operador_sintetico'
+        assert chamada['ator_papel'] == 'operador'
+        assert chamada['ator_contexto'] == 'retomada'
+
+
 def test_falha_de_um_item_nao_e_grave(app, ids, monkeypatch):
     """Rejeicao de uma nota nao pode derrubar o lote: as outras 199 continuam."""
     with app.app_context():
