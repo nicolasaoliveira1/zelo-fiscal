@@ -118,6 +118,7 @@ def test_driver_morto_faz_relogar(sessao):
     exercitar o caminho de substituicao.
     """
     primeiro = sessao.garantir()
+    sessao.confirmar_aliquota('3,87')
     type(primeiro).current_url = property(
         lambda self: (_ for _ in ()).throw(Exception('sessao morta')))
     assert sessao.driver_vivo() is False
@@ -127,14 +128,19 @@ def test_driver_morto_faz_relogar(sessao):
     assert len(sessao._criados) == 2
     assert sessao_mod.automacao.login_certificado.call_count == 2
     assert primeiro.quit.called, 'o driver morto precisa ser descartado'
+    assert sessao.aliquota is None
+    assert sessao.aliquota_confirmada is False
 
 
 def test_sessao_deslogada_refaz_o_login(sessao):
     """Sessao expirada no portal: o driver esta vivo, mas caiu para o login."""
     driver = sessao.garantir()
+    sessao.confirmar_aliquota('3,87')
     driver.current_url = 'https://www.nfse.gov.br/EmissorNacional/Login'
     sessao.garantir()
     assert sessao_mod.automacao.login_certificado.call_count == 2
+    assert sessao.aliquota is None
+    assert sessao.aliquota_confirmada is False
 
 
 # --- aliquota: trava por sessao (NFSE-12) ----------------------------------
@@ -305,12 +311,15 @@ URLS_DEPOIS_DO_LOGIN = [
 @pytest.mark.parametrize('url', URLS_DEPOIS_DO_LOGIN)
 def test_reusa_o_navegador_fora_do_painel(sessao, url):
     driver = sessao.garantir()
+    sessao.confirmar_aliquota('3,87')
     driver.current_url = url
 
     assert sessao.garantir() is driver
     assert sessao_mod.automacao.login_certificado.call_count == 1, (
         f'sair do painel para {url} nao pode custar um novo certificado')
     assert len(sessao._criados) == 1
+    assert sessao.aliquota_confirmada is True
+    assert sessao.aliquota == '3,87'
 
 
 def test_ler_aliquota_nao_derruba_a_sessao(sessao, monkeypatch):
