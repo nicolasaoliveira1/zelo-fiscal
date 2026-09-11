@@ -153,8 +153,7 @@ class NfseSession:
         um `quit()` que levanta nao pode deixar a policy presa no registro."""
         self._descartar_driver()
         self._liberar_politica()
-        self.aliquota = None
-        self.aliquota_confirmada = False
+        self._invalidar_aliquota()
         log_event('nfse_sessao_encerrada')
 
     def _invalidar_aliquota(self):
