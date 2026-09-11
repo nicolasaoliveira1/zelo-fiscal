@@ -405,7 +405,7 @@ def run_batch_loop(
                         # Modo tolerante (agendador): um grave "comum" (ex.: timeout
                         # de download) NAO aborta o lote — vira falha por-item e o
                         # loop segue para o proximo (RESIL-01).
-                        if _breaker_falha(alvo, mensagem):
+                        if gerenciar_breaker_resultado and _breaker_falha(alvo, mensagem):
                             alerta_pendente = (alvo, mensagem)
                         state['falhas'] += 1
                         append_batch_message(
