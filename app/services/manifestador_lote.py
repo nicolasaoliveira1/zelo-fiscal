@@ -143,6 +143,7 @@ def _manifestar_item(chave_id, _driver, execution_id):
     resultado = manifestar(
         chave_id,
         tipo_evento=opcoes.get('tipo_evento') or CONFIRMACAO,
+        justificativa=opcoes.get('justificativa'),
         execution_id=execution_id)
 
     breaker_abriu = _alimentar_breaker(resultado)

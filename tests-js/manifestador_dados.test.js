@@ -6,6 +6,7 @@ import {
   balanco_vazio,
   chave_segmentada,
   escapar_html,
+  filtrar_chaves,
   linha_do_cofre,
   montar_corpo_manifestacao,
   somar_balanco,
@@ -90,6 +91,34 @@ test('sem seleção mantém os escopos amplos explícitos', () => {
   }), {
     tipo_evento: '210200', competencia: null, modo: 'carteira',
   });
+});
+
+test('justificativa só entra no corpo do evento não realizado', () => {
+  assert.deepEqual(montar_corpo_manifestacao({
+    tipo_evento: '210240', competencia: null, ids: [], empresa_id: '',
+    justificativa: '  Motivo sintético  ',
+  }), {
+    tipo_evento: '210240', competencia: null, modo: 'carteira',
+    justificativa: 'Motivo sintético',
+  });
+  const corpo = montar_corpo_manifestacao({
+    tipo_evento: '210200', competencia: null, ids: [], empresa_id: '',
+    justificativa: 'não deve ir',
+  });
+  assert.equal('justificativa' in corpo, false);
+});
+
+const CHAVES_BUSCA = [
+  { empresa: 'Alfa Comércio', chave: '43170122333444000181650010000045391000045393' },
+  { empresa: 'Beta Serviços', chave: '43170122333444000181650010000045401000045408' },
+];
+
+test('busca por nome, chave, termo misto e termo vazio não amplia resultados', () => {
+  assert.deepEqual(filtrar_chaves(CHAVES_BUSCA, 'comércio'), [CHAVES_BUSCA[0]]);
+  assert.deepEqual(filtrar_chaves(CHAVES_BUSCA, '4540'), [CHAVES_BUSCA[1]]);
+  assert.deepEqual(filtrar_chaves(CHAVES_BUSCA, 'beta 4540'), []);
+  assert.deepEqual(filtrar_chaves(CHAVES_BUSCA, ''), CHAVES_BUSCA);
+  assert.deepEqual(filtrar_chaves(CHAVES_BUSCA, 'inexistente'), []);
 });
 
 const cofreBase = {
