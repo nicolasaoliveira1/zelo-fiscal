@@ -1892,7 +1892,7 @@ import { showToast } from './toasts.js';
                         if (config.batchModal) config.batchModal.hide();
                         showLoading(config.getEmpresaNome() || '', config.getTipoCert() || '');
 
-                        fetch(singleUrl)
+                        fetch(singleUrl, { method: 'POST' })
                             .then(response => response.json())
                             .then(data => {
                                 handleDownloadResponse(data);
