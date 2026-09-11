@@ -5,6 +5,7 @@ ao do painel; filtros respeitados; recorte vazio = so cabecalho; arquivo abre
 como XLSX valido.
 """
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 import pytest
 from openpyxl import load_workbook
@@ -108,3 +109,46 @@ def test_recorte_vazio_so_cabecalho(app, carteira):
         # nenhuma certidao com status pendentes na cidade Imbe
         ws = _abrir(export_service.gerar_planilha_carteira(status=['pendentes'], cidade=['imbe']))
         assert ws.max_row == 1
+
+
+def test_campos_textuais_perigosos_sao_serializados_como_texto(app, carteira, monkeypatch):
+    empresa = SimpleNamespace(
+        nome='=nome-sintetico', cnpj='+documento-sintetico', estado='-RS',
+        cidade='@cidade-sintetica')
+    certidao = SimpleNamespace(
+        tipo=SimpleNamespace(value='=TIPO-SINTETICO'),
+        subtipo=SimpleNamespace(value='+subtipo-sintetico'),
+        data_validade=None, atualizado_em=None, ordem_exibicao=0)
+    linha = SimpleNamespace(empresa=empresa, certidao=certidao, status_cat='-status')
+    monkeypatch.setattr(export_service.carteira_filtros, 'filtrar',
+                        lambda **_filtros: [linha])
+
+    with app.app_context():
+        ws = _abrir(export_service.gerar_planilha_carteira())
+
+    valores = [celula.value for celula in ws[2]]
+    tipos = [celula.data_type for celula in ws[2]]
+    assert valores[:7] == [
+        '=nome-sintetico', '+documento-sintetico', '-RS', '@cidade-sintetica',
+        '=TIPO-SINTETICO', '+subtipo-sintetico', '-status']
+    assert valores[7:] == ['—', '—']
+    assert tipos == ['s'] * 9
+
+
+def test_texto_normal_e_acentuado_preserva_conteudo(app, carteira, monkeypatch):
+    empresa = SimpleNamespace(
+        nome='Razão Social Sintética', cnpj='00.000.000/0000-00', estado='RS',
+        cidade='Tramandaí')
+    certidao = SimpleNamespace(
+        tipo=SimpleNamespace(value='MUNICIPAL'), subtipo=None,
+        data_validade=None, atualizado_em=None, ordem_exibicao=0)
+    linha = SimpleNamespace(empresa=empresa, certidao=certidao, status_cat='validas')
+    monkeypatch.setattr(export_service.carteira_filtros, 'filtrar',
+                        lambda **_filtros: [linha])
+
+    with app.app_context():
+        ws = _abrir(export_service.gerar_planilha_carteira())
+
+    assert ws['A2'].value == 'Razão Social Sintética'
+    assert ws['D2'].value == 'Tramandaí'
+    assert ws['A2'].data_type == ws['D2'].data_type == 's'
