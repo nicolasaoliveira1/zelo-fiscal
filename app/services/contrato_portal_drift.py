@@ -7,7 +7,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
-from app.automation.trabalhista_recon import (
+from app.services.contrato_portal_protocol import (
     ElementoInventariado,
     InventarioPortal,
 )
@@ -122,7 +122,15 @@ def _diferenca(
 
 
 def _papel_acao(elemento: ElementoInventariado) -> tuple[str, str]:
-    if elemento.tag == 'img':
+    tag = elemento.tag.lower()
+    tipo = elemento.tipo.lower()
+    if (
+        tag == 'img'
+        or 'captcha' in tag
+        or 'captcha' in tipo
+        or 'altcha' in tag
+        or 'altcha' in tipo
+    ):
         return 'captcha', 'observar'
     if elemento.tag == 'a':
         return 'navegacao', 'navegar'
@@ -393,6 +401,11 @@ def montar_baseline_observada(
     declarados = {
         (item.seletor_tipo, item.seletor): item for item in declaracao.elementos
     }
+    # Chaves da declaração são reservadas: um controle não declarado cuja chave
+    # sairia igual ao seletor de um declarado (que só aparece mais adiante na
+    # ordem da tela) geraria duas linhas com a mesma `chave` e a gravação
+    # morreria na unique (contrato_id, chave).
+    chaves_declaradas = {item.chave for item in declaracao.elementos}
     usados = set()
     elementos = []
     faltantes = []
@@ -421,7 +434,8 @@ def montar_baseline_observada(
             autoajuste = esperado.autoajuste_seletor
             etapa = esperado.etapa
         else:
-            chave = _chave_observada(observado, ordem, elementos)
+            chave = _chave_observada(
+                observado, ordem, elementos, reservadas=chaves_declaradas)
             # Nada que a declaração não nomeia pode autoajustar: deny-by-default
             # vale com mais razão para o que ninguém revisou.
             autoajuste = False
@@ -462,14 +476,15 @@ def montar_baseline_observada(
     )
 
 
-def _chave_observada(observado, ordem, ja_montados):
+def _chave_observada(observado, ordem, ja_montados, reservadas=()):
     """Chave estável para o controle que a declaração não nomeia.
 
     É o próprio seletor, porque é o que o operador reconhece na tela; cai para a
-    posição quando o elemento não tem seletor ou o nome já foi usado.
+    posição quando o elemento não tem seletor ou o nome já foi usado — inclusive
+    quando quem já usou é uma chave declarada que ainda não foi montada.
     """
     base = (observado.seletor or f'elemento-{ordem}')[:90]
-    usadas = {item.chave for item in ja_montados}
+    usadas = {item.chave for item in ja_montados} | set(reservadas)
     if base not in usadas:
         return base
     return f'{base}#{ordem}'[:100]

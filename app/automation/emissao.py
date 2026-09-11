@@ -59,6 +59,9 @@ from app.models import (
 )
 from app.services import batch_engine, contrato_portal_preflight
 from app.services.correlation import CorrelationContext
+from app.services.contrato_portal_protocol import (
+    PortalObservacaoTemporariamenteIndisponivelError,
+)
 from app.utils import normalizar_cidade
 from app.services.retry import retry_call
 from app.services.execution_logger import log_event
@@ -216,8 +219,10 @@ def _formatar_cnpj(cnpj_limpo):
     )
 
 
-def _preparar_pagina_fgts(driver, url, cnpj_field_id):
-    if not driver or not url or not cnpj_field_id:
+def _preparar_pagina_fgts(driver, url, cnpj_field_id=None, *, localizador=None):
+    localizador_cnpj = localizador or (
+        (By.ID, cnpj_field_id) if cnpj_field_id else None)
+    if not driver or not url or not localizador_cnpj:
         return False
 
     try:
@@ -245,6 +250,7 @@ def _preparar_pagina_fgts(driver, url, cnpj_field_id):
                 pass
             raise
 
+    carregamento_ok = True
     try:
         retry_call(
             _carregar_url_fgts,
@@ -260,8 +266,12 @@ def _preparar_pagina_fgts(driver, url, cnpj_field_id):
                 error=str(exc),
             ),
         )
-    except TimeoutException:
-        pass
+    except (TimeoutException, WebDriverException) as erro:
+        carregamento_ok = False
+        log_event('fgts_page_load_failed', level='WARNING', error=str(erro))
+
+    if not carregamento_ok:
+        return False
 
     deadline = time.time() + 20
     while time.time() < deadline:
@@ -269,7 +279,7 @@ def _preparar_pagina_fgts(driver, url, cnpj_field_id):
             return False
         try:
             WebDriverWait(driver, 1).until(
-                EC.element_to_be_clickable((By.ID, cnpj_field_id))
+                EC.element_to_be_clickable(localizador_cnpj)
             )
             return True
         except TimeoutException:
@@ -362,31 +372,42 @@ def _wait_file_stable(caminho_arquivo, checks=3, interval=0.6):
     return False
 
 
-def _rs_pagina_solicitacao_pronta(driver, cnpj_field_name='campoCnpj', timeout=3):
+def _rs_pagina_solicitacao_pronta(
+    driver, cnpj_field_name='campoCnpj', timeout=3, localizador=None
+):
+    campo_locator = localizador or (By.NAME, cnpj_field_name)
     try:
         WebDriverWait(driver, timeout).until(
-            EC.element_to_be_clickable((By.NAME, cnpj_field_name))
+            EC.element_to_be_clickable(campo_locator)
         )
         return True
     except Exception:
         return False
 
 
-def _rs_garantir_pagina_solicitacao(driver, info_site):
+def _rs_garantir_pagina_solicitacao(driver, info_site, localizador=None):
     cnpj_field_name = info_site.get('cnpj_field_id', 'campoCnpj')
     url_atual = (driver.current_url or '').lower()
-    if 'certidaositfiscalsolic.aspx' in url_atual and _rs_pagina_solicitacao_pronta(driver, cnpj_field_name):
+    if (
+        'certidaositfiscalsolic.aspx' in url_atual
+        and _rs_pagina_solicitacao_pronta(
+            driver, cnpj_field_name, localizador=localizador)
+    ):
         return True
 
     _login_certificado_rs(driver, info_site.get('login_cert_url'), info_site.get('url'))
-    return _rs_pagina_solicitacao_pronta(driver, cnpj_field_name, timeout=8)
+    return _rs_pagina_solicitacao_pronta(
+        driver, cnpj_field_name, timeout=8, localizador=localizador)
 
 
-def _rs_preencher_cnpj_com_confirmacao(driver, cnpj_field_name, cnpj_limpo, tentativas=3):
+def _rs_preencher_cnpj_com_confirmacao(
+    driver, cnpj_field_name, cnpj_limpo, tentativas=3, localizador=None,
+):
+    campo_locator = localizador or (By.NAME, cnpj_field_name)
     for _ in range(max(1, int(tentativas))):
         try:
             campo_cnpj = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.NAME, cnpj_field_name))
+                EC.element_to_be_clickable(campo_locator)
             )
             campo_cnpj.click()
             campo_cnpj.clear()
@@ -424,6 +445,7 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
 
     local_driver = driver
     criado_localmente = False
+    snapshot_contrato = None
     inicio_fluxo = time.time()
 
     def _log_etapa(etapa, extra=''):
@@ -448,8 +470,22 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
 
         RS_BATCH_STATE['driver'] = local_driver
 
+        from app.services import contrato_portal_estadual_rs
+
+        with batch_engine.preflight_contrato(RS_BATCH_LOCK, RS_BATCH_STATE):
+            snapshot_contrato = contrato_portal_estadual_rs.preparar_execucao(
+                local_driver,
+                estado_lote=RS_BATCH_STATE,
+                execution_id=execution_id,
+            )
         _log_etapa('Garantindo página de solicitação RS')
-        if not _rs_garantir_pagina_solicitacao(local_driver, info_site):
+        localizador_cnpj = (
+            contrato_portal_estadual_rs.localizador(snapshot_contrato, 'cnpj')
+            if snapshot_contrato is not None else None
+        )
+        if not _rs_garantir_pagina_solicitacao(
+            local_driver, info_site, localizador=localizador_cnpj
+        ):
             _log_etapa('Falha ao abrir página de solicitação RS')
             return False, True, 'Não foi possível abrir a página de solicitação da certidão RS.'
         _log_etapa('Página de solicitação pronta')
@@ -464,6 +500,11 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
             info_site.get('cnpj_field_id', 'campoCnpj'),
             cnpj_limpo,
             tentativas=3,
+            localizador=(
+                contrato_portal_estadual_rs.localizador(
+                    snapshot_contrato, 'cnpj')
+                if snapshot_contrato is not None else None
+            ),
         ):
             _log_etapa('Falha ao preencher CNPJ')
             return False, False, 'Não foi possível preencher o CNPJ antes de resolver o ALTCHA.'
@@ -525,7 +566,14 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
                 handle_principal_rs = local_driver.current_window_handle
             except Exception:
                 handle_principal_rs = None
-            envio_rs = _clicar_enviar_estadual_rs(local_driver, timeout=8, retries=4, post_wait=0.5)
+            envio_rs = _clicar_enviar_estadual_rs(
+                local_driver, timeout=8, retries=4, post_wait=0.5,
+                localizador=(
+                    contrato_portal_estadual_rs.localizador(
+                        snapshot_contrato, 'enviar')
+                    if snapshot_contrato is not None else None
+                ),
+            )
             _log_etapa('Resultado clique Enviar', extra=f"clicked={envio_rs.get('clicked')} method={envio_rs.get('method')}")
             if not envio_rs.get('clicked'):
                 return False, False, 'Não foi possível acionar o botão Enviar no lote RS.'
@@ -670,6 +718,9 @@ def _emitir_estadual_rs_certidao(certidao_id, driver=None, usar_2captcha=False, 
             )
 
         return True, False, None
+    except contrato_portal_preflight.PreflightContratoPortalError as exc:
+        db.session.rollback()
+        return False, batch_engine.GRAVE_CONTRATO_PORTAL, str(exc)
     except Exception as exc:
         db.session.rollback()
         log_event(
@@ -848,6 +899,11 @@ def _emitir_municipal_certidao_lote(certidao_id, driver=None, execution_id=None)
     if cidade_regra_norm == 'IMBE':
         nome_certidao_arquivo = _nome_certidao_imbe(nome_certidao_arquivo, imbe_tipo)
 
+    from app.services import contrato_portal_municipal
+
+    contexto_contrato_municipal = contrato_portal_municipal.contexto_da_emissao(
+        regra_municipio, imbe_tipo, config_municipal, info_site)
+
     local_driver = driver
     criado_localmente = False
 
@@ -860,6 +916,15 @@ def _emitir_municipal_certidao_lote(certidao_id, driver=None, execution_id=None)
 
         wait = WebDriverWait(local_driver, 20)
         local_driver.get(info_site.get('url'))
+        with batch_engine.preflight_contrato(
+            MUNICIPAL_BATCH_LOCK, MUNICIPAL_BATCH_STATE
+        ):
+            snapshot_contrato = contrato_portal_municipal.preparar_execucao(
+                local_driver, contexto_contrato_municipal,
+                estado_lote=MUNICIPAL_BATCH_STATE, execution_id=execution_id)
+        if snapshot_contrato is not None:
+            info_site, config_municipal = contrato_portal_municipal.aplicar_snapshot(
+                snapshot_contrato, info_site, config_municipal)
         try:
             _configurar_download_automatico_chrome(local_driver)
         except Exception as exc:
@@ -1113,6 +1178,9 @@ def _emitir_municipal_certidao_lote(certidao_id, driver=None, execution_id=None)
                 certidao_id=certidao_id,
             )
         return True, False, 'CNPJ não cadastrado no município. Certidão marcada como pendente.'
+    except contrato_portal_preflight.PreflightContratoPortalError as exc:
+        db.session.rollback()
+        return False, batch_engine.GRAVE_CONTRATO_PORTAL, str(exc)
     except Exception as exc:
         err_type = map_exception_to_error_type(exc).value
         log_event(
@@ -1150,6 +1218,8 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
     if not certidao:
         return False, False, 'Certidão não encontrada.'
 
+    from app.services import contrato_portal_fgts
+
     info_site = SITES_CERTIDOES.get('FGTS', {})
     if not info_site.get('url'):
         return False, True, 'Configuração FGTS ausente.'
@@ -1167,10 +1237,23 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
 
         FGTS_BATCH_STATE['driver'] = local_driver
 
+        with batch_engine.preflight_contrato(FGTS_BATCH_LOCK, FGTS_BATCH_STATE):
+            snapshot_contrato = contrato_portal_fgts.preparar_execucao(
+                local_driver, estado_lote=FGTS_BATCH_STATE,
+                execution_id=execution_id)
+        localizador_cnpj = (
+            contrato_portal_fgts.localizador(snapshot_contrato, 'cnpj')
+            if snapshot_contrato is not None else None
+        )
+        url_fgts = (
+            f'https://{snapshot_contrato.host}{snapshot_contrato.rota}'
+            if snapshot_contrato is not None else info_site.get('url')
+        )
         pagina_ok = _preparar_pagina_fgts(
             local_driver,
-            info_site.get('url'),
-            info_site.get('cnpj_field_id')
+            url_fgts,
+            info_site.get('cnpj_field_id'),
+            localizador=localizador_cnpj,
         )
 
         if not pagina_ok:
@@ -1178,9 +1261,11 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
 
         wait = WebDriverWait(local_driver, 20)
 
-        field_by = By.ID
-        campo_cnpj = wait.until(EC.element_to_be_clickable(
-            (field_by, info_site.get('cnpj_field_id'))))
+        localizador_cnpj = (
+            contrato_portal_fgts.localizador(snapshot_contrato, 'cnpj')
+            if snapshot_contrato is not None
+            else (By.ID, info_site.get('cnpj_field_id')))
+        campo_cnpj = wait.until(EC.element_to_be_clickable(localizador_cnpj))
         if _fgts_stop_requested():
             return False, False, 'Lote interrompido.'
         campo_cnpj.click()
@@ -1193,6 +1278,7 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
             'data_encontrada': None,
             'impedimento_fgts': False,
             'impedimento_msg': None,
+            'contrato_snapshot': snapshot_contrato,
         }
 
         scope_atual = (FGTS_BATCH_STATE.get('scope') or 'default').strip().lower()
@@ -1201,7 +1287,9 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
             and scope_atual in {'default', 'pendentes'}
         )
 
-        _automatizar_fgts(contexto, local_driver, wait, certidao, detectar_impedimento)
+        _automatizar_fgts(
+            contexto, local_driver, wait, certidao, detectar_impedimento,
+            snapshot=snapshot_contrato)
 
         if _fgts_stop_requested():
             return False, False, 'Lote interrompido.'
@@ -1279,6 +1367,9 @@ def _emitir_fgts_certidao(certidao_id, driver=None, execution_id=None):
             )
             return True, False, None
         return False, False, 'Falha ao gerar PDF FGTS.'
+    except contrato_portal_preflight.PreflightContratoPortalError as exc:
+        db.session.rollback()
+        return False, batch_engine.GRAVE_CONTRATO_PORTAL, str(exc)
     except Exception as exc:
         log_event(
             'fgts_emit_error',
@@ -1335,12 +1426,15 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
 
         TRABALHISTA_BATCH_STATE['driver'] = local_driver
         wait = WebDriverWait(local_driver, 20)
-        snapshot_contrato = trabalhista.preparar_execucao(
-            local_driver,
-            url_legada=info_site.get('url'),
-            estado_lote=TRABALHISTA_BATCH_STATE,
-            execution_id=execution_id,
-        )
+        with batch_engine.preflight_contrato(
+            TRABALHISTA_BATCH_LOCK, TRABALHISTA_BATCH_STATE
+        ):
+            snapshot_contrato = trabalhista.preparar_execucao(
+                local_driver,
+                url_legada=info_site.get('url'),
+                estado_lote=TRABALHISTA_BATCH_STATE,
+                execution_id=execution_id,
+            )
         try:
             _configurar_download_automatico_chrome(local_driver)
         except Exception as exc:
@@ -1448,8 +1542,8 @@ def _emitir_trabalhista_certidao(certidao_id, driver=None, execution_id=None):
                 level='info', certidao_id=certidao.id)
         return True, False, None
     except contrato_portal_preflight.PreflightContratoPortalError as exc:
-        # A familia inteira, igual ao caminho individual: contrato ausente ou
-        # malformado tambem tem de parar o lote com o codigo dedicado. Cair no
+        # A família inteira, igual ao caminho individual: contrato ausente ou
+        # malformado também tem de parar o lote com o código dedicado. Cair no
         # `except Exception` abaixo perderia a garantia de interromper o modo
         # tolerante do agendador.
         db.session.rollback()
@@ -1662,7 +1756,10 @@ def _classificar_grave(exc):
     - `True` (grave "comum", ex.: timeout de download): no lote automatico vira
       falha por-item e o loop segue; no manual continua abortando (RESIL-01/03).
     """
-    if isinstance(exc, trabalhista.PortalNaoRespondeuError):
+    if isinstance(exc, (
+        trabalhista.PortalNaoRespondeuError,
+        PortalObservacaoTemporariamenteIndisponivelError,
+    )):
         # Portal lento NAO e navegador morto. O tipo declarado ganha da
         # heuristica, que caminha pela cadeia de causas e enxergaria o
         # TimeoutException do Selenium — subclasse de WebDriverException, que
@@ -1672,7 +1769,19 @@ def _classificar_grave(exc):
     return batch_engine.GRAVE_FATAL if _erro_indica_navegador_fechado(exc) else True
 
 
-def _automatizar_fgts(contexto, driver, wait, certidao, detectar_impedimento=False):
+def _automatizar_fgts(
+    contexto, driver, wait, certidao, detectar_impedimento=False,
+    snapshot=None,
+):
+    if snapshot is None:
+        def _localizador(chave, legado):
+            return legado
+    else:
+        from app.services import contrato_portal_fgts
+
+        def _localizador(chave, legado):
+            return contrato_portal_fgts.localizador(snapshot, chave)
+
     def _parar_se_solicitado():
         if _fgts_stop_requested():
             try:
@@ -1702,7 +1811,8 @@ def _automatizar_fgts(contexto, driver, wait, certidao, detectar_impedimento=Fal
         log_event('fgts_impedimento', level='WARNING', certidao_id=certidao.id, message=mensagem)
 
     try:
-        btn_consultar = _aguardar_clickable((By.ID, "mainForm:btnConsultar"))
+        btn_consultar = _aguardar_clickable(_localizador(
+            'consultar', (By.ID, "mainForm:btnConsultar")))
         if not btn_consultar:
             return
         log_event('fgts_click', certidao_id=certidao.id, botao='Consultar')
@@ -1717,7 +1827,8 @@ def _automatizar_fgts(contexto, driver, wait, certidao, detectar_impedimento=Fal
                 _marcar_impedimento_e_sair(msg_impedimento)
                 return
 
-        btn_certificado = _aguardar_clickable((By.ID, "mainForm:j_id76"))
+        btn_certificado = _aguardar_clickable(_localizador(
+            'certificado', (By.ID, "mainForm:j_id76")))
         if not btn_certificado:
             if detectar_impedimento:
                 msg_impedimento = _fgts_detectar_mensagem_impedimento(driver)
@@ -1755,7 +1866,8 @@ def _automatizar_fgts(contexto, driver, wait, certidao, detectar_impedimento=Fal
                     certidao_id=certidao.id, error=str(e),
                 )
 
-        btn_visualizar = _aguardar_clickable((By.ID, "mainForm:btnVisualizar"))
+        btn_visualizar = _aguardar_clickable(_localizador(
+            'visualizar', (By.ID, "mainForm:btnVisualizar")))
         if not btn_visualizar:
             if detectar_impedimento:
                 msg_impedimento = _fgts_detectar_mensagem_impedimento(driver)
@@ -1879,6 +1991,8 @@ def _automatizar_fgts(contexto, driver, wait, certidao, detectar_impedimento=Fal
                 'fgts_pdf_gerar_error', level='ERROR',
                 certidao_id=certidao.id, error=str(e_pdf),
             )
+    except contrato_portal_preflight.PreflightContratoPortalError:
+        raise
     except Exception as e:
         if _fgts_stop_requested():
             return

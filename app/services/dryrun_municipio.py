@@ -229,7 +229,10 @@ def falhou_ao_abrir(relatorio):
     return False
 
 
-def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None, rotulo=''):
+def verificar_municipio(
+    municipio, driver, config=None, timeout=20, cnpj=None, rotulo='',
+    modo_passivo=False,
+):
     """Roda o dry-run de UMA passada (uma variante) e devolve um relatorio.
 
     `config` e o `config_automacao` ja desserializado (dict) ou None. `rotulo`
@@ -240,8 +243,9 @@ def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None, r
     {'municipio', 'resultado', 'checagens': [{'etapa','alvo','status','detalhe'}],
      'quebrados': [str], 'mensagem': str|None}
     """
-    relatorio = _verificar(municipio, driver, config=config, timeout=timeout,
-                           cnpj=cnpj, rotulo=rotulo)
+    relatorio = _verificar(
+        municipio, driver, config=config, timeout=timeout,
+        cnpj=cnpj, rotulo=rotulo, modo_passivo=modo_passivo)
     # O log sai AQUI, e nao no fim de `_verificar`: aquela funcao tem sete
     # `return` de saida antecipada (drift, captcha, portal fora) e o log ficava
     # so no ultimo — justamente os municipios com problema sumiam do jsonl, e a
@@ -252,7 +256,10 @@ def verificar_municipio(municipio, driver, config=None, timeout=20, cnpj=None, r
     return relatorio
 
 
-def _verificar(municipio, driver, config=None, timeout=20, cnpj=None, rotulo=''):
+def _verificar(
+    municipio, driver, config=None, timeout=20, cnpj=None, rotulo='',
+    modo_passivo=False,
+):
     """Corpo do dry-run de uma passada. Ver `verificar_municipio`, que e a porta
     publica e faz o log do desfecho."""
     nome = getattr(municipio, 'nome', None) or '?'
@@ -311,6 +318,17 @@ def _verificar(municipio, driver, config=None, timeout=20, cnpj=None, rotulo='')
             _registrar(etapa, _descrever(step), PARCIAL,
                        f'passo "{tipo}" não é executado no dry-run')
             continue
+        if modo_passivo and tipo in {'fill', 'press_tab'}:
+            # `fill` poderia alterar o estado do contribuinte e `press_tab`
+            # envia uma tecla para um controle do portal. O dry-run legado pode
+            # exercitar o fill com valor sintético; o contrato passivo não.
+            relatorio['resultado'] = PARCIAL
+            _registrar(
+                etapa, _descrever(step), PARCIAL,
+                f'passo "{tipo}" não é executado na observação passiva')
+            relatorio['mensagem'] = (
+                f'Verificação parou em {etapa}: o fluxo exige ação de formulário.')
+            return relatorio
         if _passo_emite(step, idx, len(antes), tem_after, pula_cnpj):
             # Nao clicar: este passo emitiria a certidao. Só confere se o
             # localizador ainda resolve — e o que interessa para detectar drift.
@@ -346,14 +364,34 @@ def _verificar(municipio, driver, config=None, timeout=20, cnpj=None, rotulo='')
 
     # 2) pre_fill_click: o passo pre-CNPJ que vive em COLUNA do municipio, nao em
     #    `before_cnpj`. Em Imbe/Sorriso e o radio "Pessoa Juridica" e em Capao da
-    #    Canoa a troca de modo para CNPJ — e nesses portais o campo de CNPJ so e
-    #    renderizado DEPOIS do clique. Sem executa-lo, o dry-run procurava um campo
-    #    que ainda nao existe e reportava "quebrado" num portal intacto (relatado
-    #    no Imbe: `form:cnpjDI`). Executar e seguro pela mesma regra do
-    #    `_passo_emite`: e anterior ao CNPJ, e sem CNPJ nao ha o que emitir.
-    if not pula_cnpj:
-        info_pre = {'pre_fill_click_id': getattr(municipio, 'pre_fill_click_id', None),
-                    'pre_fill_click_by': getattr(municipio, 'pre_fill_click_by', None)}
+    #    Canoa a troca de modo para CNPJ. A emissao real sempre passa por ele,
+    #    inclusive quando `skip_cnpj_fill` esta ligado porque o preenchimento
+    #    acontece nos steps. A observacao passiva, porem, so pode localiza-lo:
+    #    clicar alteraria o estado do portal.
+    info_pre = {'pre_fill_click_id': getattr(municipio, 'pre_fill_click_id', None),
+                'pre_fill_click_by': getattr(municipio, 'pre_fill_click_by', None)}
+    if modo_passivo and info_pre['pre_fill_click_id']:
+        alvo = (f"{info_pre['pre_fill_click_by'] or 'id'}"
+                f"={info_pre['pre_fill_click_id']}")
+        if _localiza(driver, info_pre['pre_fill_click_by'] or 'id',
+                     info_pre['pre_fill_click_id'], timeout):
+            relatorio['resultado'] = PARCIAL
+            _registrar(
+                'pre_fill_click', alvo, PARCIAL,
+                'controle localizado sem clicar na observação passiva')
+            relatorio['mensagem'] = (
+                'Verificação parou no controle pré-CNPJ: a observação passiva '
+                'não pode clicar no portal.')
+        else:
+            relatorio['resultado'] = QUEBRADO
+            _registrar(
+                'pre_fill_click', alvo, QUEBRADO,
+                'elemento não encontrado')
+            relatorio['mensagem'] = (
+                f'Passo pré-CNPJ ({alvo}) não existe mais no portal.')
+        return relatorio
+
+    if not modo_passivo:
         clicou = steps_engine.clicar_pre_fill(info_pre, wait, by_padrao='id', pausa=1)
         if clicou is not None:
             alvo = (f"{info_pre['pre_fill_click_by'] or 'id'}"
@@ -384,6 +422,21 @@ def _verificar(municipio, driver, config=None, timeout=20, cnpj=None, rotulo='')
                 _registrar('cnpj', alvo, QUEBRADO, 'campo não encontrado')
                 relatorio['mensagem'] = f'Campo de CNPJ ({alvo}) não existe mais no portal.'
                 return relatorio
+
+    # Alguns portais só expõem a inscrição depois do estado pré-CNPJ. A
+    # checagem é apenas de presença, como a do CNPJ; nunca preenche o campo.
+    inscricao = getattr(municipio, 'inscricao_field_id', None)
+    if modo_passivo and inscricao and not config.get('skip_cnpj_fill'):
+        by_inscricao = getattr(municipio, 'inscricao_field_by', None)
+        alvo = f'{by_inscricao}={inscricao}'
+        if _localiza(driver, by_inscricao, inscricao, timeout):
+            _registrar('inscricao', alvo, OK)
+        else:
+            relatorio['resultado'] = QUEBRADO
+            _registrar('inscricao', alvo, QUEBRADO, 'campo não encontrado')
+            relatorio['mensagem'] = (
+                f'Campo de inscrição ({alvo}) não existe mais no portal.')
+            return relatorio
 
     # 4) after_cnpj: NAO executa (e o clique que emite). Verifica o primeiro
     #    localizador; os seguintes dependem dele e ficam sem verificacao.
@@ -497,6 +550,11 @@ def _bloquear_downloads(driver):
         driver.execute_cdp_cmd('Page.setDownloadBehavior', {'behavior': 'deny'})
     except Exception as exc:
         log_event('dryrun_bloqueio_download_falhou', level='WARNING', error=str(exc))
+
+
+def bloquear_downloads(driver):
+    """Superfície pública para observadores contratuais reutilizarem a defesa."""
+    _bloquear_downloads(driver)
 
 
 def _executar_dry_run(municipio, timeout=20):

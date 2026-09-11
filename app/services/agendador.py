@@ -21,7 +21,7 @@ from app.captcha_solver import consultar_saldo
 from app.services import auditoria, fila_emissao, snapshot_service
 from app.services.correlation import CorrelationContext
 from app.services.execution_logger import log_event
-from app.utils import utcnow_naive
+from app.utils import normalizar_cidade, utcnow_naive
 
 _JOB_RENOVACAO = 'agendador_renovacao_diaria'
 _JOB_SNAPSHOT = 'agendador_snapshot_diario'
@@ -390,12 +390,19 @@ def job_verificacao_municipios(app):
     antes que uma emissão real falhe. Não emite nem gasta captcha; só municípios
     com `quebrado` viram alerta (erro=infra e parcial=captcha não alertam)."""
     from app.models import Municipio
-    from app.services import dryrun_municipio
+    from app.services import contrato_portal_municipal, dryrun_municipio
 
     with app.app_context():
         municipios = (Municipio.query
                       .filter_by(automacao_ativa=True)
                       .order_by(Municipio.nome).all())
+        cobertos = contrato_portal_municipal.municipios_cobertos_por_contrato(
+            municipios)
+        if cobertos:
+            municipios = [
+                municipio for municipio in municipios
+                if normalizar_cidade(municipio.nome) not in cobertos
+            ]
         relatorios, resumo = dryrun_municipio.executar_dry_run_varios(municipios)
         log_event('municipios_verificacao_diaria', **resumo)
 
@@ -425,7 +432,9 @@ def job_recon_portais(app):
     with app.app_context():
         execution_id = CorrelationContext.new_execution_id()
         resultados = contrato_portal_recon.executar(
-            contrato_portal_recon.adaptadores_padrao(),
+            contrato_portal_recon.adaptadores_padrao(
+                incluir_municipais=True, incluir_fgts=True,
+                incluir_estaduais=True),
             _criador_driver_recon,
             execution_id=execution_id,
         )

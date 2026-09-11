@@ -19,11 +19,16 @@ Três limites de propósito:
 
 Um alvo que falhe não derruba os demais nem o scheduler (AC-07.5).
 """
-from dataclasses import dataclass
-from typing import Any, Callable
+import time
 
 from app.services import contrato_portal, contrato_portal_preflight
+from app.services.contrato_portal_registry import (
+    AdaptadorRecon,
+    RegistroAdaptadores,
+)
+from app.services.contrato_portal_protocol import AdaptadorPortal
 from app.services.contrato_portal_drift import COMPATIVEL as DRIFT_COMPATIVEL
+from app.services.contrato_portal_drift import DESCONHECIDA as DRIFT_DESCONHECIDA
 from app.services.contrato_portal_drift import REVISAO as DRIFT_REVISAO
 from app.services.contrato_portal_drift import (
     BaselineNaoObservavelError,
@@ -42,46 +47,53 @@ ADIADO = 'adiado'
 SEM_CONTRATO = 'sem_contrato'
 
 
-@dataclass(frozen=True)
-class AdaptadorRecon:
-    """Alvo que declara observação passiva segura.
-
-    `chave_health` é o alvo do circuit breaker, porque é assim que o painel
-    indexa cada portal — não um rótulo próprio, que viraria um segundo nome para
-    a mesma coisa.
-    """
-    fluxo: str
-    alvo: str
-    nome: str
-    chave_health: str
-    observar: Callable[[Any, Any], Any]
-    lock: Any = None
-    recon_passivo_seguro: bool = False
-    # Baseline declarada no código, nunca derivada do DOM: a primeira versão
-    # ativa é decisão humana revisável (AC-01.5).
-    definicao: Callable[[], Any] | None = None
+def _duracao_ms(inicio):
+    return max(0, int((time.perf_counter() - inicio) * 1000))
 
 
-def adaptadores_padrao() -> list[AdaptadorRecon]:
+def _registro_padrao() -> RegistroAdaptadores:
     """Registry do piloto: só o Trabalhista declara recon passivo seguro.
 
     Os municípios continuam no dry-run diário que já existe; duas navegações
     diárias equivalentes contra o mesmo portal não se justificam.
     """
     from app.automation import trabalhista
-    from app.automation.batch_state import TRABALHISTA_BATCH_LOCK
+    from app.automation.batch_state import (
+        TRABALHISTA_BATCH_LOCK,
+        TRABALHISTA_BATCH_STATE,
+    )
     from app.services import circuit_breaker
 
-    return [AdaptadorRecon(
-        fluxo=trabalhista.FLUXO_CONTRATO,
-        alvo=trabalhista.ALVO_CONTRATO,
-        nome='Trabalhista (CNDT/TST)',
-        chave_health=circuit_breaker.ALVO_TRABALHISTA,
-        observar=trabalhista.observar_passivo,
-        lock=TRABALHISTA_BATCH_LOCK,
-        recon_passivo_seguro=True,
-        definicao=trabalhista.definicao_baseline,
-    )]
+    return RegistroAdaptadores((AdaptadorRecon(
+            fluxo=trabalhista.FLUXO_CONTRATO,
+            alvo=trabalhista.ALVO_CONTRATO,
+            nome='Trabalhista (CNDT/TST)',
+            chave_health=circuit_breaker.ALVO_TRABALHISTA,
+            observar=trabalhista.observar_passivo,
+            lock=TRABALHISTA_BATCH_LOCK,
+            preflight_state=TRABALHISTA_BATCH_STATE,
+            recon_passivo_seguro=True,
+            definicao=trabalhista.definicao_baseline,
+        ),))
+
+
+def adaptadores_padrao(
+    *, incluir_municipais=False, incluir_fgts=False, incluir_estaduais=False,
+) -> list[AdaptadorPortal]:
+    adaptadores = list(_registro_padrao().todos())
+    if incluir_municipais:
+        from app.services import contrato_portal_municipal
+
+        adaptadores.extend(contrato_portal_municipal.adaptadores_municipais())
+    if incluir_fgts:
+        from app.services import contrato_portal_fgts
+
+        adaptadores.append(contrato_portal_fgts.adaptador_fgts())
+    if incluir_estaduais:
+        from app.services import contrato_portal_estadual_rs
+
+        adaptadores.append(contrato_portal_estadual_rs.adaptador_estadual_rs())
+    return adaptadores
 
 
 class AlvoOcupadoError(RuntimeError):
@@ -93,10 +105,24 @@ class NadaParaRevisarError(RuntimeError):
 
 
 def adaptador_por_alvo(fluxo, alvo):
-    for adaptador in adaptadores_padrao():
-        if adaptador.fluxo == fluxo and adaptador.alvo == alvo:
-            return adaptador
-    return None
+    adaptador = _registro_padrao().por_alvo(fluxo, alvo)
+    if adaptador is not None or fluxo not in {
+        'municipal', 'fgts', 'estadual',
+    }:
+        return adaptador
+    if fluxo == 'fgts':
+        from app.services import contrato_portal_fgts
+
+        return (contrato_portal_fgts.adaptador_fgts()
+                if alvo == contrato_portal_fgts.ALVO_CONTRATO else None)
+    if fluxo == 'estadual':
+        from app.services import contrato_portal_estadual_rs
+
+        return (contrato_portal_estadual_rs.adaptador_estadual_rs()
+                if alvo == contrato_portal_estadual_rs.ALVO_CONTRATO else None)
+    from app.services import contrato_portal_municipal
+
+    return contrato_portal_municipal.adaptador_por_alvo(alvo)
 
 
 def _fechar(driver):
@@ -110,9 +136,15 @@ def _fechar(driver):
 
 def _observar_alvo(adaptador, ativo, criar_driver, execution_id):
     """Abre o driver, observa uma vez e devolve o resultado da comparação."""
+    inicio = time.perf_counter()
     driver = None
+    resultado = DESCONHECIDO
+    erro = None
+    versao_evento = ativo.versao
+    origem_evento = ativo.origem
     try:
-        driver = criar_driver()
+        fabrica = getattr(adaptador, 'criar_driver', None) or criar_driver
+        driver = fabrica()
         snapshot = contrato_portal_preflight.executar(
             fluxo=adaptador.fluxo,
             alvo=adaptador.alvo,
@@ -121,27 +153,54 @@ def _observar_alvo(adaptador, ativo, criar_driver, execution_id):
             execution_id=execution_id,
             contrato_ativo=ativo,
         )
-    except contrato_portal_preflight.ContratoPortalBloqueadoError:
-        return BLOQUEADO
+        resultado = AUTOAJUSTADO if snapshot.versao != ativo.versao else COMPATIVEL
+        versao_evento = snapshot.versao
+        if resultado == AUTOAJUSTADO:
+            origem_evento = 'sistema'
+    except contrato_portal_preflight.ContratoPortalBloqueadoError as exc:
+        # Observação inconclusiva (driver morto, DOM instável, rota que não
+        # abriu) NÃO é drift: o preflight bloqueia igual, mas o recon precisa
+        # dizer `desconhecido`, senão o painel acusa "mudança estrutural
+        # aguardando revisão" por causa de um portal que engasgou.
+        resultado = (
+            DESCONHECIDO
+            if getattr(exc, 'classificacao', None) == DRIFT_DESCONHECIDA
+            else BLOQUEADO)
     except Exception as exc:
+        erro = exc
         log_event(
             'contrato_portal_recon_falhou', level='ERROR',
             fluxo=adaptador.fluxo, alvo=adaptador.alvo,
-            error=str(exc), execution_id=execution_id)
-        return DESCONHECIDO
+            error=str(exc), duracao_ms=_duracao_ms(inicio),
+            versao=versao_evento, origem=origem_evento,
+            execution_id=execution_id)
     finally:
         _fechar(driver)
-    return AUTOAJUSTADO if snapshot.versao != ativo.versao else COMPATIVEL
+        campos = {
+            'fluxo': adaptador.fluxo,
+            'alvo': adaptador.alvo,
+            'resultado': resultado,
+            'versao': versao_evento,
+            'origem': origem_evento,
+            'duracao_ms': _duracao_ms(inicio),
+            'execution_id': execution_id,
+        }
+        if erro is not None:
+            campos['error'] = str(erro)
+        log_event('contrato_portal_recon_resultado', **campos)
+    return resultado
 
 
 def _recon_de_um(adaptador, criar_driver, execution_id):
+    inicio = time.perf_counter()
     lock = adaptador.lock
     if lock is not None and not lock.acquire(blocking=False):
         # Emissão em andamento no mesmo alvo: adiar é o comportamento correto,
         # não erro. A observação de amanhã cobre o mesmo terreno.
         log_event(
             'contrato_portal_recon_adiado', fluxo=adaptador.fluxo,
-            alvo=adaptador.alvo, execution_id=execution_id)
+            alvo=adaptador.alvo, resultado=ADIADO,
+            duracao_ms=_duracao_ms(inicio), execution_id=execution_id)
         return ADIADO
     try:
         ativo = contrato_portal_preflight.buscar_ativo(
@@ -149,7 +208,8 @@ def _recon_de_um(adaptador, criar_driver, execution_id):
         if ativo is None:
             log_event(
                 'contrato_portal_recon_sem_contrato', fluxo=adaptador.fluxo,
-                alvo=adaptador.alvo, execution_id=execution_id)
+                alvo=adaptador.alvo, resultado=SEM_CONTRATO,
+                duracao_ms=_duracao_ms(inicio), execution_id=execution_id)
             return SEM_CONTRATO
         return _observar_alvo(adaptador, ativo, criar_driver, execution_id)
     finally:
@@ -210,15 +270,26 @@ def estado_por_alvo() -> dict:
     """
     estados = {}
     try:
-        adaptadores = adaptadores_padrao()
+        adaptadores = adaptadores_padrao(
+            incluir_municipais=True, incluir_fgts=True, incluir_estaduais=True)
     except Exception:
         return estados
+    prioridade = {
+        COMPATIVEL: 1,
+        AUTOAJUSTADO: 2,
+        DESCONHECIDO: 3,
+        BLOQUEADO: 4,
+    }
     for adaptador in adaptadores:
         try:
-            estados[adaptador.chave_health] = _estado_do_alvo(adaptador)
+            estado = _estado_do_alvo(adaptador)
         except Exception:
-            estados[adaptador.chave_health] = {
+            estado = {
                 'estado': DESCONHECIDO, 'versao': None, 'mensagem': None}
+        anterior = estados.get(adaptador.chave_health)
+        if anterior is None or prioridade.get(estado['estado'], 0) > prioridade.get(
+                anterior['estado'], 0):
+            estados[adaptador.chave_health] = estado
     return estados
 
 
@@ -235,7 +306,8 @@ def _observar_com_lock(adaptador, contrato, criar_driver):
             'Há uma emissão em curso neste portal. Tente novamente depois.')
     driver = None
     try:
-        driver = criar_driver()
+        fabrica = getattr(adaptador, 'criar_driver', None) or criar_driver
+        driver = fabrica()
         return adaptador.observar(driver, contrato)
     finally:
         _fechar(driver)

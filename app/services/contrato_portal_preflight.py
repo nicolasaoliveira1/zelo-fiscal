@@ -1,6 +1,7 @@
 """Barreira única de compatibilidade antes da automação de um portal."""
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Callable, Mapping
@@ -20,6 +21,10 @@ from app.services.contrato_portal_drift import (
 from app.services.execution_logger import log_event
 
 
+def _duracao_ms(inicio):
+    return max(0, int((time.perf_counter() - inicio) * 1000))
+
+
 class PreflightContratoPortalError(RuntimeError):
     pass
 
@@ -29,9 +34,20 @@ class ContratoPortalAusenteError(PreflightContratoPortalError):
 
 
 class ContratoPortalBloqueadoError(PreflightContratoPortalError):
-    def __init__(self, classificacao: str):
-        super().__init__(
-            'A estrutura do portal mudou e a emissão foi bloqueada para revisão.')
+    """Bloqueio estrutural: `classificacao` é o veredito, `mensagem` o motivo.
+
+    Os dois são separados de propósito. Quem levanta por drift passa só a
+    classificação (`revisao`, `desconhecida`) e herda a frase padrão; quem
+    levanta por um snapshot incompleto tem um motivo específico a dizer, e ele
+    precisa chegar ao log e ao operador — antes, o argumento era engolido para
+    dentro de `classificacao` e toda causa virava a mesma frase.
+    """
+
+    MENSAGEM_PADRAO = (
+        'A estrutura do portal mudou e a emissão foi bloqueada para revisão.')
+
+    def __init__(self, classificacao: str, mensagem: str | None = None):
+        super().__init__(mensagem or self.MENSAGEM_PADRAO)
         self.classificacao = classificacao
 
 
@@ -161,6 +177,7 @@ def executar(
     contrato_ativo: ContratoPortal | None = None,
 ) -> SnapshotContratoPortal:
     """Observa uma vez, decide e devolve somente uma versão pronta para fixar."""
+    inicio = time.perf_counter()
     ativo = contrato_ativo or _carregar_ativo(fluxo, alvo)
     if (
         ativo.fluxo != fluxo
@@ -183,9 +200,12 @@ def executar(
             log_event(
                 'contrato_portal_promocao_falhou', level='ERROR',
                 fluxo=fluxo, alvo=alvo, versao=ativo.versao,
+                origem=ativo.origem, duracao_ms=_duracao_ms(inicio),
                 error=str(erro), execution_id=execution_id)
             raise ContratoPortalBloqueadoError(
-                'A estrutura mudou e o ajuste não pôde ser promovido.') from erro
+                'revisao',
+                'A estrutura mudou e o ajuste não pôde ser promovido.',
+            ) from erro
     elif resultado.classificacao != COMPATIVEL:
         try:
             contrato_portal.registrar_incidente(
@@ -203,6 +223,7 @@ def executar(
                 'contrato_portal_incidente_nao_registrado', level='ERROR',
                 fluxo=fluxo, alvo=alvo, versao=ativo.versao,
                 resultado=resultado.classificacao, error=str(erro),
+                origem=ativo.origem, duracao_ms=_duracao_ms(inicio),
                 execution_id=execution_id,
             )
         mensagem = 'Estrutura do portal incompatível com o contrato ativo.'
@@ -212,7 +233,8 @@ def executar(
             'contrato_portal_bloqueado', level='WARNING',
             fluxo=fluxo, alvo=alvo, versao=ativo.versao,
             fingerprint=ativo.fingerprint[:12],
-            resultado=resultado.classificacao, execution_id=execution_id,
+            resultado=resultado.classificacao, origem=ativo.origem,
+            duracao_ms=_duracao_ms(inicio), execution_id=execution_id,
         )
         raise ContratoPortalBloqueadoError(resultado.classificacao)
 
@@ -220,7 +242,8 @@ def executar(
     log_event(
         'contrato_portal_preflight', fluxo=fluxo, alvo=alvo,
         versao=snapshot.versao, fingerprint=snapshot.fingerprint[:12],
-        resultado=resultado.classificacao, execution_id=execution_id,
+        resultado=resultado.classificacao, origem=ativo.origem,
+        duracao_ms=_duracao_ms(inicio), execution_id=execution_id,
     )
     return snapshot
 

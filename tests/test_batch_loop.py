@@ -6,6 +6,7 @@ Rodar: SECRET_KEY=x python tests/test_batch_loop.py
 """
 import os
 import sys
+from threading import Lock
 
 os.environ.setdefault('SECRET_KEY', 'test')
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -65,6 +66,18 @@ def make_emit(results, on_call=None):
 
     emit.calls = calls
     return emit
+
+
+def test_preflight_contrato_marca_janela_sem_prender_lock_durante_selenium():
+    estado = batch_state_defaults()
+    lock = Lock()
+
+    with batch_engine.preflight_contrato(lock, estado):
+        assert estado['contrato_preflight_em_andamento'] is True
+        assert lock.acquire(blocking=False) is True
+        lock.release()
+
+    assert estado['contrato_preflight_em_andamento'] is False
 
 
 COMMON = dict(nome_lote='Teste', curto='T', tag='TESTE-LOTE', event_prefix='teste_batch_worker')

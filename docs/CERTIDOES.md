@@ -37,15 +37,18 @@
   - Emissão individual com geração de PDF via Chrome DevTools.
   - Emissão em lote com pausa, retomada, parada e resumo final.
   - Detecção de PDF positiva no lote: arquivo removido e certidão marcada como PENDENTE automaticamente.
+  - **Contrato adaptativo**: a tela observável fixa CNPJ, Consultar, Certificado e Visualizar antes da automação. Com contrato ativo, os seletores do snapshot são a única fonte; sem contrato, o mapa legado continua valendo.
 - **Estadual RS**:
   - Unitário mantido manual para evitar consumo indevido de solver.
   - Lote com ALTCHA automático via API 2captcha.
   - Processo robusto: só avança para o próximo CNPJ após baixar, estabilizar, mover e classificar o arquivo.
+  - **Contrato adaptativo**: a sessão por certificado chega à tela do formulário e observa CNPJ, host do ALTCHA e Enviar sem preencher nem submeter. Só o CNPJ pode autoajustar; mudança em ALTCHA ou Enviar bloqueia para revisão. Sem contrato, o fluxo legado permanece.
 - **Municipal**: automação orientada por dados, com URL, seletores e steps de cada cidade guardados na tabela Município.
   - Tramandaí: fluxo condicional com detecção de link NEGATIVA na página final; suporte a lote.
   - Gravataí: classificação de status via conteúdo do PDF (positiva/negativa), com tratamento automático de pendência quando positiva.
   - Imbé: resolução automática de captcha de imagem via 2captcha; emissão de geral e mobiliário separadamente; suporte a lote por subtipo.
   - Portais **IPM Atende.Net** (Gravataí, Osório, Novo Hamburgo): a emissão individual usa **undetected-chromedriver** com um perfil persistente dedicado para não ser bloqueada pelo score anti-bot do portal (tela "validação automática de segurança / baixa pontuação"). A detecção é automática pela URL (`*.atende.net`), então qualquer novo município com esse domínio entra no fluxo sem mudança de código. O captcha em si continua resolvido manualmente pelo operador. Falhas de pré-condição (driver indisponível ou perfil em uso) retornam mensagem acionável (HTTP 409) sem cair para o navegador comum.
+  - **Contrato adaptativo por município/variante**: a configuração existente é traduzida para um snapshot em memória sem sobrescrever o cadastro. O dry-run continua sendo a referência até toda a variante ter contrato ativo; município sem adaptador ou sem contrato não recebe proteção parcial.
 - **Trabalhista (CNDT/TST)**:
   - Unitário mantido assistido/manual para evitar consumo indevido de solver (o operador resolve o captcha).
   - Lote com captcha de imagem resolvido automaticamente via 2captcha; disponível também na emissão proativa do agendador.

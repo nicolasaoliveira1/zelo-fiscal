@@ -30,6 +30,8 @@ from app.automation.batch_state import (
     MUNICIPAL_BATCH_STATE,
     RS_BATCH_LOCK,
     RS_BATCH_STATE,
+    TRABALHISTA_BATCH_LOCK,
+    TRABALHISTA_BATCH_STATE,
     marcar_emissao_individual,
     automacao_em_curso,
     mensagem_automacao_em_curso,
@@ -59,7 +61,7 @@ from app.automation.emissao import (
 )
 from app.automation.sites import is_ipm_atende
 from app.models import Certidao
-from app.services import contrato_portal_preflight
+from app.services import batch_engine, contrato_portal_preflight
 from app.services.execution_logger import log_event
 from app.services.visualizar_token import _gerar_visualizar_token
 from app.utils import json_error as _json_error
@@ -479,7 +481,11 @@ def _baixar_executar_acao(nome_acao, info_site, wait, driver, certidao, contexto
     #3 ação específica para FGTS: emitir e salvar PDF
     elif nome_acao == 'fgts_emitir_pdf':
         try:
-            _automatizar_fgts(contexto, driver, wait, certidao)
+            _automatizar_fgts(
+                contexto, driver, wait, certidao,
+                snapshot=contexto.get('contrato_snapshot'))
+        except contrato_portal_preflight.PreflightContratoPortalError:
+            raise
         except Exception as e:
             log_event(
                 'fgts_emitir_pdf_error', level='ERROR',
@@ -563,8 +569,10 @@ def _executar_automacao_baixar(certidao, cfg):
     certidao_pdf_msg = None
     pdf_invalida_msg = None
 
-    # snapshot do contrato do portal; só o Trabalhista fixa um (T6)
+    # snapshot do contrato do portal; cada adaptador fixa o seu alvo
     snapshot_contrato = None
+    contexto_contrato_municipal = None
+    estado_contrato_municipal = {'contrato_snapshots': {}}
 
     # contexto compartilhado com helpers de steps
     contexto = {
@@ -587,20 +595,64 @@ def _executar_automacao_baixar(certidao, cfg):
 
         wait = WebDriverWait(driver, 20)
 
-        if tipo_certidao_chave == 'ESTADUAL' and estado_emp == 'RS' and info_site.get('login_cert_url'):
-            log_event('estadual_rs_cert_login', certidao_id=certidao.id)
-            _login_certificado_rs(
-                driver,
-                info_site.get('login_cert_url'),
-                info_site.get('url')
-            )
+        if tipo_certidao_chave == 'ESTADUAL' and estado_emp == 'RS':
+            from app.services import contrato_portal_estadual_rs
+
+            with batch_engine.preflight_contrato(RS_BATCH_LOCK, RS_BATCH_STATE):
+                snapshot_contrato = contrato_portal_estadual_rs.preparar_execucao(
+                    driver, execution_id=cfg.get('execution_id'))
+            contexto['contrato_snapshot'] = snapshot_contrato
+            if snapshot_contrato is None:
+                # A guarda por `login_cert_url` continua valendo: sem ela, um RS
+                # sem URL de login cairia em `_login_certificado_rs(driver, None,
+                # ...)` em vez de simplesmente abrir a página.
+                if info_site.get('login_cert_url'):
+                    log_event('estadual_rs_cert_login', certidao_id=certidao.id)
+                    _login_certificado_rs(
+                        driver,
+                        info_site.get('login_cert_url'),
+                        info_site.get('url')
+                    )
+                else:
+                    log_event('emit_navigate', certidao_id=certidao.id,
+                              url=info_site.get('url'))
+                    driver.get(info_site.get('url'))
         elif tipo_certidao_chave == 'TRABALHISTA':
             log_event('emit_navigate', certidao_id=certidao.id, url=info_site.get('url'))
-            snapshot_contrato = trabalhista.preparar_execucao(
-                driver, url_legada=info_site.get('url'))
+            with batch_engine.preflight_contrato(
+                TRABALHISTA_BATCH_LOCK, TRABALHISTA_BATCH_STATE
+            ):
+                snapshot_contrato = trabalhista.preparar_execucao(
+                    driver, url_legada=info_site.get('url'))
+        elif tipo_certidao_chave == 'FGTS':
+            from app.services import contrato_portal_fgts
+
+            log_event('emit_navigate', certidao_id=certidao.id, url=info_site.get('url'))
+            with batch_engine.preflight_contrato(FGTS_BATCH_LOCK, FGTS_BATCH_STATE):
+                snapshot_contrato = contrato_portal_fgts.preparar_execucao(
+                    driver, execution_id=cfg.get('execution_id'))
+            contexto['contrato_snapshot'] = snapshot_contrato
+            if snapshot_contrato is None:
+                driver.get(info_site.get('url'))
         else:
             log_event('emit_navigate', certidao_id=certidao.id, url=info_site.get('url'))
             driver.get(info_site.get('url'))
+
+        if tipo_certidao_chave == 'MUNICIPAL' and usar_config_municipal:
+            from app.services import contrato_portal_municipal
+
+            contexto_contrato_municipal = contrato_portal_municipal.contexto_da_emissao(
+                cfg['regra_municipio'], cfg.get('imbe_tipo') or '',
+                config_municipal, info_site)
+            with batch_engine.preflight_contrato(
+                MUNICIPAL_BATCH_LOCK, MUNICIPAL_BATCH_STATE
+            ):
+                snapshot_contrato = contrato_portal_municipal.preparar_execucao(
+                    driver, contexto_contrato_municipal,
+                    estado_lote=estado_contrato_municipal)
+            if snapshot_contrato is not None:
+                info_site, config_municipal = contrato_portal_municipal.aplicar_snapshot(
+                    snapshot_contrato, info_site, config_municipal)
 
         try:
             _configurar_download_automatico_chrome(driver)
@@ -643,6 +695,17 @@ def _executar_automacao_baixar(certidao, cfg):
         if tipo_certidao_chave == 'TRABALHISTA' and snapshot_contrato is not None:
             localizador_documento = trabalhista.localizador(
                 snapshot_contrato, 'documento')
+        elif tipo_certidao_chave == 'FGTS' and snapshot_contrato is not None:
+            from app.services import contrato_portal_fgts
+
+            localizador_documento = contrato_portal_fgts.localizador(
+                snapshot_contrato, 'cnpj')
+        elif (tipo_certidao_chave == 'ESTADUAL' and estado_emp == 'RS'
+              and snapshot_contrato is not None):
+            from app.services import contrato_portal_estadual_rs
+
+            localizador_documento = contrato_portal_estadual_rs.localizador(
+                snapshot_contrato, 'cnpj')
         else:
             field_by = _get_by(info_site.get('by'))
             localizador_documento = (
@@ -763,16 +826,31 @@ def _executar_automacao_baixar(certidao, cfg):
                     )
 
     except contrato_portal_preflight.PreflightContratoPortalError as e:
-        # Toda a familia do preflight, nao so o bloqueio: contrato ausente ou
-        # falha de persistencia sao ambiente local (spec 09), nao falha do
+        # Toda a família do preflight, não só o bloqueio: contrato ausente ou
+        # falha de persistência são ambiente local (spec 09), não falha do
         # portal — merecem mensagem acionavel, nunca erro cru do Selenium.
+        fluxo_contrato = trabalhista.FLUXO_CONTRATO
+        alvo_contrato = trabalhista.ALVO_CONTRATO
+        acao_contrato = 'Revise o contrato Trabalhista no Diagnóstico.'
+        if tipo_certidao_chave == 'FGTS':
+            fluxo_contrato = 'fgts'
+            alvo_contrato = 'fgts'
+            acao_contrato = 'Revise o contrato FGTS no Diagnóstico.'
+        elif tipo_certidao_chave == 'ESTADUAL' and estado_emp == 'RS':
+            fluxo_contrato = 'estadual'
+            alvo_contrato = 'rs'
+            acao_contrato = 'Revise o contrato Estadual RS no Diagnóstico.'
+        elif tipo_certidao_chave == 'MUNICIPAL' and contexto_contrato_municipal:
+            fluxo_contrato = 'municipal'
+            alvo_contrato = contexto_contrato_municipal.alvo
+            acao_contrato = 'Revise o contrato municipal no Diagnóstico.'
         log_event(
             'contrato_portal_bloqueado', level='WARNING',
-            fluxo=trabalhista.FLUXO_CONTRATO, alvo=trabalhista.ALVO_CONTRATO)
+            fluxo=fluxo_contrato, alvo=alvo_contrato)
         resultado['erro_acionavel'] = {
             'message': str(e),
             'error_type': ErrorType.PORTAL.value,
-            'acao': 'Revise o contrato Trabalhista no Diagnóstico.',
+            'acao': acao_contrato,
             'code': 409,
         }
         # Fecha o Chrome como o handler generico abaixo: sem isto, todo

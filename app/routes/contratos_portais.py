@@ -21,6 +21,7 @@ from app.services import auditoria, contrato_portal, contrato_portal_recon
 from app.services.contrato_portal_drift import BaselineNaoObservavelError
 from app.services.execution_logger import log_event
 from app.utils import json_error as _json_error
+from app.utils import utcnow_naive
 
 
 def _iso(valor):
@@ -91,7 +92,9 @@ def _alvo_para_painel(adaptador):
 def diagnostico_contratos_portais():
     """Estado de cada alvo com contrato adaptativo. Só leitura."""
     alvos = [_alvo_para_painel(adaptador)
-             for adaptador in contrato_portal_recon.adaptadores_padrao()]
+             for adaptador in contrato_portal_recon.adaptadores_padrao(
+                 incluir_municipais=True, incluir_fgts=True,
+                 incluir_estaduais=True)]
     return jsonify({'status': 'ok', 'alvos': alvos})
 
 
@@ -100,6 +103,28 @@ def _adaptador_ou_404(fluxo, alvo):
     if adaptador is None:
         return None, _json_error('Portal sem contrato adaptativo.', 404)
     return adaptador, None
+
+
+def _adquirir_lock_contrato(adaptador):
+    """Adquire a contenção do alvo sem correr durante o Selenium.
+
+    O worker publica `contrato_preflight_em_andamento` sob este lock e observa
+    o portal fora dele. Assim, descarte/restauração não intercalam com o
+    pinning, sem transformar a requisição do Diagnóstico em espera pelo portal.
+    """
+    lock = adaptador.lock
+    if lock is None:
+        return None, None
+    if not lock.acquire(blocking=False):
+        return None, _json_error(
+            'Há uma emissão em curso neste portal. Tente novamente depois.', 423)
+    estado = getattr(adaptador, 'preflight_state', None)
+    if estado and estado.get('contrato_preflight_em_andamento'):
+        lock.release()
+        return None, _json_error(
+            'Há uma emissão fixando o contrato neste portal. Tente novamente depois.',
+            423)
+    return lock, None
 
 
 @bp.route('/diagnostico/contratos-portais/<fluxo>/<alvo>/baseline',
@@ -208,20 +233,33 @@ def diagnostico_contrato_incidente_aceitar(incidente_id):
 @requer_papel('admin')
 def diagnostico_contrato_incidente_rejeitar(incidente_id):
     """Recusa a mudança: a versão ativa continua sendo a que já estava."""
-    incidente, erro = _incidente_ou_404(incidente_id)
-    if erro:
-        return erro
+    incidente = (IncidenteContratoPortal.query
+                 .filter_by(id=incidente_id, estado='aberto')
+                 .with_for_update()
+                 .one_or_none())
+    if incidente is None:
+        return _json_error('Incidente não encontrado ou já resolvido.', 404)
     candidata_id = incidente.contrato_candidato_id
+    candidata = (db.session.get(ContratoPortal, candidata_id)
+                 if candidata_id is not None else None)
     try:
-        if candidata_id is not None:
+        # Só a candidata que ainda AGUARDA revisão é rejeitável. O incidente
+        # guarda o vínculo mesmo depois de a candidata ser recusada (ele só
+        # vincula, nunca desvincula) e reabre no preflight seguinte: sem esta
+        # checagem, "Manter a versão atual" batia em `ContratoPortalTransicaoError`
+        # e o incidente ficava aberto no painel para sempre.
+        if candidata is not None and candidata.estado == 'candidata_revisao':
             contrato_portal.rejeitar_candidata(
                 candidata_id, usuario_id=current_user.id)
         else:
-            # Incidente do preflight não tem candidata: recusar é encerrar o
-            # incidente, sem promover nada.
+            # Incidente do preflight não tem candidata viva: recusar é encerrar
+            # o incidente, sem promover nada.
             incidente.estado = 'rejeitado'
+            incidente.resolvido_em = utcnow_naive()
+            incidente.resolvido_por_id = current_user.id
             db.session.commit()
     except contrato_portal.ContratoPortalError as exc:
+        db.session.rollback()
         return _json_error(str(exc), 409)
     auditoria.registrar(
         'contrato_portal.rejeitar', alvo_tipo='contrato_portal',
@@ -256,10 +294,9 @@ def diagnostico_contrato_descartar(fluxo, alvo):
     # Lote em curso já fixou o snapshot e termina com ele; o problema é o lote
     # que ainda não fixou — descartar no meio faria metade da fila obedecer o
     # contrato e metade o mapa legado.
-    lock = adaptador.lock
-    if lock is not None and not lock.acquire(blocking=False):
-        return _json_error(
-            'Há uma emissão em curso neste portal. Tente novamente depois.', 423)
+    lock, erro_lock = _adquirir_lock_contrato(adaptador)
+    if erro_lock:
+        return erro_lock
     try:
         contrato_portal.descartar_ativa(
             adaptador.fluxo, adaptador.alvo,
@@ -293,7 +330,7 @@ def diagnostico_contrato_restaurar(contrato_id):
     # Pelo registry, como as demais rotas: sem isto daria para restaurar o
     # contrato de um alvo que ja saiu de `adaptadores_padrao()` — ativo no banco
     # e sem ninguem para obedece-lo.
-    _, erro = _adaptador_ou_404(historico.fluxo, historico.alvo)
+    adaptador, erro = _adaptador_ou_404(historico.fluxo, historico.alvo)
     if erro:
         return erro
     ativa = (ContratoPortal.query
@@ -302,12 +339,21 @@ def diagnostico_contrato_restaurar(contrato_id):
              .one_or_none())
     if ativa is None:
         return _json_error('O portal não possui contrato ativo.', 409)
+    # Mesmo motivo do descarte: trocar a versão ativa no meio de um lote faria
+    # metade da fila obedecer uma estrutura e metade outra. Quem já fixou o
+    # snapshot termina com ele; o problema é quem ainda não fixou.
+    lock, erro_lock = _adquirir_lock_contrato(adaptador)
+    if erro_lock:
+        return erro_lock
     try:
         nova = contrato_portal.restaurar(
             historico.id, fingerprint_ativa=ativa.fingerprint,
             usuario_id=current_user.id)
     except contrato_portal.ContratoPortalError as exc:
         return _json_error(str(exc), 409)
+    finally:
+        if lock is not None:
+            lock.release()
     auditoria.registrar(
         'contrato_portal.restaurar', alvo_tipo='contrato_portal',
         alvo_id=nova.id,

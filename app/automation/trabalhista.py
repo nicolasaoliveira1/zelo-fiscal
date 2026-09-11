@@ -9,8 +9,6 @@ A detecção de sucesso é delegada ao chamador via callback `houve_sucesso` (ex
 nos Downloads) — assim o retry fica num único lugar, sem duplicar entre a emissão individual
 e o lote, e sem acoplar este módulo ao `file_manager`.
 """
-import hashlib
-import json
 import time
 
 from selenium.common.exceptions import TimeoutException
@@ -38,23 +36,14 @@ TIMEOUT_CARREGAMENTO_S = 30
 ROTA_CNDT = '/gerarCertidao'
 
 
-def _assinatura_formulario_cndt():
-    estrutura = {
-        'id': 'form-certidao',
-        'name': 'certidao',
-        'metodo': 'post',
-        'acao_caminho': '/api/certidao',
-        'ordem': 0,
-    }
-    bruto = json.dumps(
-        estrutura, ensure_ascii=False, sort_keys=True,
-        separators=(',', ':')).encode('utf-8')
-    return hashlib.sha256(bruto).hexdigest()
-
-
 def definicao_baseline() -> ContratoComparavel:
-    """Baseline declarada do CNDT atual; instalação exige ação admin em T8."""
-    formulario = _assinatura_formulario_cndt()
+    """Baseline declarada do CNDT atual; instalação exige ação admin em T8.
+
+    A assinatura do formulário fica vazia de propósito, como no FGTS e no RS:
+    ela é FATO da tela, e `montar_baseline_observada` a sobrescreve com o que a
+    observação leu. Um hash escrito à mão aqui nunca chegava ao contrato.
+    """
+    formulario = ''
     dados = (
         ('documento', 'entrada', 'preencher', 'cpfCnpj', 'input', 'text',
          'CPF ou CNPJ', True, True),
