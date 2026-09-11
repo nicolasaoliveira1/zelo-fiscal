@@ -6,6 +6,7 @@ devolve um 'resultado' controlado, entao nenhum navegador e aberto. Cobre:
 - as fronteiras puras _validar_baixar / _montar_config_baixar / _montar_resposta_baixar
 """
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from app.services import emissao_service
 from app.models import Certidao, TipoCertidao
@@ -20,8 +21,15 @@ def _mock_automacao(monkeypatch, resultado):
 # --------------------------- rota (contrato HTTP) ---------------------------
 
 def test_baixar_inexistente_404(client):
-    r = client.get('/certidao/baixar/999999')
+    r = client.post('/certidao/baixar/999999')
     assert r.status_code == 404
+
+
+def test_get_baixar_nao_executa_automacao(client):
+    with patch.object(emissao_service, '_executar_automacao_baixar') as automacao:
+        r = client.get('/certidao/baixar/999999')
+    assert r.status_code == 405
+    automacao.assert_not_called()
 
 
 def test_baixar_sucesso(client, ids, monkeypatch):
@@ -29,7 +37,7 @@ def test_baixar_sucesso(client, ids, monkeypatch):
     resultado['arquivo_salvo_msg'] = 'Arquivo salvo em: C:/x/cert.pdf'
     _mock_automacao(monkeypatch, resultado)
 
-    r = client.get(f"/certidao/baixar/{ids['fgts']}")
+    r = client.post(f"/certidao/baixar/{ids['fgts']}")
     assert r.status_code == 200
     j = r.get_json()
     assert j['status'] in ('success_file_saved', 'success_file_saved_no_date')
@@ -43,7 +51,7 @@ def test_baixar_erro_500(client, ids, monkeypatch):
     resultado['erro_500'] = 'Ocorreu um erro na automação.'
     _mock_automacao(monkeypatch, resultado)
 
-    r = client.get(f"/certidao/baixar/{ids['fgts']}")
+    r = client.post(f"/certidao/baixar/{ids['fgts']}")
     assert r.status_code == 500
     assert r.get_json()['status'] == 'error'
 
@@ -53,7 +61,7 @@ def test_baixar_janela_fechada(client, ids, monkeypatch):
     resultado['window_closed'] = True
     _mock_automacao(monkeypatch, resultado)
 
-    r = client.get(f"/certidao/baixar/{ids['fgts']}")
+    r = client.post(f"/certidao/baixar/{ids['fgts']}")
     assert r.status_code == 200
     j = r.get_json()
     assert j['status'] == 'window_closed_no_file'

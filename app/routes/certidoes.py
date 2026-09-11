@@ -87,7 +87,7 @@ def marcar_pendente(certidao_id):
     return redirect(url_for('main.certidoes'))
 
 
-@bp.route('/certidao/baixar/<int:certidao_id>')
+@bp.route('/certidao/baixar/<int:certidao_id>', methods=['POST'])
 @requer_papel('operador')
 def baixar_certidao(certidao_id):
     return emissao_service.baixar_certidao(certidao_id)
@@ -143,7 +143,7 @@ def _resposta_federal(certidao_id, res, mensagem_sucesso):
     return jsonify(payload)
 
 
-@bp.route('/certidao/monitorar_download_federal/<int:certidao_id>')
+@bp.route('/certidao/monitorar_download_federal/<int:certidao_id>', methods=['POST'])
 @requer_papel('operador')
 def monitorar_download_federal(certidao_id):
     certidao = Certidao.query.get_or_404(certidao_id)
