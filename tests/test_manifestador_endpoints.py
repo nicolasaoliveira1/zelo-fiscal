@@ -59,7 +59,8 @@ def test_pagina_abre_para_operador(client):
 def test_pagina_expoe_campo_de_justificativa_do_evento(client):
     corpo = client.get('/manifestador').get_data(as_text=True)
     assert 'id="manifJustificativa"' in corpo
-    assert 'maxlength="60"' in corpo
+    assert 'minlength="15"' in corpo
+    assert 'maxlength="255"' in corpo
 
 
 def test_pagina_exige_login(client_anon):
@@ -468,7 +469,7 @@ def test_iniciar_exige_tipo_de_evento(app, ids, client):
 
 
 def test_iniciar_210240_exige_justificativa(app, ids, client):
-    for valor in (None, '   ', 'abc', 'x' * 61):
+    for valor in (None, '   ', 'x' * 14, 'x' * 256):
         payload = {'modo': 'carteira', 'tipo_evento': '210240'}
         if valor is not None:
             payload['justificativa'] = valor

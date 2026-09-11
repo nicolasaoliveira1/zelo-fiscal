@@ -114,17 +114,24 @@ export function agrupar_arquivos_xml(lista) {
 }
 
 /**
+ * Dados aceitos pelo contrato de início da manifestação.
+ *
+ * @typedef {Object} DadosManifestacao
+ * @property {string} tipo_evento
+ * @property {string | null | undefined} competencia
+ * @property {number[]} ids
+ * @property {string | number | null | undefined} empresa_id
+ * @property {string | null | undefined} [justificativa]
+ */
+
+/**
  * Monta o contrato de início da manifestação a partir da seleção visível.
  *
  * Quando há IDs marcados, eles são a autorização do operador e seguem no
  * payload. O filtro de empresa só escolhe um escopo amplo quando não há
  * seleção explícita.
  *
- * @param {Object} dados
- * @param {string} dados.tipo_evento
- * @param {string | null | undefined} dados.competencia
- * @param {number[]} dados.ids
- * @param {string | number | null | undefined} dados.empresa_id
+ * @param {DadosManifestacao} dados
  * @returns {Record<string, unknown>}
  */
 export function montar_corpo_manifestacao({
@@ -155,12 +162,20 @@ export function montar_corpo_manifestacao({
 }
 
 /**
+ * Linha de chave usada pela busca da fila.
+ *
+ * @typedef {Object} ChaveManifestacao
+ * @property {string | null | undefined} [empresa]
+ * @property {string | null | undefined} [chave]
+ */
+
+/**
  * Decide se uma chave deve aparecer para o termo de busca.
  *
  * Chave numérica só é consultada quando o termo inteiro é numérico ou uma
  * máscara de chave. Assim uma busca textual nunca vira `includes('')`.
  *
- * @param {Object} chave
+ * @param {ChaveManifestacao} chave
  * @param {string | null | undefined} busca
  * @returns {boolean}
  */
@@ -181,7 +196,7 @@ export function chave_visivel(chave, busca) {
  *
  * @param {unknown} chaves
  * @param {string | null | undefined} busca
- * @returns {Object[]}
+ * @returns {ChaveManifestacao[]}
  */
 export function filtrar_chaves(chaves, busca) {
   return (Array.isArray(chaves) ? chaves : [])

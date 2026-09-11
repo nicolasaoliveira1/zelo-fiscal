@@ -116,17 +116,24 @@ def test_operacao_nao_realizada_exige_justificativa():
     assert 'justificativa' in str(erro.value).lower()
 
 
-@pytest.mark.parametrize('justificativa', ['    ', 'abc', 'x' * 61])
+@pytest.mark.parametrize('justificativa', ['    ', 'x' * 14, 'x' * 256])
 def test_justificativa_tem_limites_do_schema(justificativa):
     with pytest.raises(svc.EventoError):
         _montar(tipo_evento=svc.NAO_REALIZADA,
                 justificativa=justificativa)
 
 
+@pytest.mark.parametrize('tamanho', [15, 255])
+def test_justificativa_aceita_os_limites_do_schema(tamanho):
+    raiz = _montar(tipo_evento=svc.NAO_REALIZADA,
+                   justificativa='x' * tamanho)
+    assert len(_texto(raiz, 'xJust')) == tamanho
+
+
 def test_justificativa_remove_espacos_nas_fronteiras():
     raiz = _montar(tipo_evento=svc.NAO_REALIZADA,
-                   justificativa='  abcde  ')
-    assert _texto(raiz, 'xJust') == 'abcde'
+                   justificativa='  motivo sintético válido  ')
+    assert _texto(raiz, 'xJust') == 'motivo sintético válido'
 
 
 def test_justificativa_entra_no_detevento():

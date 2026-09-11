@@ -38,8 +38,10 @@ DESCRICOES = {
 # O unico dos quatro que carrega texto livre. Sem `xJust` a SEFAZ rejeita; nos
 # outros tres, um `xJust` a mais e rejeicao de schema.
 EXIGEM_JUSTIFICATIVA = (NAO_REALIZADA,)
-JUSTIFICATIVA_MINIMA = 5
-JUSTIFICATIVA_MAXIMA = 60
+# NT 2020.001, leiaute do evento de Manifestação do Destinatário: xJust tem
+# tamanho de 15 a 255 caracteres.
+JUSTIFICATIVA_MINIMA = 15
+JUSTIFICATIVA_MAXIMA = 255
 
 # Manifestacao do destinatario e sempre Ambiente Nacional — nao e a UF da
 # empresa.
