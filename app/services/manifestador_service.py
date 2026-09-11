@@ -141,7 +141,7 @@ TETO_REENVIOS = 3
 class Resultado:
     """Desfecho de uma manifestacao, do ponto de vista de quem chamou."""
 
-    def __init__(self, sucesso, mensagem, resposta=None):
+    def __init__(self, sucesso, mensagem, resposta=None, *, falha_servico=False):
         self.sucesso = sucesso
         self.mensagem = mensagem
         self.cstat = getattr(resposta, 'cstat', None)
@@ -150,6 +150,7 @@ class Resultado:
         self.ja_existia = bool(getattr(resposta, 'duplicidade', False))
         self.indefinido = bool(getattr(resposta, 'indefinido', False))
         self.consumo_indevido = bool(getattr(resposta, 'consumo_indevido', False))
+        self.falha_servico = bool(falha_servico)
 
     def __repr__(self):
         return (f'<Resultado sucesso={self.sucesso} cstat={self.cstat} '
@@ -300,7 +301,7 @@ def manifestar(chave_id, tipo_evento=CONFIRMACAO, justificativa=None,
                   chave=linha.chave, error=str(exc), execution_id=execution_id)
         return Resultado(
             False, f'Erro inesperado ao enviar a chave {linha.chave}. Confira '
-                   f'no portal se a manifestacao saiu.')
+                   f'no portal se a manifestacao saiu.', falha_servico=True)
 
     sucesso, mensagem = _gravar_desfecho(linha, resposta)
 
@@ -313,4 +314,9 @@ def manifestar(chave_id, tipo_evento=CONFIRMACAO, justificativa=None,
     log_event('manifestador_desfecho', chave=linha.chave, cstat=resposta.cstat,
               status=linha.status, execution_id=execution_id)
 
-    return Resultado(sucesso, mensagem, resposta)
+    return Resultado(
+        sucesso,
+        mensagem,
+        resposta,
+        falha_servico=bool(resposta.erro or resposta.indefinido),
+    )
