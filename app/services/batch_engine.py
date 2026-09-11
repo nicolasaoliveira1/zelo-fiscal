@@ -619,10 +619,20 @@ def solicitar_parada_se_ativa(batch_lock, batch_state):
         return True
 
 
-def resume_batch(batch_lock, batch_state, worker_fn, app_factory):
+def resume_batch(batch_lock, batch_state, worker_fn, app_factory, state_values=None):
     with batch_lock:
         if batch_state['status'] != 'paused' or batch_state.get('worker_active'):
             return False
+
+        if state_values:
+            valores = dict(state_values)
+            # O ator de uma retomada altera somente o snapshot já aceito; não
+            # pode apagar modo, fila ou tipo de evento da execução original.
+            if 'opcoes_execucao' in valores:
+                opcoes = dict(batch_state.get('opcoes_execucao') or {})
+                opcoes.update(valores['opcoes_execucao'] or {})
+                valores['opcoes_execucao'] = opcoes
+            batch_state.update(valores)
 
         batch_state['stop_requested'] = False
         batch_state['status'] = 'running'

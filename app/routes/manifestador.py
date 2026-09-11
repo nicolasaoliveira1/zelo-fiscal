@@ -34,6 +34,16 @@ TAMANHO_MAXIMO_COLAGEM = 2 * 1024 * 1024
 TAMANHO_MAXIMO_XML = 50 * 1024 * 1024
 
 
+def _capturar_ator(contexto):
+    """Copia a identidade autenticada para o snapshot interno do lote."""
+    return {
+        'ator_id': current_user.id,
+        'ator_nome': current_user.username,
+        'ator_papel': current_user.papel,
+        'ator_contexto': contexto,
+    }
+
+
 def _chave_para_json(linha):
     return {
         'id': linha.id,
@@ -373,6 +383,7 @@ def manifestador_lote_iniciar():
         'chave_id': chave_id,
         'justificativa': justificativa,
     }
+    opcoes_execucao.update(_capturar_ator('iniciador'))
 
     try:
         dados_lote = batch_engine.init_batch_run(
@@ -446,9 +457,11 @@ def manifestador_lote_parar():
 @requer_papel('operador')
 def manifestador_lote_retomar():
     """Recomeca pela chave onde parou — o motor nao avanca o indice ao pausar."""
+    ator = _capturar_ator('retomada')
     if not batch_engine.resume_batch(MANIF_BATCH_LOCK, MANIF_BATCH_STATE,
                                      manifestador_lote.worker,
-                                     app_factory=_current_app_object):
+                                     app_factory=_current_app_object,
+                                     state_values={'opcoes_execucao': ator}):
         return json_error('Nao ha manifestacao pausada para retomar.', 409)
     return {'status': 'ok', 'message': 'Manifestacao retomada.'}
 

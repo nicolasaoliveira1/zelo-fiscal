@@ -14,6 +14,7 @@ from app.models import (
     Empresa,
     EstadoCertificado,
     EventoAuditoria,
+    Usuario,
     StatusManifestacao,
 )
 from app.services import manifestador_cofre as cofre
@@ -89,6 +90,27 @@ def test_evento_registrado_fecha_a_chave_como_manifestada(app, ids, tmp_path,
         assert recarregada.manifestado_em is not None
         assert recarregada.ja_existia is False
         assert recarregada.tipo_evento == svc.CONFIRMACAO
+
+
+def test_manifestacao_fora_de_request_audita_ator_do_worker(app, ids, tmp_path,
+                                                            monkeypatch):
+    with app.app_context():
+        emp = _empresa_pronta(tmp_path)
+        linha = _chave(emp)
+        operador = Usuario.query.filter_by(username='op_test').one()
+        _com_envio(monkeypatch, _EnvioFalso())
+
+        resultado = svc.manifestar(
+            linha.id, ator_id=operador.id, ator_nome=operador.username,
+            ator_papel=operador.papel, ator_contexto='retomada')
+
+        evento = EventoAuditoria.query.filter_by(
+            acao='manifestacao', alvo_id=linha.id).one()
+        assert resultado.sucesso is True
+        assert evento.usuario_id == operador.id
+        assert evento.usuario_nome == operador.username
+        assert evento.papel == operador.papel
+        assert 'contexto=retomada' in evento.detalhe
 
 
 def test_duplicidade_fecha_como_manifestada_com_marca(app, ids, tmp_path,

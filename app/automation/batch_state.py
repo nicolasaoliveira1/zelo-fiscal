@@ -163,6 +163,10 @@ _MANIF_BATCH_OPCOES = MappingProxyType({
     'empresa_id': None,
     'competencia': None,
     'chave_id': None,
+    'ator_id': None,
+    'ator_nome': None,
+    'ator_papel': None,
+    'ator_contexto': None,
     'justificativa': None,
 })
 
