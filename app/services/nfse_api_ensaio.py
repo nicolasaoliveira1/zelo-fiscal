@@ -9,6 +9,7 @@ transição.
 import json
 import re
 from datetime import datetime
+import xml.etree.ElementTree as ET
 
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -26,6 +27,7 @@ from app.models import (
 )
 from app.services import nfe_assinatura, nfse_api_credencial
 from app.services.execution_logger import log_event
+from app.services.nfse_api_xml import NAMESPACE_NFSE
 
 
 AMBIENTE_RESTRITA = 'restrita'
@@ -103,6 +105,26 @@ class PreparacaoDpsInvalidaError(NfseApiEnsaioError):
 
 class ComparacaoDpsBloqueadaError(NfseApiEnsaioError):
     """A comparação encontrou diferença fiscal que impede o envio."""
+
+
+class EnsaioDpsNaoEncontradoError(NfseApiEnsaioError):
+    """A tentativa selecionada não existe no banco operacional."""
+
+
+class TransicaoDpsInvalidaError(NfseApiEnsaioError):
+    """A tentativa não está no estado exigido pela ação."""
+
+
+class EnsaioDpsEmAndamentoError(NfseApiEnsaioError):
+    """Outra ação já assumiu o envio desta tentativa."""
+
+
+class EnvioDpsCredencialError(NfseApiEnsaioError):
+    """A credencial impediu o envio sem criar um desfecho fiscal."""
+
+
+class RespostaRestritaInvalidaError(NfseApiEnsaioError):
+    """A resposta não permite persistir um desfecho com segurança."""
 
 
 def validar_serie(serie):
@@ -419,3 +441,308 @@ def preparar(nota_id, *, operador_id):
         estado=ensaio.estado,
     )
     return ensaio
+
+
+_CHAVE_NFSE = re.compile(r'NFS[0-9]{50}')
+
+
+def _carregar_ensaio(ensaio_id, operador_id):
+    operador = db.session.get(Usuario, operador_id)
+    if operador is None:
+        raise OperadorDpsNaoEncontradoError(
+            'O operador informado não existe mais no banco.')
+    ensaio = db.session.get(EnsaioDpsNfse, ensaio_id)
+    if ensaio is None:
+        raise EnsaioDpsNaoEncontradoError(
+            'A tentativa de ensaio não existe mais no banco.')
+    return ensaio
+
+
+def _exigir_estado(ensaio, estado):
+    if ensaio.estado != estado:
+        raise TransicaoDpsInvalidaError(
+            f'A tentativa está em {ensaio.estado!r}; a ação exige '
+            f'{estado!r}.')
+
+
+def _comparacao_liberada(ensaio):
+    try:
+        comparacao = json.loads(ensaio.comparacao_json or '')
+    except (TypeError, ValueError) as exc:
+        raise TransicaoDpsInvalidaError(
+            'A tentativa não possui uma comparação local válida.') from exc
+    if (not isinstance(comparacao, dict)
+            or comparacao.get('pode_enviar') is not True
+            or not isinstance(comparacao.get('bloqueadoras'), list)
+            or comparacao['bloqueadoras']):
+        raise TransicaoDpsInvalidaError(
+            'A comparação local contém divergência bloqueadora.')
+
+
+def _dps_assinada_do_ensaio(ensaio, dps_api):
+    xml = ensaio.xml_dps_assinada
+    if not isinstance(xml, str) or not xml.strip():
+        raise TransicaoDpsInvalidaError(
+            'A tentativa não possui a DPS assinada para envio.')
+    try:
+        dps = ET.fromstring(xml)
+    except (ET.ParseError, TypeError, ValueError) as exc:
+        raise TransicaoDpsInvalidaError(
+            'A DPS persistida da tentativa está ilegível.') from exc
+    problemas = dps_api.validar(dps)
+    if problemas:
+        raise TransicaoDpsInvalidaError(
+            'A DPS persistida da tentativa não passa no XSD restrito.')
+    try:
+        identificador = dps_api.identificador(dps)
+    except dps_api.NfseApiDpsError as exc:
+        raise TransicaoDpsInvalidaError(
+            'A DPS persistida da tentativa não possui identificador válido.') from exc
+    if identificador != ensaio.identificador_dps:
+        raise TransicaoDpsInvalidaError(
+            'O identificador persistido não corresponde à DPS assinada.')
+    if not dps_api.verificar(dps):
+        raise TransicaoDpsInvalidaError(
+            'A assinatura persistida da tentativa não pôde ser verificada.')
+    return dps
+
+
+def _validar_campo_resposta(valor, limite):
+    if valor is None:
+        return None
+    if not isinstance(valor, str) or len(valor) > limite:
+        raise RespostaRestritaInvalidaError(
+            'A resposta da SEFIN trouxe um campo maior que o armazenamento permitido.')
+    return valor
+
+
+def _xml_nfse_texto(xml_nfse):
+    if isinstance(xml_nfse, bytearray):
+        xml_nfse = bytes(xml_nfse)
+    if isinstance(xml_nfse, bytes):
+        try:
+            xml_nfse = xml_nfse.decode('utf-8')
+        except UnicodeDecodeError as exc:
+            raise RespostaRestritaInvalidaError(
+                'O XML da NFS-e de teste não está em uma codificação suportada.') from exc
+    if not isinstance(xml_nfse, str) or not xml_nfse.strip():
+        raise RespostaRestritaInvalidaError(
+            'A resposta da SEFIN não trouxe um XML de NFS-e de teste válido.')
+    return xml_nfse
+
+
+def _validar_xml_nfse(xml_nfse, chave):
+    try:
+        raiz = ET.fromstring(xml_nfse)
+    except (ET.ParseError, TypeError, ValueError) as exc:
+        raise RespostaRestritaInvalidaError(
+            'O XML da NFS-e de teste está malformado.') from exc
+    inf_nfse = raiz.find(f'{{{NAMESPACE_NFSE}}}infNFSe')
+    if (raiz.tag != f'{{{NAMESPACE_NFSE}}}NFSe'
+            or inf_nfse is None
+            or inf_nfse.get('Id') != chave):
+        raise RespostaRestritaInvalidaError(
+            'O XML da NFS-e de teste não corresponde à chave retornada.')
+
+
+def _registrar_desfecho(ensaio, resultado):
+    log_event(
+        'nfse_ensaio_desfecho',
+        ensaio_id=ensaio.id,
+        estado=ensaio.estado,
+        situacao=resultado.situacao,
+        http=resultado.http,
+    )
+
+
+def _persistir_resultado(ensaio, resultado):
+    if resultado.identificador not in (None, ensaio.identificador_dps):
+        raise RespostaRestritaInvalidaError(
+            'A resposta da SEFIN pertence a outro identificador de DPS.')
+
+    if resultado.situacao == ESTADO_GERADO_TESTE:
+        chave = resultado.chave_acesso
+        if not isinstance(chave, str) or _CHAVE_NFSE.fullmatch(chave) is None:
+            raise RespostaRestritaInvalidaError(
+                'A resposta gerada não trouxe uma chave de acesso válida.')
+        if resultado.xml_nfse is not None:
+            xml_nfse = _xml_nfse_texto(resultado.xml_nfse)
+            _validar_xml_nfse(xml_nfse, chave)
+            ensaio.xml_nfse_teste = xml_nfse
+        ensaio.chave_nfse_teste = chave
+        ensaio.codigo_rejeicao = None
+        ensaio.motivo_rejeicao = None
+        ensaio.ultima_falha = None
+        ensaio.estado = ESTADO_GERADO_TESTE
+    elif resultado.situacao == ESTADO_REJEITADO:
+        codigo = _validar_campo_resposta(resultado.codigo, 40)
+        motivo = _validar_campo_resposta(resultado.motivo, 1000)
+        if codigo is None and motivo is None:
+            raise RespostaRestritaInvalidaError(
+                'A rejeição da SEFIN não trouxe código nem motivo.')
+        ensaio.codigo_rejeicao = codigo
+        ensaio.motivo_rejeicao = motivo
+        ensaio.ultima_falha = None
+        ensaio.estado = ESTADO_REJEITADO
+    else:
+        raise RespostaRestritaInvalidaError(
+            'A resposta da SEFIN não representa um desfecho persistível.')
+
+    ensaio.atualizado_em = datetime.now()
+    db.session.commit()
+    _registrar_desfecho(ensaio, resultado)
+    return ensaio
+
+
+def _persistir_indefinida(ensaio, mensagem):
+    ensaio.estado = ESTADO_INDEFINIDA
+    ensaio.ultima_falha = mensagem[:1000]
+    ensaio.atualizado_em = datetime.now()
+    db.session.commit()
+    log_event(
+        'nfse_ensaio_desfecho_indefinido',
+        ensaio_id=ensaio.id,
+        estado=ensaio.estado,
+    )
+    return ensaio
+
+
+def _restaurar_preparado(ensaio, mensagem):
+    ensaio.estado = ESTADO_PREPARADO
+    ensaio.ultima_falha = mensagem[:1000]
+    ensaio.atualizado_em = datetime.now()
+    db.session.commit()
+    return ensaio
+
+
+def _consultar(ensaio, sefin):
+    try:
+        return sefin.consultar_dps_restrita(ensaio.identificador_dps)
+    except Exception as exc:
+        log_event(
+            'nfse_ensaio_consulta_falhou',
+            level='WARNING',
+            ensaio_id=ensaio.id,
+            tipo=type(exc).__name__,
+        )
+        return None
+
+
+def _resolver_apos_envio(ensaio, sefin):
+    resultado = _consultar(ensaio, sefin)
+    if resultado is not None and resultado.situacao in {
+            ESTADO_GERADO_TESTE, ESTADO_REJEITADO}:
+        try:
+            return _persistir_resultado(ensaio, resultado)
+        except RespostaRestritaInvalidaError:
+            pass
+    return _persistir_indefinida(
+        ensaio,
+        'O desfecho do ensaio não pôde ser confirmado; faça somente uma reconsulta.',
+    )
+
+
+def _assumir_envio(ensaio):
+    agora = datetime.now()
+    resultado = db.session.execute(
+        update(EnsaioDpsNfse)
+        .where(
+            EnsaioDpsNfse.id == ensaio.id,
+            EnsaioDpsNfse.estado == ESTADO_PREPARADO,
+        )
+        .values(
+            estado=ESTADO_ENVIANDO,
+            ultima_falha=None,
+            atualizado_em=agora,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if resultado.rowcount == 1:
+        ensaio.estado = ESTADO_ENVIANDO
+        ensaio.ultima_falha = None
+        ensaio.atualizado_em = agora
+        db.session.commit()
+        return ensaio
+
+    db.session.rollback()
+    atual = db.session.get(EnsaioDpsNfse, ensaio.id)
+    if atual is None:
+        raise EnsaioDpsNaoEncontradoError(
+            'A tentativa de ensaio não existe mais no banco.')
+    if atual.estado == ESTADO_ENVIANDO:
+        raise EnsaioDpsEmAndamentoError(
+            'Outra ação já assumiu o envio desta tentativa.')
+    if atual.estado in {
+            ESTADO_GERADO_TESTE, ESTADO_REJEITADO, ESTADO_INDEFINIDA}:
+        return atual
+    raise TransicaoDpsInvalidaError(
+        f'A tentativa mudou para o estado {atual.estado!r} antes do envio.')
+
+
+def enviar(ensaio_id, *, operador_id):
+    """Envia uma tentativa preparada, sem repetir POST após incerteza."""
+    from app.services import nfse_api_dps as dps_api
+    from app.services import nfse_api_sefin as sefin
+
+    ensaio = _carregar_ensaio(ensaio_id, operador_id)
+    _exigir_estado(ensaio, ESTADO_PREPARADO)
+    _comparacao_liberada(ensaio)
+    dps = _dps_assinada_do_ensaio(ensaio, dps_api)
+
+    preexistente = _consultar(ensaio, sefin)
+    if preexistente is None or preexistente.situacao == 'indisponivel':
+        return _persistir_indefinida(
+            ensaio,
+            'Não foi possível consultar o identificador antes do POST; o ensaio '
+            'ficou indefinido e deve ser reconsultado.',
+        )
+    if preexistente.situacao in {ESTADO_GERADO_TESTE, ESTADO_REJEITADO}:
+        return _persistir_resultado(ensaio, preexistente)
+    if preexistente.situacao == 'credencial':
+        raise EnvioDpsCredencialError(
+            'A credencial não autorizou a consulta anterior ao POST.')
+    if preexistente.situacao != 'nao_encontrado':
+        raise RespostaRestritaInvalidaError(
+            'A consulta anterior ao POST não trouxe um desfecho utilizável.')
+
+    ensaio = _assumir_envio(ensaio)
+    if ensaio.estado != ESTADO_ENVIANDO:
+        return ensaio
+
+    try:
+        resultado = sefin.enviar_restrita(dps)
+    except Exception:
+        return _resolver_apos_envio(ensaio, sefin)
+
+    if resultado is None:
+        return _resolver_apos_envio(ensaio, sefin)
+    if resultado.situacao in {ESTADO_GERADO_TESTE, ESTADO_REJEITADO}:
+        try:
+            return _persistir_resultado(ensaio, resultado)
+        except RespostaRestritaInvalidaError:
+            return _resolver_apos_envio(ensaio, sefin)
+    if resultado.situacao == 'credencial':
+        return _restaurar_preparado(
+            ensaio,
+            'A credencial não autorizou o envio; nenhuma nova tentativa foi feita.',
+        )
+    return _resolver_apos_envio(ensaio, sefin)
+
+
+def reconsultar(ensaio_id, *, operador_id):
+    """Consulta uma tentativa indefinida sem executar qualquer POST."""
+    from app.services import nfse_api_sefin as sefin
+
+    ensaio = _carregar_ensaio(ensaio_id, operador_id)
+    _exigir_estado(ensaio, ESTADO_INDEFINIDA)
+    resultado = _consultar(ensaio, sefin)
+    if resultado is not None and resultado.situacao in {
+            ESTADO_GERADO_TESTE, ESTADO_REJEITADO}:
+        try:
+            return _persistir_resultado(ensaio, resultado)
+        except RespostaRestritaInvalidaError:
+            pass
+    return _persistir_indefinida(
+        ensaio,
+        'O desfecho do ensaio continua desconhecido; tente reconsultar mais tarde.',
+    )
