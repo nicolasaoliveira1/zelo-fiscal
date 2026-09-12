@@ -237,8 +237,85 @@ def projetar_espelho(chaves):
             SITUACAO_FISCAL_CANCELADA if cancelada
             else _situacao_fiscal_da_observacao(observacao))
         nota.consultado_em = observacao.observado_em or datetime.now()
+        if cancelada:
+            # Uma nota cancelada não pode continuar conciliada com a fila,
+            # mesmo antes de o chamador pedir uma nova conciliação.
+            nota.nota_id = None
 
     return novas, atualizadas
+
+
+def registrar_eventos(eventos):
+    """Registra cancelamentos do ADN e reflete-os sem fazer `commit`."""
+    from app import db
+    from app.models import EventoEmitidaNfse, NotaEmitidaNfse
+    from app.services.execution_logger import log_event
+
+    eventos = list(eventos)
+    candidatos = []
+    for evento in eventos:
+        tipo = str(getattr(evento, 'tipo', '') or '').strip()
+        if tipo not in TIPOS_EVENTO_CANCELAMENTO:
+            continue
+        chave = str(getattr(evento, 'chave', '') or '').strip()
+        if not chave:
+            raise ValueError('Todo evento de NFS-e precisa de uma chave.')
+        try:
+            num_seq = int(getattr(evento, 'num_seq', 1) or 1)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('A sequência do evento precisa ser numérica.') from exc
+        if num_seq < 1:
+            raise ValueError('A sequência do evento precisa ser positiva.')
+        candidatos.append((evento, chave, tipo, num_seq))
+
+    if not candidatos:
+        return 0
+
+    chaves = list(dict.fromkeys(chave for _, chave, _, _ in candidatos))
+    existentes = {
+        (evento.chave, evento.tipo, evento.num_seq): evento
+        for evento in EventoEmitidaNfse.query.filter(
+            EventoEmitidaNfse.chave.in_(chaves),
+        ).all()
+    }
+
+    novos = atualizados = 0
+    for origem, chave, tipo, num_seq in candidatos:
+        identidade = (chave, tipo, num_seq)
+        registro = existentes.get(identidade)
+        if registro is None:
+            registro = EventoEmitidaNfse(
+                chave=chave, tipo=tipo, num_seq=num_seq,
+                data=getattr(origem, 'data', None),
+                nsu=getattr(origem, 'nsu', None),
+            )
+            db.session.add(registro)
+            existentes[identidade] = registro
+            novos += 1
+        else:
+            atualizados += 1
+            data = getattr(origem, 'data', None)
+            nsu = getattr(origem, 'nsu', None)
+            if data is not None:
+                registro.data = data
+            if nsu is not None:
+                registro.nsu = nsu
+
+    # A projeção também cria a nota quando já existe uma observação ADN/portal;
+    # o bloco seguinte cobre o legado em que só o espelho canônico foi salvo.
+    projetar_espelho(chaves)
+    notas = NotaEmitidaNfse.query.filter(
+        NotaEmitidaNfse.chave.in_(chaves),
+    ).all()
+    for nota in notas:
+        nota.situacao_fiscal = SITUACAO_FISCAL_CANCELADA
+        nota.origem_autoritativa = 'adn'
+        nota.nota_id = None
+
+    log_event(
+        'nfse_emitidas_eventos', novos=novos, atualizados=atualizados,
+        canceladas=len(notas))
+    return novos
 
 
 # --- consulta ao portal ----------------------------------------------------
@@ -321,6 +398,20 @@ def mes_de(dia):
     return f'{dia.month:02d}/{dia.year}' if dia else None
 
 
+def _nota_gerada(nota):
+    """Consulta a situação fiscal normalizada, com fallback legado seguro."""
+    from app.models import SituacaoNotaEmitida
+
+    if nota.situacao_fiscal is not None:
+        return nota.situacao_fiscal == SITUACAO_FISCAL_GERADA
+    return nota.situacao == SituacaoNotaEmitida.GERADA
+
+
+def _situacao_para_resumo(nota):
+    """Escolhe o rótulo explícito sem apagar o código cru da fonte."""
+    return nota.situacao_fiscal or nota.situacao or '(sem situação)'
+
+
 def _quando(nota):
     """Data que situa a linha do extrato no tempo, para desempate."""
     return nota.data_pagamento or nota.vencimento
@@ -378,11 +469,10 @@ def _avaliar_conciliacao():
     a escolha reproduzível quando há vários tomadores iguais; um empate de
     distância continua sem vínculo e vira uma ocorrência de `ambigua`.
     """
-    from app.models import NotaEmitidaNfse, NotaNfse, SituacaoNotaEmitida
+    from app.models import NotaEmitidaNfse, NotaNfse
 
     todas_emitidas = NotaEmitidaNfse.query.order_by(NotaEmitidaNfse.id).all()
-    emitidas = [e for e in todas_emitidas
-                if e.situacao == SituacaoNotaEmitida.GERADA]
+    emitidas = [e for e in todas_emitidas if _nota_gerada(e)]
     notas = [n for n in NotaNfse.query.order_by(NotaNfse.id).all()
              if _nota_elegivel(n)]
 
@@ -469,17 +559,17 @@ def resumo(mes_geracao):
     qualquer outra situação entram em `outras_situacoes`, separadas e visíveis:
     os códigos de cancelada/substituída não apareceram na recon, e somar ou
     descartar por adivinhação erraria um total fiscal nos dois sentidos."""
-    from app.models import NotaEmitidaNfse, SituacaoNotaEmitida
+    from app.models import NotaEmitidaNfse
 
     emitidas = [e for e in NotaEmitidaNfse.query.all()
                 if mes_de(e.data_geracao) == mes_geracao]
-    geradas = [n for n in emitidas if n.situacao == SituacaoNotaEmitida.GERADA]
+    geradas = [n for n in emitidas if _nota_gerada(n)]
 
     contagem = {}
     for nota in emitidas:
-        if nota.situacao == SituacaoNotaEmitida.GERADA:
+        if _nota_gerada(nota):
             continue
-        chave = nota.situacao or '(sem situação)'
+        chave = _situacao_para_resumo(nota)
         contagem[chave] = contagem.get(chave, 0) + 1
 
     return {
@@ -494,17 +584,17 @@ def resumo(mes_geracao):
 
 def resumo_periodo(inicio, fim):
     """Total das notas GERADAS dentro do intervalo consultado, inclusive."""
-    from app.models import NotaEmitidaNfse, SituacaoNotaEmitida
+    from app.models import NotaEmitidaNfse
 
     emitidas = [e for e in NotaEmitidaNfse.query.all()
                 if e.data_geracao is not None
                 and inicio <= e.data_geracao <= fim]
-    geradas = [e for e in emitidas if e.situacao == SituacaoNotaEmitida.GERADA]
+    geradas = [e for e in emitidas if _nota_gerada(e)]
     contagem = {}
     for nota in emitidas:
-        if nota.situacao == SituacaoNotaEmitida.GERADA:
+        if _nota_gerada(nota):
             continue
-        chave = nota.situacao or '(sem situação)'
+        chave = _situacao_para_resumo(nota)
         contagem[chave] = contagem.get(chave, 0) + 1
 
     return {
