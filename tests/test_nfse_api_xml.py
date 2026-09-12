@@ -1,7 +1,7 @@
 """Envelope XML do ADN: só bytes sintéticos, sem rede."""
 import base64
 import gzip
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -22,6 +22,8 @@ def _compactar(conteudo):
 
 CHAVE = '0' * 50
 ID_NFSE = 'NFS' + CHAVE
+ID_EVENTO = 'EVT' + '0' * 59
+ID_PEDIDO_EVENTO = 'PRE' + '0' * 56
 
 
 def _xml_nfse(documento_tag='CNPJ', documento='44556677000186', valor='1280.40'):
@@ -41,6 +43,35 @@ def _xml_nfse(documento_tag='CNPJ', documento='44556677000186', valor='1280.40')
     </DPS>
   </infNFSe>
 </NFSe>'''.encode('utf-8')
+
+
+def _xml_evento(tipo='e101101', sequencia='001', incluir_sequencia=True):
+    seq = f'<nSeqEvento>{sequencia}</nSeqEvento>' if incluir_sequencia else ''
+    if tipo == 'e101101':
+        detalhe = '<e101101><xDesc>Cancelamento de NFS-e</xDesc></e101101>'
+    elif tipo == 'e105102':
+        detalhe = '<e105102><xDesc>Cancelamento por substituição</xDesc></e105102>'
+    else:
+        detalhe = f'<{tipo}><xDesc>Evento sintético não tratado</xDesc></{tipo}>'
+    return f'''<evento xmlns="{NS}" versao="1.01">
+  <infEvento Id="{ID_EVENTO}">
+    <verAplic>4</verAplic>
+    <ambGer>3</ambGer>
+    {seq}
+    <dhProc>2026-08-02T10:30:00-03:00</dhProc>
+    <nDFSe>1</nDFSe>
+    <pedRegEvento versao="1.01">
+      <infPedReg Id="{ID_PEDIDO_EVENTO}">
+        <tpAmb>1</tpAmb>
+        <verAplic>4</verAplic>
+        <dhEvento>2026-08-02T10:29:00-03:00</dhEvento>
+        <CNPJAutor>11222333000181</CNPJAutor>
+        <chNFSe>{CHAVE}</chNFSe>
+        {detalhe}
+      </infPedReg>
+    </pedRegEvento>
+  </infEvento>
+</evento>'''.encode('utf-8')
 
 
 def test_descomprimir_retorna_o_xml_original():
@@ -126,3 +157,28 @@ def test_ler_nfse_recusa_chave_fora_do_formato_oficial():
 def test_ler_nfse_recusa_valor_com_mais_casas_que_a_coluna():
     with pytest.raises(xml_api.ValorNfseInvalidoError):
         xml_api.ler_nfse(_xml_nfse(valor='1280.401'))
+
+
+@pytest.mark.parametrize('tipo', ['e101101', 'e105102'])
+def test_ler_evento_reconhece_cancelamentos_e_mapeia_a_chave(tipo):
+    evento = xml_api.ler_evento(_xml_evento(tipo=tipo))
+
+    assert evento.chave == CHAVE
+    assert evento.tipo == tipo
+    assert evento.num_seq == 1
+    assert evento.data == datetime(
+        2026, 8, 2, 10, 30, tzinfo=timezone(timedelta(hours=-3)))
+    assert evento.tratado is True
+
+
+def test_ler_evento_preserva_tipo_desconhecido_sem_trata_lo():
+    evento = xml_api.ler_evento(_xml_evento(tipo='e999999'))
+
+    assert evento.tipo == 'e999999'
+    assert evento.tratado is False
+
+
+def test_ler_evento_usa_sequencia_um_quando_ausente():
+    evento = xml_api.ler_evento(_xml_evento(incluir_sequencia=False))
+
+    assert evento.num_seq == 1

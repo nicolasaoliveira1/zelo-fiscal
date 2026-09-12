@@ -1,8 +1,7 @@
-"""Desempacotamento e classificação dos XML recebidos pelo ADN.
+"""Desempacotamento, classificação e leitura dos XML recebidos pelo ADN.
 
-Este módulo só conhece o envelope do documento. A leitura dos campos da NFS-e
-e dos eventos fica nas funções especializadas que usam este contrato, sem rede
-nem persistência.
+Este módulo transforma os documentos no DTO que o domínio entende, sem rede,
+persistência ou automação fiscal.
 """
 import base64
 import binascii
@@ -10,6 +9,7 @@ import gzip
 import re
 import xml.etree.ElementTree as ET
 import zlib
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
@@ -19,6 +19,7 @@ from app.utils import formatar_documento
 
 NAMESPACE_NFSE = 'http://www.sped.fazenda.gov.br/nfse'
 TIPOS_XML = ('nfse', 'evento', 'desconhecido')
+TIPOS_EVENTO_CANCELAMENTO = ('e101101', 'e105102')
 
 
 class NfseApiXmlError(ValueError):
@@ -51,6 +52,25 @@ class ChaveNfseInvalidaError(NfseApiXmlError):
 
 class ValorNfseInvalidoError(NfseApiXmlError):
     """O valor da NFS-e não cabe sem perda na coluna monetária do domínio."""
+
+
+class EventoEstruturaInvalidaError(NfseApiXmlError):
+    """O evento não contém a identificação ou data exigida pelo XSD."""
+
+
+@dataclass(frozen=True)
+class EventoLido:
+    """Evento do ADN reduzido aos campos usados pelo espelho."""
+
+    chave: str
+    tipo: str
+    num_seq: int = 1
+    data: datetime | None = None
+
+    @property
+    def tratado(self):
+        """Indica se o P1 conhece o evento como cancelamento fiscal."""
+        return self.tipo in TIPOS_EVENTO_CANCELAMENTO
 
 
 def _parsear_xml(xml_bytes):
@@ -238,4 +258,77 @@ def ler_nfse(xml_bytes):
         municipio=municipio[:60],
         valor=_valor_liquido(inf_nfse),
         situacao=_texto(inf_nfse, 'cStat')[:30],
+    )
+
+
+def _validar_raiz_evento(raiz):
+    namespace, nome = _namespace_e_nome(raiz)
+    if namespace != NAMESPACE_NFSE or nome != 'evento':
+        raise EventoEstruturaInvalidaError(
+            'O XML recebido não contém a raiz oficial evento.')
+
+
+def _chave_evento(inf_ped_reg):
+    bruto = _exigir_texto(inf_ped_reg, 'chNFSe', 'infPedReg/chNFSe')
+    if bruto.startswith('NFS') and re.fullmatch(r'NFS[0-9]{50}', bruto):
+        return bruto[3:]
+    if re.fullmatch(r'[0-9]{50}', bruto):
+        return bruto
+    raise EventoEstruturaInvalidaError(
+        'A chave do evento deve conter os 50 dígitos da NFS-e.')
+
+
+def _tipo_evento(inf_ped_reg):
+    for filho in list(inf_ped_reg):
+        _, nome = _namespace_e_nome(filho)
+        if re.fullmatch(r'e[0-9]{6}', nome):
+            return nome
+    raise EventoEstruturaInvalidaError(
+        'O pedido de registro não informa o tipo do evento.')
+
+
+def _numero_evento(inf_evento):
+    bruto = _texto(inf_evento, 'nSeqEvento') or '1'
+    try:
+        numero = int(bruto)
+    except (TypeError, ValueError) as exc:
+        raise EventoEstruturaInvalidaError(
+            'A sequência do evento não é um número válido.') from exc
+    if not 1 <= numero <= 999:
+        raise EventoEstruturaInvalidaError(
+            'A sequência do evento precisa estar entre 1 e 999.')
+    return numero
+
+
+def _data_evento(inf_evento, inf_ped_reg):
+    # dhProc é a data em que o evento foi registrado no ambiente nacional;
+    # dhEvento fica como fallback para envelopes antigos/minimais.
+    bruto = _texto(inf_evento, 'dhProc') or _texto(inf_ped_reg, 'dhEvento')
+    if not bruto:
+        raise EventoEstruturaInvalidaError(
+            'O evento não informa dhProc nem dhEvento.')
+    try:
+        return datetime.fromisoformat(bruto.replace('Z', '+00:00'))
+    except (TypeError, ValueError) as exc:
+        raise EventoEstruturaInvalidaError(
+            'A data do evento não está no formato ISO válido.') from exc
+
+
+def ler_evento(xml_bytes):
+    """Lê evento do ADN e preserva código desconhecido para decisão do domínio."""
+    raiz = _parsear_xml(xml_bytes)
+    _validar_raiz_evento(raiz)
+
+    inf_evento = _filho(raiz, 'infEvento')
+    ped_registro = _filho(inf_evento, 'pedRegEvento')
+    inf_ped_reg = _filho(ped_registro, 'infPedReg')
+    if inf_evento is None or inf_ped_reg is None:
+        raise EventoEstruturaInvalidaError(
+            'O evento não informa infEvento/pedRegEvento/infPedReg.')
+
+    return EventoLido(
+        chave=_chave_evento(inf_ped_reg),
+        tipo=_tipo_evento(inf_ped_reg),
+        num_seq=_numero_evento(inf_evento),
+        data=_data_evento(inf_evento, inf_ped_reg),
     )
