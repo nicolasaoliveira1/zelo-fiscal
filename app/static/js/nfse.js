@@ -107,6 +107,80 @@ async function chamar(url, opcoes = {}) {
   return dados;
 }
 
+const ROTULO_ACESSO_API = {
+  ok: 'Acesso confirmado',
+  negado: 'Acesso negado',
+  credencial: 'Problema na credencial',
+  indisponivel: 'Serviço indisponível',
+  rejeitado: 'Resposta rejeitada',
+};
+
+const MENSAGEM_ACESSO_API = {
+  ok: 'A resposta autorizada prova o acesso a este serviço.',
+  negado: 'A API recusou a credencial para este serviço.',
+  credencial: 'Confira a credencial do escritório antes de tentar novamente.',
+  indisponivel: 'Não foi possível concluir a chamada agora.',
+  rejeitado: 'A API respondeu, mas não autorizou esta sondagem.',
+};
+
+/**
+ * @typedef {Object} DesfechoAcessoApi
+ * @property {string=} situacao
+ * @property {number|null=} http
+ * @property {string=} mensagem
+ */
+
+/**
+ * Pinta os dois desfechos sem transformar uma prova SEFIN em prova de ADN.
+ *
+ * @param {{sefin?: DesfechoAcessoApi, adn?: DesfechoAcessoApi}|null} acessos
+ */
+export function pintarAcessoApi(acessos) {
+  const alvo = document.getElementById('nfseApiAcessoResultados');
+  if (!alvo) return;
+
+  const blocos = [
+    ['SEFIN', acessos?.sefin],
+    ['ADN', acessos?.adn],
+  ].map(([servico, desfecho]) => {
+    const situacao = Object.prototype.hasOwnProperty.call(
+      ROTULO_ACESSO_API, desfecho?.situacao)
+      ? desfecho.situacao : 'indisponivel';
+    const rotulo = ROTULO_ACESSO_API[situacao];
+    const mensagem = String(desfecho?.mensagem || '').trim()
+      || MENSAGEM_ACESSO_API[situacao];
+    const http = desfecho?.http == null
+      ? '' : `<span class="nfse-hint nfse-mono">HTTP ${esc(desfecho.http)}</span>`;
+    return `<section class="nfse-api-acesso-resultado" data-situacao="${situacao}">
+      <h3>${servico}</h3>
+      <div class="situacao">${rotulo}</div>
+      <div class="nfse-hint">${esc(mensagem)}${http ? ` · ${http}` : ''}</div>
+    </section>`;
+  });
+  alvo.innerHTML = blocos.join('');
+}
+
+export async function verificarAcesso(botao) {
+  if (!botao) return;
+  const estado = document.getElementById('nfseApiAcessoEstado');
+  const rotulo = botao.textContent;
+  botao.disabled = true;
+  botao.textContent = 'Verificando…';
+  if (estado) estado.textContent = 'Testando SEFIN e ADN separadamente…';
+  try {
+    const dados = await chamar('/nfse/api/acesso');
+    pintarAcessoApi(dados.acessos);
+    if (estado) estado.textContent = 'Verificação concluída.';
+    showToast('Verificação separada concluída.', 'info');
+  } catch (erro) {
+    if (estado) estado.textContent = '';
+    showToast(erro.message, 'error');
+  } finally {
+    botao.disabled = false;
+    botao.textContent = rotulo;
+  }
+}
+
 // --- tabela ---------------------------------------------------------------
 
 function opcoesEmpresa(selecionada) {
@@ -1198,6 +1272,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('formEmitidas')?.addEventListener('submit', (ev) => {
     ev.preventDefault();
     consultarEmitidas(document.getElementById('btnConsultarEmitidas'));
+  });
+
+  document.getElementById('btnVerificarAcesso')?.addEventListener('click', (ev) => {
+    verificarAcesso(ev.currentTarget);
   });
 
   document.getElementById('formImportar')?.addEventListener('submit', async (ev) => {

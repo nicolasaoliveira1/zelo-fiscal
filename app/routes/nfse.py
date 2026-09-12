@@ -36,6 +36,7 @@ from app.automation import nfse_recon
 from app.services import (
     auditoria,
     batch_engine,
+    nfse_api_adn,
     nfse_config,
     nfse_emitidas,
     nfse_grupos,
@@ -803,6 +804,32 @@ def nfse_painel():
         # apenas como ponto de partida para uma nova consulta.
         emitidas=_painel_emitidas(mes=_competencia_corrente()),
     )
+
+
+def _desfecho_api_para_json(desfecho):
+    """Expõe só o resumo de uma sondagem, nunca a resposta bruta da API."""
+    return {
+        'situacao': desfecho.situacao,
+        'http': desfecho.http,
+        'mensagem': desfecho.mensagem,
+    }
+
+
+@bp.route('/nfse/api/acesso', methods=['POST'])
+@requer_papel('operador')
+def nfse_api_acesso():
+    """Verifica SEFIN e ADN em chamadas independentes e somente de leitura."""
+    try:
+        acessos = nfse_api_adn.verificar_acesso()
+    except Exception as exc:
+        return json_error(exc=exc, code=500)
+    return {
+        'status': 'ok',
+        'acessos': {
+            'sefin': _desfecho_api_para_json(acessos.sefin),
+            'adn': _desfecho_api_para_json(acessos.adn),
+        },
+    }
 
 
 @bp.route('/nfse/notas')

@@ -17,6 +17,47 @@
         color: var(--zelo-slate);
         font-size: 0.86rem;
     }
+    .nfse-api-acesso-resultados {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.75rem;
+    }
+    .nfse-api-acesso-resultado {
+        background: var(--zelo-muted-soft);
+        border: 1px solid var(--zelo-line);
+        border-left: 4px solid var(--zelo-muted);
+        border-radius: 8px;
+        padding: 0.75rem 0.85rem;
+    }
+    .nfse-api-acesso-resultado[data-situacao="ok"] {
+        background: var(--zelo-ok-soft);
+        border-left-color: var(--zelo-ok);
+    }
+    .nfse-api-acesso-resultado[data-situacao="negado"],
+    .nfse-api-acesso-resultado[data-situacao="rejeitado"] {
+        background: var(--zelo-danger-soft);
+        border-left-color: var(--zelo-danger);
+    }
+    .nfse-api-acesso-resultado[data-situacao="credencial"] {
+        background: var(--zelo-warn-soft);
+        border-left-color: var(--zelo-warn);
+    }
+    .nfse-api-acesso-resultado h3 {
+        font-size: 0.8rem;
+        letter-spacing: 0.04em;
+        margin: 0;
+        text-transform: uppercase;
+    }
+    .nfse-api-acesso-resultado .situacao {
+        color: var(--zelo-ink);
+        font-weight: 600;
+        margin-top: 0.35rem;
+    }
+    @media (max-width: 767.98px) {
+        .nfse-api-acesso-resultados {
+            grid-template-columns: 1fr;
+        }
+    }
     /* Toggle de modo: monocromatico como todo o chrome — a unica cor da tela
        continua sendo o status da nota. */
     .nfse-modo .btn-check:checked + .btn {
@@ -1088,6 +1129,27 @@
     <p class="nfse-hint mt-3 mb-0" id="nfseVazio" role="status" aria-live="polite">
         Nenhuma nota importada.
     </p>
+</div>
+
+<!-- Verificacao do acesso aos servicos nacionais (APINF-01/02) -->
+<div class="nfse-card mt-3" id="nfseApiAcesso">
+    {{ zl_secao('Verificar acesso à API nacional') }}
+    <p class="nfse-hint mb-3">
+        Testa SEFIN e ADN separadamente, sem baixar histórico nem emitir documento.
+        O resultado de um serviço não confirma o outro.
+    </p>
+    <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+        <button class="btn btn-primary btn-sm" type="button" id="btnVerificarAcesso">
+            Verificar acesso
+        </button>
+        <span class="nfse-hint" id="nfseApiAcessoEstado" role="status" aria-live="polite">
+            Nenhuma verificação realizada.
+        </span>
+    </div>
+    <div class="nfse-api-acesso-resultados" id="nfseApiAcessoResultados"
+         aria-live="polite">
+        <p class="nfse-hint mb-0">Os desfechos aparecerão aqui após a verificação.</p>
+    </div>
 </div>
 
 <!-- Conferencia contra o portal (NFSE-28) -->

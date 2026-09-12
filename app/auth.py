@@ -105,6 +105,7 @@ _ROTAS_JSON_POST = {
     '/fgts/emitir_unico',
     '/certidao/salvar_data_confirmada',
     '/certidao/monitorar_download_federal/stop',
+    '/nfse/api/acesso',
 }
 
 _PREFIXOS_JSON_POST = (
