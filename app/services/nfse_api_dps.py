@@ -9,6 +9,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
+from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
 
@@ -21,6 +23,14 @@ VERSAO_DPS = '1.01'
 TP_AMBIENTE_RESTRITO = '2'
 TP_EMITENTE_PRESTADOR = '1'
 VERSAO_APLICATIVO = 'Zelo'
+CAMINHO_SCHEMA_RESTRITO = (
+    Path(__file__).resolve().parents[1]
+    / 'schemas'
+    / 'nfse'
+    / 'restrita'
+    / 'v1.01-20260727'
+    / 'DPS_v1.01.xsd'
+)
 
 
 class NfseApiDpsError(ValueError):
@@ -57,6 +67,14 @@ class ConfiguracaoDpsInvalidaError(NfseApiDpsError):
 
 class MontagemDpsInvalidaError(NfseApiDpsError):
     """A DPS não pôde ser montada com os fatos fornecidos."""
+
+
+@dataclass(frozen=True)
+class ProblemaDps:
+    """Falha de leiaute sem reproduzir valor fiscal ou XML na mensagem."""
+
+    caminho: str
+    mensagem: str
 
 
 @dataclass(frozen=True)
@@ -472,6 +490,68 @@ def _inf_dps_de(dps):
         raise MontagemDpsInvalidaError(
             'O elemento fornecido não é uma DPS do namespace oficial.')
     return _exigir_grupo(dps, 'infDPS', 'DPS/infDPS')
+
+
+def _dps_de(dps):
+    if dps is None or dps.tag != _tag('DPS'):
+        raise MontagemDpsInvalidaError(
+            'A validação exige o elemento raiz DPS do namespace oficial.')
+    return dps
+
+
+@lru_cache(maxsize=1)
+def carregar_esquema_restrito():
+    """Carrega somente o XSD restrito versionado no repositório."""
+    try:
+        import xmlschema
+        return xmlschema.XMLSchema(CAMINHO_SCHEMA_RESTRITO)
+    except (OSError, ImportError, ValueError) as exc:
+        raise ConfiguracaoDpsInvalidaError(
+            'O esquema XSD restrito versionado não pôde ser carregado.') from exc
+
+
+def _caminho_legivel(caminho):
+    if not caminho:
+        return '/DPS'
+    partes = re.findall(r'(?:^|/)(?:\{[^}]+\})?([^/{]+)', caminho)
+    return '/' + '/'.join(partes)
+
+
+def _mensagem_validacao(erro):
+    nome_validador = type(getattr(erro, 'validator', None)).__name__
+    if 'Pattern' in nome_validador:
+        return 'O valor não atende ao formato oficial do leiaute.'
+    if 'Enumeration' in nome_validador:
+        return 'O valor não pertence às opções permitidas pelo leiaute.'
+    if 'Length' in nome_validador or 'Digits' in nome_validador:
+        return 'O tamanho ou a escala não atende ao formato oficial.'
+    if 'Date' in nome_validador:
+        return 'A data não atende ao formato oficial do leiaute.'
+    return 'O campo está ausente, fora da ordem ou incompatível com o leiaute.'
+
+
+def validar(dps, esquema_restrito=None):
+    """Valida uma DPS com um esquema já carregado, sem resolver schema na rede.
+
+    A lista devolvida é segura para apresentar ao operador: contém apenas o
+    caminho estrutural e uma explicação genérica, nunca o XML nem o valor
+    fiscal que causou a falha.
+    """
+    dps = _dps_de(dps)
+    esquema = (
+        carregar_esquema_restrito()
+        if esquema_restrito is None else esquema_restrito)
+    iter_erros = getattr(esquema, 'iter_errors', None)
+    if iter_erros is None:
+        raise ConfiguracaoDpsInvalidaError(
+            'A validação exige um esquema XSD restrito carregado localmente.')
+    return [
+        ProblemaDps(
+            caminho=_caminho_legivel(getattr(erro, 'path', None)),
+            mensagem=_mensagem_validacao(erro),
+        )
+        for erro in iter_erros(dps)
+    ]
 
 
 def _identificador_dos_campos(inf_dps):

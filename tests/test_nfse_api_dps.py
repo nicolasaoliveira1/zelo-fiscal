@@ -108,6 +108,59 @@ def test_montar_fixa_homologacao_injeta_dh_emi_e_aplica_configuracao():
         'CST') == '00'
 
 
+def test_validar_carrega_o_xsd_restrito_e_aceita_dps_sintetica():
+    referencia = dps_api.ler_referencia(_nota(), _xml_referencia())
+    montada = dps_api.montar(
+        referencia, _config(), serie='7', numero=12,
+        agora=datetime(2026, 9, 12, 14, 35, 20, tzinfo=timezone.utc))
+
+    assert dps_api.validar(montada) == []
+
+
+def test_validar_traduz_caminho_de_campo_reprovado_sem_expor_valor():
+    referencia = dps_api.ler_referencia(_nota(), _xml_referencia())
+    montada = dps_api.montar(
+        referencia, _config(), serie='7', numero=12,
+        agora=datetime(2026, 9, 12, 14, 35, 20, tzinfo=timezone.utc))
+    c_trib_nac = montada.find(
+        f'.//{{{NS}}}cTribNac')
+    c_trib_nac.text = 'X'
+
+    problemas = dps_api.validar(montada)
+
+    assert problemas
+    assert any('/DPS/infDPS/serv/cServ/cTribNac' == problema.caminho
+               for problema in problemas)
+    assert all('X' not in problema.mensagem for problema in problemas)
+
+
+def test_validar_aponta_grupo_quando_campo_obrigatorio_e_removido():
+    referencia = dps_api.ler_referencia(_nota(), _xml_referencia())
+    montada = dps_api.montar(
+        referencia, _config(), serie='7', numero=12,
+        agora=datetime(2026, 9, 12, 14, 35, 20, tzinfo=timezone.utc))
+    c_serv = montada.find(f'.//{{{NS}}}cServ')
+    c_serv.remove(c_serv.find(f'{{{NS}}}cTribNac'))
+
+    problemas = dps_api.validar(montada)
+
+    assert any('/DPS/infDPS/serv/cServ' == problema.caminho
+               for problema in problemas)
+
+
+def test_validar_aponta_campo_com_tamanho_invalido():
+    referencia = dps_api.ler_referencia(_nota(), _xml_referencia())
+    montada = dps_api.montar(
+        referencia, _config(), serie='7', numero=12,
+        agora=datetime(2026, 9, 12, 14, 35, 20, tzinfo=timezone.utc))
+    montada.find(f'.//{{{NS}}}serie').text = '123456'
+
+    problemas = dps_api.validar(montada)
+
+    assert any('/DPS/infDPS/serie' == problema.caminho
+               for problema in problemas)
+
+
 def test_identificador_segue_o_formato_oficial_de_45_posicoes():
     referencia = dps_api.ler_referencia(_nota(), _xml_referencia())
     montada = dps_api.montar(
