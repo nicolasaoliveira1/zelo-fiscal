@@ -59,7 +59,7 @@ def test_diagnostico_certificado_nao_pronto(app, ids):
 
 
 def test_diagnostico_certificado_vencido_preserva_a_data(app, ids):
-    vencimento = datetime.now() - timedelta(days=1)
+    vencimento = datetime.now().replace(microsecond=0) - timedelta(days=1)
     _configurar_empresa(app, ids, EstadoCertificado.VENCIDO, vencimento)
 
     with app.app_context():
@@ -72,7 +72,7 @@ def test_diagnostico_certificado_vencido_preserva_a_data(app, ids):
 
 
 def test_diagnostico_certificado_pronto(app, ids):
-    vencimento = datetime.now() + timedelta(days=30)
+    vencimento = datetime.now().replace(microsecond=0) + timedelta(days=30)
     _configurar_empresa(app, ids, EstadoCertificado.PRONTO, vencimento)
 
     with app.app_context():
