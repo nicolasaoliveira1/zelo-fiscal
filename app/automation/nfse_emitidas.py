@@ -17,10 +17,11 @@ módulo só lê. Ele nunca os toca.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
+
+from app.services.nfse_emitidas import LinhaEmitida as LinhaEmitida
 
 BASE = 'https://www.nfse.gov.br/EmissorNacional'
 URL_EMITIDAS = BASE + '/Notas/Emitidas'
@@ -36,19 +37,6 @@ POR_PAGINA = 15
 RE_CHAVE = re.compile(r'/Notas/Visualizar/Index/(\d{20,60})')
 RE_TOTAL = re.compile(r'Total de\s+([\d.]+)\s+registros', re.I)
 RE_PG = re.compile(r'[?&]pg=(\d+)')
-
-
-@dataclass
-class LinhaEmitida:
-    """Uma linha da listagem, como o portal a mostra."""
-    chave: str = ''
-    data_geracao: date | None = None
-    documento: str = ''
-    nome_tomador: str = ''
-    competencia: str = ''
-    municipio: str = ''
-    valor: Decimal | None = None
-    situacao: str = ''
 
 
 def montar_url(inicio, fim, pagina=1):

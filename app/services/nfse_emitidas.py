@@ -16,8 +16,22 @@ a regra que evitou a falha silenciosa dos selects escondidos atras do Chosen
 from __future__ import annotations
 
 from calendar import monthrange
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+
+
+@dataclass
+class LinhaEmitida:
+    """Uma linha de NFS-e lida por qualquer fonte de conferência."""
+    chave: str = ''
+    data_geracao: date | None = None
+    documento: str = ''
+    nome_tomador: str = ''
+    competencia: str = ''
+    municipio: str = ''
+    valor: Decimal | None = None
+    situacao: str = ''
 
 # Maior janela por consulta, em dias corridos e inclusiva nas duas pontas.
 # Confirmado na recon: 01/07 a 31/07 (31 dias) foi aceito e devolveu 80
