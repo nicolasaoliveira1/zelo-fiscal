@@ -942,6 +942,191 @@ export async function consultarEmitidas(botao) {
   }
 }
 
+// --- conferência sombra entre portal e ADN (APINF-10) --------------------
+
+const ROTULO_CAMPO_SOMBRA = {
+  data_geracao: 'data de geração',
+  documento: 'documento do tomador',
+  valor: 'valor',
+};
+
+const ROTULO_FONTE_SOMBRA = {
+  portal: 'portal',
+  adn: 'ADN',
+  comparacao: 'comparação',
+};
+
+function linhaObservacaoSombra(observacao) {
+  const data = observacao?.data_geracao
+    ? dataVisivel(observacao.data_geracao) : 'data não informada';
+  const documento = observacao?.documento || 'documento não informado';
+  const valor = observacao?.valor || 'valor não informado';
+  const situacao = observacao?.situacao_fonte
+    ? `situação da fonte: ${esc(observacao.situacao_fonte)}` : '';
+  return `<span class="nfse-mono">${esc(observacao?.chave || 'chave não informada')}</span>`
+    + ` · ${esc(data)} · ${esc(documento)} · R$ ${esc(valor)}`
+    + (situacao ? ` · ${situacao}` : '');
+}
+
+function listaSombra(titulo, itens, formatar, vazio, classificacao = '') {
+  const lista = Array.isArray(itens) ? itens : [];
+  const atributo = classificacao
+    ? ` data-classificacao="${esc(classificacao)}"` : '';
+  const corpo = lista.length
+    ? `<ul>${lista.map((item) => `<li>${formatar(item)}</li>`).join('')}</ul>`
+    : `<p class="nfse-hint mb-0">${esc(vazio)}</p>`;
+  return `<div class="nfse-sombra-lista"${atributo}>`
+    + `<h3>${esc(titulo)} (${lista.length})</h3>${corpo}</div>`;
+}
+
+function divergenciaSombra(divergencia) {
+  const campos = (divergencia?.campos || [])
+    .map((campo) => ROTULO_CAMPO_SOMBRA[campo] || campo);
+  const situacao = divergencia?.situacao || {};
+  const motivo = campos.length
+    ? `Campos divergentes: ${campos.map((campo) => esc(campo)).join(', ')}.`
+    : 'Diferença de situação fiscal.';
+  const explicacao = situacao.explicacao
+    ? ` ${esc(situacao.explicacao)}` : '';
+  return `<span class="nfse-mono">${esc(divergencia?.chave || 'chave não informada')}</span>`
+    + `<br><span class="nfse-hint">${motivo}</span>`
+    + `<br><span class="nfse-hint">Portal: ${esc(situacao.portal || 'desconhecida')}`
+    + ` · ADN: ${esc(situacao.adn || 'desconhecida')}.${explicacao}</span>`
+    + `<br><span class="nfse-hint">Portal — ${linhaObservacaoSombra(divergencia?.portal)}`
+    + `<br>ADN — ${linhaObservacaoSombra(divergencia?.adn)}</span>`;
+}
+
+function divergenciasSombra(comparacao) {
+  const divergentes = Array.isArray(comparacao?.divergentes)
+    ? comparacao.divergentes : [];
+  const esperadas = Array.isArray(comparacao?.esperadas)
+    ? comparacao.esperadas
+    : divergentes.filter((item) => item.classificacao === 'esperada');
+  const inesperadas = Array.isArray(comparacao?.inesperadas)
+    ? comparacao.inesperadas
+    : divergentes.filter((item) => item.classificacao !== 'esperada');
+  const lista = (itens, vazio, classificacao) => listaSombra(
+    `Diferenças ${classificacao === 'esperada' ? 'esperadas' : 'inesperadas'}`,
+    itens, divergenciaSombra, vazio, classificacao);
+  return `<div class="nfse-sombra-lista">`
+    + `<h3>Divergências entre as fontes (${divergentes.length})</h3>`
+    + lista(esperadas, 'Nenhuma diferença esperada.', 'esperada')
+    + lista(inesperadas, 'Nenhuma diferença inesperada.', 'inesperada')
+    + '</div>';
+}
+
+function resumoFonteSombra(fonte, resumo) {
+  const rotulo = ROTULO_FONTE_SOMBRA[fonte] || fonte;
+  if (!resumo) return `${rotulo}: leitura não concluída`;
+  const lidas = resumo.lidos ?? resumo.lidas ?? 0;
+  return `${rotulo}: ${esc(lidas)} lida(s)`;
+}
+
+export function pintarSombra(sombra) {
+  const alvo = document.getElementById('nfseSombraResultado');
+  if (!alvo) return;
+  if (!sombra) {
+    alvo.innerHTML = '<p class="nfse-hint mb-0">Escolha o período e execute '
+      + 'a conferência para ver as três listas.</p>';
+    return;
+  }
+
+  if (sombra.status === 'inconclusiva') {
+    const fonte = ROTULO_FONTE_SOMBRA[sombra.fonte_falha]
+      || sombra.fonte_falha || 'não identificada';
+    const mensagem = sombra.mensagem
+      || 'Não foi possível concluir uma das leituras.';
+    alvo.innerHTML = `<div class="nfse-sombra-status" data-situacao="inconclusiva">`
+      + '<strong>Resultado inconclusivo</strong>'
+      + `<p class="mb-1 mt-1">${esc(mensagem)}</p>`
+      + `<p class="nfse-hint mb-0">Fonte com falha: ${esc(fonte)}. `
+      + 'Não é possível afirmar igualdade entre portal e ADN.</p></div>';
+    return;
+  }
+
+  const comparacao = sombra.comparacao || {};
+  const periodo = sombra.periodo?.inicio && sombra.periodo?.fim
+    ? `${dataVisivel(sombra.periodo.inicio)} a ${dataVisivel(sombra.periodo.fim)}`
+    : 'período informado';
+  const divergentes = Array.isArray(comparacao.divergentes)
+    ? comparacao.divergentes : [];
+  const total = comparacao.total_diferencas
+    ?? ((comparacao.so_no_portal || []).length
+      + (comparacao.so_no_adn || []).length + divergentes.length);
+  const fontes = sombra.fontes || {};
+  const nenhumaObservacao = !fontes.portal?.lidas && !fontes.adn?.lidos;
+  const conclusao = total === 0
+    ? (nenhumaObservacao
+      ? 'Nenhuma observação foi encontrada nas duas fontes neste período.'
+      : 'As observações das duas fontes coincidem neste período.')
+    : `${esc(total)} diferença(s) encontrada(s); confira a classificação abaixo.`;
+
+  alvo.innerHTML = `<div class="nfse-sombra-status" data-situacao="concluida">`
+    + `<strong>Conferência concluída</strong>`
+    + `<p class="mb-1 mt-1">Período: ${esc(periodo)}.</p>`
+    + `<p class="nfse-hint mb-0">${conclusao}</p></div>`
+    + `<p class="nfse-hint mt-3 mb-0">${resumoFonteSombra('portal', fontes.portal)}`
+    + ` · ${resumoFonteSombra('adn', fontes.adn)}</p>`
+    + '<p class="nfse-hint mt-2 mb-0">Observação exclusiva de uma fonte é '
+    + 'diferença inesperada; cancelamento reconhecido pelo ADN fica nas '
+    + 'diferenças esperadas.</p>'
+    + listaSombra(
+      'Somente no portal', comparacao.so_no_portal,
+      linhaObservacaoSombra, 'Nenhuma observação exclusiva do portal.',
+      'inesperada')
+    + listaSombra(
+      'Somente no ADN', comparacao.so_no_adn,
+      linhaObservacaoSombra, 'Nenhuma observação exclusiva do ADN.',
+      'inesperada')
+    + divergenciasSombra(comparacao);
+}
+
+export async function executarSombra(botao) {
+  if (!botao) return;
+  const inicio = document.getElementById('emitidasInicio')?.value;
+  const fim = document.getElementById('emitidasFim')?.value;
+  const estado = document.getElementById('nfseSombraEstado');
+  if (!inicio || !fim) {
+    showToast('Informe as datas inicial e final do período.', 'error');
+    return;
+  }
+
+  const rotulo = botao.textContent;
+  botao.disabled = true;
+  botao.setAttribute('aria-busy', 'true');
+  botao.textContent = 'Conferindo…';
+  if (estado) estado.textContent = 'Lendo o portal e o ADN…';
+  try {
+    const dados = await chamar('/nfse/emitidas/sombra', {
+      body: JSON.stringify({ inicio, fim }),
+    });
+    const sombra = dados.sombra;
+    pintarSombra(sombra);
+    const inconclusiva = sombra?.status === 'inconclusiva';
+    const total = sombra?.comparacao?.total_diferencas ?? 0;
+    if (estado) {
+      estado.textContent = inconclusiva
+        ? 'Resultado inconclusivo.'
+        : total
+        ? `${total} diferença(s) encontrada(s) na conferência.`
+        : 'As fontes coincidem no período.';
+    }
+    showToast(inconclusiva
+      ? (sombra?.mensagem || 'Resultado inconclusivo.')
+      : (total ? `${total} diferença(s) encontrada(s).`
+        : 'As fontes coincidem no período.'), inconclusiva ? 'error'
+        : (total ? 'info' : 'success'));
+  } catch (erro) {
+    if (erro.dados?.sombra) pintarSombra(erro.dados.sombra);
+    if (estado) estado.textContent = 'Resultado inconclusivo.';
+    showToast(erro.message, 'error');
+  } finally {
+    botao.disabled = false;
+    botao.removeAttribute('aria-busy');
+    botao.textContent = rotulo;
+  }
+}
+
 // --- selecao e acao em massa ----------------------------------------------
 
 function pintarSelecao() {
@@ -1350,6 +1535,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('formEmitidas')?.addEventListener('submit', (ev) => {
     ev.preventDefault();
     consultarEmitidas(document.getElementById('btnConsultarEmitidas'));
+  });
+
+  document.getElementById('btnExecutarSombra')?.addEventListener('click', (ev) => {
+    executarSombra(ev.currentTarget);
   });
 
   document.getElementById('btnVerificarAcesso')?.addEventListener('click', (ev) => {

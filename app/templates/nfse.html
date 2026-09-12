@@ -396,6 +396,51 @@
     }
     .nfse-diverg ul { margin: 0; padding-left: 1.1rem; font-size: 0.86rem; }
     .nfse-diverg li { margin-bottom: 0.15rem; }
+    .nfse-sombra {
+        border-top: 1px solid var(--zelo-line);
+        padding-top: 1rem;
+    }
+    .nfse-sombra-status {
+        background: var(--zelo-muted-soft);
+        border: 1px solid var(--zelo-line);
+        border-left: 4px solid var(--zelo-muted);
+        border-radius: 8px;
+        padding: 0.75rem 0.85rem;
+    }
+    .nfse-sombra-status[data-situacao="concluida"] {
+        background: var(--zelo-ok-soft);
+        border-left-color: var(--zelo-ok);
+    }
+    .nfse-sombra-status[data-situacao="inconclusiva"] {
+        background: var(--zelo-warn-soft);
+        border-left-color: var(--zelo-warn);
+    }
+    .nfse-sombra-lista {
+        border-top: 1px solid var(--zelo-line);
+        margin-top: 0.85rem;
+        padding-top: 0.7rem;
+    }
+    .nfse-sombra-lista h3 {
+        color: var(--zelo-slate);
+        font-size: 0.78rem;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.35rem;
+        text-transform: uppercase;
+    }
+    .nfse-sombra-lista ul {
+        font-size: 0.86rem;
+        margin: 0;
+        padding-left: 1.1rem;
+    }
+    .nfse-sombra-lista li { margin-bottom: 0.4rem; }
+    .nfse-sombra-lista[data-classificacao="esperada"] {
+        border-left: 3px solid var(--zelo-ok);
+        padding-left: 0.7rem;
+    }
+    .nfse-sombra-lista[data-classificacao="inesperada"] {
+        border-left: 3px solid var(--zelo-danger);
+        padding-left: 0.7rem;
+    }
     .nfse-acoes-linha { display: flex; gap: 0.35rem; justify-content: flex-end; }
     /* Rotulo de acao nao quebra: "Já emiti" virando "Já / emiti" em duas linhas
        le como botao quebrado, e a coluna ganhou mais um botao (Cancelar). */
@@ -1196,10 +1241,33 @@
         <button class="btn btn-primary btn-sm" type="submit" id="btnConsultarEmitidas">
             Consultar o portal
         </button>
+        <button class="btn btn-soft-primary btn-sm" type="button" id="btnExecutarSombra">
+            Conferir portal + ADN
+        </button>
         <span class="nfse-hint" id="emitidasEstado"></span>
     </form>
 
     <div id="emitidasPainel"></div>
+
+    <!-- Conferência paralela entre as duas fontes (APINF-10) -->
+    <div class="nfse-sombra mt-4" id="nfseSombra">
+        {{ zl_secao('Conferência sombra: portal + ADN') }}
+        <p class="nfse-hint mb-3">
+            Executa a leitura completa das duas fontes para o intervalo acima e
+            preserva os retratos separados. Não emite, cancela ou substitui
+            documento fiscal.
+        </p>
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+            <span class="nfse-hint" id="nfseSombraEstado" role="status" aria-live="polite">
+                Nenhuma conferência sombra realizada.
+            </span>
+        </div>
+        <div id="nfseSombraResultado" aria-live="polite">
+            <p class="nfse-hint mb-0">
+                Escolha o período e execute a conferência para ver as três listas.
+            </p>
+        </div>
+    </div>
 </div>
 
 <!-- Aviso confirmavel: aliquota nao conferida nesta sessao (modal de decisao) -->
