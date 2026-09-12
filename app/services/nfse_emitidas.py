@@ -33,6 +33,12 @@ class LinhaEmitida:
     valor: Decimal | None = None
     situacao: str = ''
 
+
+FONTES_OBSERVACAO = ('portal', 'adn')
+TIPOS_EVENTO_CANCELAMENTO = ('e101101', 'e105102')
+SITUACAO_FISCAL_GERADA = 'gerada'
+SITUACAO_FISCAL_CANCELADA = 'cancelada'
+
 # Maior janela por consulta, em dias corridos e inclusiva nas duas pontas.
 # Confirmado na recon: 01/07 a 31/07 (31 dias) foi aceito e devolveu 80
 # registros, ou seja um mes civil cabe numa consulta so. O corte por mes do
@@ -94,6 +100,145 @@ def periodo_do_mes(mes_geracao):
     numero, ano = mes_geracao.split('/')
     inicio = date(int(ano), int(numero), 1)
     return inicio, _fim_do_mes(inicio)
+
+
+# --- observações por fonte e projeção canônica -----------------------------
+
+def _gravar_observacoes(linhas, fonte, execution_id=None):
+    """Faz upsert do retrato de uma fonte, sem confirmar a transação.
+
+    Cada produtor conserva sua própria observação. A ausência de `commit()` é
+    deliberada: o ADN confirma observação, evento e cursor por NSU na mesma
+    unidade de trabalho; o portal mantém sua consulta inteira atômica.
+    """
+    from app import db
+    from app.models import ObservacaoEmitidaNfse
+    from app.services.execution_logger import log_event
+
+    if fonte not in FONTES_OBSERVACAO:
+        raise ValueError(
+            f'Fonte de observação desconhecida: {fonte!r}.')
+
+    linhas = list(linhas)
+    chaves = list(dict.fromkeys(linha.chave for linha in linhas))
+    if any(not chave for chave in chaves):
+        raise ValueError('Toda observação de NFS-e precisa de uma chave.')
+
+    existentes = {observacao.chave: observacao for observacao in
+                  ObservacaoEmitidaNfse.query.filter(
+                      ObservacaoEmitidaNfse.fonte == fonte,
+                      ObservacaoEmitidaNfse.chave.in_(chaves),
+                  ).all()} if chaves else {}
+
+    novas = atualizadas = 0
+    for linha in linhas:
+        observacao = existentes.get(linha.chave)
+        if observacao is None:
+            observacao = ObservacaoEmitidaNfse(
+                fonte=fonte, chave=linha.chave)
+            db.session.add(observacao)
+            existentes[linha.chave] = observacao
+            novas += 1
+        else:
+            atualizadas += 1
+
+        observacao.data_geracao = linha.data_geracao
+        observacao.competencia_dps = linha.competencia or None
+        observacao.documento = linha.documento or None
+        observacao.nome_tomador = linha.nome_tomador or None
+        observacao.municipio = linha.municipio or None
+        observacao.valor = linha.valor
+        observacao.situacao_fonte = linha.situacao or None
+        observacao.observado_em = datetime.now()
+
+    log_event(
+        'nfse_emitidas_observacoes', fonte=fonte, lidas=len(linhas),
+        novas=novas, atualizadas=atualizadas, execution_id=execution_id)
+    return novas, atualizadas
+
+
+def _situacao_fiscal_da_observacao(observacao):
+    """Converte o vocabulário da fonte para a situação do domínio."""
+    from app.models import SituacaoNotaEmitida
+
+    if (observacao.fonte == 'portal'
+            and observacao.situacao_fonte == SituacaoNotaEmitida.GERADA):
+        return SITUACAO_FISCAL_GERADA
+    if observacao.fonte == 'adn':
+        # O ADN já entrega o documento fiscal emitido; cancelamento é evento
+        # separado e tem precedência na projeção abaixo.
+        return SITUACAO_FISCAL_GERADA
+    return None
+
+
+def projetar_espelho(chaves):
+    """Projeta observações em `NotaEmitidaNfse`, sem confirmar a transação.
+
+    A observação ADN prevalece sobre a do portal. Eventos de cancelamento são
+    evidência autoritativa mesmo quando a nota ainda só foi vista pelo portal,
+    para que o espelho não continue contando um documento cancelado.
+    """
+    from app import db
+    from app.models import (
+        EventoEmitidaNfse,
+        NotaEmitidaNfse,
+        ObservacaoEmitidaNfse,
+    )
+
+    chaves = list(dict.fromkeys(chave for chave in chaves if chave))
+    if not chaves:
+        return 0, 0
+
+    observacoes = ObservacaoEmitidaNfse.query.filter(
+        ObservacaoEmitidaNfse.chave.in_(chaves),
+        ObservacaoEmitidaNfse.fonte.in_(FONTES_OBSERVACAO),
+    ).all()
+    por_chave = {}
+    for observacao in observacoes:
+        por_chave.setdefault(observacao.chave, {})[observacao.fonte] = observacao
+
+    if not por_chave:
+        return 0, 0
+
+    eventos = EventoEmitidaNfse.query.filter(
+        EventoEmitidaNfse.chave.in_(por_chave),
+        EventoEmitidaNfse.tipo.in_(TIPOS_EVENTO_CANCELAMENTO),
+    ).all()
+    chaves_canceladas = {evento.chave for evento in eventos}
+
+    existentes = {nota.chave: nota for nota in NotaEmitidaNfse.query.filter(
+        NotaEmitidaNfse.chave.in_(list(por_chave)),
+    ).all()}
+
+    novas = atualizadas = 0
+    for chave, por_fonte in por_chave.items():
+        observacao = por_fonte.get('adn') or por_fonte.get('portal')
+        if observacao is None:
+            continue
+
+        nota = existentes.get(chave)
+        if nota is None:
+            nota = NotaEmitidaNfse(chave=chave)
+            db.session.add(nota)
+            novas += 1
+        else:
+            atualizadas += 1
+
+        cancelada = chave in chaves_canceladas
+        nota.data_geracao = observacao.data_geracao
+        nota.competencia_dps = observacao.competencia_dps
+        nota.documento = observacao.documento
+        nota.nome_tomador = observacao.nome_tomador
+        nota.municipio = observacao.municipio
+        nota.valor = observacao.valor
+        nota.situacao = observacao.situacao_fonte
+        nota.origem_autoritativa = 'adn' if cancelada else observacao.fonte
+        nota.situacao_fiscal = (
+            SITUACAO_FISCAL_CANCELADA if cancelada
+            else _situacao_fiscal_da_observacao(observacao))
+        nota.consultado_em = observacao.observado_em or datetime.now()
+
+    return novas, atualizadas
 
 
 # --- consulta ao portal ----------------------------------------------------
