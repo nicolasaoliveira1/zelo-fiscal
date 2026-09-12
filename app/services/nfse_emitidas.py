@@ -34,10 +34,37 @@ class LinhaEmitida:
     situacao: str = ''
 
 
+@dataclass(frozen=True)
+class DivergenciaEmitidaNfse:
+    """Diferença entre os retratos portal e ADN de uma mesma chave."""
+
+    chave: str
+    portal: object
+    adn: object
+    campos: tuple[str, ...] = ()
+    situacao_portal: str = 'desconhecida'
+    situacao_adn: str = 'desconhecida'
+
+    @property
+    def situacao_divergente(self):
+        """Indica se as situações fiscais normalizadas não coincidem."""
+        return self.situacao_portal != self.situacao_adn
+
+
+@dataclass(frozen=True)
+class Comparacao:
+    """Resultado somente leitura da conferência entre as duas fontes."""
+
+    so_no_portal: tuple[object, ...] = ()
+    so_no_adn: tuple[object, ...] = ()
+    divergentes: tuple[DivergenciaEmitidaNfse, ...] = ()
+
+
 FONTES_OBSERVACAO = ('portal', 'adn')
 TIPOS_EVENTO_CANCELAMENTO = ('e101101', 'e105102')
 SITUACAO_FISCAL_GERADA = 'gerada'
 SITUACAO_FISCAL_CANCELADA = 'cancelada'
+SITUACAO_FISCAL_DESCONHECIDA = 'desconhecida'
 
 # Maior janela por consulta, em dias corridos e inclusiva nas duas pontas.
 # Confirmado na recon: 01/07 a 31/07 (31 dias) foi aceito e devolveu 80
@@ -243,6 +270,93 @@ def projetar_espelho(chaves):
             nota.nota_id = None
 
     return novas, atualizadas
+
+
+def _situacao_comparavel(observacao, *, cancelada=False):
+    """Converte a situação da fonte para o vocabulário comum da comparação."""
+    if cancelada:
+        return SITUACAO_FISCAL_CANCELADA
+    return (_situacao_fiscal_da_observacao(observacao)
+            or SITUACAO_FISCAL_DESCONHECIDA)
+
+
+def comparar_fontes(inicio, fim):
+    """Compara observações persistidas sem alterar a unidade de trabalho.
+
+    A chave do documento é a identidade do par. Primeiro são encontradas as
+    chaves com pelo menos uma observação no intervalo; depois o outro retrato
+    da mesma chave é lido sem restringir sua data, para que uma data divergente
+    continue aparecendo como divergência em vez de virar uma ausência.
+    Eventos de cancelamento do ADN entram somente na classificação normalizada
+    da situação; nenhuma linha é criada, atualizada ou confirmada aqui.
+    """
+    from app.models import EventoEmitidaNfse, ObservacaoEmitidaNfse
+
+    if inicio > fim:
+        raise ValueError('A data inicial não pode ser depois da final.')
+
+    observacoes_no_periodo = ObservacaoEmitidaNfse.query.filter(
+        ObservacaoEmitidaNfse.fonte.in_(FONTES_OBSERVACAO),
+        ObservacaoEmitidaNfse.data_geracao >= inicio,
+        ObservacaoEmitidaNfse.data_geracao <= fim,
+    ).all()
+    chaves = {observacao.chave for observacao in observacoes_no_periodo}
+    if not chaves:
+        return Comparacao()
+
+    observacoes = ObservacaoEmitidaNfse.query.filter(
+        ObservacaoEmitidaNfse.fonte.in_(FONTES_OBSERVACAO),
+        ObservacaoEmitidaNfse.chave.in_(chaves),
+    ).order_by(
+        ObservacaoEmitidaNfse.chave,
+        ObservacaoEmitidaNfse.fonte,
+    ).all()
+    eventos = EventoEmitidaNfse.query.filter(
+        EventoEmitidaNfse.chave.in_(chaves),
+        EventoEmitidaNfse.tipo.in_(TIPOS_EVENTO_CANCELAMENTO),
+    ).all()
+    chaves_canceladas = {evento.chave for evento in eventos}
+
+    por_chave = {}
+    for observacao in observacoes:
+        por_chave.setdefault(observacao.chave, {})[
+            observacao.fonte] = observacao
+
+    so_no_portal = []
+    so_no_adn = []
+    divergentes = []
+    for chave in sorted(por_chave):
+        por_fonte = por_chave[chave]
+        portal = por_fonte.get('portal')
+        adn = por_fonte.get('adn')
+        if portal is None:
+            so_no_adn.append(adn)
+            continue
+        if adn is None:
+            so_no_portal.append(portal)
+            continue
+
+        campos = tuple(campo for campo in (
+            'data_geracao', 'documento', 'valor')
+            if getattr(portal, campo) != getattr(adn, campo))
+        situacao_portal = _situacao_comparavel(portal)
+        situacao_adn = _situacao_comparavel(
+            adn, cancelada=chave in chaves_canceladas)
+        if campos or situacao_portal != situacao_adn:
+            divergentes.append(DivergenciaEmitidaNfse(
+                chave=chave,
+                portal=portal,
+                adn=adn,
+                campos=campos,
+                situacao_portal=situacao_portal,
+                situacao_adn=situacao_adn,
+            ))
+
+    return Comparacao(
+        so_no_portal=tuple(so_no_portal),
+        so_no_adn=tuple(so_no_adn),
+        divergentes=tuple(divergentes),
+    )
 
 
 def registrar_eventos(eventos, execution_id=None):
