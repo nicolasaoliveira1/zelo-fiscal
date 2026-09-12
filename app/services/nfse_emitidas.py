@@ -335,7 +335,7 @@ def consultar(inicio, fim, execution_id=None):
     """
     from app import db
     from app.automation import nfse_emitidas as automacao
-    from app.models import ConsultaEmitidaNfse, NotaEmitidaNfse
+    from app.models import ConsultaEmitidaNfse
     from app.services.execution_logger import log_event
     from app.services.nfse_session import SESSAO
 
@@ -351,32 +351,17 @@ def consultar(inicio, fim, execution_id=None):
             log=lambda evento, **campos: log_event(
                 evento, execution_id=execution_id, **campos)))
 
-    novas = atualizadas = 0
-    existentes = {n.chave: n for n in NotaEmitidaNfse.query.filter(
-        NotaEmitidaNfse.chave.in_([linha.chave for linha in lidas])).all()} if lidas else {}
-
-    for linha in lidas:
-        registro = existentes.get(linha.chave)
-        if registro is None:
-            registro = NotaEmitidaNfse(chave=linha.chave)
-            db.session.add(registro)
-            novas += 1
-        else:
-            atualizadas += 1
-        registro.data_geracao = linha.data_geracao
-        registro.competencia_dps = linha.competencia or None
-        registro.documento = linha.documento or None
-        registro.nome_tomador = linha.nome_tomador or None
-        registro.municipio = linha.municipio or None
-        registro.valor = linha.valor
-        registro.situacao = linha.situacao or None
-        registro.consultado_em = datetime.now()
-
-    db.session.commit()
-    conciliar()
-    consulta = ConsultaEmitidaNfse(inicio=inicio, fim=fim)
-    db.session.add(consulta)
-    db.session.commit()
+    try:
+        chaves = [linha.chave for linha in lidas]
+        _gravar_observacoes(lidas, 'portal', execution_id=execution_id)
+        novas, atualizadas = projetar_espelho(chaves)
+        conciliar(persistir=False, execution_id=execution_id)
+        consulta = ConsultaEmitidaNfse(inicio=inicio, fim=fim)
+        db.session.add(consulta)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
 
     log_event('nfse_emitidas_consulta_ok', lidas=len(lidas), novas=novas,
               atualizadas=atualizadas, consulta_id=consulta.id,
