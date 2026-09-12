@@ -36,3 +36,5 @@ requests==2.32.5
 # o traz. NAO ha lxml/signxml/zeep — a stdlib reproduz o digest e valida a
 # assinatura de NF-e reais (medido; ver .specs/features/manifestador-nfe/recon.md).
 cryptography==46.0.3
+# Validação offline dos XSDs oficiais da NFS-e nacional (P2, AD-037).
+xmlschema==4.3.2
