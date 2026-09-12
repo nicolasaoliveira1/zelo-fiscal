@@ -46,6 +46,7 @@ from app.services import (
     nfse_service,
 )
 from app.services.nfse_extrato_inter import chave_descricao, normalizar_termo
+from app.services.correlation import CorrelationContext
 from app.services.execution_logger import log_event
 from app.services.nfse_session import SESSAO
 from app.utils import (
@@ -1412,6 +1413,61 @@ def _emitida_para_json(emitida):
     }
 
 
+def _sincronizacao_para_json(resultado):
+    """Expõe o resumo da leitura ADN sem vazar resposta ou erro do portal."""
+    return {
+        'faixa_nsu': {
+            'inicio': resultado.nsu_inicial,
+            'fim': resultado.nsu_final,
+        },
+        'nsu_inicial': resultado.nsu_inicial,
+        'nsu_final': resultado.nsu_final,
+        'nsu_falha': resultado.nsu_falha,
+        'lidos': resultado.lidos,
+        'gravados': resultado.gravados,
+        'ignorados': resultado.ignorados,
+        'desfecho': resultado.desfecho,
+    }
+
+
+def _erro_sincronizacao(desfecho, falha=None):
+    """Traduz falhas da sincronização para mensagens acionáveis e seguras."""
+    if desfecho == 'negado':
+        codigo = re.search(r'\bHTTP\s+(\d{3})\b', str(falha or ''))
+        detalhe = f' (HTTP {codigo.group(1)})' if codigo else ''
+        return (
+            'O ADN recusou a chamada'
+            f'{detalhe}. Verifique a habilitação do certificado e o acesso '
+            'do escritório.',
+            502,
+        )
+
+    mensagens = {
+        'indisponivel': (
+            'O serviço do ADN está indisponível no momento. Tente novamente '
+            'mais tarde.'),
+        'credencial': (
+            'A credencial do escritório não está disponível para sincronizar '
+            'o ADN.'),
+        'rejeitado': (
+            'O ADN rejeitou a sincronização. Confira o acesso e tente '
+            'novamente.'),
+        'falha_local': (
+            'A sincronização falhou no ambiente local. Nenhum documento foi '
+            'descartado.'),
+    }
+    codigos = {
+        'indisponivel': 503,
+        'credencial': 424,
+        'rejeitado': 502,
+        'falha_local': 500,
+    }
+    return (mensagens.get(
+        desfecho,
+        'Não foi possível concluir a sincronização do ADN.'),
+        codigos.get(desfecho, 500))
+
+
 def _competencia_corrente():
     hoje = datetime.now()
     return f'{hoje.month:02d}/{hoje.year}'
@@ -1522,6 +1578,43 @@ def nfse_consultar_emitidas():
         'atualizadas': resultado['atualizadas'],
         'consulta_id': resultado['consulta_id'],
         'painel': _painel_emitidas(consulta=consulta),
+    }
+
+
+@bp.route('/nfse/emitidas/sincronizar', methods=['POST'])
+@requer_papel('operador')
+def nfse_sincronizar_emitidas():
+    """Aciona a leitura incremental do ADN e devolve seu resumo seguro."""
+    execution_id = CorrelationContext.new_execution_id()
+    try:
+        resultado = nfse_api_adn.sincronizar(execution_id=execution_id)
+    except nfse_api_adn.SincronizacaoEmCursoError:
+        return json_error(
+            'Já existe uma sincronização do ADN em andamento. Aguarde a '
+            'conclusão e tente novamente.',
+            409,
+            desfecho='em_curso',
+            execution_id=execution_id,
+        )
+    except Exception as exc:
+        return json_error(exc=exc, code=500, execution_id=execution_id)
+
+    resumo = _sincronizacao_para_json(resultado)
+    if resultado.falha:
+        mensagem, codigo = _erro_sincronizacao(
+            resultado.desfecho, resultado.falha)
+        return json_error(
+            mensagem,
+            codigo,
+            desfecho=resultado.desfecho,
+            sincronizacao=resumo,
+            execution_id=execution_id,
+        )
+
+    return {
+        'status': 'ok',
+        'execution_id': execution_id,
+        'sincronizacao': resumo,
     }
 
 

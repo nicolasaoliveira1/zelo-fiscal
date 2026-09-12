@@ -1152,6 +1152,29 @@
     </div>
 </div>
 
+<!-- Sincronização incremental da conferência oficial (APINF-03..09) -->
+<div class="nfse-card mt-3" id="nfseAdnSincronizacao">
+    {{ zl_secao('Atualizar pelo ADN') }}
+    <p class="nfse-hint mb-3">
+        Busca novas NFS-e na API nacional e atualiza a conferência deste escritório.
+        É uma operação somente de leitura: não emite documento fiscal.
+    </p>
+    <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+        <button class="btn btn-primary btn-sm" type="button" id="btnSincronizarAdn">
+            Sincronizar notas do ADN
+        </button>
+        <span class="nfse-hint" id="nfseAdnSincronizacaoEstado" role="status"
+              aria-live="polite">
+            Nenhuma sincronização realizada.
+        </span>
+    </div>
+    <div id="nfseAdnSincronizacaoResultado" aria-live="polite">
+        <p class="nfse-hint mb-0">
+            O intervalo de NSU e as contagens aparecerão após a sincronização.
+        </p>
+    </div>
+</div>
+
 <!-- Conferencia contra o portal (NFSE-28) -->
 <div class="nfse-card mt-3">
     {{ zl_secao('O que saiu no portal') }}

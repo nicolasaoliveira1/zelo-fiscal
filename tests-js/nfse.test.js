@@ -11,8 +11,13 @@ globalThis.requestAnimationFrame = (callback) => setTimeout(callback, 0);
 dom.window.HTMLElement.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
 
-const { celulaDescricao, pintarEmitidas, consultarEmitidas, iniciarEmissao } =
-  await import('../app/static/js/nfse.js');
+const {
+  celulaDescricao,
+  pintarEmitidas,
+  pintarSincronizacaoAdn,
+  consultarEmitidas,
+  iniciarEmissao,
+} = await import('../app/static/js/nfse.js');
 
 after(() => dom.window.close());
 
@@ -23,7 +28,8 @@ beforeEach(() => {
     <input id="emitidasInicio" value="2026-08-01">
     <input id="emitidasFim" value="2026-08-31">
     <span id="emitidasEstado"></span>
-    <button id="btnConsultarEmitidas" type="button">Consultar o portal</button>`;
+    <button id="btnConsultarEmitidas" type="button">Consultar o portal</button>
+    <div id="nfseAdnSincronizacaoResultado"></div>`;
 });
 
 function painel(overrides = {}) {
@@ -120,6 +126,23 @@ test('mostra o intervalo e a seção de correspondência ambígua', () => {
   assert.match(texto, /Correspondência ambígua \(1\)/);
   assert.match(texto, /valor final comparado/);
   assert.match(texto, /CANDIDATA UM/);
+});
+
+test('mostra o desfecho teto junto da faixa e das contagens do ADN', () => {
+  pintarSincronizacaoAdn({
+    faixa_nsu: { inicio: 4, fim: 12 },
+    lidos: 8,
+    gravados: 6,
+    ignorados: 2,
+    desfecho: 'teto',
+  });
+
+  const texto = document.getElementById('nfseAdnSincronizacaoResultado').textContent;
+  assert.match(texto, /NSU 4 a 12/);
+  assert.match(texto, /Limite de chamadas atingido/);
+  assert.match(texto, /8 lido\(s\)/);
+  assert.match(texto, /6 gravado\(s\)/);
+  assert.match(texto, /2 ignorado\(s\)/);
 });
 
 test('consulta envia somente o intervalo, sem competência', async () => {

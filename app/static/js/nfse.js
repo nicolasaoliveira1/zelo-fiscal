@@ -712,6 +712,84 @@ async function desfazerGrupo(token) {
   }
 }
 
+// --- sincronização incremental pelo ADN ----------------------------------
+
+const MENSAGEM_SINCRONIZACAO_ADN = {
+  concluida: 'Sincronização concluída.',
+  sem_documentos: 'Nenhum documento novo foi encontrado no ADN.',
+  teto: 'Limite de chamadas atingido; a sincronização pode continuar depois.',
+};
+
+function mensagemSincronizacaoAdn(desfecho) {
+  return MENSAGEM_SINCRONIZACAO_ADN[desfecho]
+    || 'Sincronização encerrada com desfecho informado pelo servidor.';
+}
+
+function resumoSincronizacaoAdn(sincronizacao) {
+  const faixa = sincronizacao?.faixa_nsu || {};
+  const inicio = faixa.inicio ?? sincronizacao?.nsu_inicial ?? 0;
+  const fim = faixa.fim ?? sincronizacao?.nsu_final;
+  const intervalo = fim == null
+    ? `a partir do NSU ${esc(inicio)}; sem avanço confirmado`
+    : `NSU ${esc(inicio)} a ${esc(fim)}`;
+  const mensagem = mensagemSincronizacaoAdn(sincronizacao?.desfecho);
+  const falha = sincronizacao?.nsu_falha == null
+    ? ''
+    : `<span class="nfse-hint zl-num">falha no NSU ${esc(sincronizacao.nsu_falha)}</span>`;
+  return `<div class="nfse-total">
+    <span class="valor">${intervalo}</span>
+    <span class="rotulo">faixa percorrida</span>
+    <span class="nfse-hint">${esc(mensagem)}</span>
+    <span class="nfse-hint zl-num">${esc(sincronizacao?.lidos ?? 0)} lido(s)</span>
+    <span class="nfse-hint zl-num">${esc(sincronizacao?.gravados ?? 0)} gravado(s)</span>
+    <span class="nfse-hint zl-num">${esc(sincronizacao?.ignorados ?? 0)} ignorado(s)</span>
+    ${falha}
+  </div>`;
+}
+
+export function pintarSincronizacaoAdn(sincronizacao) {
+  const alvo = document.getElementById('nfseAdnSincronizacaoResultado');
+  if (!alvo) return;
+  if (!sincronizacao) {
+    alvo.innerHTML = '<p class="nfse-hint mb-0">O intervalo de NSU e as '
+      + 'contagens aparecerão após a sincronização.</p>';
+    return;
+  }
+  alvo.innerHTML = resumoSincronizacaoAdn(sincronizacao);
+}
+
+export async function sincronizarAdn(botao) {
+  if (!botao) return;
+  const estado = document.getElementById('nfseAdnSincronizacaoEstado');
+  const rotulo = botao.textContent;
+  botao.disabled = true;
+  botao.setAttribute('aria-busy', 'true');
+  botao.textContent = 'Sincronizando…';
+  if (estado) estado.textContent = 'Lendo novas notas do ADN…';
+  try {
+    const dados = await chamar('/nfse/emitidas/sincronizar');
+    pintarSincronizacaoAdn(dados.sincronizacao);
+    if (estado) {
+      const resumo = dados.sincronizacao || {};
+      const mensagem = mensagemSincronizacaoAdn(resumo.desfecho);
+      estado.textContent = `${mensagem} ${resumo.gravados || 0} gravada(s), `
+        + `${resumo.ignorados || 0} ignorada(s).`;
+    }
+    showToast(mensagemSincronizacaoAdn(dados.sincronizacao?.desfecho),
+      dados.sincronizacao?.desfecho === 'teto' ? 'info' : 'success');
+  } catch (erro) {
+    if (erro.dados?.sincronizacao) {
+      pintarSincronizacaoAdn(erro.dados.sincronizacao);
+    }
+    if (estado) estado.textContent = erro.message;
+    showToast(erro.message, 'error');
+  } finally {
+    botao.disabled = false;
+    botao.removeAttribute('aria-busy');
+    botao.textContent = rotulo;
+  }
+}
+
 // --- conferencia com o portal (notas emitidas) ----------------------------
 
 export function pintarEmitidas(painel) {
@@ -1276,6 +1354,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btnVerificarAcesso')?.addEventListener('click', (ev) => {
     verificarAcesso(ev.currentTarget);
+  });
+
+  document.getElementById('btnSincronizarAdn')?.addEventListener('click', (ev) => {
+    sincronizarAdn(ev.currentTarget);
   });
 
   document.getElementById('formImportar')?.addEventListener('submit', async (ev) => {
