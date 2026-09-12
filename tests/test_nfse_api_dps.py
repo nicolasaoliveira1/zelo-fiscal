@@ -4,6 +4,10 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 from app.services import nfse_api_dps as dps_api
 
@@ -70,6 +74,31 @@ def _xml_referencia(sem_dcompet=False, com_ibscbs=False, prestador=PRESTADOR_SIN
 def _texto(elemento, nome):
     filho = elemento.find(f'{{{NS}}}{nome}')
     return filho.text if filho is not None else None
+
+
+def _montada():
+    referencia = dps_api.ler_referencia(_nota(), _xml_referencia())
+    return dps_api.montar(
+        referencia, _config(), serie='7', numero=12,
+        agora=datetime(2026, 9, 12, 14, 35, 20, tzinfo=timezone.utc))
+
+
+def _credencial_sintetica():
+    chave = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    nome = x509.Name([
+        x509.NameAttribute(NameOID.COUNTRY_NAME, 'BR'),
+        x509.NameAttribute(NameOID.COMMON_NAME, 'Certificado Sintético'),
+    ])
+    certificado = (
+        x509.CertificateBuilder()
+        .subject_name(nome)
+        .issuer_name(nome)
+        .public_key(chave.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime(2026, 1, 1, tzinfo=timezone.utc))
+        .not_valid_after(datetime(2027, 1, 1, tzinfo=timezone.utc))
+        .sign(chave, hashes.SHA256()))
+    return chave, certificado
 
 
 def test_ler_referencia_preserva_data_completa_do_xml_e_nao_a_competencia_mensal():
@@ -201,3 +230,55 @@ def test_montar_nao_recebe_ambiente_publico():
             referencia, _config(), serie='7', numero=12,
             agora=datetime(2026, 9, 12, tzinfo=timezone.utc),
             ambiente='restrita')
+
+
+def test_assinar_reutiliza_o_perfil_xml_dsig_e_verifica_o_id_oficial():
+    montada = _montada()
+    chave, certificado = _credencial_sintetica()
+
+    assinada = dps_api.assinar(montada, chave, certificado)
+    assinatura = assinada.find(
+        f'{{{dps_api.nfe_assinatura.NS_DSIG}}}Signature')
+    signed_info = assinatura.find(
+        f'{{{dps_api.nfe_assinatura.NS_DSIG}}}SignedInfo')
+    referencia = assinatura.find(
+        f'.//{{{dps_api.nfe_assinatura.NS_DSIG}}}Reference')
+
+    assert assinada is montada
+    assert dps_api.verificar(assinada) is True
+    assert referencia.get('URI') == '#' + dps_api.identificador(montada)
+    assert signed_info.find(
+        f'{{{dps_api.nfe_assinatura.NS_DSIG}}}CanonicalizationMethod').get(
+            'Algorithm') == dps_api.nfe_assinatura.ALG_C14N
+    assert signed_info.find(
+        f'{{{dps_api.nfe_assinatura.NS_DSIG}}}SignatureMethod').get(
+            'Algorithm') == dps_api.nfe_assinatura.ALG_ASSINATURA
+    assert signed_info.find(
+        f'.//{{{dps_api.nfe_assinatura.NS_DSIG}}}DigestMethod').get(
+            'Algorithm') == dps_api.nfe_assinatura.ALG_DIGEST
+    transformacoes = signed_info.findall(
+        f'.//{{{dps_api.nfe_assinatura.NS_DSIG}}}Transform')
+    assert [transformacao.get('Algorithm') for transformacao in transformacoes] == [
+        dps_api.nfe_assinatura.ALG_ENVELOPED,
+        dps_api.nfe_assinatura.ALG_C14N,
+    ]
+    assert dps_api.validar(assinada) == []
+
+
+def test_assinatura_falha_apos_adulterar_campo_da_dps():
+    montada = _montada()
+    chave, certificado = _credencial_sintetica()
+    dps_api.assinar(montada, chave, certificado)
+
+    montada.find(f'.//{{{NS}}}xDescServ').text += ' ADULTERADO'
+
+    assert dps_api.verificar(montada) is False
+
+
+def test_assinar_recusa_id_que_nao_seja_o_calculado():
+    montada = _montada()
+    montada.find(f'.//{{{NS}}}infDPS').set('Id', 'DPS' + '1' * 42)
+    chave, certificado = _credencial_sintetica()
+
+    with pytest.raises(dps_api.AssinaturaDpsInvalidaError):
+        dps_api.assinar(montada, chave, certificado)

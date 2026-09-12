@@ -16,6 +16,7 @@ import xml.etree.ElementTree as ET
 
 from app.models import StatusNotaNfse
 from app.services.nfse_api_ensaio import validar_serie
+from app.services import nfe_assinatura
 from app.services.nfse_api_xml import NAMESPACE_NFSE
 
 
@@ -67,6 +68,10 @@ class ConfiguracaoDpsInvalidaError(NfseApiDpsError):
 
 class MontagemDpsInvalidaError(NfseApiDpsError):
     """A DPS não pôde ser montada com os fatos fornecidos."""
+
+
+class AssinaturaDpsInvalidaError(NfseApiDpsError):
+    """A DPS não pode ser assinada ou verificada com segurança."""
 
 
 @dataclass(frozen=True)
@@ -493,7 +498,7 @@ def _inf_dps_de(dps):
 
 
 def _dps_de(dps):
-    if dps is None or dps.tag != _tag('DPS'):
+    if dps is None or getattr(dps, 'tag', None) != _tag('DPS'):
         raise MontagemDpsInvalidaError(
             'A validação exige o elemento raiz DPS do namespace oficial.')
     return dps
@@ -587,6 +592,49 @@ def _identificador_dos_campos(inf_dps):
 def identificador(dps):
     """Calcula o identificador oficial de 45 posições da DPS."""
     return _identificador_dos_campos(_inf_dps_de(dps))
+
+
+def assinar(dps, chave_privada, certificado):
+    """Assina a `infDPS` usando o núcleo XMLDSig fiscal existente."""
+    dps = _dps_de(dps)
+    inf_dps = _inf_dps_de(dps)
+    id_esperado = identificador(inf_dps)
+    if inf_dps.get('Id') != id_esperado:
+        raise AssinaturaDpsInvalidaError(
+            'O Id da infDPS não corresponde ao identificador oficial calculado.')
+    if dps.find(f'{{{nfe_assinatura.NS_DSIG}}}Signature') is not None:
+        raise AssinaturaDpsInvalidaError(
+            'A DPS já possui assinatura e não pode ser assinada novamente.')
+    try:
+        nfe_assinatura.assinar(
+            dps, inf_dps, chave_privada, certificado)
+    except (nfe_assinatura.AssinaturaError, AttributeError, TypeError,
+            ValueError) as exc:
+        raise AssinaturaDpsInvalidaError(
+            'A assinatura da DPS não pôde ser produzida.') from exc
+    return dps
+
+
+def verificar(dps):
+    """Verifica o XMLDSig da DPS e a referência ao Id oficial da `infDPS`."""
+    try:
+        dps = _dps_de(dps)
+        inf_dps = _inf_dps_de(dps)
+        id_esperado = identificador(inf_dps)
+        if inf_dps.get('Id') != id_esperado:
+            return False
+        assinatura = dps.find(
+            f'{{{nfe_assinatura.NS_DSIG}}}Signature')
+        if assinatura is None:
+            return False
+        referencia = assinatura.find(
+            f'.//{{{nfe_assinatura.NS_DSIG}}}Reference')
+        if referencia is None or referencia.get('URI') != f'#{id_esperado}':
+            return False
+        return nfe_assinatura.verificar(dps)
+    except (NfseApiDpsError, AttributeError, TypeError, ValueError,
+            ET.ParseError):
+        return False
 
 
 def montar(referencia, config, *, serie, numero, agora=None):
