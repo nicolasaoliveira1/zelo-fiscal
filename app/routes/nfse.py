@@ -4,6 +4,7 @@ Registra no blueprint "main" compartilhado (AD-013). Rotas finas: toda a
 logica vive em `app/services/nfse_*`; aqui so entra validacao de entrada,
 autorizacao e montagem da resposta.
 """
+import json
 import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -16,6 +17,7 @@ from app.auth import requer_papel
 from app.models import (
     ApelidoNfse,
     Empresa,
+    EnsaioDpsNfse,
     LoteNfse,
     NotaNfse,
     OrigemVinculoNfse,
@@ -37,6 +39,8 @@ from app.services import (
     auditoria,
     batch_engine,
     nfse_api_adn,
+    nfse_api_dps,
+    nfse_api_ensaio,
     nfse_config,
     nfse_emitidas,
     nfse_grupos,
@@ -831,6 +835,224 @@ def nfse_api_acesso():
             'adn': _desfecho_api_para_json(acessos.adn),
         },
     }
+
+
+# --- ensaio restrito da API nacional (P2) ---------------------------------
+
+def _payload_ensaio(permitidos=()):
+    """Valida o corpo fechado das ações do ensaio.
+
+    O número da nota e o identificador da tentativa vêm exclusivamente da
+    URL. Assim, nenhum campo recebido do navegador consegue escolher ambiente,
+    host ou outro alvo fiscal.
+    """
+    dados = request.get_json(silent=True)
+    if dados is None:
+        if request.data:
+            return None, json_error(
+                'Envie um objeto JSON para a ação do ensaio.',
+                400,
+                campo='corpo',
+            )
+        dados = {}
+    if not isinstance(dados, dict):
+        return None, json_error(
+            'Envie um objeto JSON para a ação do ensaio.',
+            400,
+            campo='corpo',
+        )
+
+    extras = set(dados) - set(permitidos)
+    if extras:
+        return None, json_error(
+            'Campo não permitido na ação do ensaio.',
+            400,
+            campo=sorted(extras)[0],
+        )
+    return dados, None
+
+
+def _texto_ensaio_seguro(valor, limite=1000):
+    """Devolve detalhe textual sem permitir XML ou material de credencial."""
+    if valor is None:
+        return None
+    texto = str(valor).strip()
+    if not texto:
+        return None
+    if '<' in texto or '-----BEGIN' in texto.upper():
+        return 'O detalhe técnico foi omitido da resposta.'
+    return texto[:limite]
+
+
+def _comparacao_ensaio_para_json(ensaio):
+    try:
+        comparacao = json.loads(ensaio.comparacao_json or '')
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(comparacao, dict):
+        return None
+
+    def sanitizar(valor):
+        if isinstance(valor, dict):
+            return {
+                chave: sanitizar(conteudo)
+                for chave, conteudo in valor.items()
+                if chave not in {
+                    'xml',
+                    'xml_referencia',
+                    'xml_dps_assinada',
+                    'xml_nfse_teste',
+                }
+            }
+        if isinstance(valor, list):
+            return [sanitizar(item) for item in valor]
+        if isinstance(valor, str) and (
+                '<' in valor or '-----BEGIN' in valor.upper()):
+            return 'O detalhe técnico foi omitido da resposta.'
+        return valor
+
+    return sanitizar(comparacao)
+
+
+def _ensaio_para_json(ensaio):
+    """Serializa apenas a visão de conferência do operador.
+
+    Os XMLs permanecem no banco para rastreabilidade, mas não são despejados
+    no JSON da rota. A tela recebe os campos da comparação e indicadores da
+    presença de cada documento, sem expor conteúdo fiscal bruto por acidente.
+    """
+    def iso(valor):
+        return valor.isoformat() if valor is not None else None
+    return {
+        'id': ensaio.id,
+        'nota_nfse_id': ensaio.nota_nfse_id,
+        'ambiente': ensaio.ambiente,
+        'serie': ensaio.serie,
+        'numero': ensaio.numero,
+        'identificador_dps': ensaio.identificador_dps,
+        'estado': ensaio.estado,
+        'sem_validade_juridica': True,
+        'comparacao': _comparacao_ensaio_para_json(ensaio),
+        'chave_nfse_teste': ensaio.chave_nfse_teste,
+        'codigo_rejeicao': ensaio.codigo_rejeicao,
+        'motivo_rejeicao': _texto_ensaio_seguro(ensaio.motivo_rejeicao),
+        'ultima_falha': _texto_ensaio_seguro(ensaio.ultima_falha),
+        'xml': {
+            'referencia_disponivel': bool(ensaio.xml_referencia),
+            'dps_assinada_disponivel': bool(ensaio.xml_dps_assinada),
+            'nfse_teste_disponivel': bool(ensaio.xml_nfse_teste),
+        },
+        'criado_em': iso(ensaio.criado_em),
+        'atualizado_em': iso(ensaio.atualizado_em),
+    }
+
+
+def _erro_ensaio(exc):
+    """Converte falhas de domínio em envelope sem ecoar detalhe sensível."""
+    nao_encontrado = (
+        nfse_api_ensaio.NotaDpsNaoEncontradaError,
+        nfse_api_ensaio.EnsaioDpsNaoEncontradoError,
+    )
+    conflito = (
+        nfse_api_ensaio.TransicaoDpsInvalidaError,
+        nfse_api_ensaio.EnsaioDpsEmAndamentoError,
+    )
+    remoto_invalido = (
+        nfse_api_ensaio.EnvioDpsCredencialError,
+        nfse_api_ensaio.RespostaRestritaInvalidaError,
+    )
+    if isinstance(exc, nao_encontrado):
+        codigo = 404
+    elif isinstance(exc, conflito):
+        codigo = 409
+    elif isinstance(exc, remoto_invalido):
+        codigo = 502
+    elif isinstance(exc, (
+            nfse_api_ensaio.NfseApiEnsaioError,
+            nfse_api_dps.NfseApiDpsError,
+    )):
+        codigo = 422
+    else:
+        return json_error(exc=exc, code=500)
+
+    mensagem = _texto_ensaio_seguro(str(exc))
+    return json_error(
+        mensagem or 'A ação do ensaio não pôde ser concluída.',
+        codigo,
+    )
+
+
+@bp.route('/nfse/api/ensaios/preparar/<int:nota_id>', methods=['POST'])
+@requer_papel('operador')
+def nfse_api_ensaio_preparar(nota_id):
+    dados, erro = _payload_ensaio()
+    if erro is not None:
+        return erro
+    del dados
+    try:
+        ensaio = nfse_api_ensaio.preparar(
+            nota_id,
+            operador_id=current_user.id,
+        )
+    except Exception as exc:
+        return _erro_ensaio(exc)
+
+    if ensaio.estado == nfse_api_ensaio.ESTADO_FALHA_PREPARACAO:
+        return json_error(
+            _texto_ensaio_seguro(ensaio.ultima_falha)
+            or 'A preparação local do ensaio falhou.',
+            422,
+            ensaio=_ensaio_para_json(ensaio),
+        )
+    return {'status': 'ok', 'ensaio': _ensaio_para_json(ensaio)}
+
+
+@bp.route('/nfse/api/ensaios/<int:ensaio_id>')
+@requer_papel('operador')
+def nfse_api_ensaio_detalhe(ensaio_id):
+    ensaio = db.session.get(EnsaioDpsNfse, ensaio_id)
+    if ensaio is None:
+        return json_error('A tentativa de ensaio não existe.', 404)
+    return {'status': 'ok', 'ensaio': _ensaio_para_json(ensaio)}
+
+
+@bp.route('/nfse/api/ensaios/<int:ensaio_id>/enviar', methods=['POST'])
+@requer_papel('operador')
+def nfse_api_ensaio_enviar(ensaio_id):
+    dados, erro = _payload_ensaio({'confirmar_envio'})
+    if erro is not None:
+        return erro
+    if dados.get('confirmar_envio') is not True:
+        return json_error(
+            'Confirme explicitamente o envio ao ambiente de testes.',
+            400,
+            campo='confirmar_envio',
+        )
+    try:
+        ensaio = nfse_api_ensaio.enviar(
+            ensaio_id,
+            operador_id=current_user.id,
+        )
+    except Exception as exc:
+        return _erro_ensaio(exc)
+    return {'status': 'ok', 'ensaio': _ensaio_para_json(ensaio)}
+
+
+@bp.route('/nfse/api/ensaios/<int:ensaio_id>/reconsultar', methods=['POST'])
+@requer_papel('operador')
+def nfse_api_ensaio_reconsultar(ensaio_id):
+    dados, erro = _payload_ensaio()
+    if erro is not None:
+        return erro
+    del dados
+    try:
+        ensaio = nfse_api_ensaio.reconsultar(
+            ensaio_id,
+            operador_id=current_user.id,
+        )
+    except Exception as exc:
+        return _erro_ensaio(exc)
+    return {'status': 'ok', 'ensaio': _ensaio_para_json(ensaio)}
 
 
 @bp.route('/nfse/notas')
