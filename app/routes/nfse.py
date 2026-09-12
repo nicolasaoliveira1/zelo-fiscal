@@ -794,6 +794,7 @@ def nfse_painel():
         competencia_atual=escopo,
         competencias=_competencias_disponiveis(),
         config=nfse_config.get_config_nfse(),
+        ambientes_api=nfse_config.AMBIENTES_API,
         empresas=[{'id': e.id, 'nome': e.nome, 'cnpj': e.cnpj}
                   for e in Empresa.query.order_by(Empresa.nome).all()],
         contrato_estado=nfse_contrato.estado_painel(),
@@ -1558,7 +1559,7 @@ def _data_pedida(bruto):
 # --- configuracao (NFSE-08/09) ---------------------------------------------
 
 @bp.route('/nfse/configuracao', methods=['POST'])
-@requer_papel('operador')
+@requer_papel('admin')
 def nfse_salvar_configuracao():
     dados = request.get_json(silent=True) or request.form.to_dict()
     try:
@@ -1568,7 +1569,7 @@ def nfse_salvar_configuracao():
     return {
         'status': 'ok',
         'config': {campo: getattr(config, campo)
-                   for campo in nfse_config.CAMPOS_OBRIGATORIOS},
+                   for campo in nfse_config.CAMPOS_CONFIGURACAO},
     }
 
 

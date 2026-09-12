@@ -509,7 +509,10 @@
 <!-- Configuracao dos campos fixos -->
 <div class="collapse mb-3" id="painelConfig">
     <div class="nfse-card">
+        {% set pode_editar_configuracao = current_user.papel == 'admin' %}
         <form id="formConfig" class="row g-3">
+            <fieldset class="border-0 p-0 m-0 row g-3"
+                      {% if not pode_editar_configuracao %}disabled{% endif %}>
             <div class="col-md-3">
                 <label class="form-label" for="cfg_codigo_tributacao">Código de tributação</label>
                 <input class="form-control" id="cfg_codigo_tributacao"
@@ -561,8 +564,65 @@
                     Extrato do Inter: outras categorias são ignoradas na importação.
                 </div>
             </div>
+
+            <div class="col-12" id="configuracaoApiNacional">
+                {{ zl_secao('Acesso à API nacional') }}
+                <p class="nfse-hint mb-3">
+                    Escolha a empresa do escritório e o ambiente da integração. Deixe a empresa
+                    vazia enquanto o acesso ainda não estiver configurado.
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-5">
+                        <label class="form-label" for="cfg_empresa_escritorio_id">
+                            Empresa do escritório
+                        </label>
+                        <select class="form-select" id="cfg_empresa_escritorio_id"
+                                name="empresa_escritorio_id">
+                            <option value="">Nenhuma empresa selecionada</option>
+                            {% for empresa in empresas %}
+                            <option value="{{ empresa.id }}"
+                                    {% if config.empresa_escritorio_id == empresa.id %}selected{% endif %}>
+                                {{ empresa.nome }} ({{ empresa.cnpj }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="cfg_api_ambiente">Ambiente</label>
+                        <select class="form-select" id="cfg_api_ambiente" name="api_ambiente">
+                            {% for ambiente in ambientes_api %}
+                            <option value="{{ ambiente }}"
+                                    {% if config.api_ambiente == ambiente %}selected{% endif %}>
+                                {% if ambiente == 'producao' %}Produção{% else %}Produção restrita{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="nfse-hint mt-1">
+                            Os ambientes possuem serviços próprios e não são intercambiáveis.
+                        </div>
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end">
+                        <div class="form-check form-switch mb-2">
+                            <input type="hidden" name="api_habilitada" value="false">
+                            <input class="form-check-input" type="checkbox"
+                                   id="cfg_api_habilitada" name="api_habilitada" value="true"
+                                   {% if config.api_habilitada %}checked{% endif %}>
+                            <label class="form-check-label" for="cfg_api_habilitada">
+                                Habilitar conferência pela API
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </fieldset>
             <div class="col-12 d-flex justify-content-end">
+                {% if pode_editar_configuracao %}
                 <button class="btn btn-primary btn-sm" type="submit">Salvar configurações</button>
+                {% else %}
+                <span class="nfse-hint" role="note">
+                    Somente administradores podem alterar esta configuração.
+                </span>
+                {% endif %}
             </div>
         </form>
     </div>
