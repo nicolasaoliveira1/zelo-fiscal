@@ -632,6 +632,20 @@ class ConfiguracaoNfse(db.Model):
     categoria_extrato = db.Column(
         db.String(60), nullable=False, default='HONORÁRIOS - CLIENTES')
 
+    # Credencial do próprio escritório para a API oficial, nunca de cliente.
+    # Nulo mantém a configuração incompleta como estado suportado até o
+    # operador selecionar a empresa em T2A.
+    empresa_escritorio_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            'empresa.id',
+            name='fk_configuracao_nfse_empresa_escritorio_id_empresa'),
+        nullable=True,
+        index=True,
+    )
+    api_ambiente = db.Column(db.String(10), nullable=False, default='restrita')
+    api_habilitada = db.Column(db.Boolean, nullable=False, default=False)
+
     def __repr__(self):
         return f'<ConfiguracaoNfse {self.id}>'
 
@@ -858,6 +872,12 @@ class NotaEmitidaNfse(db.Model):
     # o title de uma imagem e muda com tema/idioma, o codigo nao
     situacao = db.Column(db.String(30), nullable=True, index=True)
 
+    # Contrato consumido pela conferência: o código cru acima continua sendo
+    # preservado para a fonte portal, enquanto estes campos descrevem a origem
+    # autoritativa e a situação comum às duas fontes.
+    origem_autoritativa = db.Column(db.String(10), nullable=True, index=True)
+    situacao_fiscal = db.Column(db.String(12), nullable=True, index=True)
+
     # quando esta linha foi vista no portal pela ultima vez
     consultado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
 
@@ -867,6 +887,82 @@ class NotaEmitidaNfse(db.Model):
 
     def __repr__(self):
         return f'<NotaEmitidaNfse {self.chave} {self.competencia} {self.valor}>'
+
+
+class SincronizacaoAdnNfse(db.Model):
+    """Cursor durável da distribuição do ADN por ambiente e contribuinte.
+
+    O lease recuperável evita que uma queda deixe a sincronização presa, sem
+    transformar um booleano persistente em mutex. O cursor só avança junto com
+    o efeito do NSU confirmado.
+    """
+    __tablename__ = 'sincronizacao_adn_nfse'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'ambiente', 'documento_consulta',
+            name='uq_sincronizacao_adn_nfse_ambiente_documento'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    ambiente = db.Column(db.String(10), nullable=False)
+    documento_consulta = db.Column(db.String(14), nullable=False)
+    ultimo_nsu = db.Column(db.BigInteger, nullable=True)
+    dono_execucao = db.Column(db.String(40), nullable=True)
+    lease_ate = db.Column(db.DateTime, nullable=True)
+    atualizado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    ultima_falha = db.Column(db.String(500), nullable=True)
+
+    def __repr__(self):
+        return f'<SincronizacaoAdnNfse {self.ambiente}/{self.documento_consulta}>'
+
+
+class ObservacaoEmitidaNfse(db.Model):
+    """Retrato de uma nota emitida por uma fonte específica.
+
+    Portal e ADN não sobrescrevem um ao outro: a projeção canônica é derivada
+    depois, preservando a evidência necessária ao modo sombra.
+    """
+    __tablename__ = 'observacao_emitida_nfse'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'fonte', 'chave', name='uq_observacao_emitida_nfse_fonte_chave'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    fonte = db.Column(db.String(10), nullable=False)
+    chave = db.Column(db.String(60), nullable=False)
+    data_geracao = db.Column(db.Date, nullable=True, index=True)
+    competencia_dps = db.Column(db.String(10), nullable=True)
+    documento = db.Column(db.String(18), nullable=True, index=True)
+    nome_tomador = db.Column(db.String(140), nullable=True)
+    municipio = db.Column(db.String(60), nullable=True)
+    valor = db.Column(db.Numeric(12, 2), nullable=True)
+    situacao_fonte = db.Column(db.String(30), nullable=True)
+    observado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+    def __repr__(self):
+        return f'<ObservacaoEmitidaNfse {self.fonte}/{self.chave}>'
+
+
+class EventoEmitidaNfse(db.Model):
+    """Evento recebido pelo ADN e vinculado à NFS-e pela chave natural."""
+    __tablename__ = 'evento_emitida_nfse'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'chave', 'tipo', 'num_seq',
+            name='uq_evento_emitida_nfse_chave_tipo_seq'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    chave = db.Column(db.String(60), nullable=False, index=True)
+    tipo = db.Column(db.String(10), nullable=False)
+    num_seq = db.Column(db.Integer, nullable=False, default=1)
+    data = db.Column(db.DateTime, nullable=True)
+    nsu = db.Column(db.BigInteger, nullable=True, index=True)
+    recebido_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+    def __repr__(self):
+        return f'<EventoEmitidaNfse {self.chave} {self.tipo}/{self.num_seq}>'
 
 
 class ConsultaEmitidaNfse(db.Model):

@@ -9,7 +9,7 @@ placeholder `{competencia}`, senao toda nota sairia com a mesma descricao e o
 mes de referencia se perderia.
 """
 from app import db
-from app.models import ConfiguracaoNfse
+from app.models import ConfiguracaoNfse, Empresa
 
 PLACEHOLDER_COMPETENCIA = '{competencia}'
 
@@ -25,6 +25,17 @@ CAMPOS_OBRIGATORIOS = {
     'piscofins_tipo_retencao': 'Tipo de retenção do PIS/COFINS/CSLL',
     'categoria_extrato': 'Categoria dos recebimentos no extrato',
 }
+
+# Os ambientes são um domínio fechado, mas cada um possui serviço e artefato
+# próprios. A constante guarda apenas a escolha da configuração; URL e
+# transporte pertencem aos módulos da API nacional.
+AMBIENTES_API = ('producao', 'restrita')
+CAMPOS_API = (
+    'empresa_escritorio_id',
+    'api_ambiente',
+    'api_habilitada',
+)
+CAMPOS_CONFIGURACAO = tuple(CAMPOS_OBRIGATORIOS) + CAMPOS_API
 
 
 class ConfiguracaoInvalidaError(ValueError):
@@ -71,6 +82,39 @@ def validar(valores):
             'sairiam com a mesma descricao.',
             campo='descricao_template')
 
+    if 'empresa_escritorio_id' in valores:
+        bruto_empresa = valores.get('empresa_escritorio_id')
+        if bruto_empresa not in (None, ''):
+            texto_empresa = str(bruto_empresa).strip()
+            if not texto_empresa.isdecimal() or int(texto_empresa) <= 0:
+                raise ConfiguracaoInvalidaError(
+                    'Selecione uma empresa válida para a integração.',
+                    campo='empresa_escritorio_id')
+            if db.session.get(Empresa, int(texto_empresa)) is None:
+                raise ConfiguracaoInvalidaError(
+                    'A empresa selecionada não existe mais no cadastro.',
+                    campo='empresa_escritorio_id')
+
+    if 'api_ambiente' in valores:
+        ambiente = str(valores.get('api_ambiente') or '').strip().lower()
+        if ambiente not in AMBIENTES_API:
+            raise ConfiguracaoInvalidaError(
+                'Escolha um ambiente válido para a API nacional.',
+                campo='api_ambiente')
+
+    if 'api_habilitada' in valores:
+        habilitada = valores.get('api_habilitada')
+        habilitada_valida = isinstance(habilitada, bool) or (
+            isinstance(habilitada, str)
+            and habilitada.strip().lower() in {
+                'true', 'false', '1', '0', 'on', 'off',
+            }
+        )
+        if not habilitada_valida:
+            raise ConfiguracaoInvalidaError(
+                'A habilitação da API deve ser booleana.',
+                campo='api_habilitada')
+
 
 def salvar(valores):
     """Valida e grava. Nada e escrito se a validacao recusar."""
@@ -79,6 +123,21 @@ def salvar(valores):
     for campo in CAMPOS_OBRIGATORIOS:
         if campo in valores:
             setattr(config, campo, str(valores[campo]).strip())
+    if 'empresa_escritorio_id' in valores:
+        bruto_empresa = valores.get('empresa_escritorio_id')
+        config.empresa_escritorio_id = (
+            None if bruto_empresa in (None, '')
+            else int(str(bruto_empresa).strip()))
+    if 'api_ambiente' in valores:
+        config.api_ambiente = str(valores['api_ambiente']).strip().lower()
+    if 'api_habilitada' in valores:
+        bruto_habilitada = valores['api_habilitada']
+        if isinstance(bruto_habilitada, bool):
+            config.api_habilitada = bruto_habilitada
+        else:
+            config.api_habilitada = str(bruto_habilitada).strip().lower() in {
+                'true', '1', 'on',
+            }
     db.session.commit()
     return config
 

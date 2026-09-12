@@ -11,8 +11,15 @@ globalThis.requestAnimationFrame = (callback) => setTimeout(callback, 0);
 dom.window.HTMLElement.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
 
-const { celulaDescricao, pintarEmitidas, consultarEmitidas, iniciarEmissao } =
-  await import('../app/static/js/nfse.js');
+const {
+  celulaDescricao,
+  pintarEmitidas,
+  pintarSincronizacaoAdn,
+  pintarSombra,
+  consultarEmitidas,
+  executarSombra,
+  iniciarEmissao,
+} = await import('../app/static/js/nfse.js');
 
 after(() => dom.window.close());
 
@@ -23,7 +30,11 @@ beforeEach(() => {
     <input id="emitidasInicio" value="2026-08-01">
     <input id="emitidasFim" value="2026-08-31">
     <span id="emitidasEstado"></span>
-    <button id="btnConsultarEmitidas" type="button">Consultar o portal</button>`;
+    <button id="btnConsultarEmitidas" type="button">Consultar o portal</button>
+    <button id="btnExecutarSombra" type="button">Conferir portal + ADN</button>
+    <span id="nfseSombraEstado"></span>
+    <div id="nfseSombraResultado"></div>
+    <div id="nfseAdnSincronizacaoResultado"></div>`;
 });
 
 function painel(overrides = {}) {
@@ -120,6 +131,114 @@ test('mostra o intervalo e a seção de correspondência ambígua', () => {
   assert.match(texto, /Correspondência ambígua \(1\)/);
   assert.match(texto, /valor final comparado/);
   assert.match(texto, /CANDIDATA UM/);
+});
+
+test('mostra o desfecho teto junto da faixa e das contagens do ADN', () => {
+  pintarSincronizacaoAdn({
+    faixa_nsu: { inicio: 4, fim: 12 },
+    lidos: 8,
+    gravados: 6,
+    ignorados: 2,
+    desfecho: 'teto',
+  });
+
+  const texto = document.getElementById('nfseAdnSincronizacaoResultado').textContent;
+  assert.match(texto, /NSU 4 a 12/);
+  assert.match(texto, /Limite de chamadas atingido/);
+  assert.match(texto, /8 lido\(s\)/);
+  assert.match(texto, /6 gravado\(s\)/);
+  assert.match(texto, /2 ignorado\(s\)/);
+});
+
+test('pinta as três listas da conferência sombra e explica a situação normalizada', () => {
+  pintarSombra({
+    status: 'concluida',
+    periodo: { inicio: '2026-08-01', fim: '2026-08-31' },
+    fontes: { portal: { lidas: 2 }, adn: { lidos: 2 } },
+    comparacao: {
+      so_no_portal: [{ chave: 'CHAVE-SINTETICA-002', data_geracao: '2026-08-12', valor: '10,00' }],
+      so_no_adn: [{ chave: 'CHAVE-SINTETICA-003', data_geracao: '2026-08-13', valor: '20,00' }],
+      divergentes: [{
+        chave: 'CHAVE-SINTETICA-001',
+        portal: { chave: 'CHAVE-SINTETICA-001', data_geracao: '2026-08-12', valor: '30,00' },
+        adn: { chave: 'CHAVE-SINTETICA-001', data_geracao: '2026-08-12', valor: '30,00' },
+        campos: [],
+        classificacao: 'esperada',
+        situacao: {
+          portal: 'gerada',
+          adn: 'cancelada',
+          explicacao: 'O ADN acrescentou um cancelamento.',
+        },
+      }],
+      esperadas: [{
+        chave: 'CHAVE-SINTETICA-001',
+        portal: { chave: 'CHAVE-SINTETICA-001', valor: '30,00' },
+        adn: { chave: 'CHAVE-SINTETICA-001', valor: '30,00' },
+        campos: [],
+        classificacao: 'esperada',
+        situacao: { portal: 'gerada', adn: 'cancelada', explicacao: 'Cancelamento conhecido.' },
+      }],
+      inesperadas: [],
+      total_diferencas: 3,
+    },
+  });
+
+  const texto = document.getElementById('nfseSombraResultado').textContent;
+  assert.match(texto, /Somente no portal \(1\)/);
+  assert.match(texto, /Somente no ADN \(1\)/);
+  assert.match(texto, /Divergências entre as fontes \(1\)/);
+  assert.match(texto, /Diferenças esperadas \(1\)/);
+  assert.match(texto, /Diferenças inesperadas \(0\)/);
+  assert.match(texto, /gerada/);
+  assert.match(texto, /cancelada/);
+  assert.match(texto, /[Cc]ancelamento/);
+});
+
+test('não pinta igualdade quando a conferência sombra é inconclusiva', () => {
+  pintarSombra({
+    status: 'inconclusiva',
+    fonte_falha: 'adn',
+    mensagem: 'O serviço do ADN está indisponível.',
+  });
+
+  const texto = document.getElementById('nfseSombraResultado').textContent;
+  assert.match(texto, /Resultado inconclusivo/);
+  assert.match(texto, /ADN/);
+  assert.match(texto, /Não é possível afirmar igualdade/);
+  assert.doesNotMatch(texto, /As observações das duas fontes coincidem/);
+});
+
+test('execução sombra envia somente o intervalo e pinta o resultado', async () => {
+  const chamadas = [];
+  globalThis.fetch = async (url, opcoes) => {
+    chamadas.push({ url, opcoes });
+    return {
+      ok: true,
+      json: async () => ({
+        status: 'ok',
+        sombra: {
+          status: 'concluida',
+          periodo: { inicio: '2026-08-01', fim: '2026-08-31' },
+          fontes: { portal: { lidas: 0 }, adn: { lidos: 0 } },
+          comparacao: {
+            so_no_portal: [], so_no_adn: [], divergentes: [],
+            esperadas: [], inesperadas: [], total_diferencas: 0,
+          },
+        },
+      }),
+    };
+  };
+
+  await executarSombra(document.getElementById('btnExecutarSombra'));
+
+  assert.equal(chamadas.length, 1);
+  assert.equal(chamadas[0].url, '/nfse/emitidas/sombra');
+  assert.deepEqual(JSON.parse(chamadas[0].opcoes.body), {
+    inicio: '2026-08-01', fim: '2026-08-31',
+  });
+  assert.match(
+    document.getElementById('nfseSombraResultado').textContent,
+    /Nenhuma observação foi encontrada/);
 });
 
 test('consulta envia somente o intervalo, sem competência', async () => {

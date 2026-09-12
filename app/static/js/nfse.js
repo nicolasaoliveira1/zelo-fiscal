@@ -107,6 +107,80 @@ async function chamar(url, opcoes = {}) {
   return dados;
 }
 
+const ROTULO_ACESSO_API = {
+  ok: 'Acesso confirmado',
+  negado: 'Acesso negado',
+  credencial: 'Problema na credencial',
+  indisponivel: 'Serviço indisponível',
+  rejeitado: 'Resposta rejeitada',
+};
+
+const MENSAGEM_ACESSO_API = {
+  ok: 'A resposta autorizada prova o acesso a este serviço.',
+  negado: 'A API recusou a credencial para este serviço.',
+  credencial: 'Confira a credencial do escritório antes de tentar novamente.',
+  indisponivel: 'Não foi possível concluir a chamada agora.',
+  rejeitado: 'A API respondeu, mas não autorizou esta sondagem.',
+};
+
+/**
+ * @typedef {Object} DesfechoAcessoApi
+ * @property {string=} situacao
+ * @property {number|null=} http
+ * @property {string=} mensagem
+ */
+
+/**
+ * Pinta os dois desfechos sem transformar uma prova SEFIN em prova de ADN.
+ *
+ * @param {{sefin?: DesfechoAcessoApi, adn?: DesfechoAcessoApi}|null} acessos
+ */
+export function pintarAcessoApi(acessos) {
+  const alvo = document.getElementById('nfseApiAcessoResultados');
+  if (!alvo) return;
+
+  const blocos = [
+    ['SEFIN', acessos?.sefin],
+    ['ADN', acessos?.adn],
+  ].map(([servico, desfecho]) => {
+    const situacao = Object.prototype.hasOwnProperty.call(
+      ROTULO_ACESSO_API, desfecho?.situacao)
+      ? desfecho.situacao : 'indisponivel';
+    const rotulo = ROTULO_ACESSO_API[situacao];
+    const mensagem = String(desfecho?.mensagem || '').trim()
+      || MENSAGEM_ACESSO_API[situacao];
+    const http = desfecho?.http == null
+      ? '' : `<span class="nfse-hint nfse-mono">HTTP ${esc(desfecho.http)}</span>`;
+    return `<section class="nfse-api-acesso-resultado" data-situacao="${situacao}">
+      <h3>${servico}</h3>
+      <div class="situacao">${rotulo}</div>
+      <div class="nfse-hint">${esc(mensagem)}${http ? ` · ${http}` : ''}</div>
+    </section>`;
+  });
+  alvo.innerHTML = blocos.join('');
+}
+
+export async function verificarAcesso(botao) {
+  if (!botao) return;
+  const estado = document.getElementById('nfseApiAcessoEstado');
+  const rotulo = botao.textContent;
+  botao.disabled = true;
+  botao.textContent = 'Verificando…';
+  if (estado) estado.textContent = 'Testando SEFIN e ADN separadamente…';
+  try {
+    const dados = await chamar('/nfse/api/acesso');
+    pintarAcessoApi(dados.acessos);
+    if (estado) estado.textContent = 'Verificação concluída.';
+    showToast('Verificação separada concluída.', 'info');
+  } catch (erro) {
+    if (estado) estado.textContent = '';
+    showToast(erro.message, 'error');
+  } finally {
+    botao.disabled = false;
+    botao.textContent = rotulo;
+  }
+}
+
 // --- tabela ---------------------------------------------------------------
 
 function opcoesEmpresa(selecionada) {
@@ -638,6 +712,84 @@ async function desfazerGrupo(token) {
   }
 }
 
+// --- sincronização incremental pelo ADN ----------------------------------
+
+const MENSAGEM_SINCRONIZACAO_ADN = {
+  concluida: 'Sincronização concluída.',
+  sem_documentos: 'Nenhum documento novo foi encontrado no ADN.',
+  teto: 'Limite de chamadas atingido; a sincronização pode continuar depois.',
+};
+
+function mensagemSincronizacaoAdn(desfecho) {
+  return MENSAGEM_SINCRONIZACAO_ADN[desfecho]
+    || 'Sincronização encerrada com desfecho informado pelo servidor.';
+}
+
+function resumoSincronizacaoAdn(sincronizacao) {
+  const faixa = sincronizacao?.faixa_nsu || {};
+  const inicio = faixa.inicio ?? sincronizacao?.nsu_inicial ?? 0;
+  const fim = faixa.fim ?? sincronizacao?.nsu_final;
+  const intervalo = fim == null
+    ? `a partir do NSU ${esc(inicio)}; sem avanço confirmado`
+    : `NSU ${esc(inicio)} a ${esc(fim)}`;
+  const mensagem = mensagemSincronizacaoAdn(sincronizacao?.desfecho);
+  const falha = sincronizacao?.nsu_falha == null
+    ? ''
+    : `<span class="nfse-hint zl-num">falha no NSU ${esc(sincronizacao.nsu_falha)}</span>`;
+  return `<div class="nfse-total">
+    <span class="valor">${intervalo}</span>
+    <span class="rotulo">faixa percorrida</span>
+    <span class="nfse-hint">${esc(mensagem)}</span>
+    <span class="nfse-hint zl-num">${esc(sincronizacao?.lidos ?? 0)} lido(s)</span>
+    <span class="nfse-hint zl-num">${esc(sincronizacao?.gravados ?? 0)} gravado(s)</span>
+    <span class="nfse-hint zl-num">${esc(sincronizacao?.ignorados ?? 0)} ignorado(s)</span>
+    ${falha}
+  </div>`;
+}
+
+export function pintarSincronizacaoAdn(sincronizacao) {
+  const alvo = document.getElementById('nfseAdnSincronizacaoResultado');
+  if (!alvo) return;
+  if (!sincronizacao) {
+    alvo.innerHTML = '<p class="nfse-hint mb-0">O intervalo de NSU e as '
+      + 'contagens aparecerão após a sincronização.</p>';
+    return;
+  }
+  alvo.innerHTML = resumoSincronizacaoAdn(sincronizacao);
+}
+
+export async function sincronizarAdn(botao) {
+  if (!botao) return;
+  const estado = document.getElementById('nfseAdnSincronizacaoEstado');
+  const rotulo = botao.textContent;
+  botao.disabled = true;
+  botao.setAttribute('aria-busy', 'true');
+  botao.textContent = 'Sincronizando…';
+  if (estado) estado.textContent = 'Lendo novas notas do ADN…';
+  try {
+    const dados = await chamar('/nfse/emitidas/sincronizar');
+    pintarSincronizacaoAdn(dados.sincronizacao);
+    if (estado) {
+      const resumo = dados.sincronizacao || {};
+      const mensagem = mensagemSincronizacaoAdn(resumo.desfecho);
+      estado.textContent = `${mensagem} ${resumo.gravados || 0} gravada(s), `
+        + `${resumo.ignorados || 0} ignorada(s).`;
+    }
+    showToast(mensagemSincronizacaoAdn(dados.sincronizacao?.desfecho),
+      dados.sincronizacao?.desfecho === 'teto' ? 'info' : 'success');
+  } catch (erro) {
+    if (erro.dados?.sincronizacao) {
+      pintarSincronizacaoAdn(erro.dados.sincronizacao);
+    }
+    if (estado) estado.textContent = erro.message;
+    showToast(erro.message, 'error');
+  } finally {
+    botao.disabled = false;
+    botao.removeAttribute('aria-busy');
+    botao.textContent = rotulo;
+  }
+}
+
 // --- conferencia com o portal (notas emitidas) ----------------------------
 
 export function pintarEmitidas(painel) {
@@ -786,6 +938,191 @@ export async function consultarEmitidas(botao) {
     showToast(erro.message, 'error');
   } finally {
     botao.disabled = false;
+    botao.textContent = rotulo;
+  }
+}
+
+// --- conferência sombra entre portal e ADN (APINF-10) --------------------
+
+const ROTULO_CAMPO_SOMBRA = {
+  data_geracao: 'data de geração',
+  documento: 'documento do tomador',
+  valor: 'valor',
+};
+
+const ROTULO_FONTE_SOMBRA = {
+  portal: 'portal',
+  adn: 'ADN',
+  comparacao: 'comparação',
+};
+
+function linhaObservacaoSombra(observacao) {
+  const data = observacao?.data_geracao
+    ? dataVisivel(observacao.data_geracao) : 'data não informada';
+  const documento = observacao?.documento || 'documento não informado';
+  const valor = observacao?.valor || 'valor não informado';
+  const situacao = observacao?.situacao_fonte
+    ? `situação da fonte: ${esc(observacao.situacao_fonte)}` : '';
+  return `<span class="nfse-mono">${esc(observacao?.chave || 'chave não informada')}</span>`
+    + ` · ${esc(data)} · ${esc(documento)} · R$ ${esc(valor)}`
+    + (situacao ? ` · ${situacao}` : '');
+}
+
+function listaSombra(titulo, itens, formatar, vazio, classificacao = '') {
+  const lista = Array.isArray(itens) ? itens : [];
+  const atributo = classificacao
+    ? ` data-classificacao="${esc(classificacao)}"` : '';
+  const corpo = lista.length
+    ? `<ul>${lista.map((item) => `<li>${formatar(item)}</li>`).join('')}</ul>`
+    : `<p class="nfse-hint mb-0">${esc(vazio)}</p>`;
+  return `<div class="nfse-sombra-lista"${atributo}>`
+    + `<h3>${esc(titulo)} (${lista.length})</h3>${corpo}</div>`;
+}
+
+function divergenciaSombra(divergencia) {
+  const campos = (divergencia?.campos || [])
+    .map((campo) => ROTULO_CAMPO_SOMBRA[campo] || campo);
+  const situacao = divergencia?.situacao || {};
+  const motivo = campos.length
+    ? `Campos divergentes: ${campos.map((campo) => esc(campo)).join(', ')}.`
+    : 'Diferença de situação fiscal.';
+  const explicacao = situacao.explicacao
+    ? ` ${esc(situacao.explicacao)}` : '';
+  return `<span class="nfse-mono">${esc(divergencia?.chave || 'chave não informada')}</span>`
+    + `<br><span class="nfse-hint">${motivo}</span>`
+    + `<br><span class="nfse-hint">Portal: ${esc(situacao.portal || 'desconhecida')}`
+    + ` · ADN: ${esc(situacao.adn || 'desconhecida')}.${explicacao}</span>`
+    + `<br><span class="nfse-hint">Portal — ${linhaObservacaoSombra(divergencia?.portal)}`
+    + `<br>ADN — ${linhaObservacaoSombra(divergencia?.adn)}</span>`;
+}
+
+function divergenciasSombra(comparacao) {
+  const divergentes = Array.isArray(comparacao?.divergentes)
+    ? comparacao.divergentes : [];
+  const esperadas = Array.isArray(comparacao?.esperadas)
+    ? comparacao.esperadas
+    : divergentes.filter((item) => item.classificacao === 'esperada');
+  const inesperadas = Array.isArray(comparacao?.inesperadas)
+    ? comparacao.inesperadas
+    : divergentes.filter((item) => item.classificacao !== 'esperada');
+  const lista = (itens, vazio, classificacao) => listaSombra(
+    `Diferenças ${classificacao === 'esperada' ? 'esperadas' : 'inesperadas'}`,
+    itens, divergenciaSombra, vazio, classificacao);
+  return `<div class="nfse-sombra-lista">`
+    + `<h3>Divergências entre as fontes (${divergentes.length})</h3>`
+    + lista(esperadas, 'Nenhuma diferença esperada.', 'esperada')
+    + lista(inesperadas, 'Nenhuma diferença inesperada.', 'inesperada')
+    + '</div>';
+}
+
+function resumoFonteSombra(fonte, resumo) {
+  const rotulo = ROTULO_FONTE_SOMBRA[fonte] || fonte;
+  if (!resumo) return `${rotulo}: leitura não concluída`;
+  const lidas = resumo.lidos ?? resumo.lidas ?? 0;
+  return `${rotulo}: ${esc(lidas)} lida(s)`;
+}
+
+export function pintarSombra(sombra) {
+  const alvo = document.getElementById('nfseSombraResultado');
+  if (!alvo) return;
+  if (!sombra) {
+    alvo.innerHTML = '<p class="nfse-hint mb-0">Escolha o período e execute '
+      + 'a conferência para ver as três listas.</p>';
+    return;
+  }
+
+  if (sombra.status === 'inconclusiva') {
+    const fonte = ROTULO_FONTE_SOMBRA[sombra.fonte_falha]
+      || sombra.fonte_falha || 'não identificada';
+    const mensagem = sombra.mensagem
+      || 'Não foi possível concluir uma das leituras.';
+    alvo.innerHTML = `<div class="nfse-sombra-status" data-situacao="inconclusiva">`
+      + '<strong>Resultado inconclusivo</strong>'
+      + `<p class="mb-1 mt-1">${esc(mensagem)}</p>`
+      + `<p class="nfse-hint mb-0">Fonte com falha: ${esc(fonte)}. `
+      + 'Não é possível afirmar igualdade entre portal e ADN.</p></div>';
+    return;
+  }
+
+  const comparacao = sombra.comparacao || {};
+  const periodo = sombra.periodo?.inicio && sombra.periodo?.fim
+    ? `${dataVisivel(sombra.periodo.inicio)} a ${dataVisivel(sombra.periodo.fim)}`
+    : 'período informado';
+  const divergentes = Array.isArray(comparacao.divergentes)
+    ? comparacao.divergentes : [];
+  const total = comparacao.total_diferencas
+    ?? ((comparacao.so_no_portal || []).length
+      + (comparacao.so_no_adn || []).length + divergentes.length);
+  const fontes = sombra.fontes || {};
+  const nenhumaObservacao = !fontes.portal?.lidas && !fontes.adn?.lidos;
+  const conclusao = total === 0
+    ? (nenhumaObservacao
+      ? 'Nenhuma observação foi encontrada nas duas fontes neste período.'
+      : 'As observações das duas fontes coincidem neste período.')
+    : `${esc(total)} diferença(s) encontrada(s); confira a classificação abaixo.`;
+
+  alvo.innerHTML = `<div class="nfse-sombra-status" data-situacao="concluida">`
+    + `<strong>Conferência concluída</strong>`
+    + `<p class="mb-1 mt-1">Período: ${esc(periodo)}.</p>`
+    + `<p class="nfse-hint mb-0">${conclusao}</p></div>`
+    + `<p class="nfse-hint mt-3 mb-0">${resumoFonteSombra('portal', fontes.portal)}`
+    + ` · ${resumoFonteSombra('adn', fontes.adn)}</p>`
+    + '<p class="nfse-hint mt-2 mb-0">Observação exclusiva de uma fonte é '
+    + 'diferença inesperada; cancelamento reconhecido pelo ADN fica nas '
+    + 'diferenças esperadas.</p>'
+    + listaSombra(
+      'Somente no portal', comparacao.so_no_portal,
+      linhaObservacaoSombra, 'Nenhuma observação exclusiva do portal.',
+      'inesperada')
+    + listaSombra(
+      'Somente no ADN', comparacao.so_no_adn,
+      linhaObservacaoSombra, 'Nenhuma observação exclusiva do ADN.',
+      'inesperada')
+    + divergenciasSombra(comparacao);
+}
+
+export async function executarSombra(botao) {
+  if (!botao) return;
+  const inicio = document.getElementById('emitidasInicio')?.value;
+  const fim = document.getElementById('emitidasFim')?.value;
+  const estado = document.getElementById('nfseSombraEstado');
+  if (!inicio || !fim) {
+    showToast('Informe as datas inicial e final do período.', 'error');
+    return;
+  }
+
+  const rotulo = botao.textContent;
+  botao.disabled = true;
+  botao.setAttribute('aria-busy', 'true');
+  botao.textContent = 'Conferindo…';
+  if (estado) estado.textContent = 'Lendo o portal e o ADN…';
+  try {
+    const dados = await chamar('/nfse/emitidas/sombra', {
+      body: JSON.stringify({ inicio, fim }),
+    });
+    const sombra = dados.sombra;
+    pintarSombra(sombra);
+    const inconclusiva = sombra?.status === 'inconclusiva';
+    const total = sombra?.comparacao?.total_diferencas ?? 0;
+    if (estado) {
+      estado.textContent = inconclusiva
+        ? 'Resultado inconclusivo.'
+        : total
+        ? `${total} diferença(s) encontrada(s) na conferência.`
+        : 'As fontes coincidem no período.';
+    }
+    showToast(inconclusiva
+      ? (sombra?.mensagem || 'Resultado inconclusivo.')
+      : (total ? `${total} diferença(s) encontrada(s).`
+        : 'As fontes coincidem no período.'), inconclusiva ? 'error'
+        : (total ? 'info' : 'success'));
+  } catch (erro) {
+    if (erro.dados?.sombra) pintarSombra(erro.dados.sombra);
+    if (estado) estado.textContent = 'Resultado inconclusivo.';
+    showToast(erro.message, 'error');
+  } finally {
+    botao.disabled = false;
+    botao.removeAttribute('aria-busy');
     botao.textContent = rotulo;
   }
 }
@@ -1198,6 +1535,18 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('formEmitidas')?.addEventListener('submit', (ev) => {
     ev.preventDefault();
     consultarEmitidas(document.getElementById('btnConsultarEmitidas'));
+  });
+
+  document.getElementById('btnExecutarSombra')?.addEventListener('click', (ev) => {
+    executarSombra(ev.currentTarget);
+  });
+
+  document.getElementById('btnVerificarAcesso')?.addEventListener('click', (ev) => {
+    verificarAcesso(ev.currentTarget);
+  });
+
+  document.getElementById('btnSincronizarAdn')?.addEventListener('click', (ev) => {
+    sincronizarAdn(ev.currentTarget);
   });
 
   document.getElementById('formImportar')?.addEventListener('submit', async (ev) => {

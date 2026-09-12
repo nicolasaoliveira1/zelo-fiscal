@@ -36,6 +36,7 @@ from app.automation import nfse_recon
 from app.services import (
     auditoria,
     batch_engine,
+    nfse_api_adn,
     nfse_config,
     nfse_emitidas,
     nfse_grupos,
@@ -45,6 +46,7 @@ from app.services import (
     nfse_service,
 )
 from app.services.nfse_extrato_inter import chave_descricao, normalizar_termo
+from app.services.correlation import CorrelationContext
 from app.services.execution_logger import log_event
 from app.services.nfse_session import SESSAO
 from app.utils import (
@@ -794,6 +796,7 @@ def nfse_painel():
         competencia_atual=escopo,
         competencias=_competencias_disponiveis(),
         config=nfse_config.get_config_nfse(),
+        ambientes_api=nfse_config.AMBIENTES_API,
         empresas=[{'id': e.id, 'nome': e.nome, 'cnpj': e.cnpj}
                   for e in Empresa.query.order_by(Empresa.nome).all()],
         contrato_estado=nfse_contrato.estado_painel(),
@@ -802,6 +805,32 @@ def nfse_painel():
         # apenas como ponto de partida para uma nova consulta.
         emitidas=_painel_emitidas(mes=_competencia_corrente()),
     )
+
+
+def _desfecho_api_para_json(desfecho):
+    """Expõe só o resumo de uma sondagem, nunca a resposta bruta da API."""
+    return {
+        'situacao': desfecho.situacao,
+        'http': desfecho.http,
+        'mensagem': desfecho.mensagem,
+    }
+
+
+@bp.route('/nfse/api/acesso', methods=['POST'])
+@requer_papel('operador')
+def nfse_api_acesso():
+    """Verifica SEFIN e ADN em chamadas independentes e somente de leitura."""
+    try:
+        acessos = nfse_api_adn.verificar_acesso()
+    except Exception as exc:
+        return json_error(exc=exc, code=500)
+    return {
+        'status': 'ok',
+        'acessos': {
+            'sefin': _desfecho_api_para_json(acessos.sefin),
+            'adn': _desfecho_api_para_json(acessos.adn),
+        },
+    }
 
 
 @bp.route('/nfse/notas')
@@ -1384,6 +1413,203 @@ def _emitida_para_json(emitida):
     }
 
 
+def _sincronizacao_para_json(resultado):
+    """Expõe o resumo da leitura ADN sem vazar resposta ou erro do portal."""
+    return {
+        'faixa_nsu': {
+            'inicio': resultado.nsu_inicial,
+            'fim': resultado.nsu_final,
+        },
+        'nsu_inicial': resultado.nsu_inicial,
+        'nsu_final': resultado.nsu_final,
+        'nsu_falha': resultado.nsu_falha,
+        'lidos': resultado.lidos,
+        'gravados': resultado.gravados,
+        'ignorados': resultado.ignorados,
+        'desfecho': resultado.desfecho,
+    }
+
+
+def _erro_sincronizacao(desfecho, falha=None):
+    """Traduz falhas da sincronização para mensagens acionáveis e seguras."""
+    if desfecho == 'negado':
+        codigo = re.search(r'\bHTTP\s+(\d{3})\b', str(falha or ''))
+        detalhe = f' (HTTP {codigo.group(1)})' if codigo else ''
+        return (
+            'O ADN recusou a chamada'
+            f'{detalhe}. Verifique a habilitação do certificado e o acesso '
+            'do escritório.',
+            502,
+        )
+
+    mensagens = {
+        'indisponivel': (
+            'O serviço do ADN está indisponível no momento. Tente novamente '
+            'mais tarde.'),
+        'credencial': (
+            'A credencial do escritório não está disponível para sincronizar '
+            'o ADN.'),
+        'rejeitado': (
+            'O ADN rejeitou a sincronização. Confira o acesso e tente '
+            'novamente.'),
+        'falha_local': (
+            'A sincronização falhou no ambiente local. Nenhum documento foi '
+            'descartado.'),
+    }
+    codigos = {
+        'indisponivel': 503,
+        'credencial': 424,
+        'rejeitado': 502,
+        'falha_local': 500,
+    }
+    return (mensagens.get(
+        desfecho,
+        'Não foi possível concluir a sincronização do ADN.'),
+        codigos.get(desfecho, 500))
+
+
+def _campo_resultado_sombra(resultado, campo, padrao=None):
+    """Lê um campo do resumo de consulta sem expor o objeto de domínio."""
+    if isinstance(resultado, dict):
+        return resultado.get(campo, padrao)
+    return getattr(resultado, campo, padrao)
+
+
+def _data_sombra_para_json(data):
+    if isinstance(data, datetime):
+        data = data.date()
+    return data.isoformat() if data is not None else None
+
+
+def _observacao_sombra_para_json(observacao):
+    """Serializa somente os fatos necessários para a conferência na tela."""
+    return {
+        'fonte': getattr(observacao, 'fonte', None),
+        'chave': getattr(observacao, 'chave', None),
+        'data_geracao': _data_sombra_para_json(
+            getattr(observacao, 'data_geracao', None)),
+        'documento': getattr(observacao, 'documento', None),
+        'nome_tomador': getattr(observacao, 'nome_tomador', None),
+        'competencia_dps': getattr(
+            observacao, 'competencia_dps',
+            getattr(observacao, 'competencia', None)),
+        'municipio': getattr(observacao, 'municipio', None),
+        'valor': _valor_json(getattr(observacao, 'valor', None)),
+        'situacao_fonte': getattr(observacao, 'situacao_fonte', None),
+    }
+
+
+def _resumo_portal_sombra(resultado):
+    return {
+        'desfecho': 'concluida',
+        'consulta_id': _campo_resultado_sombra(resultado, 'consulta_id'),
+        'blocos': _campo_resultado_sombra(resultado, 'blocos', 0),
+        'lidas': _campo_resultado_sombra(resultado, 'lidas', 0),
+        'novas': _campo_resultado_sombra(resultado, 'novas', 0),
+        'atualizadas': _campo_resultado_sombra(
+            resultado, 'atualizadas', 0),
+    }
+
+
+def _diferenca_sombra_esperada(divergencia):
+    """Cancelamento conhecido é esperado; alteração de dados não é."""
+    return (
+        not divergencia.campos
+        and divergencia.situacao_adn == nfse_emitidas.SITUACAO_FISCAL_CANCELADA
+        and divergencia.situacao_portal != divergencia.situacao_adn
+    )
+
+
+def _divergencia_sombra_para_json(divergencia):
+    esperada = _diferenca_sombra_esperada(divergencia)
+    situacao_portal = divergencia.situacao_portal
+    situacao_adn = divergencia.situacao_adn
+    if esperada:
+        explicacao = (
+            'O portal conserva a situação da geração; o ADN acrescentou um '
+            'cancelamento e, por isso, a situação fiscal normalizada é '
+            'cancelada.')
+    else:
+        explicacao = (
+            'A comparação usa a situação fiscal normalizada, não os códigos '
+            'brutos específicos de cada fonte.')
+    return {
+        'chave': divergencia.chave,
+        'portal': _observacao_sombra_para_json(divergencia.portal),
+        'adn': _observacao_sombra_para_json(divergencia.adn),
+        'campos': list(divergencia.campos),
+        'situacao_portal': situacao_portal,
+        'situacao_adn': situacao_adn,
+        'situacao': {
+            'portal': situacao_portal,
+            'adn': situacao_adn,
+            'divergente': divergencia.situacao_divergente,
+            'explicacao': explicacao,
+        },
+        'classificacao': 'esperada' if esperada else 'inesperada',
+    }
+
+
+def _comparacao_sombra_para_json(comparacao):
+    divergentes = [
+        _divergencia_sombra_para_json(item)
+        for item in comparacao.divergentes
+    ]
+    esperadas = [
+        item for item in divergentes if item['classificacao'] == 'esperada'
+    ]
+    inesperadas = [
+        item for item in divergentes if item['classificacao'] == 'inesperada'
+    ]
+    so_no_portal = [
+        _observacao_sombra_para_json(item)
+        for item in comparacao.so_no_portal
+    ]
+    so_no_adn = [
+        _observacao_sombra_para_json(item)
+        for item in comparacao.so_no_adn
+    ]
+    return {
+        'so_no_portal': so_no_portal,
+        'so_no_adn': so_no_adn,
+        'divergentes': divergentes,
+        'esperadas': esperadas,
+        'inesperadas': inesperadas,
+        'total_diferencas': (
+            len(so_no_portal) + len(so_no_adn) + len(divergentes)),
+    }
+
+
+def _sombra_payload(inicio, fim, *, portal=None, adn=None,
+                    comparacao=None, fonte_falha=None, mensagem=None):
+    return {
+        'status': 'inconclusiva' if fonte_falha else 'concluida',
+        'periodo': {'inicio': inicio.isoformat(), 'fim': fim.isoformat()},
+        'fontes': {'portal': portal, 'adn': adn},
+        'comparacao': comparacao,
+        'fonte_falha': fonte_falha,
+        'mensagem': mensagem,
+    }
+
+
+def _erro_sombra(inicio, fim, *, fonte, mensagem, codigo, execution_id,
+                 portal=None, adn=None, desfecho_fonte=None, exc=None):
+    sombra = _sombra_payload(
+        inicio, fim, portal=portal, adn=adn, fonte_falha=fonte,
+        mensagem=mensagem)
+    extras = {
+        'desfecho': 'inconclusiva',
+        'fonte_falha': fonte,
+        'sombra': sombra,
+        'execution_id': execution_id,
+    }
+    if desfecho_fonte:
+        extras['desfecho_fonte'] = desfecho_fonte
+    if exc is not None:
+        extras['exc'] = exc
+    return json_error(mensagem, codigo, **extras)
+
+
 def _competencia_corrente():
     hoje = datetime.now()
     return f'{hoje.month:02d}/{hoje.year}'
@@ -1497,6 +1723,158 @@ def nfse_consultar_emitidas():
     }
 
 
+@bp.route('/nfse/emitidas/sincronizar', methods=['POST'])
+@requer_papel('operador')
+def nfse_sincronizar_emitidas():
+    """Aciona a leitura incremental do ADN e devolve seu resumo seguro."""
+    execution_id = CorrelationContext.new_execution_id()
+    try:
+        resultado = nfse_api_adn.sincronizar(execution_id=execution_id)
+    except nfse_api_adn.SincronizacaoEmCursoError:
+        return json_error(
+            'Já existe uma sincronização do ADN em andamento. Aguarde a '
+            'conclusão e tente novamente.',
+            409,
+            desfecho='em_curso',
+            execution_id=execution_id,
+        )
+    except Exception as exc:
+        return json_error(exc=exc, code=500, execution_id=execution_id)
+
+    resumo = _sincronizacao_para_json(resultado)
+    if resultado.falha:
+        mensagem, codigo = _erro_sincronizacao(
+            resultado.desfecho, resultado.falha)
+        return json_error(
+            mensagem,
+            codigo,
+            desfecho=resultado.desfecho,
+            sincronizacao=resumo,
+            execution_id=execution_id,
+        )
+
+    return {
+        'status': 'ok',
+        'execution_id': execution_id,
+        'sincronizacao': resumo,
+    }
+
+
+@bp.route('/nfse/emitidas/sombra', methods=['POST'])
+@requer_papel('operador')
+def nfse_sombra_emitidas():
+    """Executa as duas leituras e compara somente observações persistidas."""
+    execution_id = CorrelationContext.new_execution_id()
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return json_error(
+            'Envie um objeto JSON com as datas do período.',
+            400,
+            execution_id=execution_id,
+        )
+
+    try:
+        inicio = _data_pedida(dados.get('inicio'))
+        fim = _data_pedida(dados.get('fim'))
+    except ValueError as exc:
+        return json_error(str(exc), 400, execution_id=execution_id)
+
+    if inicio > fim:
+        return json_error(
+            'A data inicial não pode ser depois da final.',
+            400,
+            execution_id=execution_id,
+        )
+
+    # O portal dirige o Chrome compartilhado. A sessão fica presa somente
+    # durante a leitura dele; o ADN usa outro lease e pode começar depois que
+    # o navegador for devolvido ao restante da aplicação.
+    if not SESSAO.adquirir():
+        mensagem = (
+            'A sessão do navegador está ocupada com uma emissão. A '
+            'conferência sombra ficou inconclusiva; tente novamente depois.')
+        return _erro_sombra(
+            inicio, fim, fonte='portal', mensagem=mensagem, codigo=409,
+            execution_id=execution_id, desfecho_fonte='em_curso')
+
+    try:
+        resultado_portal = nfse_emitidas.consultar(
+            inicio, fim, execution_id=execution_id)
+    except automacao_emitidas.TotalDivergenteError as exc:
+        return _erro_sombra(
+            inicio, fim, fonte='portal', mensagem=str(exc), codigo=502,
+            execution_id=execution_id, desfecho_fonte='total_divergente',
+            exc=exc)
+    except Exception as exc:
+        mensagem = (
+            'Não foi possível concluir a leitura do portal. A conferência '
+            'sombra ficou inconclusiva.')
+        return _erro_sombra(
+            inicio, fim, fonte='portal', mensagem=mensagem, codigo=500,
+            execution_id=execution_id, desfecho_fonte='falha', exc=exc)
+    finally:
+        SESSAO.liberar()
+
+    resumo_portal = _resumo_portal_sombra(resultado_portal)
+    try:
+        resultado_adn = nfse_api_adn.sincronizar(execution_id=execution_id)
+    except nfse_api_adn.SincronizacaoEmCursoError:
+        mensagem = (
+            'Já existe uma sincronização do ADN em andamento. A conferência '
+            'sombra ficou inconclusiva; tente novamente depois.')
+        return _erro_sombra(
+            inicio, fim, fonte='adn', mensagem=mensagem, codigo=409,
+            execution_id=execution_id, portal=resumo_portal,
+            desfecho_fonte='em_curso')
+    except Exception as exc:
+        mensagem = (
+            'Não foi possível concluir a sincronização do ADN. A '
+            'conferência sombra ficou inconclusiva.')
+        return _erro_sombra(
+            inicio, fim, fonte='adn', mensagem=mensagem, codigo=500,
+            execution_id=execution_id, portal=resumo_portal,
+            desfecho_fonte='falha', exc=exc)
+
+    resumo_adn = _sincronizacao_para_json(resultado_adn)
+    if resultado_adn.falha:
+        mensagem, codigo = _erro_sincronizacao(
+            resultado_adn.desfecho, resultado_adn.falha)
+        return _erro_sombra(
+            inicio, fim, fonte='adn', mensagem=(
+                f'{mensagem} A conferência sombra ficou inconclusiva.'),
+            codigo=codigo, execution_id=execution_id, portal=resumo_portal,
+            adn=resumo_adn, desfecho_fonte=resultado_adn.desfecho)
+    if resultado_adn.desfecho == 'teto':
+        mensagem = (
+            'A sincronização do ADN atingiu o limite de chamadas antes de '
+            'terminar. A conferência sombra ficou inconclusiva; continue a '
+            'sincronização e tente novamente.')
+        return _erro_sombra(
+            inicio, fim, fonte='adn', mensagem=mensagem, codigo=409,
+            execution_id=execution_id, portal=resumo_portal,
+            adn=resumo_adn, desfecho_fonte='teto')
+
+    try:
+        comparacao = nfse_emitidas.comparar_fontes(inicio, fim)
+        comparacao_json = _comparacao_sombra_para_json(comparacao)
+    except Exception as exc:
+        mensagem = (
+            'As duas fontes foram lidas, mas não foi possível comparar as '
+            'observações. A conferência sombra ficou inconclusiva.')
+        return _erro_sombra(
+            inicio, fim, fonte='comparacao', mensagem=mensagem, codigo=500,
+            execution_id=execution_id, portal=resumo_portal, adn=resumo_adn,
+            desfecho_fonte='falha_local', exc=exc)
+
+    return {
+        'status': 'ok',
+        'execution_id': execution_id,
+        'sombra': _sombra_payload(
+            inicio, fim, portal=resumo_portal, adn=resumo_adn,
+            comparacao=comparacao_json),
+    }
+
+
 @bp.route('/nfse/emitidas')
 @requer_papel('operador')
 def nfse_painel_emitidas():
@@ -1558,7 +1936,7 @@ def _data_pedida(bruto):
 # --- configuracao (NFSE-08/09) ---------------------------------------------
 
 @bp.route('/nfse/configuracao', methods=['POST'])
-@requer_papel('operador')
+@requer_papel('admin')
 def nfse_salvar_configuracao():
     dados = request.get_json(silent=True) or request.form.to_dict()
     try:
@@ -1568,7 +1946,7 @@ def nfse_salvar_configuracao():
     return {
         'status': 'ok',
         'config': {campo: getattr(config, campo)
-                   for campo in nfse_config.CAMPOS_OBRIGATORIOS},
+                   for campo in nfse_config.CAMPOS_CONFIGURACAO},
     }
 
 

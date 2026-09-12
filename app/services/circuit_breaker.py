@@ -40,6 +40,10 @@ ALVO_FEDERAL = 'Federal'
 # Nao e um portal de certidao, mas a regra e a mesma: N falhas seguidas do
 # servico param o lote em vez de queimar requisicao contra algo fora do ar.
 ALVO_SEFAZ_AN = 'SEFAZ (Ambiente Nacional)'
+# API de distribuição da NFS-e pelo Ambiente de Dados Nacional. O alvo é
+# separado da SEFAZ porque uma indisponibilidade de um serviço não prova a do
+# outro, assim como a sondagem de acesso mantém os dois desfechos independentes.
+ALVO_NFSE_NACIONAL = 'NFS-e (API Nacional)'
 # Municipio nao tem rotulo fixo: o alvo e a chave canonica da cidade
 # (`utils.normalizar_cidade`), a mesma dos dois lados.
 ALVO_MUNICIPAL_GENERICO = 'Municipal'
@@ -67,7 +71,7 @@ def _contador_atual():
     return _contador
 
 
-def registrar_falha(alvo, mensagem=None):
+def registrar_falha(alvo, mensagem=None, execution_id=None):
     """Conta uma falha do portal. Devolve True apenas quando o breaker ABRIU
     agora — assim o alerta sai uma vez, e nao a cada item do lote."""
     if not alvo:
@@ -84,12 +88,15 @@ def registrar_falha(alvo, mensagem=None):
             'ocorrencias': ocorrencias,
             'motivo': mensagem,
         }
-    log_event('breaker_aberto', level='WARNING', alvo=alvo,
-              ocorrencias=ocorrencias, message=mensagem)
+    log_event(
+        'breaker_aberto', level='WARNING', alvo=alvo,
+        ocorrencias=ocorrencias, message=mensagem,
+        execution_id=execution_id,
+    )
     return True
 
 
-def registrar_sucesso(alvo):
+def registrar_sucesso(alvo, execution_id=None):
     """Desfecho nao-erro no portal: zera a contagem e fecha o breaker."""
     if not alvo:
         return
@@ -97,7 +104,10 @@ def registrar_sucesso(alvo):
     with _lock:
         fechou = _abertos.pop(alvo, None) is not None
     if fechou:
-        log_event('breaker_fechado', alvo=alvo, motivo='sucesso')
+        log_event(
+            'breaker_fechado', alvo=alvo, motivo='sucesso',
+            execution_id=execution_id,
+        )
 
 
 def aberto(alvo):

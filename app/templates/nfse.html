@@ -17,6 +17,47 @@
         color: var(--zelo-slate);
         font-size: 0.86rem;
     }
+    .nfse-api-acesso-resultados {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.75rem;
+    }
+    .nfse-api-acesso-resultado {
+        background: var(--zelo-muted-soft);
+        border: 1px solid var(--zelo-line);
+        border-left: 4px solid var(--zelo-muted);
+        border-radius: 8px;
+        padding: 0.75rem 0.85rem;
+    }
+    .nfse-api-acesso-resultado[data-situacao="ok"] {
+        background: var(--zelo-ok-soft);
+        border-left-color: var(--zelo-ok);
+    }
+    .nfse-api-acesso-resultado[data-situacao="negado"],
+    .nfse-api-acesso-resultado[data-situacao="rejeitado"] {
+        background: var(--zelo-danger-soft);
+        border-left-color: var(--zelo-danger);
+    }
+    .nfse-api-acesso-resultado[data-situacao="credencial"] {
+        background: var(--zelo-warn-soft);
+        border-left-color: var(--zelo-warn);
+    }
+    .nfse-api-acesso-resultado h3 {
+        font-size: 0.8rem;
+        letter-spacing: 0.04em;
+        margin: 0;
+        text-transform: uppercase;
+    }
+    .nfse-api-acesso-resultado .situacao {
+        color: var(--zelo-ink);
+        font-weight: 600;
+        margin-top: 0.35rem;
+    }
+    @media (max-width: 767.98px) {
+        .nfse-api-acesso-resultados {
+            grid-template-columns: 1fr;
+        }
+    }
     /* Toggle de modo: monocromatico como todo o chrome — a unica cor da tela
        continua sendo o status da nota. */
     .nfse-modo .btn-check:checked + .btn {
@@ -355,6 +396,51 @@
     }
     .nfse-diverg ul { margin: 0; padding-left: 1.1rem; font-size: 0.86rem; }
     .nfse-diverg li { margin-bottom: 0.15rem; }
+    .nfse-sombra {
+        border-top: 1px solid var(--zelo-line);
+        padding-top: 1rem;
+    }
+    .nfse-sombra-status {
+        background: var(--zelo-muted-soft);
+        border: 1px solid var(--zelo-line);
+        border-left: 4px solid var(--zelo-muted);
+        border-radius: 8px;
+        padding: 0.75rem 0.85rem;
+    }
+    .nfse-sombra-status[data-situacao="concluida"] {
+        background: var(--zelo-ok-soft);
+        border-left-color: var(--zelo-ok);
+    }
+    .nfse-sombra-status[data-situacao="inconclusiva"] {
+        background: var(--zelo-warn-soft);
+        border-left-color: var(--zelo-warn);
+    }
+    .nfse-sombra-lista {
+        border-top: 1px solid var(--zelo-line);
+        margin-top: 0.85rem;
+        padding-top: 0.7rem;
+    }
+    .nfse-sombra-lista h3 {
+        color: var(--zelo-slate);
+        font-size: 0.78rem;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.35rem;
+        text-transform: uppercase;
+    }
+    .nfse-sombra-lista ul {
+        font-size: 0.86rem;
+        margin: 0;
+        padding-left: 1.1rem;
+    }
+    .nfse-sombra-lista li { margin-bottom: 0.4rem; }
+    .nfse-sombra-lista[data-classificacao="esperada"] {
+        border-left: 3px solid var(--zelo-ok);
+        padding-left: 0.7rem;
+    }
+    .nfse-sombra-lista[data-classificacao="inesperada"] {
+        border-left: 3px solid var(--zelo-danger);
+        padding-left: 0.7rem;
+    }
     .nfse-acoes-linha { display: flex; gap: 0.35rem; justify-content: flex-end; }
     /* Rotulo de acao nao quebra: "Já emiti" virando "Já / emiti" em duas linhas
        le como botao quebrado, e a coluna ganhou mais um botao (Cancelar). */
@@ -509,7 +595,10 @@
 <!-- Configuracao dos campos fixos -->
 <div class="collapse mb-3" id="painelConfig">
     <div class="nfse-card">
+        {% set pode_editar_configuracao = current_user.papel == 'admin' %}
         <form id="formConfig" class="row g-3">
+            <fieldset class="border-0 p-0 m-0 row g-3"
+                      {% if not pode_editar_configuracao %}disabled{% endif %}>
             <div class="col-md-3">
                 <label class="form-label" for="cfg_codigo_tributacao">Código de tributação</label>
                 <input class="form-control" id="cfg_codigo_tributacao"
@@ -561,8 +650,65 @@
                     Extrato do Inter: outras categorias são ignoradas na importação.
                 </div>
             </div>
+
+            <div class="col-12" id="configuracaoApiNacional">
+                {{ zl_secao('Acesso à API nacional') }}
+                <p class="nfse-hint mb-3">
+                    Escolha a empresa do escritório e o ambiente da integração. Deixe a empresa
+                    vazia enquanto o acesso ainda não estiver configurado.
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-5">
+                        <label class="form-label" for="cfg_empresa_escritorio_id">
+                            Empresa do escritório
+                        </label>
+                        <select class="form-select" id="cfg_empresa_escritorio_id"
+                                name="empresa_escritorio_id">
+                            <option value="">Nenhuma empresa selecionada</option>
+                            {% for empresa in empresas %}
+                            <option value="{{ empresa.id }}"
+                                    {% if config.empresa_escritorio_id == empresa.id %}selected{% endif %}>
+                                {{ empresa.nome }} ({{ empresa.cnpj }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="cfg_api_ambiente">Ambiente</label>
+                        <select class="form-select" id="cfg_api_ambiente" name="api_ambiente">
+                            {% for ambiente in ambientes_api %}
+                            <option value="{{ ambiente }}"
+                                    {% if config.api_ambiente == ambiente %}selected{% endif %}>
+                                {% if ambiente == 'producao' %}Produção{% else %}Produção restrita{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="nfse-hint mt-1">
+                            Os ambientes possuem serviços próprios e não são intercambiáveis.
+                        </div>
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end">
+                        <div class="form-check form-switch mb-2">
+                            <input type="hidden" name="api_habilitada" value="false">
+                            <input class="form-check-input" type="checkbox"
+                                   id="cfg_api_habilitada" name="api_habilitada" value="true"
+                                   {% if config.api_habilitada %}checked{% endif %}>
+                            <label class="form-check-label" for="cfg_api_habilitada">
+                                Habilitar conferência pela API
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </fieldset>
             <div class="col-12 d-flex justify-content-end">
+                {% if pode_editar_configuracao %}
                 <button class="btn btn-primary btn-sm" type="submit">Salvar configurações</button>
+                {% else %}
+                <span class="nfse-hint" role="note">
+                    Somente administradores podem alterar esta configuração.
+                </span>
+                {% endif %}
             </div>
         </form>
     </div>
@@ -1030,6 +1176,50 @@
     </p>
 </div>
 
+<!-- Verificacao do acesso aos servicos nacionais (APINF-01/02) -->
+<div class="nfse-card mt-3" id="nfseApiAcesso">
+    {{ zl_secao('Verificar acesso à API nacional') }}
+    <p class="nfse-hint mb-3">
+        Testa SEFIN e ADN separadamente, sem baixar histórico nem emitir documento.
+        O resultado de um serviço não confirma o outro.
+    </p>
+    <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+        <button class="btn btn-primary btn-sm" type="button" id="btnVerificarAcesso">
+            Verificar acesso
+        </button>
+        <span class="nfse-hint" id="nfseApiAcessoEstado" role="status" aria-live="polite">
+            Nenhuma verificação realizada.
+        </span>
+    </div>
+    <div class="nfse-api-acesso-resultados" id="nfseApiAcessoResultados"
+         aria-live="polite">
+        <p class="nfse-hint mb-0">Os desfechos aparecerão aqui após a verificação.</p>
+    </div>
+</div>
+
+<!-- Sincronização incremental da conferência oficial (APINF-03..09) -->
+<div class="nfse-card mt-3" id="nfseAdnSincronizacao">
+    {{ zl_secao('Atualizar pelo ADN') }}
+    <p class="nfse-hint mb-3">
+        Busca novas NFS-e na API nacional e atualiza a conferência deste escritório.
+        É uma operação somente de leitura: não emite documento fiscal.
+    </p>
+    <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+        <button class="btn btn-primary btn-sm" type="button" id="btnSincronizarAdn">
+            Sincronizar notas do ADN
+        </button>
+        <span class="nfse-hint" id="nfseAdnSincronizacaoEstado" role="status"
+              aria-live="polite">
+            Nenhuma sincronização realizada.
+        </span>
+    </div>
+    <div id="nfseAdnSincronizacaoResultado" aria-live="polite">
+        <p class="nfse-hint mb-0">
+            O intervalo de NSU e as contagens aparecerão após a sincronização.
+        </p>
+    </div>
+</div>
+
 <!-- Conferencia contra o portal (NFSE-28) -->
 <div class="nfse-card mt-3">
     {{ zl_secao('O que saiu no portal') }}
@@ -1051,10 +1241,33 @@
         <button class="btn btn-primary btn-sm" type="submit" id="btnConsultarEmitidas">
             Consultar o portal
         </button>
+        <button class="btn btn-soft-primary btn-sm" type="button" id="btnExecutarSombra">
+            Conferir portal + ADN
+        </button>
         <span class="nfse-hint" id="emitidasEstado"></span>
     </form>
 
     <div id="emitidasPainel"></div>
+
+    <!-- Conferência paralela entre as duas fontes (APINF-10) -->
+    <div class="nfse-sombra mt-4" id="nfseSombra">
+        {{ zl_secao('Conferência sombra: portal + ADN') }}
+        <p class="nfse-hint mb-3">
+            Executa a leitura completa das duas fontes para o intervalo acima e
+            preserva os retratos separados. Não emite, cancela ou substitui
+            documento fiscal.
+        </p>
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+            <span class="nfse-hint" id="nfseSombraEstado" role="status" aria-live="polite">
+                Nenhuma conferência sombra realizada.
+            </span>
+        </div>
+        <div id="nfseSombraResultado" aria-live="polite">
+            <p class="nfse-hint mb-0">
+                Escolha o período e execute a conferência para ver as três listas.
+            </p>
+        </div>
+    </div>
 </div>
 
 <!-- Aviso confirmavel: aliquota nao conferida nesta sessao (modal de decisao) -->

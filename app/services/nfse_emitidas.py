@@ -16,8 +16,55 @@ a regra que evitou a falha silenciosa dos selects escondidos atras do Chosen
 from __future__ import annotations
 
 from calendar import monthrange
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+
+
+@dataclass
+class LinhaEmitida:
+    """Uma linha de NFS-e lida por qualquer fonte de conferência."""
+    chave: str = ''
+    data_geracao: date | None = None
+    documento: str = ''
+    nome_tomador: str = ''
+    competencia: str = ''
+    municipio: str = ''
+    valor: Decimal | None = None
+    situacao: str = ''
+
+
+@dataclass(frozen=True)
+class DivergenciaEmitidaNfse:
+    """Diferença entre os retratos portal e ADN de uma mesma chave."""
+
+    chave: str
+    portal: object
+    adn: object
+    campos: tuple[str, ...] = ()
+    situacao_portal: str = 'desconhecida'
+    situacao_adn: str = 'desconhecida'
+
+    @property
+    def situacao_divergente(self):
+        """Indica se as situações fiscais normalizadas não coincidem."""
+        return self.situacao_portal != self.situacao_adn
+
+
+@dataclass(frozen=True)
+class Comparacao:
+    """Resultado somente leitura da conferência entre as duas fontes."""
+
+    so_no_portal: tuple[object, ...] = ()
+    so_no_adn: tuple[object, ...] = ()
+    divergentes: tuple[DivergenciaEmitidaNfse, ...] = ()
+
+
+FONTES_OBSERVACAO = ('portal', 'adn')
+TIPOS_EVENTO_CANCELAMENTO = ('e101101', 'e105102')
+SITUACAO_FISCAL_GERADA = 'gerada'
+SITUACAO_FISCAL_CANCELADA = 'cancelada'
+SITUACAO_FISCAL_DESCONHECIDA = 'desconhecida'
 
 # Maior janela por consulta, em dias corridos e inclusiva nas duas pontas.
 # Confirmado na recon: 01/07 a 31/07 (31 dias) foi aceito e devolveu 80
@@ -82,6 +129,309 @@ def periodo_do_mes(mes_geracao):
     return inicio, _fim_do_mes(inicio)
 
 
+# --- observações por fonte e projeção canônica -----------------------------
+
+def _gravar_observacoes(linhas, fonte, execution_id=None):
+    """Faz upsert do retrato de uma fonte, sem confirmar a transação.
+
+    Cada produtor conserva sua própria observação. A ausência de `commit()` é
+    deliberada: o ADN confirma observação, evento e cursor por NSU na mesma
+    unidade de trabalho; o portal mantém sua consulta inteira atômica.
+    """
+    from app import db
+    from app.models import ObservacaoEmitidaNfse
+    from app.services.execution_logger import log_event
+
+    if fonte not in FONTES_OBSERVACAO:
+        raise ValueError(
+            f'Fonte de observação desconhecida: {fonte!r}.')
+
+    linhas = list(linhas)
+    chaves = list(dict.fromkeys(linha.chave for linha in linhas))
+    if any(not chave for chave in chaves):
+        raise ValueError('Toda observação de NFS-e precisa de uma chave.')
+
+    existentes = {observacao.chave: observacao for observacao in
+                  ObservacaoEmitidaNfse.query.filter(
+                      ObservacaoEmitidaNfse.fonte == fonte,
+                      ObservacaoEmitidaNfse.chave.in_(chaves),
+                  ).all()} if chaves else {}
+
+    novas = atualizadas = 0
+    for linha in linhas:
+        observacao = existentes.get(linha.chave)
+        if observacao is None:
+            observacao = ObservacaoEmitidaNfse(
+                fonte=fonte, chave=linha.chave)
+            db.session.add(observacao)
+            existentes[linha.chave] = observacao
+            novas += 1
+        else:
+            atualizadas += 1
+
+        observacao.data_geracao = linha.data_geracao
+        observacao.competencia_dps = linha.competencia or None
+        observacao.documento = linha.documento or None
+        observacao.nome_tomador = linha.nome_tomador or None
+        observacao.municipio = linha.municipio or None
+        observacao.valor = linha.valor
+        observacao.situacao_fonte = linha.situacao or None
+        observacao.observado_em = datetime.now()
+
+    log_event(
+        'nfse_emitidas_observacoes', fonte=fonte, lidas=len(linhas),
+        novas=novas, atualizadas=atualizadas, execution_id=execution_id)
+    return novas, atualizadas
+
+
+def _situacao_fiscal_da_observacao(observacao):
+    """Converte o vocabulário da fonte para a situação do domínio."""
+    from app.models import SituacaoNotaEmitida
+
+    if (observacao.fonte == 'portal'
+            and observacao.situacao_fonte == SituacaoNotaEmitida.GERADA):
+        return SITUACAO_FISCAL_GERADA
+    if observacao.fonte == 'adn':
+        # O ADN já entrega o documento fiscal emitido; cancelamento é evento
+        # separado e tem precedência na projeção abaixo.
+        return SITUACAO_FISCAL_GERADA
+    return None
+
+
+def projetar_espelho(chaves):
+    """Projeta observações em `NotaEmitidaNfse`, sem confirmar a transação.
+
+    A observação ADN prevalece sobre a do portal. Eventos de cancelamento são
+    evidência autoritativa mesmo quando a nota ainda só foi vista pelo portal,
+    para que o espelho não continue contando um documento cancelado.
+    """
+    from app import db
+    from app.models import (
+        EventoEmitidaNfse,
+        NotaEmitidaNfse,
+        ObservacaoEmitidaNfse,
+    )
+
+    chaves = list(dict.fromkeys(chave for chave in chaves if chave))
+    if not chaves:
+        return 0, 0
+
+    observacoes = ObservacaoEmitidaNfse.query.filter(
+        ObservacaoEmitidaNfse.chave.in_(chaves),
+        ObservacaoEmitidaNfse.fonte.in_(FONTES_OBSERVACAO),
+    ).all()
+    por_chave = {}
+    for observacao in observacoes:
+        por_chave.setdefault(observacao.chave, {})[observacao.fonte] = observacao
+
+    if not por_chave:
+        return 0, 0
+
+    eventos = EventoEmitidaNfse.query.filter(
+        EventoEmitidaNfse.chave.in_(por_chave),
+        EventoEmitidaNfse.tipo.in_(TIPOS_EVENTO_CANCELAMENTO),
+    ).all()
+    chaves_canceladas = {evento.chave for evento in eventos}
+
+    existentes = {nota.chave: nota for nota in NotaEmitidaNfse.query.filter(
+        NotaEmitidaNfse.chave.in_(list(por_chave)),
+    ).all()}
+
+    novas = atualizadas = 0
+    for chave, por_fonte in por_chave.items():
+        observacao = por_fonte.get('adn') or por_fonte.get('portal')
+        if observacao is None:
+            continue
+
+        nota = existentes.get(chave)
+        if nota is None:
+            nota = NotaEmitidaNfse(chave=chave)
+            db.session.add(nota)
+            novas += 1
+        else:
+            atualizadas += 1
+
+        cancelada = chave in chaves_canceladas
+        nota.data_geracao = observacao.data_geracao
+        nota.competencia_dps = observacao.competencia_dps
+        nota.documento = observacao.documento
+        nota.nome_tomador = observacao.nome_tomador
+        nota.municipio = observacao.municipio
+        nota.valor = observacao.valor
+        nota.situacao = observacao.situacao_fonte
+        nota.origem_autoritativa = 'adn' if cancelada else observacao.fonte
+        nota.situacao_fiscal = (
+            SITUACAO_FISCAL_CANCELADA if cancelada
+            else _situacao_fiscal_da_observacao(observacao))
+        nota.consultado_em = observacao.observado_em or datetime.now()
+        if cancelada:
+            # Uma nota cancelada não pode continuar conciliada com a fila,
+            # mesmo antes de o chamador pedir uma nova conciliação.
+            nota.nota_id = None
+
+    return novas, atualizadas
+
+
+def _situacao_comparavel(observacao, *, cancelada=False):
+    """Converte a situação da fonte para o vocabulário comum da comparação."""
+    if cancelada:
+        return SITUACAO_FISCAL_CANCELADA
+    return (_situacao_fiscal_da_observacao(observacao)
+            or SITUACAO_FISCAL_DESCONHECIDA)
+
+
+def comparar_fontes(inicio, fim):
+    """Compara observações persistidas sem alterar a unidade de trabalho.
+
+    A chave do documento é a identidade do par. Primeiro são encontradas as
+    chaves com pelo menos uma observação no intervalo; depois o outro retrato
+    da mesma chave é lido sem restringir sua data, para que uma data divergente
+    continue aparecendo como divergência em vez de virar uma ausência.
+    Eventos de cancelamento do ADN entram somente na classificação normalizada
+    da situação; nenhuma linha é criada, atualizada ou confirmada aqui.
+    """
+    from app.models import EventoEmitidaNfse, ObservacaoEmitidaNfse
+
+    if inicio > fim:
+        raise ValueError('A data inicial não pode ser depois da final.')
+
+    observacoes_no_periodo = ObservacaoEmitidaNfse.query.filter(
+        ObservacaoEmitidaNfse.fonte.in_(FONTES_OBSERVACAO),
+        ObservacaoEmitidaNfse.data_geracao >= inicio,
+        ObservacaoEmitidaNfse.data_geracao <= fim,
+    ).all()
+    chaves = {observacao.chave for observacao in observacoes_no_periodo}
+    if not chaves:
+        return Comparacao()
+
+    observacoes = ObservacaoEmitidaNfse.query.filter(
+        ObservacaoEmitidaNfse.fonte.in_(FONTES_OBSERVACAO),
+        ObservacaoEmitidaNfse.chave.in_(chaves),
+    ).order_by(
+        ObservacaoEmitidaNfse.chave,
+        ObservacaoEmitidaNfse.fonte,
+    ).all()
+    eventos = EventoEmitidaNfse.query.filter(
+        EventoEmitidaNfse.chave.in_(chaves),
+        EventoEmitidaNfse.tipo.in_(TIPOS_EVENTO_CANCELAMENTO),
+    ).all()
+    chaves_canceladas = {evento.chave for evento in eventos}
+
+    por_chave = {}
+    for observacao in observacoes:
+        por_chave.setdefault(observacao.chave, {})[
+            observacao.fonte] = observacao
+
+    so_no_portal = []
+    so_no_adn = []
+    divergentes = []
+    for chave in sorted(por_chave):
+        por_fonte = por_chave[chave]
+        portal = por_fonte.get('portal')
+        adn = por_fonte.get('adn')
+        if portal is None:
+            so_no_adn.append(adn)
+            continue
+        if adn is None:
+            so_no_portal.append(portal)
+            continue
+
+        campos = tuple(campo for campo in (
+            'data_geracao', 'documento', 'valor')
+            if getattr(portal, campo) != getattr(adn, campo))
+        situacao_portal = _situacao_comparavel(portal)
+        situacao_adn = _situacao_comparavel(
+            adn, cancelada=chave in chaves_canceladas)
+        if campos or situacao_portal != situacao_adn:
+            divergentes.append(DivergenciaEmitidaNfse(
+                chave=chave,
+                portal=portal,
+                adn=adn,
+                campos=campos,
+                situacao_portal=situacao_portal,
+                situacao_adn=situacao_adn,
+            ))
+
+    return Comparacao(
+        so_no_portal=tuple(so_no_portal),
+        so_no_adn=tuple(so_no_adn),
+        divergentes=tuple(divergentes),
+    )
+
+
+def registrar_eventos(eventos, execution_id=None):
+    """Registra cancelamentos do ADN e reflete-os sem fazer `commit`."""
+    from app import db
+    from app.models import EventoEmitidaNfse, NotaEmitidaNfse
+    from app.services.execution_logger import log_event
+
+    eventos = list(eventos)
+    candidatos = []
+    for evento in eventos:
+        tipo = str(getattr(evento, 'tipo', '') or '').strip()
+        if tipo not in TIPOS_EVENTO_CANCELAMENTO:
+            continue
+        chave = str(getattr(evento, 'chave', '') or '').strip()
+        if not chave:
+            raise ValueError('Todo evento de NFS-e precisa de uma chave.')
+        try:
+            num_seq = int(getattr(evento, 'num_seq', 1) or 1)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('A sequência do evento precisa ser numérica.') from exc
+        if num_seq < 1:
+            raise ValueError('A sequência do evento precisa ser positiva.')
+        candidatos.append((evento, chave, tipo, num_seq))
+
+    if not candidatos:
+        return 0
+
+    chaves = list(dict.fromkeys(chave for _, chave, _, _ in candidatos))
+    existentes = {
+        (evento.chave, evento.tipo, evento.num_seq): evento
+        for evento in EventoEmitidaNfse.query.filter(
+            EventoEmitidaNfse.chave.in_(chaves),
+        ).all()
+    }
+
+    novos = atualizados = 0
+    for origem, chave, tipo, num_seq in candidatos:
+        identidade = (chave, tipo, num_seq)
+        registro = existentes.get(identidade)
+        if registro is None:
+            registro = EventoEmitidaNfse(
+                chave=chave, tipo=tipo, num_seq=num_seq,
+                data=getattr(origem, 'data', None),
+                nsu=getattr(origem, 'nsu', None),
+            )
+            db.session.add(registro)
+            existentes[identidade] = registro
+            novos += 1
+        else:
+            atualizados += 1
+            data = getattr(origem, 'data', None)
+            nsu = getattr(origem, 'nsu', None)
+            if data is not None:
+                registro.data = data
+            if nsu is not None:
+                registro.nsu = nsu
+
+    # A projeção também cria a nota quando já existe uma observação ADN/portal;
+    # o bloco seguinte cobre o legado em que só o espelho canônico foi salvo.
+    projetar_espelho(chaves)
+    notas = NotaEmitidaNfse.query.filter(
+        NotaEmitidaNfse.chave.in_(chaves),
+    ).all()
+    for nota in notas:
+        nota.situacao_fiscal = SITUACAO_FISCAL_CANCELADA
+        nota.origem_autoritativa = 'adn'
+        nota.nota_id = None
+
+    log_event(
+        'nfse_emitidas_eventos', novos=novos, atualizados=atualizados,
+        canceladas=len(notas), execution_id=execution_id)
+    return novos
+
+
 # --- consulta ao portal ----------------------------------------------------
 
 def consultar(inicio, fim, execution_id=None):
@@ -99,7 +449,7 @@ def consultar(inicio, fim, execution_id=None):
     """
     from app import db
     from app.automation import nfse_emitidas as automacao
-    from app.models import ConsultaEmitidaNfse, NotaEmitidaNfse
+    from app.models import ConsultaEmitidaNfse
     from app.services.execution_logger import log_event
     from app.services.nfse_session import SESSAO
 
@@ -115,32 +465,17 @@ def consultar(inicio, fim, execution_id=None):
             log=lambda evento, **campos: log_event(
                 evento, execution_id=execution_id, **campos)))
 
-    novas = atualizadas = 0
-    existentes = {n.chave: n for n in NotaEmitidaNfse.query.filter(
-        NotaEmitidaNfse.chave.in_([linha.chave for linha in lidas])).all()} if lidas else {}
-
-    for linha in lidas:
-        registro = existentes.get(linha.chave)
-        if registro is None:
-            registro = NotaEmitidaNfse(chave=linha.chave)
-            db.session.add(registro)
-            novas += 1
-        else:
-            atualizadas += 1
-        registro.data_geracao = linha.data_geracao
-        registro.competencia_dps = linha.competencia or None
-        registro.documento = linha.documento or None
-        registro.nome_tomador = linha.nome_tomador or None
-        registro.municipio = linha.municipio or None
-        registro.valor = linha.valor
-        registro.situacao = linha.situacao or None
-        registro.consultado_em = datetime.now()
-
-    db.session.commit()
-    conciliar()
-    consulta = ConsultaEmitidaNfse(inicio=inicio, fim=fim)
-    db.session.add(consulta)
-    db.session.commit()
+    try:
+        chaves = [linha.chave for linha in lidas]
+        _gravar_observacoes(lidas, 'portal', execution_id=execution_id)
+        novas, atualizadas = projetar_espelho(chaves)
+        conciliar(persistir=False, execution_id=execution_id)
+        consulta = ConsultaEmitidaNfse(inicio=inicio, fim=fim)
+        db.session.add(consulta)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
 
     log_event('nfse_emitidas_consulta_ok', lidas=len(lidas), novas=novas,
               atualizadas=atualizadas, consulta_id=consulta.id,
@@ -160,6 +495,20 @@ def consultar(inicio, fim, execution_id=None):
 def mes_de(dia):
     """'MM/AAAA' de uma data. None quando nao ha data."""
     return f'{dia.month:02d}/{dia.year}' if dia else None
+
+
+def _nota_gerada(nota):
+    """Consulta a situação fiscal normalizada, com fallback legado seguro."""
+    from app.models import SituacaoNotaEmitida
+
+    if nota.situacao_fiscal is not None:
+        return nota.situacao_fiscal == SITUACAO_FISCAL_GERADA
+    return nota.situacao == SituacaoNotaEmitida.GERADA
+
+
+def _situacao_para_resumo(nota):
+    """Escolhe o rótulo explícito sem apagar o código cru da fonte."""
+    return nota.situacao_fiscal or nota.situacao or '(sem situação)'
 
 
 def _quando(nota):
@@ -219,11 +568,10 @@ def _avaliar_conciliacao():
     a escolha reproduzível quando há vários tomadores iguais; um empate de
     distância continua sem vínculo e vira uma ocorrência de `ambigua`.
     """
-    from app.models import NotaEmitidaNfse, NotaNfse, SituacaoNotaEmitida
+    from app.models import NotaEmitidaNfse, NotaNfse
 
     todas_emitidas = NotaEmitidaNfse.query.order_by(NotaEmitidaNfse.id).all()
-    emitidas = [e for e in todas_emitidas
-                if e.situacao == SituacaoNotaEmitida.GERADA]
+    emitidas = [e for e in todas_emitidas if _nota_gerada(e)]
     notas = [n for n in NotaNfse.query.order_by(NotaNfse.id).all()
              if _nota_elegivel(n)]
 
@@ -267,7 +615,7 @@ def _avaliar_conciliacao():
     }
 
 
-def conciliar(*, persistir=True):
+def conciliar(*, persistir=True, execution_id=None):
     """Liga notas emitidas e extrato sem consultar competência de referência.
 
     O casamento usa documento, valor, data e a janela de 75 dias. Estados que
@@ -288,6 +636,7 @@ def conciliar(*, persistir=True):
         vinculadas=sum(1 for e in resultado['emitidas'] if e.nota_id),
         ambiguas=len(resultado['ambiguas']),
         alteradas=resultado['mudou'],
+        execution_id=execution_id,
     )
     return resultado['mudou']
 
@@ -310,17 +659,17 @@ def resumo(mes_geracao):
     qualquer outra situação entram em `outras_situacoes`, separadas e visíveis:
     os códigos de cancelada/substituída não apareceram na recon, e somar ou
     descartar por adivinhação erraria um total fiscal nos dois sentidos."""
-    from app.models import NotaEmitidaNfse, SituacaoNotaEmitida
+    from app.models import NotaEmitidaNfse
 
     emitidas = [e for e in NotaEmitidaNfse.query.all()
                 if mes_de(e.data_geracao) == mes_geracao]
-    geradas = [n for n in emitidas if n.situacao == SituacaoNotaEmitida.GERADA]
+    geradas = [n for n in emitidas if _nota_gerada(n)]
 
     contagem = {}
     for nota in emitidas:
-        if nota.situacao == SituacaoNotaEmitida.GERADA:
+        if _nota_gerada(nota):
             continue
-        chave = nota.situacao or '(sem situação)'
+        chave = _situacao_para_resumo(nota)
         contagem[chave] = contagem.get(chave, 0) + 1
 
     return {
@@ -335,17 +684,17 @@ def resumo(mes_geracao):
 
 def resumo_periodo(inicio, fim):
     """Total das notas GERADAS dentro do intervalo consultado, inclusive."""
-    from app.models import NotaEmitidaNfse, SituacaoNotaEmitida
+    from app.models import NotaEmitidaNfse
 
     emitidas = [e for e in NotaEmitidaNfse.query.all()
                 if e.data_geracao is not None
                 and inicio <= e.data_geracao <= fim]
-    geradas = [e for e in emitidas if e.situacao == SituacaoNotaEmitida.GERADA]
+    geradas = [e for e in emitidas if _nota_gerada(e)]
     contagem = {}
     for nota in emitidas:
-        if nota.situacao == SituacaoNotaEmitida.GERADA:
+        if _nota_gerada(nota):
             continue
-        chave = nota.situacao or '(sem situação)'
+        chave = _situacao_para_resumo(nota)
         contagem[chave] = contagem.get(chave, 0) + 1
 
     return {
