@@ -245,7 +245,7 @@ def projetar_espelho(chaves):
     return novas, atualizadas
 
 
-def registrar_eventos(eventos):
+def registrar_eventos(eventos, execution_id=None):
     """Registra cancelamentos do ADN e reflete-os sem fazer `commit`."""
     from app import db
     from app.models import EventoEmitidaNfse, NotaEmitidaNfse
@@ -314,7 +314,7 @@ def registrar_eventos(eventos):
 
     log_event(
         'nfse_emitidas_eventos', novos=novos, atualizados=atualizados,
-        canceladas=len(notas))
+        canceladas=len(notas), execution_id=execution_id)
     return novos
 
 
@@ -516,7 +516,7 @@ def _avaliar_conciliacao():
     }
 
 
-def conciliar(*, persistir=True):
+def conciliar(*, persistir=True, execution_id=None):
     """Liga notas emitidas e extrato sem consultar competência de referência.
 
     O casamento usa documento, valor, data e a janela de 75 dias. Estados que
@@ -537,6 +537,7 @@ def conciliar(*, persistir=True):
         vinculadas=sum(1 for e in resultado['emitidas'] if e.nota_id),
         ambiguas=len(resultado['ambiguas']),
         alteradas=resultado['mudou'],
+        execution_id=execution_id,
     )
     return resultado['mudou']
 

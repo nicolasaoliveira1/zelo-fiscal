@@ -46,6 +46,10 @@ class DocumentoTomadorInvalidoError(NfseApiXmlError):
     """O CPF/CNPJ informado no tomador não tem formato estrutural válido."""
 
 
+class DocumentoPrestadorInvalidoError(NfseApiXmlError):
+    """O CPF/CNPJ informado no prestador não tem formato estrutural válido."""
+
+
 class ChaveNfseInvalidaError(NfseApiXmlError):
     """A chave de acesso não segue o identificador oficial da NFS-e."""
 
@@ -66,6 +70,7 @@ class EventoLido:
     tipo: str
     num_seq: int = 1
     data: datetime | None = None
+    nsu: int | None = None
 
     @property
     def tratado(self):
@@ -259,6 +264,38 @@ def ler_nfse(xml_bytes):
         valor=_valor_liquido(inf_nfse),
         situacao=_texto(inf_nfse, 'cStat')[:30],
     )
+
+
+def documento_prestador(xml_bytes):
+    """Lê o documento do prestador para filtrar documentos de tomador.
+
+    A distribuição do ADN pode alcançar o escritório como prestador ou como
+    tomador. O espelho de emitidas só aceita o primeiro caso; quando o XML não
+    permite identificar o prestador, devolve texto vazio para que o domínio não
+    atribua a nota ao escritório por suposição.
+    """
+    raiz = _parsear_xml(xml_bytes)
+    _validar_raiz_nfse(raiz)
+    inf_nfse = _filho(raiz, 'infNFSe')
+    if inf_nfse is None:
+        raise NfseEstruturaInvalidaError(
+            'A NFS-e não informa o grupo obrigatório infNFSe.')
+
+    dps = _filho(inf_nfse, 'DPS')
+    inf_dps = _filho(dps, 'infDPS')
+    grupo = _filho(inf_dps, 'prest')
+    if grupo is None:
+        return ''
+    for nome, tamanho in (('CNPJ', 14), ('CPF', 11)):
+        bruto = _texto(grupo, nome)
+        if not bruto:
+            continue
+        if (len(bruto) != tamanho or not bruto.isascii()
+                or not bruto.isdigit()):
+            raise DocumentoPrestadorInvalidoError(
+                f'O {nome} do prestador não tem {tamanho} dígitos.')
+        return formatar_documento(bruto)
+    return ''
 
 
 def _validar_raiz_evento(raiz):
