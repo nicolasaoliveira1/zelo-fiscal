@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
+import xml.etree.ElementTree as ET
 
 import pytest
 from cryptography import x509
@@ -282,3 +283,69 @@ def test_assinar_recusa_id_que_nao_seja_o_calculado():
 
     with pytest.raises(dps_api.AssinaturaDpsInvalidaError):
         dps_api.assinar(montada, chave, certificado)
+
+
+def test_comparar_com_real_separa_diferencas_tecnicas_e_exibe_metadados():
+    montada = _montada()
+
+    comparacao = dps_api.comparar_com_real(montada, _xml_referencia())
+
+    assert comparacao.pode_enviar is True
+    assert comparacao.bloqueadoras == ()
+    assert {diferenca.caminho for diferenca in comparacao.esperadas} == {
+        '/DPS/infDPS/tpAmb',
+        '/DPS/infDPS/dhEmi',
+        '/DPS/infDPS/verAplic',
+        '/DPS/infDPS/serie',
+        '/DPS/infDPS/nDPS',
+    }
+    assert comparacao.metadados['ambiente_referencia'] == '1'
+    assert comparacao.metadados['ambiente_dps'] == '2'
+    assert comparacao.metadados['chave_nfse_referencia'] == CHAVE_SINTETICA
+    assert comparacao.metadados['dh_emi_dps'] == '2026-09-12T14:35:20+00:00'
+
+
+@pytest.mark.parametrize('caminho,valor', [
+    (f'.//{{{NS}}}prest/{{{NS}}}CNPJ', '99888777000166'),
+    (f'.//{{{NS}}}toma/{{{NS}}}CNPJ', '66777888000199'),
+    (f'.//{{{NS}}}dCompet', '2026-06-18'),
+    (f'.//{{{NS}}}cTribNac', '171902'),
+    (f'.//{{{NS}}}xDescServ', 'SERVIÇO SINTÉTICO ALTERADO'),
+    (f'.//{{{NS}}}vServ', '1280.41'),
+    (f'.//{{{NS}}}regApTribSN', '2'),
+    (f'.//{{{NS}}}tpRetPisCofins', '1'),
+    (f'.//{{{NS}}}tribISSQN', '2'),
+])
+def test_comparar_bloqueia_cada_fato_fiscal_alterado(caminho, valor):
+    montada = _montada()
+    montada.find(caminho).text = valor
+
+    comparacao = dps_api.comparar_com_real(montada, _xml_referencia())
+
+    assert comparacao.pode_enviar is False
+    assert comparacao.bloqueadoras
+    assert any(diferenca.valor_dps == valor
+               for diferenca in comparacao.bloqueadoras)
+
+
+def test_comparar_trata_campo_desconhecido_como_bloqueador():
+    montada = _montada()
+    serv = montada.find(f'.//{{{NS}}}serv')
+    ET.SubElement(serv, f'{{{NS}}}CampoNovo').text = 'valor sintético'
+
+    comparacao = dps_api.comparar_com_real(montada, _xml_referencia())
+
+    assert any(diferenca.caminho == '/DPS/infDPS/serv/CampoNovo'
+               for diferenca in comparacao.bloqueadoras)
+    assert comparacao.pode_enviar is False
+
+
+def test_comparacao_e_serializavel_sem_elementos_xml():
+    import json
+
+    comparacao = dps_api.comparar_com_real(_montada(), _xml_referencia())
+
+    serializada = comparacao.serializar()
+    json.dumps(serializada, ensure_ascii=False)
+    assert serializada['pode_enviar'] is True
+    assert all(isinstance(item, dict) for item in serializada['esperadas'])

@@ -83,6 +83,46 @@ class ProblemaDps:
 
 
 @dataclass(frozen=True)
+class DivergenciaFiscal:
+    """Diferença entre a referência e a DPS candidata."""
+
+    caminho: str
+    valor_referencia: str | None
+    valor_dps: str | None
+    motivo: str
+
+
+@dataclass(frozen=True)
+class ComparacaoFiscal:
+    """Resultado serializável da conferência pré-envio da DPS."""
+
+    esperadas: tuple[DivergenciaFiscal, ...] = ()
+    bloqueadoras: tuple[DivergenciaFiscal, ...] = ()
+    metadados: dict = field(default_factory=dict)
+
+    @property
+    def pode_enviar(self):
+        return not self.bloqueadoras
+
+    def serializar(self):
+        def item(diferenca):
+            return {
+                'caminho': diferenca.caminho,
+                'valor_referencia': diferenca.valor_referencia,
+                'valor_dps': diferenca.valor_dps,
+                'motivo': diferenca.motivo,
+            }
+
+        return {
+            'esperadas': [item(diferenca) for diferenca in self.esperadas],
+            'bloqueadoras': [
+                item(diferenca) for diferenca in self.bloqueadoras],
+            'metadados': dict(self.metadados),
+            'pode_enviar': self.pode_enviar,
+        }
+
+
+@dataclass(frozen=True)
 class ReferenciaFiscal:
     """Fatos necessários para reproduzir uma NFS-e histórica.
 
@@ -635,6 +675,122 @@ def verificar(dps):
     except (NfseApiDpsError, AttributeError, TypeError, ValueError,
             ET.ParseError):
         return False
+
+
+_CAMPOS_TECNICOS = {
+    'tpAmb', 'dhEmi', 'verAplic', 'serie', 'nDPS', 'cMotivoEmisTI',
+    'chNFSeRej',
+}
+_CAMPOS_FISCAIS = {
+    'cLocEmi', 'subst', 'prest', 'toma', 'interm', 'serv', 'valores',
+}
+
+
+def _mapa_elemento(elemento, caminho):
+    if elemento is None:
+        return {caminho: None}
+    mapa = {
+        caminho: (
+            elemento.text.strip()
+            if len(elemento) == 0 and elemento.text else None)
+    }
+    ocorrencias = {}
+    for filho in list(elemento):
+        nome = _nome_local(filho)
+        ocorrencias[nome] = ocorrencias.get(nome, 0) + 1
+        sufixo = (
+            f'[{ocorrencias[nome]}]' if ocorrencias[nome] > 1 else '')
+        mapa.update(_mapa_elemento(
+            filho, f'{caminho}/{nome}{sufixo}'))
+    return mapa
+
+
+def _adicionar_diferencas(
+        destino, origem, candidato, caminho, *, motivo):
+    mapa_origem = _mapa_elemento(origem, caminho)
+    mapa_candidato = _mapa_elemento(candidato, caminho)
+    for campo in sorted(set(mapa_origem) | set(mapa_candidato)):
+        valor_origem = mapa_origem.get(campo)
+        valor_candidato = mapa_candidato.get(campo)
+        if valor_origem != valor_candidato:
+            destino.append(DivergenciaFiscal(
+                caminho=campo,
+                valor_referencia=valor_origem,
+                valor_dps=valor_candidato,
+                motivo=motivo,
+            ))
+
+
+def _extrair_referencia_comparacao(xml_real):
+    raiz = _parsear_xml(xml_real)
+    if _nome_local(raiz) != 'NFSe' or raiz.tag != _tag('NFSe'):
+        raise XmlReferenciaInvalidoError(
+            'O XML histórico precisa ter a raiz oficial NFSe.')
+    if any(_nome_local(elemento) == 'IBSCBS' for elemento in raiz.iter()):
+        raise IbscbsForaEscopoError(
+            'A comparação do primeiro ensaio não aceita IBS/CBS.')
+    inf_nfse = _exigir_grupo(raiz, 'infNFSe', 'NFSe/infNFSe')
+    dps = _exigir_grupo(inf_nfse, 'DPS', 'NFSe/infNFSe/DPS')
+    inf_dps = _exigir_grupo(
+        dps, 'infDPS', 'NFSe/infNFSe/DPS/infDPS')
+    _validar_data_completa(
+        _exigir_texto(inf_dps, 'dCompet', 'DPS/infDPS/dCompet'),
+        'DPS/infDPS/dCompet')
+    return raiz, inf_nfse, dps, inf_dps
+
+
+def comparar_com_real(dps, xml_real):
+    """Compara fatos da DPS com o XML histórico sem aceitar exceções tácitas."""
+    dps = _dps_de(dps)
+    inf_dps = _inf_dps_de(dps)
+    _raiz, inf_nfse, dps_referencia, inf_referencia = (
+        _extrair_referencia_comparacao(xml_real))
+    esperadas = []
+    bloqueadoras = []
+
+    for campo in sorted(_CAMPOS_TECNICOS):
+        _adicionar_diferencas(
+            esperadas, _filho(inf_referencia, campo),
+            _filho(inf_dps, campo), f'/DPS/infDPS/{campo}',
+            motivo='metadado técnico do ensaio')
+
+    for campo in sorted(_CAMPOS_FISCAIS):
+        _adicionar_diferencas(
+            bloqueadoras, _filho(inf_referencia, campo),
+            _filho(inf_dps, campo), f'/DPS/infDPS/{campo}',
+            motivo='campo fiscal divergente')
+
+    nomes_desconhecidos = (
+        { _nome_local(filho) for filho in list(inf_referencia)}
+        | { _nome_local(filho) for filho in list(inf_dps)}
+    ) - _CAMPOS_TECNICOS - _CAMPOS_FISCAIS - {'IBSCBS'}
+    for campo in sorted(nomes_desconhecidos):
+        _adicionar_diferencas(
+            bloqueadoras, _filho(inf_referencia, campo),
+            _filho(inf_dps, campo), f'/DPS/infDPS/{campo}',
+            motivo='campo não classificado; revisão obrigatória')
+
+    if any(_nome_local(elemento) == 'IBSCBS' for elemento in inf_dps.iter()):
+        raise IbscbsForaEscopoError(
+            'A comparação do primeiro ensaio não aceita IBS/CBS.')
+
+    metadados = {
+        'versao_referencia': dps_referencia.get('versao'),
+        'versao_dps': dps.get('versao'),
+        'ambiente_referencia': _texto(inf_referencia, 'tpAmb'),
+        'ambiente_dps': _texto(inf_dps, 'tpAmb'),
+        'identificador_referencia': inf_referencia.get('Id'),
+        'identificador_dps': inf_dps.get('Id'),
+        'chave_nfse_referencia': inf_nfse.get('Id'),
+        'dh_emi_referencia': _texto(inf_referencia, 'dhEmi'),
+        'dh_emi_dps': _texto(inf_dps, 'dhEmi'),
+        'dh_processamento_referencia': _texto(inf_nfse, 'dhProc') or None,
+    }
+    return ComparacaoFiscal(
+        esperadas=tuple(esperadas),
+        bloqueadoras=tuple(bloqueadoras),
+        metadados=metadados,
+    )
 
 
 def montar(referencia, config, *, serie, numero, agora=None):
