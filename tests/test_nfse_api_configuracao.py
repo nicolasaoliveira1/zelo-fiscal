@@ -89,6 +89,19 @@ def test_ambiente_invalido_preserva_o_valor_anterior(client, app, ids):
     assert config.empresa_escritorio_id == ids['empresa']
 
 
+def test_habilitacao_valida_nao_oculta_outro_campo_invalido(client):
+    resposta = client.post(
+        '/nfse/configuracao',
+        json={
+            'api_ambiente': 'homologacao',
+            'api_habilitada': True,
+        },
+    )
+
+    assert resposta.status_code == 400
+    assert resposta.get_json()['campo'] == 'api_ambiente'
+
+
 def test_operador_nao_altera_configuracao_da_api(login_as, app, ids):
     administrador = login_as('admin')
     administrador.post(

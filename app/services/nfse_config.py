@@ -104,15 +104,16 @@ def validar(valores):
 
     if 'api_habilitada' in valores:
         habilitada = valores.get('api_habilitada')
-        if isinstance(habilitada, bool):
-            return
-        if isinstance(habilitada, str) and habilitada.strip().lower() in {
-            'true', 'false', '1', '0', 'on', 'off',
-        }:
-            return
-        raise ConfiguracaoInvalidaError(
-            'A habilitação da API deve ser booleana.',
-            campo='api_habilitada')
+        habilitada_valida = isinstance(habilitada, bool) or (
+            isinstance(habilitada, str)
+            and habilitada.strip().lower() in {
+                'true', 'false', '1', '0', 'on', 'off',
+            }
+        )
+        if not habilitada_valida:
+            raise ConfiguracaoInvalidaError(
+                'A habilitação da API deve ser booleana.',
+                campo='api_habilitada')
 
 
 def salvar(valores):
