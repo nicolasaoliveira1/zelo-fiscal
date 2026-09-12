@@ -599,23 +599,17 @@ def validar(dps, esquema_restrito=None):
     ]
 
 
-def _identificador_dos_campos(inf_dps):
-    c_loc_emi = _exigir_texto(inf_dps, 'cLocEmi', 'DPS/infDPS/cLocEmi')
+def _identificador_dos_valores(
+        c_loc_emi, tipo_inscricao, inscricao, serie, numero):
     if re.fullmatch(r'[0-9]{7}', c_loc_emi) is None:
         raise MontagemDpsInvalidaError(
             'O município de emissão precisa ter 7 algarismos.')
-    prest = _exigir_grupo(inf_dps, 'prest', 'DPS/infDPS/prest')
-    tipo, inscricao = _documento_do_grupo(prest, 'DPS/infDPS/prest')
-    if tipo == 'CPF':
-        tipo_inscricao = '2'
-        inscricao = '000' + inscricao
-    elif tipo == 'CNPJ':
-        tipo_inscricao = '1'
-    else:
+    if tipo_inscricao not in {'1', '2'}:
         raise DocumentoNaoRepresentavelError(
             'O prestador da DPS não possui documento representável.')
-    serie = _exigir_texto(inf_dps, 'serie', 'DPS/infDPS/serie')
-    numero = _exigir_texto(inf_dps, 'nDPS', 'DPS/infDPS/nDPS')
+    if re.fullmatch(r'[0-9]{14}', inscricao) is None:
+        raise DocumentoNaoRepresentavelError(
+            'A inscrição federal do prestador deve ter 14 algarismos.')
     if re.fullmatch(r'[0-9]{1,5}', serie) is None:
         raise MontagemDpsInvalidaError('A série da DPS não é numérica.')
     if re.fullmatch(r'[1-9][0-9]{0,14}', numero) is None:
@@ -629,9 +623,46 @@ def _identificador_dos_campos(inf_dps):
     return identificador
 
 
+def _identificador_dos_campos(inf_dps):
+    c_loc_emi = _exigir_texto(inf_dps, 'cLocEmi', 'DPS/infDPS/cLocEmi')
+    prest = _exigir_grupo(inf_dps, 'prest', 'DPS/infDPS/prest')
+    tipo, inscricao = _documento_do_grupo(prest, 'DPS/infDPS/prest')
+    if tipo == 'CPF':
+        tipo_inscricao = '2'
+        inscricao = '000' + inscricao
+    elif tipo == 'CNPJ':
+        tipo_inscricao = '1'
+    else:
+        raise DocumentoNaoRepresentavelError(
+            'O prestador da DPS não possui documento representável.')
+    serie = _exigir_texto(inf_dps, 'serie', 'DPS/infDPS/serie')
+    numero = _exigir_texto(inf_dps, 'nDPS', 'DPS/infDPS/nDPS')
+    return _identificador_dos_valores(
+        c_loc_emi, tipo_inscricao, inscricao, serie, numero)
+
+
 def identificador(dps):
     """Calcula o identificador oficial de 45 posições da DPS."""
     return _identificador_dos_campos(_inf_dps_de(dps))
+
+
+def identificador_de_referencia(referencia, *, serie, numero):
+    """Calcula o Id antes da montagem, para persistir uma reserva durável.
+
+    A preparação reserva o número antes de executar todas as provas locais.
+    Este cálculo usa somente os fatos já validados do XML histórico e mantém a
+    fórmula oficial no mesmo núcleo de ``identificador``.
+    """
+    if not isinstance(referencia, ReferenciaFiscal):
+        raise MontagemDpsInvalidaError(
+            'O identificador exige uma referência fiscal lida pelo serviço.')
+    prestador = referencia.prestador
+    if re.fullmatch(r'[0-9]{14}', prestador) is None:
+        raise DocumentoNaoRepresentavelError(
+            'O prestador da referência precisa ter 14 algarismos.')
+    return _identificador_dos_valores(
+        referencia.c_loc_emi, '1', prestador,
+        validar_serie(serie), _numero_dps(numero))
 
 
 def assinar(dps, chave_privada, certificado):
