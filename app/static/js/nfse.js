@@ -72,6 +72,38 @@ const editando = new Set();
 const editandoDescricao = new Set();
 // linhas marcadas para uma acao em massa
 const selecionadas = new Set();
+let ensaioAtual = null;
+let acaoEnsaio = null;
+
+const ESTADOS_ENSAIO = Object.freeze({
+  RESERVADO: 'reservado',
+  PREPARADO: 'preparado',
+  ENVIANDO: 'enviando',
+  GERADO_TESTE: 'gerado_teste',
+  REJEITADO: 'rejeitado',
+  INDEFINIDA: 'indefinida',
+  FALHA_PREPARACAO: 'falha_preparacao',
+});
+
+const ROTULO_ESTADO_ENSAIO = {
+  reservado: 'Preparação reservada',
+  preparado: 'Pronto para envio de teste',
+  enviando: 'Envio de teste em andamento',
+  gerado_teste: 'Teste gerado',
+  rejeitado: 'Teste rejeitado',
+  indefinida: 'Resultado ainda desconhecido',
+  falha_preparacao: 'Falha na preparação local',
+};
+
+const MENSAGEM_ESTADO_ENSAIO = {
+  reservado: 'A preparação local ainda não terminou.',
+  preparado: 'Revise a comparação antes de confirmar o envio ao ambiente de testes.',
+  enviando: 'Consulte o resultado somente quando a janela de segurança permitir.',
+  gerado_teste: 'O ambiente de testes devolveu uma NFS-e de teste sem validade jurídica.',
+  rejeitado: 'O ambiente de testes rejeitou a DPS; a nota histórica continua emitida.',
+  indefinida: 'O resultado ainda não pôde ser confirmado. Faça somente uma reconsulta.',
+  falha_preparacao: 'A tentativa não foi liberada para envio. Corrija a causa ou escolha outra nota.',
+};
 
 // `textContent` -> `innerHTML` escapa &, < e >, mas NAO aspas: como o resultado
 // tambem entra em atributos (title="${esc(...)}"), faltavam justamente as duas
@@ -82,6 +114,428 @@ const esc = (texto) => {
   div.textContent = texto == null ? '' : String(texto);
   return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 };
+
+function buscar(id, raiz = document) {
+  return raiz?.getElementById?.(id) || null;
+}
+
+/**
+ * A seleção do ensaio é um veredito do servidor: status emitida e um único
+ * espelho oficial. XML, configuração e assinatura continuam sendo provas da
+ * preparação, não critérios que a interface tenta adivinhar.
+ *
+ * @param {Array<Object>} lista
+ * @returns {Array<Object>}
+ */
+export function notasHistoricasAptas(lista) {
+  return (Array.isArray(lista) ? lista : []).filter((nota) => (
+    nota?.status === 'emitida' && nota.ensaio_elegivel === true
+  ));
+}
+
+function rotuloNotaHistorica(nota) {
+  const nome = nota.nome_csv || nota.empresa || 'Nota histórica emitida';
+  const detalhes = [
+    nota.competencia,
+    nota.valor ? `R$ ${nota.valor}` : null,
+  ].filter(Boolean);
+  return detalhes.length ? `${nome} · ${detalhes.join(' · ')}` : nome;
+}
+
+function atualizarControlesEnsaio(raiz = document) {
+  const select = buscar('nfseEnsaioNota', raiz);
+  const preparar = buscar('btnPrepararEnsaio', raiz);
+  const enviar = buscar('btnEnviarEnsaio', raiz);
+  const reconsultar = buscar('btnReconsultarEnsaio', raiz);
+  const temCandidatas = select?.dataset.ensaioTemCandidatas === 'true';
+  const ocupado = Boolean(acaoEnsaio);
+
+  if (select) select.disabled = !temCandidatas || ocupado;
+  if (preparar) preparar.disabled = !select?.value || ocupado;
+
+  const estado = ensaioAtual?.estado;
+  const comparacao = ensaioAtual?.comparacao;
+  const bloqueadoras = Array.isArray(comparacao?.bloqueadoras)
+    ? comparacao.bloqueadoras : [];
+  const podeEnviar = estado === ESTADOS_ENSAIO.PREPARADO
+    && comparacao?.pode_enviar === true
+    && bloqueadoras.length === 0;
+  if (enviar) {
+    enviar.classList.toggle('d-none', estado !== ESTADOS_ENSAIO.PREPARADO);
+    enviar.disabled = !podeEnviar || ocupado;
+  }
+  if (reconsultar) {
+    const podeReconsultar = [
+      ESTADOS_ENSAIO.INDEFINIDA,
+      ESTADOS_ENSAIO.ENVIANDO,
+    ].includes(estado);
+    reconsultar.classList.toggle('d-none', !podeReconsultar);
+    reconsultar.disabled = !podeReconsultar || ocupado;
+  }
+}
+
+/**
+ * Preenche a lista com as únicas notas que o servidor considera candidatas
+ * históricas. O valor do id fica somente no controle, não no texto lido.
+ *
+ * @param {Array<Object>} lista
+ * @param {Document=} raiz
+ * @returns {Array<Object>}
+ */
+export function pintarOpcoesEnsaio(lista = notas, raiz = document) {
+  const select = buscar('nfseEnsaioNota', raiz);
+  if (!select) return [];
+
+  const valorAnterior = select.value;
+  const aptas = notasHistoricasAptas(lista);
+  select.dataset.ensaioTemCandidatas = String(aptas.length > 0);
+  const primeira = aptas.length
+    ? 'Escolha uma nota histórica…'
+    : 'Nenhuma nota histórica apta disponível.';
+  select.innerHTML = [
+    `<option value="">${primeira}</option>`,
+    ...aptas.map((nota) => (
+      `<option value="${esc(nota.id)}">${esc(rotuloNotaHistorica(nota))}</option>`
+    )),
+  ].join('');
+
+  if (aptas.some((nota) => String(nota.id) === valorAnterior)) {
+    select.value = valorAnterior;
+  }
+  if (ensaioAtual
+      && String(ensaioAtual.nota_nfse_id) !== String(select.value || '')) {
+    ensaioAtual = null;
+    pintarEnsaio(null, raiz);
+  }
+  atualizarControlesEnsaio(raiz);
+  return aptas;
+}
+
+function valorEnsaio(valor) {
+  if (valor === null || valor === undefined || valor === '') return '—';
+  if (typeof valor === 'object') {
+    try { return JSON.stringify(valor); } catch { return '—'; }
+  }
+  return String(valor);
+}
+
+function htmlDiferenca(diferenca) {
+  const caminho = diferenca?.caminho || 'Campo não identificado';
+  const motivo = diferenca?.motivo || 'Diferença registrada na comparação.';
+  return `<li>
+    <div class="nfse-ensaio-diferenca">
+      <div><span class="rotulo">Campo</span><br><code>${esc(caminho)}</code></div>
+      <div><span class="rotulo">Referência</span><br>${esc(valorEnsaio(diferenca?.valor_referencia))}</div>
+      <div><span class="rotulo">DPS do ensaio</span><br>${esc(valorEnsaio(diferenca?.valor_dps))}</div>
+      <div class="motivo">${esc(motivo)}</div>
+    </div>
+  </li>`;
+}
+
+function htmlListaDiferencas(titulo, itens, classe, vazio) {
+  const lista = Array.isArray(itens) ? itens : [];
+  const corpo = lista.length
+    ? `<ul class="nfse-ensaio-lista">${lista.map(htmlDiferenca).join('')}</ul>`
+    : `<p class="nfse-hint mb-0">${esc(vazio)}</p>`;
+  return `<section class="${classe}">
+    <h3>${esc(titulo)} (${lista.length})</h3>
+    ${corpo}
+  </section>`;
+}
+
+function htmlMetadados(metadados) {
+  if (!metadados || typeof metadados !== 'object') return '';
+  const itens = Object.entries(metadados);
+  if (!itens.length) return '';
+  return `<section class="mt-3">
+    <h3>Metadados técnicos esperados</h3>
+    <dl class="nfse-ensaio-metadados mb-0">
+      ${itens.map(([chave, valor]) => (
+        `<div><dt><code>${esc(chave)}</code></dt><dd>${esc(valorEnsaio(valor))}</dd></div>`
+      )).join('')}
+    </dl>
+  </section>`;
+}
+
+function htmlComparacao(comparacao) {
+  if (!comparacao || typeof comparacao !== 'object') {
+    return `<div class="nfse-ensaio-comparacao">
+      <h3>Comparação local</h3>
+      <p class="nfse-hint mb-0">A comparação local ainda não está disponível.</p>
+    </div>`;
+  }
+  const bloqueadoras = Array.isArray(comparacao.bloqueadoras)
+    ? comparacao.bloqueadoras : [];
+  const esperadas = Array.isArray(comparacao.esperadas)
+    ? comparacao.esperadas : [];
+  const estadoBloqueio = bloqueadoras.length || comparacao.pode_enviar !== true
+    ? 'O envio permanece bloqueado até que não haja divergência fiscal.'
+    : 'Nenhuma divergência fiscal bloqueadora foi encontrada.';
+  return `<div class="nfse-ensaio-comparacao">
+    <h3>Comparação campo a campo</h3>
+    <p class="nfse-hint mb-3">${esc(estadoBloqueio)}</p>
+    ${htmlListaDiferencas(
+      'Diferenças fiscais bloqueadoras', bloqueadoras,
+      'nfse-ensaio-bloqueadoras', 'Nenhuma diferença fiscal bloqueadora.')}
+    ${htmlListaDiferencas(
+      'Diferenças técnicas esperadas', esperadas,
+      'nfse-ensaio-esperadas', 'Nenhuma diferença técnica esperada.')}
+    ${htmlMetadados(comparacao.metadados)}
+  </div>`;
+}
+
+function mensagemDoEnsaio(ensaio, comparacao) {
+  if (ensaio.estado === ESTADOS_ENSAIO.PREPARADO
+      && comparacao?.pode_enviar !== true) {
+    return 'Há divergência fiscal: o envio está desabilitado e não pode ser ignorado.';
+  }
+  return MENSAGEM_ESTADO_ENSAIO[ensaio.estado]
+    || 'O servidor devolveu um estado de ensaio não reconhecido.';
+}
+
+function htmlEnsaio(ensaio) {
+  const comparacao = ensaio.comparacao;
+  const xml = ensaio.xml || {};
+  const falha = ensaio.motivo_rejeicao || ensaio.ultima_falha;
+  const identificador = valorEnsaio(ensaio.identificador_dps);
+  const provas = [
+    xml.referencia_disponivel ? 'referência histórica' : null,
+    xml.dps_assinada_disponivel ? 'DPS assinada' : null,
+    xml.nfse_teste_disponivel ? 'NFS-e de teste' : null,
+  ].filter(Boolean);
+  const resultado = ensaio.estado === ESTADOS_ENSAIO.REJEITADO
+    ? [ensaio.codigo_rejeicao, ensaio.motivo_rejeicao].filter(Boolean).join(' · ')
+    : ensaio.chave_nfse_teste;
+  return `<div data-ensaio-id="${esc(ensaio.id)}">
+    <div class="nfse-ensaio-faixa" data-estado="${esc(ensaio.estado)}"
+         role="status" aria-live="polite">
+      <div class="estado">${esc(ROTULO_ESTADO_ENSAIO[ensaio.estado]
+        || 'Estado do ensaio')}</div>
+      <div class="nfse-hint">${esc(mensagemDoEnsaio(ensaio, comparacao))}</div>
+    </div>
+    <dl class="nfse-ensaio-meta">
+      <div><dt>Identificador da DPS</dt><dd class="nfse-mono">${esc(identificador)}</dd></div>
+      <div><dt>Série / número</dt><dd class="nfse-mono">${esc(valorEnsaio(ensaio.serie))} / ${esc(valorEnsaio(ensaio.numero))}</dd></div>
+      <div><dt>Ambiente</dt><dd>Produção restrita (testes)</dd></div>
+      ${resultado ? `<div><dt>Desfecho</dt><dd>${esc(valorEnsaio(resultado))}</dd></div>` : ''}
+      <div><dt>Validade</dt><dd>Sem validade jurídica</dd></div>
+      <div><dt>Provas persistidas</dt><dd>${esc(provas.join(', ') || 'Nenhuma disponível')}</dd></div>
+    </dl>
+    ${falha ? `<p class="nfse-ensaio-erro" role="alert">${esc(falha)}</p>` : ''}
+    <p class="nfse-hint mt-3 mb-0">
+      A nota de origem permanece <strong>emitida</strong>; este ensaio é uma tentativa separada.
+      O conteúdo XML fica fora da tela.
+    </p>
+    ${htmlComparacao(comparacao)}
+  </div>`;
+}
+
+/**
+ * Pinta somente o resumo seguro devolvido pelas rotas do ensaio.
+ *
+ * @param {Object|null} ensaio
+ * @param {Document=} raiz
+ */
+export function pintarEnsaio(ensaio, raiz = document) {
+  ensaioAtual = ensaio || null;
+  const estado = buscar('nfseEnsaioEstado', raiz);
+  const resultado = buscar('nfseEnsaioResultado', raiz);
+  const select = buscar('nfseEnsaioNota', raiz);
+
+  if (!ensaio) {
+    if (estado) {
+      estado.removeAttribute('data-estado');
+      estado.textContent = 'Nenhum ensaio preparado.';
+    }
+    if (resultado) {
+      delete resultado.dataset.ensaioId;
+      resultado.innerHTML = `<p class="nfse-hint mb-0">
+        A comparação local aparecerá aqui depois da preparação.
+      </p>`;
+    }
+    atualizarControlesEnsaio(raiz);
+    return;
+  }
+
+  if (select && Array.from(select.options).some(
+    (option) => option.value === String(ensaio.nota_nfse_id))) {
+    select.value = String(ensaio.nota_nfse_id);
+  }
+  const comparacao = ensaio.comparacao;
+  if (estado) {
+    estado.dataset.estado = ensaio.estado;
+    estado.textContent = mensagemDoEnsaio(ensaio, comparacao);
+  }
+  if (resultado) {
+    resultado.dataset.ensaioId = String(ensaio.id);
+    resultado.innerHTML = htmlEnsaio(ensaio);
+  }
+  atualizarControlesEnsaio(raiz);
+}
+
+function notaSelecionadaParaEnsaio(raiz = document) {
+  const valor = buscar('nfseEnsaioNota', raiz)?.value || '';
+  const id = Number(valor);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+function limparEnsaio(raiz = document) {
+  ensaioAtual = null;
+  pintarEnsaio(null, raiz);
+}
+
+function textoConfirmacaoEnsaio() {
+  return 'Confirme o envio desta DPS ao ambiente de testes. O resultado não tem validade jurídica e a nota histórica continuará emitida.';
+}
+
+function fecharConfirmacaoEnsaio(raiz = document) {
+  const modal = buscar('modalConfirmarEnsaio', raiz);
+  const Modal = globalThis.bootstrap?.Modal;
+  if (modal && Modal) Modal.getOrCreateInstance(modal).hide();
+}
+
+/**
+ * Pede a confirmação explícita da segunda etapa. O modal é o caminho normal;
+ * o confirm nativo existe apenas como fallback para páginas sem Bootstrap.
+ */
+export function solicitarEnvioEnsaio(raiz = document) {
+  const comparacao = ensaioAtual?.comparacao;
+  const bloqueadoras = Array.isArray(comparacao?.bloqueadoras)
+    ? comparacao.bloqueadoras : [];
+  const liberado = ensaioAtual?.estado === ESTADOS_ENSAIO.PREPARADO
+    && comparacao?.pode_enviar === true
+    && bloqueadoras.length === 0;
+  if (!liberado) {
+    showToast(
+      'O envio está bloqueado até a comparação local não apontar divergências fiscais.',
+      'error',
+    );
+    atualizarControlesEnsaio(raiz);
+    return false;
+  }
+
+  const modal = buscar('modalConfirmarEnsaio', raiz);
+  const texto = buscar('nfseEnsaioConfirmacaoTexto', raiz);
+  if (texto) texto.textContent = textoConfirmacaoEnsaio();
+  const Modal = globalThis.bootstrap?.Modal;
+  if (modal && Modal) {
+    Modal.getOrCreateInstance(modal).show();
+    return true;
+  }
+  if (typeof globalThis.confirm === 'function'
+      && globalThis.confirm(textoConfirmacaoEnsaio())) {
+    void enviarEnsaio();
+    return true;
+  }
+  return false;
+}
+
+function mensagemDesfechoEnsaio(ensaio) {
+  if (ensaio.estado === ESTADOS_ENSAIO.GERADO_TESTE) {
+    return 'Ensaio concluído no ambiente de testes; sem validade jurídica.';
+  }
+  if (ensaio.estado === ESTADOS_ENSAIO.REJEITADO) {
+    return 'O ambiente de testes rejeitou a DPS; a nota histórica não foi alterada.';
+  }
+  if (ensaio.estado === ESTADOS_ENSAIO.INDEFINIDA) {
+    return 'Resultado ainda desconhecido. Faça somente uma reconsulta.';
+  }
+  return 'Resultado do ensaio atualizado.';
+}
+
+/**
+ * Faz o POST somente depois da confirmação e somente para o ensaio preparado.
+ */
+export async function enviarEnsaio() {
+  if (!ensaioAtual?.id) return;
+  const id = ensaioAtual.id;
+  const comparacao = ensaioAtual.comparacao;
+  const bloqueadoras = Array.isArray(comparacao?.bloqueadoras)
+    ? comparacao.bloqueadoras : [];
+  if (ensaioAtual.estado !== ESTADOS_ENSAIO.PREPARADO
+      || comparacao?.pode_enviar !== true
+      || bloqueadoras.length > 0) {
+    showToast(
+      'O envio está bloqueado até a comparação local não apontar divergências fiscais.',
+      'error',
+    );
+    return;
+  }
+
+  fecharConfirmacaoEnsaio();
+  acaoEnsaio = 'enviando';
+  atualizarControlesEnsaio();
+  try {
+    const dados = await chamar(`/nfse/api/ensaios/${id}/enviar`, {
+      body: JSON.stringify({ confirmar_envio: true }),
+    });
+    pintarEnsaio(dados.ensaio);
+    showToast(mensagemDesfechoEnsaio(dados.ensaio), 'info');
+  } catch (erro) {
+    if (erro.dados?.ensaio) pintarEnsaio(erro.dados.ensaio);
+    showToast(erro.message, 'error');
+  } finally {
+    acaoEnsaio = null;
+    pintarEnsaio(ensaioAtual);
+  }
+}
+
+/**
+ * Reconsulta o mesmo identificador quando o servidor diz que o desfecho é
+ * indefinido ou que um envio ficou preso. Esta ação nunca faz POST fiscal.
+ */
+export async function reconsultarEnsaio() {
+  if (!ensaioAtual?.id || ![
+    ESTADOS_ENSAIO.INDEFINIDA,
+    ESTADOS_ENSAIO.ENVIANDO,
+  ].includes(ensaioAtual.estado)) return;
+  const id = ensaioAtual.id;
+  acaoEnsaio = 'reconsultando';
+  atualizarControlesEnsaio();
+  try {
+    const dados = await chamar(`/nfse/api/ensaios/${id}/reconsultar`);
+    pintarEnsaio(dados.ensaio);
+    showToast(mensagemDesfechoEnsaio(dados.ensaio), 'info');
+  } catch (erro) {
+    if (erro.dados?.ensaio) pintarEnsaio(erro.dados.ensaio);
+    showToast(erro.message, 'error');
+  } finally {
+    acaoEnsaio = null;
+    pintarEnsaio(ensaioAtual);
+  }
+}
+
+/**
+ * Executa apenas a preparação local. Uma falha depois da reserva pode devolver
+ * um ensaio persistido, que continua sendo mostrado para auditoria.
+ */
+export async function prepararEnsaio(botao = buscar('btnPrepararEnsaio')) {
+  const notaId = notaSelecionadaParaEnsaio();
+  if (!notaId) {
+    showToast('Escolha uma nota histórica apta para preparar o ensaio.', 'error');
+    return;
+  }
+
+  limparEnsaio();
+  acaoEnsaio = 'preparando';
+  if (botao) botao.textContent = 'Preparando…';
+  atualizarControlesEnsaio();
+  try {
+    const dados = await chamar(`/nfse/api/ensaios/preparar/${notaId}`);
+    pintarEnsaio(dados.ensaio);
+    showToast(
+      'Preparação local concluída. Revise a comparação antes de enviar.',
+      'success',
+    );
+  } catch (erro) {
+    if (erro.dados?.ensaio) pintarEnsaio(erro.dados.ensaio);
+    showToast(erro.message, 'error');
+  } finally {
+    acaoEnsaio = null;
+    if (botao) botao.textContent = 'Preparar ensaio';
+    pintarEnsaio(ensaioAtual);
+  }
+}
 
 /**
  * Executa uma ação JSON da NFSe e lança erro com o envelope devolvido pelo
@@ -502,6 +956,7 @@ function renderizar() {
   }
   atualizarContadores();
   pintarSelecao();
+  pintarOpcoesEnsaio();
 }
 
 function atualizarContadores() {
@@ -1525,6 +1980,7 @@ function fecharModalAliquota() {
 
 document.addEventListener('DOMContentLoaded', () => {
   renderizar();
+  pintarOpcoesEnsaio();
   pintarEmitidas(lerJsonObjeto('dadosEmitidas'));
 
   // Default do periodo: o mes da competencia que a pagina esta mostrando, ou o
@@ -1547,6 +2003,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btnSincronizarAdn')?.addEventListener('click', (ev) => {
     sincronizarAdn(ev.currentTarget);
+  });
+
+  document.getElementById('nfseEnsaioNota')?.addEventListener('change', () => {
+    limparEnsaio();
+    atualizarControlesEnsaio();
+  });
+  document.getElementById('btnPrepararEnsaio')?.addEventListener('click', (ev) => {
+    prepararEnsaio(ev.currentTarget);
+  });
+  document.getElementById('btnEnviarEnsaio')?.addEventListener('click', () => {
+    solicitarEnvioEnsaio();
+  });
+  document.getElementById('btnConfirmarEnvioEnsaio')?.addEventListener('click', () => {
+    enviarEnsaio();
+  });
+  document.getElementById('btnReconsultarEnsaio')?.addEventListener('click', () => {
+    reconsultarEnsaio();
   });
 
   document.getElementById('formImportar')?.addEventListener('submit', async (ev) => {

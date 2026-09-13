@@ -19,6 +19,7 @@ from app.models import (
     Empresa,
     EnsaioDpsNfse,
     LoteNfse,
+    NotaEmitidaNfse,
     NotaNfse,
     OrigemVinculoNfse,
     ServicoNfse,
@@ -625,6 +626,18 @@ def _descricao_prevista(nota):
         return None
 
 
+def _ensaio_elegivel(nota):
+    """Marca a candidata histórica sem duplicar a regra da preparação.
+
+    A tela só oferece uma nota já emitida e ligada a um único espelho oficial.
+    XML, configuração e assinatura continuam sendo verificados pelo serviço no
+    clique de preparação, porque esses fatos não devem ser inferidos na página.
+    """
+    if nota.status != StatusNotaNfse.EMITIDA:
+        return False
+    return NotaEmitidaNfse.query.filter_by(nota_id=nota.id).count() == 1
+
+
 def _nota_para_json(nota):
     empresa = nota.empresa_id and db.session.get(Empresa, nota.empresa_id)
     return {
@@ -650,6 +663,7 @@ def _nota_para_json(nota):
         'duplicata_liberada': nota.duplicata_liberada,
         'erro': nota.erro,
         'origem_emissao': nota.origem_emissao,
+        'ensaio_elegivel': _ensaio_elegivel(nota),
         # extrato do Inter
         'origem_extrato': nota.origem_extrato,
         'categoria': _categoria(nota),
