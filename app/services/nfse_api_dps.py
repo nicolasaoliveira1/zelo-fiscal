@@ -461,10 +461,12 @@ def _aplicar_configuracao(inf_dps, referencia, config):
         if regime not in {'1', '2', '3'}:
             raise ConfiguracaoDpsInvalidaError(
                 'O regime de apuração deve ser 1, 2 ou 3.')
-        if _texto(reg_trib, 'opSimpNac') == '3':
-            reg_esp = _filho(reg_trib, 'regEspTrib')
-            indice = list(reg_trib).index(reg_esp) if reg_esp is not None else None
-            _definir_texto(reg_trib, 'regApTribSN', regime, indice=indice)
+        if _texto(reg_trib, 'opSimpNac') != '3':
+            raise ConfiguracaoDpsInvalidaError(
+                'A configuração do regime de apuração exige opSimpNac igual a 3.')
+        reg_esp = _filho(reg_trib, 'regEspTrib')
+        indice = list(reg_trib).index(reg_esp) if reg_esp is not None else None
+        _definir_texto(reg_trib, 'regApTribSN', regime, indice=indice)
 
     valores = _exigir_grupo(inf_dps, 'valores', 'DPS/infDPS/valores')
     trib = _exigir_grupo(valores, 'trib', 'DPS/infDPS/valores/trib')

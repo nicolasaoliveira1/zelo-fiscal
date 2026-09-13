@@ -138,6 +138,18 @@ def test_montar_fixa_homologacao_injeta_dh_emi_e_aplica_configuracao():
         'CST') == '00'
 
 
+def test_regime_configurado_exige_op_simp_nac_igual_a_tres():
+    xml = _xml_referencia().replace(
+        b'<opSimpNac>3</opSimpNac>', b'<opSimpNac>1</opSimpNac>')
+    referencia = dps_api.ler_referencia(_nota(), xml)
+
+    with pytest.raises(
+            dps_api.ConfiguracaoDpsInvalidaError, match='opSimpNac'):
+        dps_api.montar(
+            referencia, _config(), serie='7', numero=12,
+            agora=datetime(2026, 9, 12, 14, 35, 20, tzinfo=timezone.utc))
+
+
 def test_validar_carrega_o_xsd_restrito_e_aceita_dps_sintetica():
     referencia = dps_api.ler_referencia(_nota(), _xml_referencia())
     montada = dps_api.montar(
