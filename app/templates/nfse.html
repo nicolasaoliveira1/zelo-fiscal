@@ -441,6 +441,121 @@
         border-left: 3px solid var(--zelo-danger);
         padding-left: 0.7rem;
     }
+    .nfse-ensaio-aviso {
+        border: 1px solid var(--zelo-warn);
+        border-left: 0.3rem solid var(--zelo-warn);
+        background: var(--zelo-warn-soft);
+        border-radius: 8px;
+        padding: 0.75rem 0.9rem;
+    }
+    .nfse-ensaio-faixa {
+        border: 1px solid var(--zelo-line);
+        border-left: 0.3rem solid var(--zelo-muted);
+        background: var(--bs-card-bg);
+        border-radius: 8px;
+        padding: 0.75rem 0.9rem;
+    }
+    .nfse-ensaio-faixa[data-estado="preparado"] {
+        border-left-color: var(--zelo-ok);
+        background: var(--zelo-ok-soft);
+    }
+    .nfse-ensaio-faixa[data-estado="gerado_teste"] {
+        border-left-color: var(--zelo-ok);
+        background: var(--zelo-ok-soft);
+    }
+    .nfse-ensaio-faixa[data-estado="rejeitado"],
+    .nfse-ensaio-faixa[data-estado="falha_preparacao"] {
+        border-left-color: var(--zelo-danger);
+        background: var(--zelo-danger-soft);
+    }
+    .nfse-ensaio-faixa[data-estado="indefinida"],
+    .nfse-ensaio-faixa[data-estado="enviando"] {
+        border-left-color: var(--zelo-warn);
+        background: var(--zelo-warn-soft);
+    }
+    .nfse-ensaio-faixa .estado {
+        font-weight: 600;
+    }
+    .nfse-ensaio-meta {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.65rem 1rem;
+        margin-top: 0.85rem;
+    }
+    .nfse-ensaio-meta dt {
+        color: var(--zelo-slate);
+        font-size: 0.7rem;
+        letter-spacing: 0.04em;
+        margin-bottom: 0.1rem;
+        text-transform: uppercase;
+    }
+    .nfse-ensaio-meta dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+    }
+    .nfse-ensaio-comparacao {
+        border-top: 1px solid var(--zelo-line);
+        margin-top: 1rem;
+        padding-top: 0.85rem;
+    }
+    .nfse-ensaio-comparacao h3 {
+        color: var(--zelo-slate);
+        font-size: 0.78rem;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.45rem;
+        text-transform: uppercase;
+    }
+    .nfse-ensaio-lista {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+    .nfse-ensaio-lista li {
+        border-top: 1px solid var(--zelo-line);
+        padding: 0.55rem 0;
+    }
+    .nfse-ensaio-lista li:first-child { border-top: 0; }
+    .nfse-ensaio-diferenca {
+        display: grid;
+        grid-template-columns: minmax(10rem, 1fr) minmax(8rem, 1fr) minmax(8rem, 1fr);
+        gap: 0.35rem 0.75rem;
+        font-size: 0.82rem;
+    }
+    .nfse-ensaio-diferenca .rotulo {
+        color: var(--zelo-slate);
+        font-size: 0.7rem;
+        text-transform: uppercase;
+    }
+    .nfse-ensaio-diferenca .motivo {
+        color: var(--zelo-slate);
+        grid-column: 1 / -1;
+    }
+    .nfse-ensaio-bloqueadoras {
+        border-left: 3px solid var(--zelo-danger);
+        padding-left: 0.7rem;
+    }
+    .nfse-ensaio-esperadas {
+        border-left: 3px solid var(--zelo-ok);
+        padding-left: 0.7rem;
+    }
+    .nfse-ensaio-metadados {
+        display: grid;
+        grid-template-columns: minmax(10rem, 1fr) minmax(12rem, 2fr);
+        gap: 0.25rem 0.75rem;
+        font-size: 0.82rem;
+    }
+    .nfse-ensaio-metadados dt { color: var(--zelo-slate); }
+    .nfse-ensaio-metadados dd { margin: 0; overflow-wrap: anywhere; }
+    .nfse-ensaio-erro {
+        color: var(--zelo-danger);
+        font-size: 0.82rem;
+        margin-top: 0.65rem;
+    }
+    @media (max-width: 767.98px) {
+        .nfse-ensaio-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .nfse-ensaio-diferenca { grid-template-columns: 1fr; }
+        .nfse-ensaio-diferenca .motivo { grid-column: auto; }
+    }
     .nfse-acoes-linha { display: flex; gap: 0.35rem; justify-content: flex-end; }
     /* Rotulo de acao nao quebra: "Já emiti" virando "Já / emiti" em duas linhas
        le como botao quebrado, e a coluna ganhou mais um botao (Cancelar). */
@@ -1174,6 +1289,92 @@
     <p class="nfse-hint mt-3 mb-0" id="nfseVazio" role="status" aria-live="polite">
         Nenhuma nota importada.
     </p>
+</div>
+
+<!-- Ensaio da API nacional em produção restrita (APINF-15..17) -->
+<section class="nfse-card mt-3" id="nfseEnsaio"
+         aria-labelledby="nfseEnsaioTitulo">
+    {{ zl_secao('Ensaio restrito da API nacional') }}
+    <div class="nfse-ensaio-aviso mb-3" role="note">
+        <strong id="nfseEnsaioTitulo">Sem validade jurídica.</strong>
+        Este fluxo usa somente o ambiente de testes. Ele pode gerar uma NFS-e de teste,
+        mas não altera a nota histórica nem representa emissão de produção.
+    </div>
+    <p class="nfse-hint mb-3">
+        Escolha uma nota já emitida e vinculada a um espelho oficial. A preparação
+        faz as provas locais e mostra a comparação; somente a segunda ação envia
+        explicitamente ao ambiente de testes.
+    </p>
+    <div class="d-flex align-items-end gap-2 flex-wrap">
+        <div class="flex-grow-1" style="min-width: min(100%, 20rem);">
+            <label class="form-label nfse-hint mb-1" for="nfseEnsaioNota">
+                Nota histórica apta
+            </label>
+            <select class="form-select form-select-sm" id="nfseEnsaioNota"
+                    aria-describedby="nfseEnsaioNotaAjuda">
+                <option value="">Escolha uma nota histórica…</option>
+            </select>
+            <div class="nfse-hint mt-1" id="nfseEnsaioNotaAjuda">
+                Só notas emitidas com um espelho oficial único aparecem nesta lista.
+            </div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap nfse-ensaio-acoes">
+            <button class="btn btn-primary btn-sm" type="button"
+                    id="btnPrepararEnsaio" disabled>
+                Preparar ensaio
+            </button>
+            <button class="btn btn-soft-primary btn-sm d-none" type="button"
+                    id="btnEnviarEnsaio" disabled>
+                Enviar ao ambiente de testes
+            </button>
+            <button class="btn btn-ghost btn-sm d-none" type="button"
+                    id="btnReconsultarEnsaio">
+                Reconsultar resultado
+            </button>
+        </div>
+    </div>
+    <div class="nfse-hint mt-3" id="nfseEnsaioEstado" role="status" aria-live="polite">
+        Nenhum ensaio preparado.
+    </div>
+    <div class="mt-3" id="nfseEnsaioResultado" aria-live="polite">
+        <p class="nfse-hint mb-0">
+            A comparação local aparecerá aqui depois da preparação.
+        </p>
+    </div>
+</section>
+
+<div class="modal fade" id="modalConfirmarEnsaio" tabindex="-1"
+     aria-labelledby="modalConfirmarEnsaioTitulo" aria-hidden="true"
+     data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modalConfirmarEnsaioTitulo">
+                    Confirmar envio ao ambiente de testes
+                </h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2" id="nfseEnsaioConfirmacaoTexto">
+                    A DPS já foi validada, assinada e comparada localmente.
+                    Confirme para enviá-la ao ambiente de testes da API nacional.
+                </p>
+                <p class="mb-0 nfse-hint">
+                    <strong>Sem validade jurídica:</strong> o resultado pode ser uma
+                    NFS-e de teste ou uma rejeição, e a nota histórica continuará emitida.
+                </p>
+            </div>
+            <div class="modal-footer batch-modal-footer">
+                <button type="button" class="btn btn-ghost btn-sm"
+                        data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary btn-sm"
+                        id="btnConfirmarEnvioEnsaio">
+                    Enviar ao ambiente de testes
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Verificacao do acesso aos servicos nacionais (APINF-01/02) -->

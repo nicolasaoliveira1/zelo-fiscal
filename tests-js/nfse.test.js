@@ -13,12 +13,17 @@ globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
 
 const {
   celulaDescricao,
+  enviarEnsaio,
+  notasHistoricasAptas,
+  pintarEnsaio,
   pintarEmitidas,
+  pintarOpcoesEnsaio,
   pintarSincronizacaoAdn,
   pintarSombra,
   consultarEmitidas,
   executarSombra,
   iniciarEmissao,
+  solicitarEnvioEnsaio,
 } = await import('../app/static/js/nfse.js');
 
 after(() => dom.window.close());
@@ -35,6 +40,163 @@ beforeEach(() => {
     <span id="nfseSombraEstado"></span>
     <div id="nfseSombraResultado"></div>
     <div id="nfseAdnSincronizacaoResultado"></div>`;
+  pintarEnsaio(null);
+});
+
+function markupEnsaio() {
+  document.body.innerHTML += `
+    <select id="nfseEnsaioNota"></select>
+    <button id="btnPrepararEnsaio" type="button">Preparar ensaio</button>
+    <button id="btnEnviarEnsaio" type="button">Enviar ao ambiente de testes</button>
+    <button id="btnReconsultarEnsaio" type="button">Reconsultar resultado</button>
+    <span id="nfseEnsaioEstado"></span>
+    <div id="nfseEnsaioResultado"></div>`;
+}
+
+function ensaio(overrides = {}) {
+  return {
+    id: 23,
+    nota_nfse_id: 2,
+    ambiente: 'restrita',
+    serie: '7',
+    numero: 12,
+    identificador_dps: 'DPS' + '1'.repeat(42),
+    estado: 'preparado',
+    sem_validade_juridica: true,
+    comparacao: {
+      esperadas: [{
+        caminho: '/DPS/infDPS/tpAmb', valor_referencia: '1', valor_dps: '2',
+        motivo: 'O ensaio usa o ambiente restrito.',
+      }],
+      bloqueadoras: [],
+      metadados: { ambiente_dps: '2' },
+      pode_enviar: true,
+    },
+    chave_nfse_teste: null,
+    codigo_rejeicao: null,
+    motivo_rejeicao: null,
+    ultima_falha: null,
+    xml: {
+      referencia_disponivel: true,
+      dps_assinada_disponivel: true,
+      nfse_teste_disponivel: false,
+    },
+    ...overrides,
+  };
+}
+
+async function assentar() {
+  for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+test('seleciona somente nota emitida com espelho oficial único', () => {
+  const candidatas = notasHistoricasAptas([
+    { id: 1, status: 'pronta', ensaio_elegivel: true },
+    { id: 2, status: 'emitida', ensaio_elegivel: true },
+    { id: 3, status: 'emitida', ensaio_elegivel: false },
+    { id: 4, status: 'emitida' },
+  ]);
+
+  assert.deepEqual(candidatas.map((nota) => nota.id), [2]);
+});
+
+test('a tela separa preparação e envio e destaca a falta de validade jurídica', () => {
+  const template = readFileSync('app/templates/nfse.html', 'utf8');
+  const inicio = template.indexOf('id="nfseEnsaio"');
+  const fim = template.indexOf('id="nfseApiAcesso"', inicio);
+  const secao = template.slice(inicio, fim);
+
+  assert.match(secao, /id="btnPrepararEnsaio"/);
+  assert.match(secao, />\s*Preparar ensaio\s*</);
+  assert.match(secao, /id="btnEnviarEnsaio"/);
+  assert.match(secao, />\s*Enviar ao ambiente de testes\s*</);
+  assert.match(secao, /Sem validade jurídica/);
+  assert.doesNotMatch(secao, /id="btnPrepararEnsaio"[^>]*>\s*Emitir\s*</);
+});
+
+test('pinta candidatas históricas sem colocar nota pendente na seleção', () => {
+  markupEnsaio();
+  pintarOpcoesEnsaio([
+    { id: 1, status: 'pronta', ensaio_elegivel: true, nome_csv: 'Pendente' },
+    { id: 2, status: 'emitida', ensaio_elegivel: true,
+      nome_csv: 'Tomador Sintético', competencia: '08/2026', valor: '400,00' },
+  ]);
+
+  const opcoes = [...document.querySelectorAll('#nfseEnsaioNota option')];
+  assert.equal(opcoes.length, 2);
+  assert.match(opcoes[1].textContent, /Tomador Sintético/);
+  assert.match(opcoes[1].textContent, /R\$ 400,00/);
+  assert.equal(opcoes.some((opcao) => opcao.textContent.includes('Pendente')), false);
+});
+
+test('divergência fiscal aparece campo a campo e desabilita o envio', () => {
+  markupEnsaio();
+  pintarOpcoesEnsaio([{ id: 2, status: 'emitida', ensaio_elegivel: true,
+    nome_csv: 'Tomador Sintético' }]);
+  document.getElementById('nfseEnsaioNota').value = '2';
+  pintarEnsaio(ensaio({
+    comparacao: {
+      esperadas: [],
+      bloqueadoras: [{
+        caminho: '/DPS/infDPS/valores/vServPrest/vServ',
+        valor_referencia: '400.00', valor_dps: '401.00',
+        motivo: 'O valor fiscal diverge da referência.',
+      }],
+      metadados: {}, pode_enviar: false,
+    },
+  }));
+
+  const resultado = document.getElementById('nfseEnsaioResultado');
+  const enviar = document.getElementById('btnEnviarEnsaio');
+  assert.equal(enviar.classList.contains('d-none'), false);
+  assert.equal(enviar.disabled, true);
+  assert.match(resultado.textContent, /vServ/);
+  assert.match(resultado.textContent, /400\.00/);
+  assert.match(resultado.textContent, /401\.00/);
+  assert.doesNotMatch(resultado.innerHTML, /<NFSe/);
+});
+
+test('resultado indefinido oferece somente reconsulta', () => {
+  markupEnsaio();
+  pintarOpcoesEnsaio([{ id: 2, status: 'emitida', ensaio_elegivel: true }]);
+  document.getElementById('nfseEnsaioNota').value = '2';
+  pintarEnsaio(ensaio({
+    estado: 'indefinida',
+    comparacao: { esperadas: [], bloqueadoras: [], metadados: {}, pode_enviar: true },
+    ultima_falha: 'Desfecho ainda não confirmado.',
+  }));
+
+  assert.equal(document.getElementById('btnEnviarEnsaio').classList.contains('d-none'), true);
+  assert.equal(document.getElementById('btnReconsultarEnsaio').classList.contains('d-none'), false);
+  assert.match(document.getElementById('nfseEnsaioEstado').textContent, /somente uma reconsulta/);
+});
+
+test('envio só acontece após confirmação explícita e leva o campo correto', async () => {
+  markupEnsaio();
+  pintarOpcoesEnsaio([{ id: 2, status: 'emitida', ensaio_elegivel: true }]);
+  document.getElementById('nfseEnsaioNota').value = '2';
+  pintarEnsaio(ensaio());
+  const chamadas = [];
+  globalThis.fetch = async (url, opcoes) => {
+    chamadas.push({ url, opcoes });
+    return { ok: true, json: async () => ({ ensaio: ensaio({ estado: 'indefinida' }) }) };
+  };
+  const confirmarAnterior = globalThis.confirm;
+  try {
+    globalThis.confirm = () => false;
+    assert.equal(solicitarEnvioEnsaio(), false);
+    assert.equal(chamadas.length, 0);
+
+    globalThis.confirm = () => true;
+    assert.equal(solicitarEnvioEnsaio(), true);
+    await assentar();
+  } finally {
+    globalThis.confirm = confirmarAnterior;
+  }
+
+  assert.equal(chamadas.length, 1);
+  assert.equal(chamadas[0].url, '/nfse/api/ensaios/23/enviar');
+  assert.deepEqual(JSON.parse(chamadas[0].opcoes.body), { confirmar_envio: true });
 });
 
 function painel(overrides = {}) {

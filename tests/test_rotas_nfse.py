@@ -10,7 +10,14 @@ from decimal import Decimal
 import pytest
 
 from app import db
-from app.models import ApelidoNfse, Empresa, LoteNfse, NotaNfse, StatusNotaNfse
+from app.models import (
+    ApelidoNfse,
+    Empresa,
+    LoteNfse,
+    NotaEmitidaNfse,
+    NotaNfse,
+    StatusNotaNfse,
+)
 
 LINHA = ('"13/07/2026";"{nome}";"0001443038";"062623";"05/07/2026";'
          '"811,00";"16,22";"1,13";"826,09";"COBRANCA SIMPLES"')
@@ -375,3 +382,26 @@ def test_payload_da_conferencia_expoe_emissao_e_preserva_valor_zero(client, app)
 
     assert dados['notas'][0]['valor'] == '0,00'
     assert dados['notas'][0]['emitida_em'] == '2026-08-05T14:30:00'
+    assert dados['notas'][0]['ensaio_elegivel'] is False
+
+
+def test_payload_marca_candidata_historica_com_espelho_unico(client, app):
+    with app.app_context():
+        lote = LoteNfse(nome_arquivo='lote-sintetico.csv', total=1)
+        db.session.add(lote)
+        db.session.flush()
+        nota = NotaNfse(
+            lote_id=lote.id,
+            nome_csv='TOMADOR SINTÉTICO',
+            competencia='08/2026',
+            status=StatusNotaNfse.EMITIDA,
+        )
+        db.session.add(nota)
+        db.session.flush()
+        db.session.add(NotaEmitidaNfse(
+            chave='CHAVE-SINTETICA-UNICA', nota_id=nota.id))
+        db.session.commit()
+
+    dados = client.get('/nfse/notas?competencia=08/2026').get_json()
+
+    assert dados['notas'][0]['ensaio_elegivel'] is True
