@@ -8,7 +8,7 @@ transição.
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import xml.etree.ElementTree as ET
 
 from sqlalchemy import update
@@ -33,6 +33,7 @@ from app.services.nfse_api_xml import NAMESPACE_NFSE
 AMBIENTE_RESTRITA = 'restrita'
 NUMERO_INICIAL = 1
 TENTATIVAS_RESERVA = 10
+JANELA_ENVIO_PRESO = timedelta(minutes=5)
 
 ESTADO_RESERVADO = 'reservado'
 ESTADO_PREPARADO = 'preparado'
@@ -465,6 +466,29 @@ def _exigir_estado(ensaio, estado):
             f'{estado!r}.')
 
 
+def _envio_preso(ensaio, agora=None):
+    if ensaio.estado != ESTADO_ENVIANDO:
+        return False
+    if ensaio.atualizado_em is None:
+        return False
+    instante = agora or datetime.now()
+    return instante - ensaio.atualizado_em >= JANELA_ENVIO_PRESO
+
+
+def _exigir_reconsulta(ensaio):
+    if ensaio.estado == ESTADO_INDEFINIDA:
+        return
+    if ensaio.estado == ESTADO_ENVIANDO:
+        if _envio_preso(ensaio):
+            return
+        raise EnsaioDpsEmAndamentoError(
+            'O envio ainda está em andamento; aguarde a janela de segurança '
+            'antes de reconsultar.')
+    raise TransicaoDpsInvalidaError(
+        f'A tentativa está em {ensaio.estado!r}; a reconsulta exige '
+        f'{ESTADO_INDEFINIDA!r} ou um envio preso.')
+
+
 def _comparacao_liberada(ensaio):
     try:
         comparacao = json.loads(ensaio.comparacao_json or '')
@@ -730,11 +754,11 @@ def enviar(ensaio_id, *, operador_id):
 
 
 def reconsultar(ensaio_id, *, operador_id):
-    """Consulta uma tentativa indefinida sem executar qualquer POST."""
+    """Consulta uma tentativa indefinida ou um envio preso sem POST."""
     from app.services import nfse_api_sefin as sefin
 
     ensaio = _carregar_ensaio(ensaio_id, operador_id)
-    _exigir_estado(ensaio, ESTADO_INDEFINIDA)
+    _exigir_reconsulta(ensaio)
     resultado = _consultar(ensaio, sefin)
     if resultado is not None and resultado.situacao in {
             ESTADO_GERADO_TESTE, ESTADO_REJEITADO}:

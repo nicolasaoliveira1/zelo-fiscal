@@ -1,4 +1,5 @@
 """Preparação local do ensaio restrito com dados e certificado sintéticos."""
+from datetime import datetime, timedelta
 import json
 from concurrent.futures import ThreadPoolExecutor
 import threading
@@ -351,6 +352,71 @@ def test_timeout_inconclusivo_vira_indefinido_e_reconsultar_nao_faz_post(
         assert len(consultas) == 3
         with pytest.raises(nfse_api_ensaio.TransicaoDpsInvalidaError):
             nfse_api_ensaio.enviar(ensaio_id, operador_id=operador_id)
+
+
+def test_reconsultar_recupera_envio_preso_sem_post(app, ids, monkeypatch):
+    ensaio_id, operador_id = _preparado(app, ids, monkeypatch)
+
+    with app.app_context():
+        ensaio = db.session.get(EnsaioDpsNfse, ensaio_id)
+        ensaio.estado = nfse_api_ensaio.ESTADO_ENVIANDO
+        ensaio.atualizado_em = (
+            datetime.now()
+            - nfse_api_ensaio.JANELA_ENVIO_PRESO
+            - timedelta(minutes=1))
+        db.session.commit()
+
+    consultas = []
+    monkeypatch.setattr(
+        nfse_api_sefin,
+        'consultar_dps_restrita',
+        lambda identificador: (
+            consultas.append(identificador),
+            _resultado_rejeitado(identificador),
+        )[1],
+    )
+    monkeypatch.setattr(
+        nfse_api_sefin,
+        'enviar_restrita',
+        lambda *_args, **_kwargs: pytest.fail(
+            'Reconsulta de envio preso não pode fazer POST'),
+    )
+
+    with app.app_context():
+        reconsultado = nfse_api_ensaio.reconsultar(
+            ensaio_id, operador_id=operador_id)
+
+        assert reconsultado.estado == nfse_api_ensaio.ESTADO_REJEITADO
+        assert reconsultado.codigo_rejeicao == 'E-SINT'
+        assert reconsultado.motivo_rejeicao == 'Rejeição sintética'
+        assert consultas == [reconsultado.identificador_dps]
+
+
+def test_reconsultar_bloqueia_envio_ainda_em_andamento(app, ids, monkeypatch):
+    ensaio_id, operador_id = _preparado(app, ids, monkeypatch)
+
+    with app.app_context():
+        ensaio = db.session.get(EnsaioDpsNfse, ensaio_id)
+        ensaio.estado = nfse_api_ensaio.ESTADO_ENVIANDO
+        ensaio.atualizado_em = datetime.now()
+        db.session.commit()
+
+    monkeypatch.setattr(
+        nfse_api_sefin,
+        'consultar_dps_restrita',
+        lambda *_args, **_kwargs: pytest.fail(
+            'Envio ainda em andamento não pode ser reconsultado'),
+    )
+
+    with app.app_context():
+        with pytest.raises(
+                nfse_api_ensaio.EnsaioDpsEmAndamentoError,
+                match='janela de segurança'):
+            nfse_api_ensaio.reconsultar(
+                ensaio_id, operador_id=operador_id)
+
+        recarregado = db.session.get(EnsaioDpsNfse, ensaio_id)
+        assert recarregado.estado == nfse_api_ensaio.ESTADO_ENVIANDO
 
 
 def test_rejeicao_do_post_fica_persistida_sem_mudar_nota(app, ids, monkeypatch):
