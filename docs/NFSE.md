@@ -62,6 +62,25 @@ Acesse `/nfse` e siga os passos da página:
 3. **Abrir o portal** e conferir a alíquota (uma vez por sessão).
 4. **Escolher o modo** e emitir. Nos modos assistidos, o sistema para na tela de revisão de cada nota. **O clique em emitir é seu**.
 
+## Ensaio restrito da API nacional (P2)
+
+O cartão **Ensaio restrito** serve para reproduzir uma nota histórica já emitida usando a API
+oficial, sem transformar o ensaio em emissão de produção. Ele só lista notas que o servidor
+reconhece como `emitida` e vinculadas a um espelho oficial.
+
+- **Preparar ensaio** lê a referência, monta a DPS, valida o esquema, verifica a assinatura e
+  compara os fatos fiscais localmente. Essa ação não faz escrita fiscal remota.
+- **Enviar ao ambiente de testes** é uma ação separada e pede confirmação no modal. O ambiente
+  restrito pode gerar uma NFS-e de teste, mas ela é **sem validade jurídica** e não altera a nota
+  histórica de origem.
+- Divergência fiscal bloqueadora deixa o envio desabilitado. Um resultado `indefinido` ou um envio
+  ainda em andamento oferece somente **Reconsultar resultado**, sem novo envio automático.
+
+Antes de uma UAT, o administrador deve escolher uma série exclusiva do ambiente restrito e o
+operador deve confirmar a nota histórica e os fatos mostrados na comparação. A UAT é manual,
+explicitamente autorizada e nunca deve usar produção, série de produção ou dados de teste
+misturados com a operação fiscal diária.
+
 ## Limitações atuais
 
 - O vínculo automático nome→CNPJ cobre a maior parte do extrato, mas não tudo; o restante exige uma escolha do operador, que fica memorizada para os meses seguintes.
