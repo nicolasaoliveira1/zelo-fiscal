@@ -34,6 +34,7 @@ CAMPOS_API = (
     'empresa_escritorio_id',
     'api_ambiente',
     'api_habilitada',
+    'serie_dps_restrita',
 )
 CAMPOS_CONFIGURACAO = tuple(CAMPOS_OBRIGATORIOS) + CAMPOS_API
 
@@ -115,6 +116,20 @@ def validar(valores):
                 'A habilitação da API deve ser booleana.',
                 campo='api_habilitada')
 
+    if 'serie_dps_restrita' in valores:
+        bruto_serie = valores.get('serie_dps_restrita')
+        if bruto_serie in (None, '') or not str(bruto_serie).strip():
+            raise ConfiguracaoInvalidaError(
+                'Informe uma série exclusiva para o ensaio restrito.',
+                campo='serie_dps_restrita')
+        from app.services import nfse_api_ensaio
+
+        try:
+            nfse_api_ensaio.validar_serie(str(bruto_serie).strip())
+        except nfse_api_ensaio.SerieDpsInvalidaError as exc:
+            raise ConfiguracaoInvalidaError(
+                str(exc), campo='serie_dps_restrita') from exc
+
 
 def salvar(valores):
     """Valida e grava. Nada e escrito se a validacao recusar."""
@@ -138,6 +153,9 @@ def salvar(valores):
             config.api_habilitada = str(bruto_habilitada).strip().lower() in {
                 'true', '1', 'on',
             }
+    if 'serie_dps_restrita' in valores:
+        config.serie_dps_restrita = str(
+            valores['serie_dps_restrita']).strip()
     db.session.commit()
     return config
 

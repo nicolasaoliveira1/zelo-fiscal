@@ -49,7 +49,7 @@ _BASES = {
         'adn': 'https://adn.nfse.gov.br/contribuintes',
     },
     'restrita': {
-        'sefin': 'https://sefin.producaorestrita.nfse.gov.br/API/SefinNacional',
+        'sefin': 'https://sefin.producaorestrita.nfse.gov.br/SefinNacional',
         'adn': 'https://adn.producaorestrita.nfse.gov.br/contribuintes',
     },
 }

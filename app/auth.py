@@ -114,6 +114,10 @@ _PREFIXOS_JSON_POST = (
     '/certidao/monitorar_download_federal/',
 )
 
+_PREFIXOS_JSON = (
+    '/nfse/api/ensaios/',
+)
+
 
 def _prefere_json():
     """Decide resposta JSON (API/fetch) vs HTML (redirect/flash em página).
@@ -123,6 +127,8 @@ def _prefere_json():
     if request.path.startswith('/api/'):
         return True
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.is_json:
+        return True
+    if request.path.startswith(_PREFIXOS_JSON):
         return True
     if request.method in ('GET', 'HEAD'):
         accept = request.accept_mimetypes

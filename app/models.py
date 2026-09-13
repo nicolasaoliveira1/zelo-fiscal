@@ -645,9 +645,80 @@ class ConfiguracaoNfse(db.Model):
     )
     api_ambiente = db.Column(db.String(10), nullable=False, default='restrita')
     api_habilitada = db.Column(db.Boolean, nullable=False, default=False)
+    # Série exclusiva do ensaio em produção restrita. Sem default para que o
+    # administrador escolha conscientemente uma faixa que não colida com o
+    # emissor web nem com a futura série de produção.
+    serie_dps_restrita = db.Column(db.String(5), nullable=True)
 
     def __repr__(self):
         return f'<ConfiguracaoNfse {self.id}>'
+
+
+class ContadorDpsNfse(db.Model):
+    """Contador durável por ambiente, prestador e série de DPS.
+
+    `proximo_numero` é o próximo número livre. A reserva é feita pelo serviço
+    do ensaio em transação própria; lacunas são aceitáveis, reutilização não.
+    """
+    __tablename__ = 'contador_dps_nfse'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'ambiente', 'prestador', 'serie',
+            name='uq_contador_dps_nfse_ambiente_prestador_serie'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    ambiente = db.Column(db.String(10), nullable=False)
+    prestador = db.Column(db.String(14), nullable=False)
+    serie = db.Column(db.String(5), nullable=False)
+    proximo_numero = db.Column(db.BigInteger, nullable=False)
+    atualizado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+    def __repr__(self):
+        return f'<ContadorDpsNfse {self.ambiente}/{self.prestador}/{self.serie}>'
+
+
+class EnsaioDpsNfse(db.Model):
+    """Tentativa imutável de reproduzir uma DPS no ambiente restrito.
+
+    Os XMLs ficam disponíveis somente para o fluxo autorizado de conferência;
+    a representação nunca os inclui e o status da `NotaNfse` de origem não é
+    parte desta máquina de estados.
+    """
+    __tablename__ = 'ensaio_dps_nfse'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'identificador_dps',
+            name='uq_ensaio_dps_nfse_identificador'),
+        db.UniqueConstraint(
+            'ambiente', 'prestador', 'serie', 'numero',
+            name='uq_ensaio_dps_nfse_ambiente_prestador_serie_numero'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    nota_nfse_id = db.Column(
+        db.Integer, db.ForeignKey('nota_nfse.id'), nullable=False, index=True)
+    operador_id = db.Column(
+        db.Integer, db.ForeignKey('usuario.id'), nullable=False)
+    ambiente = db.Column(db.String(10), nullable=False)
+    prestador = db.Column(db.String(14), nullable=False)
+    serie = db.Column(db.String(5), nullable=False)
+    numero = db.Column(db.BigInteger, nullable=False)
+    identificador_dps = db.Column(db.String(45), nullable=False)
+    estado = db.Column(db.String(24), nullable=False, index=True)
+    xml_referencia = db.Column(db.Text, nullable=True)
+    xml_dps_assinada = db.Column(db.Text, nullable=True)
+    xml_nfse_teste = db.Column(db.Text, nullable=True)
+    chave_nfse_teste = db.Column(db.String(60), nullable=True)
+    comparacao_json = db.Column(db.Text, nullable=True)
+    codigo_rejeicao = db.Column(db.String(40), nullable=True)
+    motivo_rejeicao = db.Column(db.String(1000), nullable=True)
+    ultima_falha = db.Column(db.String(1000), nullable=True)
+    criado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    atualizado_em = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+    def __repr__(self):
+        return f'<EnsaioDpsNfse {self.id} {self.estado}>'
 
 
 class LoteNfse(db.Model):
